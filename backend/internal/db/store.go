@@ -69,6 +69,13 @@ type Store interface {
 	// (`trash.Prefix`); implementations match the stored path with and
 	// without one, because drivers differ on that.
 	ListLiveNodesInTrash(ctx context.Context, storageID int64, trashPrefix string) ([]*model.Node, error)
+	// ListNodesUnder returns the row at dir and every row below it, in both
+	// path spellings drivers produce ("/a/b" and "a/b"); includeDeleted adds
+	// soft-deleted rows. The match is EXACT: names compare byte for byte, and
+	// the prefix bound is counted in characters, so a folder whose name is not
+	// ASCII matches as reliably as one that is. The storage root ("" or "/")
+	// is never a subtree and returns nothing.
+	ListNodesUnder(ctx context.Context, storageID int64, dir string, includeDeleted bool) ([]*model.Node, error)
 	ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error)
 	// AggNodes returns a lightweight {id, parent_id, is_dir, size} row for every
 	// live node of a storage — the input to folder-size aggregation.

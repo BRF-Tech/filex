@@ -11,7 +11,8 @@ contracts.
 
 Sub-files are served by GET /s/{token}/f/{rel...}: PIN + expiry enforced
 via the same share Resolve, the rel path is containment-checked under the
-shared folder, and internal dirs (.filex-trash/.thumbs) stay invisible.
+shared folder, and filex's own trees (.filex-trash/.versions/.thumbs, see
+versioning.IsInternalTree) stay invisible.
 ?thumb=1 marks a gallery <img> fetch: images stream inline and do NOT
 count as downloads; everything else 404s (video tiles render a play badge
 instead of a poster). A full file open counts one download. */
@@ -34,6 +35,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/versioning"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
 )
@@ -109,7 +111,7 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 
 	entries := make([]share.FolderEntry, 0, len(objs))
 	for _, o := range objs {
-		if browseSkipNames[o.Name] {
+		if browseSkipNames[o.Name] || versioning.IsInternalTree(joinShareRel(dirPath, o.Name)) {
 			continue
 		}
 		childRel := o.Name
@@ -232,12 +234,18 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	full := joinShareRel(node.Path, rel)
+	// Nothing inside filex's own trees is served, whichever row the link
+	// names (see HandleDownload).
+	if versioning.IsInternalTree(node.Path) || versioning.IsInternalTree(full) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
 	drv, err := h.StorageResolver(node.StorageID)
 	if err != nil {
 		http.Error(w, "storage error", http.StatusInternalServerError)
 		return
 	}
-	full := joinShareRel(node.Path, rel)
 	// Where the child's bytes are: the driver, or filex's staging area while a
 	// staged upload into this folder is still transferring. Resolved before the
 	// download claim below, so a vanished staging answers an error rather than

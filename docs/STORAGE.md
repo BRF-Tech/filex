@@ -646,6 +646,28 @@ heals an install that ran the old code: a revived deletion is soft‑deleted
 again (keeping its `storage_key`, so restore still knows where to put it back)
 and a row minted for the trash's own bytes is dropped. Bytes are never touched
 either way.
+
+**The walk does not enter filex's other trees either.** Version history lives
+at the storage root under `.versions/<node id>/<n>`, and `.thumbs/` is a
+cache; neither is anybody's file. The walk used to skip only the trash, so a
+full scan minted a system‑owned row for every snapshot folder and file —
+counted in the storage's totals, indexed for search — and, once such a row
+went unseen, the delete pass put the *folder* rows in the trash where they
+stood. Purging a trashed folder deletes its prefix on the backend: that is
+every version of every file. Three rules now hold:
+
+- the walk **skips `.versions/` and `.thumbs/`** at the storage root, exactly
+  as it skips `.filex-trash/` (a user folder called `.versions` *below* the
+  root is the user's and is catalogued as usual);
+- rows an earlier scan minted in there — live ones and ones already in the
+  trash — are **dropped from the catalogue** on the next full pass, deepest
+  first, search documents included. The backend is never touched, and the
+  version history's own rows (`node_versions`, keyed by the versioned file)
+  are unaffected;
+- the delete pass **never moves a row inside `.filex-trash/`, `.versions/` or
+  `.thumbs/` into the trash**, whatever else went wrong, so a failed cleanup
+  is only a cleanup deferred to the next pass.
+
 A **tombstone guard** protects against transient backend glitches: if a run sees
 fewer than ~70 % of the objects the previous run saw, the delete pass is skipped
 (so a flaky S3 endpoint doesn't wipe your tree from the cache).
@@ -654,7 +676,9 @@ fewer than ~70 % of the objects the previous run saw, the delete pass is skipped
 and that is expected.** `seen` no longer counts objects inside `.filex-trash/`,
 so a storage whose trash held more than ~30 % of its objects looks like it
 shrank: one warning, one skipped delete pass, and the next run compares like
-with like.
+with like. The same holds once more after the upgrade that stopped counting
+`.versions/` and `.thumbs/`, for a storage whose version history was a large
+share of its objects.
 
 ⚠ The comparison is against the **previous run only**: a backend that stays empty records a run
 with a seen count of 0, and the run after that has nothing to compare against

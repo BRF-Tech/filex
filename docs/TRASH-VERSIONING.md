@@ -229,6 +229,15 @@ Only **files** are versioned. Directories and symlinks are skipped. A snapshot
 is also skipped when there is nothing to capture — a brand‑new file with no live
 content yet, or a row whose object isn't on the backend.
 
+A snapshot is **not a catalogue entry**. It belongs to its `node_versions` row,
+which is keyed by the file it versions, and the storage sync never walks into
+`.versions/` (nor `.thumbs/`, nor `.filex-trash/`). Older versions did: a full
+scan minted a hidden, system-owned row for every snapshot folder and file, and
+those rows could later land in the trash — where purging a folder row deletes
+its whole prefix, i.e. the version history. The next full sync after upgrading
+drops every such row from the catalogue (never from the backend), and the sync's
+delete pass never moves anything inside these trees into the trash.
+
 ⚠ That last case is a **silent** skip: if the catalogued path and the object on
 the backend ever disagree, the guard finds nothing to snapshot and reports
 success. Every shipped driver normalises the key it is handed, so the two agree

@@ -356,6 +356,58 @@ func (s *Store) ListLiveNodesInTrash(ctx context.Context, storageID int64, trash
 	return out, rows.Err()
 }
 
+// treeSpellings returns the two spellings a row's path can carry for dir —
+// "/a/b" and "a/b" — or ok=false for the storage root, which is never a
+// subtree.
+func treeSpellings(dir string) (slashed, bare string, ok bool) {
+	bare = strings.Trim(path.Clean("/"+strings.Trim(dir, "/")), "/")
+	if bare == "" || bare == "." {
+		return "", "", false
+	}
+	return "/" + bare, bare, true
+}
+
+// belowClause matches every row strictly below a directory, in both
+// spellings, exactly; its placeholders start at $n and take the four
+// arguments belowArgs returns. See the SQLite store for why the bound is a
+// rune count and why this is not LIKE.
+func belowClause(n int) string {
+	return fmt.Sprintf(`(SUBSTR(path,1,$%d)=$%d OR SUBSTR(path,1,$%d)=$%d)`, n, n+1, n+2, n+3)
+}
+
+func belowArgs(slashed, bare string) []any {
+	return []any{
+		utf8.RuneCountInString(slashed + "/"), slashed + "/",
+		utf8.RuneCountInString(bare + "/"), bare + "/",
+	}
+}
+
+func (s *Store) ListNodesUnder(ctx context.Context, storageID int64, dir string, includeDeleted bool) ([]*model.Node, error) {
+	slashed, bare, ok := treeSpellings(dir)
+	if !ok {
+		return nil, nil
+	}
+	q := `SELECT ` + nodeColumns() + ` FROM nodes WHERE storage_id=$1 AND (path=$2 OR path=$3 OR ` + belowClause(4) + `)`
+	if !includeDeleted {
+		q += ` AND deleted_at IS NULL`
+	}
+	args := append([]any{storageID, slashed, bare}, belowArgs(slashed, bare)...)
+	rows, err := s.db.QueryContext(ctx, q+` ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error) {
 	q := `SELECT ` + nodeColumns() + ` FROM nodes WHERE storage_id=$1 AND deleted_at IS NULL AND parent_id `
 	args := []any{storageID}

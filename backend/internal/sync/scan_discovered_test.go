@@ -314,6 +314,8 @@ func TestSyncDoesNotScanDirectoriesVersionsOrTrash(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "belgeler", "rapor.txt"), []byte("gercek dosya"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".versions", "belgeler", "rapor.txt.1"), []byte("eski surum"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(root, trash.Prefix, "1700000000-abc123__virus.exe"), []byte("virus payload"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".thumbs"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".thumbs", "kapak.jpg"), []byte("jpeg"), 0o644))
 	// A zero-byte file: nothing to scan, and clamd would be handed an empty
 	// temp file for every one of them.
 	require.NoError(t, os.WriteFile(filepath.Join(root, "bos.txt"), nil, 0o644))
@@ -328,6 +330,19 @@ func TestSyncDoesNotScanDirectoriesVersionsOrTrash(t *testing.T) {
 
 	assert.Equal(t, []int64{real.ID}, pendingScans(t, qd),
 		"only the real file may be scanned: no directories, no .versions/, no .filex-trash/")
+
+	// Not scanned is not enough: the walk must not catalogue filex's own
+	// trees at all. A row there is counted in the storage totals, indexed for
+	// search, and — once unseen — trashed in place, where a purge of the
+	// folder row deletes its whole prefix on the backend.
+	for _, p := range []string{
+		"/.versions", "/.versions/belgeler", "/.versions/belgeler/rapor.txt.1",
+		"/.thumbs", "/.thumbs/kapak.jpg",
+		"/" + trash.Prefix, "/" + trash.Prefix + "/1700000000-abc123__virus.exe",
+	} {
+		n, _ := store.GetNodeByPathIncludingDeleted(ctx, st.ID, pathkey.Hash(st.ID, p))
+		assert.Nil(t, n, "the walk catalogued filex's own bookkeeping at %s", p)
+	}
 }
 
 // ---------------------------------------------------------------------------

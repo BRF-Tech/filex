@@ -430,6 +430,60 @@ func (s *Store) ListLiveNodesInTrash(ctx context.Context, storageID int64, trash
 	return out, rows.Err()
 }
 
+// treeSpellings returns the two spellings a row's path can carry for dir —
+// "/a/b" and "a/b" — or ok=false for the storage root, which is never a
+// subtree.
+func treeSpellings(dir string) (slashed, bare string, ok bool) {
+	bare = strings.Trim(path.Clean("/"+strings.Trim(dir, "/")), "/")
+	if bare == "" || bare == "." {
+		return "", "", false
+	}
+	return "/" + bare, bare, true
+}
+
+// belowClause matches every row strictly below a directory, in both
+// spellings, exactly. Its four arguments come from belowArgs.
+//
+// ⚠ SUBSTR counts CHARACTERS on SQLite, MySQL and PostgreSQL alike, so the
+// bound is the prefix's rune count, never len(): a byte count overshoots a
+// prefix with a single non-ASCII letter in it and the comparison then matches
+// nothing at all. LIKE is not used on purpose: it is case-insensitive on
+// SQLite and treats `_` and `%` in a folder name as wildcards.
+const belowClause = `(SUBSTR(path,1,?)=? OR SUBSTR(path,1,?)=?)`
+
+func belowArgs(slashed, bare string) []any {
+	return []any{
+		utf8.RuneCountInString(slashed + "/"), slashed + "/",
+		utf8.RuneCountInString(bare + "/"), bare + "/",
+	}
+}
+
+func (s *Store) ListNodesUnder(ctx context.Context, storageID int64, dir string, includeDeleted bool) ([]*model.Node, error) {
+	slashed, bare, ok := treeSpellings(dir)
+	if !ok {
+		return nil, nil
+	}
+	q := nodeSelectColumns() + ` FROM nodes WHERE storage_id=? AND (path=? OR path=? OR ` + belowClause + `)`
+	if !includeDeleted {
+		q += ` AND deleted_at IS NULL`
+	}
+	args := append([]any{storageID, slashed, bare}, belowArgs(slashed, bare)...)
+	rows, err := s.db.QueryContext(ctx, q+` ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error) {
 	q := nodeSelectColumns() + ` FROM nodes WHERE storage_id=? AND deleted_at IS NULL AND parent_id `
 	args := []any{storageID}

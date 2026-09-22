@@ -249,8 +249,9 @@ loop:
     seen := {}
 
     for entry in storage.Sync(since=last_run_started):
-      if entry.path is inside .filex-trash/:  # filex's own bookkeeping
-        skip                                  # -- not catalogue content
+      if entry.path is inside /.filex-trash/, /.versions/ or /.thumbs/:
+        skip                                  # filex's own bookkeeping,
+                                              # -- not catalogue content
       seen.add(entry.path)
       upsert(files, storage_id, entry)
 
@@ -261,10 +262,18 @@ loop:
       else:                                       # a row minted for trash bytes
         hard_delete(f)                            # -> dropped, bytes untouched
 
+    # ANY row under .versions/ or .thumbs/ (live or trashed) was minted by an
+    # older walk: dropped, deepest first, with its search document
+    for f in db.files where storage_id=$id and path under .versions/ or .thumbs/:
+      hard_delete(f)                              # catalogue only, bytes untouched
+
     # tombstone pass — a node not seen this run is a CANDIDATE, not a verdict
     if seen < 0.7 * previous_run.seen:      # the whole listing looks wrong
       skip the pass entirely
     for f in db.files where storage_id=$id and seen_at < run_started:
+      if f.path is inside filex's own trees: # never, whatever else went wrong:
+        keep                                 # a trashed .versions/ folder purges
+                                             # the version history
       if f.transfer_state != "stored":      # filex never put the bytes there
         keep
       elif storage.Stat(f.path) is found:   # the listing missed it
@@ -351,6 +360,19 @@ is what heals an install that ran an earlier version: a revived deletion is
 soft-deleted again (keeping `storage_key`, so restore still knows where it came
 from), and a row the old walk minted for the trash's own bytes is dropped
 outright. Bytes are never touched by either.
+
+**`.versions/` and `.thumbs/` are filex's too, and the walk skips them the same
+way** (`versioning.IsInternalTree`, anchored at the storage root — the one list
+the sync walk, a cross-storage copy and the public share pages all ask). The
+walk used to skip only the trash, so a full scan minted a system-owned row for
+every snapshot folder and file. Unseen once the walk stopped listing them, the
+*folder* rows would have gone to the trash in place — `confirmGone` has no
+object to `Stat` for a directory — and purging a trashed folder deletes its
+prefix on the backend: every version of every file. So every row under those
+two trees, live or trashed, is dropped from the catalogue before the tombstone
+pass runs (deepest first, search documents included, backend untouched), and
+the tombstone pass itself refuses any row inside an internal tree, so a cleanup
+that failed is a cleanup deferred, never a version history in the trash.
 
 `storage.Sync` compares the backend's etag when the driver reports one (S3,
 WebDAV PROPFIND) and the object's **size and modification time** when it does

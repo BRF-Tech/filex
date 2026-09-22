@@ -33,6 +33,7 @@ import (
 	"path"
 
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/versioning"
 )
 
 // skipNames are filex's own bookkeeping directories. They are storage-local by
@@ -165,12 +166,15 @@ func transferDir(ctx context.Context, srcDrv, dstDrv storage.Driver, wr storage.
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if skipNames[o.Name] {
-			continue
-		}
 		// ⚠ Drivers differ on whether Object.Path is storage-relative or bare;
 		// rebuild it from the directory we asked for so both shapes agree.
 		childSrc := path.Join(srcDir, o.Name)
+		// The version history too, and anchored where filex keeps it: a copy
+		// of a storage ROOT used to carry `.versions/` across — snapshots
+		// keyed by node ids that mean nothing on the other storage.
+		if skipNames[o.Name] || versioning.IsInternalTree(childSrc) {
+			continue
+		}
 		childDst := path.Join(dstDir, o.Name)
 		if o.Kind == storage.KindDirectory {
 			if err := transferDir(ctx, srcDrv, dstDrv, wr, childSrc, childDst, hooks); err != nil {

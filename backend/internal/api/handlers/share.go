@@ -32,6 +32,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/versioning"
 	"github.com/brf-tech/filex/backend/internal/zipstream"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
@@ -510,10 +511,10 @@ func (h *Share) warmFolderThumbs(node *model.Node) {
 				if rendered >= prewarmThumbMax || ctx.Err() != nil {
 					return
 				}
-				if browseSkipNames[o.Name] {
+				child := joinShareRel(dir, o.Name)
+				if browseSkipNames[o.Name] || versioning.IsInternalTree(child) {
 					continue
 				}
-				child := joinShareRel(dir, o.Name)
 				if o.Kind == storage.KindDirectory {
 					walk(child)
 					continue
@@ -861,6 +862,15 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	node, err := h.Store.GetNode(r.Context(), resolved.NodeID)
 	if err != nil {
 		http.Error(w, "node missing", http.StatusNotFound)
+		return
+	}
+	// A link never serves filex's own bookkeeping. The storage root has no row
+	// and cannot be shared, but a row INSIDE `.versions/` can exist (older
+	// scans minted one per snapshot folder and file), and a share names a row
+	// by id: such a link listed, zipped and streamed the previous contents of
+	// somebody's files.
+	if versioning.IsInternalTree(node.Path) {
+		h.renderErrorPage(w, r, http.StatusNotFound, "notfound")
 		return
 	}
 	drv, err := h.StorageResolver(node.StorageID)

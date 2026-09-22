@@ -21,7 +21,44 @@ import (
 // exported const versionKey() itself builds snapshot keys from, in this same
 // package, so this exemption and that key construction share one source of
 // truth instead of two copies that could drift.
-var internalDirs = []string{VersionsPrefix, ".thumbs", trash.Prefix}
+var internalDirs = []string{VersionsPrefix, ThumbsPrefix, trash.Prefix}
+
+// ThumbsPrefix is the thumbnail tree some storages still carry at their root.
+// Thumbnails live on local disk now (Thumbs.CacheDir); the name stays reserved
+// so that nothing ever treats what is left there as a user's file.
+const ThumbsPrefix = ".thumbs"
+
+// IsInternalTree reports whether rel is one of filex's own bookkeeping trees
+// at the ROOT of a storage — `.versions/`, `.thumbs/`, `.filex-trash/` — or
+// sits inside one.
+//
+// It is the one rule for every surface that WALKS a storage: the sync worker,
+// a cross-storage copy, the public folder-share pages. Each of them used to
+// keep its own list, and the lists drifted — the sync walk skipped only the
+// trash, so a full scan catalogued every version snapshot as a file. Two
+// properties are load-bearing:
+//
+//   - Anchored at the root. filex writes these trees nowhere else (versionKey,
+//     trash.NewKey), so `docs/.versions` is a user's folder and stays
+//     catalogued, copyable and shareable.
+//   - Names compare exactly. `.versions-old` and `.Versions` are not the tree:
+//     storages compare names byte for byte, and so does this.
+//
+// ⚠ Unlike isInternalPath below it answers false for the storage root and for
+// `.keepdir` markers: a walk that skipped "" would skip everything, and a
+// marker is a file inside a user's folder, not a tree.
+func IsInternalTree(rel string) bool {
+	clean := strings.TrimPrefix(path.Clean("/"+rel), "/")
+	if clean == "" {
+		return false
+	}
+	for _, d := range internalDirs {
+		if clean == d || strings.HasPrefix(clean, d+"/") {
+			return true
+		}
+	}
+	return false
+}
 
 // isInternalPath reports whether rel lives inside one of filex's own trees, or
 // is a keepdir marker.
@@ -33,12 +70,7 @@ func isInternalPath(rel string) bool {
 	if path.Base(clean) == ".keepdir" {
 		return true
 	}
-	for _, d := range internalDirs {
-		if clean == d || strings.HasPrefix(clean, d+"/") {
-			return true
-		}
-	}
-	return false
+	return IsInternalTree(clean)
 }
 
 // GuardOverwrite is the versioning half of writehook.BeforeOverwrite: if a

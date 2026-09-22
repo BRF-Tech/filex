@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log/slog"
 	"path"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -16,19 +18,23 @@ import (
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/versioning"
 )
 
 // RunOnce performs one full sync pass for the storage:
 //  1. Open a sync_runs row (status=running)
 //  2. Recursively walk the backend, upserting nodes and updating seen_at
-//  3. Reconcile the trash bucket: nothing may be live in there.
+//  3. Reconcile the trash bucket: nothing may be live in there. Then drop
+//     every row an older walk minted inside `.versions/` and `.thumbs/`.
 //  4. Tombstone-pass: any node whose seen_at < runStart is soft-deleted —
-//     but only if seen_count >= 0.7 * lastSeenCount (false-positive guard).
+//     but only if seen_count >= 0.7 * lastSeenCount (false-positive guard),
+//     and never a row inside filex's own trees.
 //  5. Close the sync_runs row with the final status.
 //
-// ⚠ Step 2 skips `.filex-trash/` entirely, so `seen` no longer counts trashed
-// objects. On the first pass after upgrading, a storage whose trash held more
-// than 30% of its objects will trip the step-4 guard once (a warning, and one
+// ⚠ Step 2 skips filex's own trees entirely (`.filex-trash/`, `.versions/`,
+// `.thumbs/`), so `seen` does not count their objects. On the first pass after
+// the upgrade that stopped counting one of them, a storage where it held more
+// than 30% of the objects will trip the step-4 guard once (a warning, and one
 // tombstone pass skipped); the next run compares like with like.
 func (s *storageSyncer) RunOnce(ctx context.Context) error {
 	// ⚠ One run at a time per storage. The poll loop is sequential by itself,
@@ -90,22 +96,13 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 	}
 
 	s.reconcileTrash(ctx)
+	s.reconcileInternalTrees(ctx)
 
 	deleted := 0
 	if guardOK(seen, prevSeen) {
 		stale, err := s.store.ListStaleNodes(ctx, s.storage.ID, runStart)
 		if err == nil {
-			for _, n := range stale {
-				if !s.confirmGone(ctx, n) {
-					continue
-				}
-				if err := s.store.SoftDeleteNode(ctx, n.ID); err == nil {
-					deleted++
-					if s.index != nil {
-						_ = s.index.DeleteNode(ctx, n.ID)
-					}
-				}
-			}
+			deleted = s.tombstone(ctx, stale)
 		}
 	} else {
 		slog.Warn("sync: tombstone guard tripped",
@@ -177,8 +174,10 @@ var errTreeTooLarge = errors.New("sync: tree too large to prefetch")
 // tree is over TreePrefetchMax, or the pass failed — the caller then walks the
 // backend the ordinary way, so a shortcut that does not fit never costs a scan.
 //
-// The trash subtree is dropped here rather than in the walk (which skips it
-// anyway): with 30% of a bucket in `.filex-trash/` that is 30% less to hold.
+// filex's own trees (`.filex-trash/`, `.versions/`, `.thumbs/`) are dropped
+// here rather than in the walk (which skips them anyway): with 30% of a bucket
+// in the trash, or a version history as large as the files it keeps, that is
+// that much less to hold.
 func (s *storageSyncer) prefetchTree(ctx context.Context) (treeIndex, bool) {
 	tw, ok := s.driver.(storage.TreeWalker)
 	if !ok {
@@ -188,7 +187,7 @@ func (s *storageSyncer) prefetchTree(ctx context.Context) (treeIndex, bool) {
 	n := 0
 	started := time.Now()
 	err := tw.WalkTree(ctx, "/", func(o storage.Object) error {
-		if trash.IsTrashPath(o.Path) {
+		if versioning.IsInternalTree(o.Path) {
 			return nil
 		}
 		n++
@@ -247,13 +246,22 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 			return count, ctx.Err()
 		default:
 		}
-		// filex's own trash bucket is not part of the catalogue and is not
-		// the walk's to reconcile. The rows for everything in there already
-		// exist -- soft-deleted, retagged to the very keys sitting on the
-		// storage -- and they are maintained by the trash service (restore,
-		// retention purge), never by a listing. Walking in was how a deletion
-		// undid itself.
-		if trash.IsTrashPath(obj.Path) {
+		// filex's own trees at the storage root are not part of the catalogue
+		// and are not the walk's to reconcile (versioning.IsInternalTree).
+		//
+		//   - `.filex-trash/`: the rows for everything in there already exist
+		//     -- soft-deleted, retagged to the very keys sitting on the storage
+		//     -- and the trash service maintains them (restore, retention
+		//     purge), never a listing. Walking in was how a deletion undid
+		//     itself.
+		//   - `.versions/`: snapshots belong to node_versions rows keyed by
+		//     the file they version. Walking in minted a system-owned row for
+		//     every snapshot folder and file — counted in the storage's totals,
+		//     indexed for search — and, once unseen, the tombstone pass put the
+		//     folder rows in the trash in place, where a purge deletes the
+		//     whole prefix on the backend: the version history itself.
+		//   - `.thumbs/`: a cache, never content.
+		if versioning.IsInternalTree(obj.Path) {
 			continue
 		}
 		hash := pathkey.Hash(s.storage.ID, obj.Path)
@@ -504,6 +512,96 @@ func (s *storageSyncer) reconcileTrash(ctx context.Context) {
 			_ = s.index.DeleteNode(ctx, n.ID)
 		}
 	}
+}
+
+// reconcileInternalTrees drops every catalogue row sitting in filex's own
+// trees other than the trash: `.versions/` and `.thumbs/`.
+//
+// An older walk descended into them and minted a system-owned row for every
+// snapshot folder and file, and for whatever `.thumbs/` held. Nothing maintains
+// those rows and nothing should: a snapshot belongs to the node_versions row of
+// the file it versions — keyed by THAT file's id, pointing at
+// `.versions/<id>/<n>` by key and never at a catalogue row. So the rows only
+// ever did harm: counted in the storage's totals, indexed for search and, once
+// the walk stopped seeing them, moved into the trash IN PLACE by the tombstone
+// pass. A trashed directory row in there is the worst thing the trash can hold:
+// purging it deletes its prefix on the backend, which is the version history.
+//
+// So every such row is hard-deleted — live ones and ones already in the trash
+// alike — deepest first (each row is released on its own, never swept away by
+// the parent_id cascade), each with its search document.
+//
+// ⚠ Catalogue only. The backend is never touched, and dropping these rows
+// cannot cascade into node_versions, whose rows reference the versioned file.
+//
+// Runs before the tombstone pass, like reconcileTrash. Best-effort: a failure
+// is logged and the pass carries on, because the tombstone pass refuses these
+// trees on its own (see tombstone) — a cleanup that did not happen is a cleanup
+// deferred to the next pass, never a version history in the trash.
+func (s *storageSyncer) reconcileInternalTrees(ctx context.Context) {
+	for _, tree := range []string{versioning.VersionsPrefix, versioning.ThumbsPrefix} {
+		rows, err := s.store.ListNodesUnder(ctx, s.storage.ID, tree, true)
+		if err != nil {
+			slog.Warn("sync: internal-tree reconcile query",
+				slog.String("tree", tree), slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
+			continue
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		sort.SliceStable(rows, func(i, j int) bool {
+			di, dj := strings.Count(rows[i].Path, "/"), strings.Count(rows[j].Path, "/")
+			if di != dj {
+				return di > dj
+			}
+			return rows[i].ID > rows[j].ID
+		})
+		dropped := 0
+		for _, n := range rows {
+			if err := s.store.HardDeleteNode(ctx, n.ID); err != nil {
+				slog.Warn("sync: could not drop a catalogue row inside filex's own tree",
+					slog.Int64("node", n.ID), slog.String("path", n.Path), slog.String("err", err.Error()))
+				continue
+			}
+			dropped++
+			if s.index != nil {
+				_ = s.index.DeleteNode(ctx, n.ID)
+			}
+		}
+		slog.Info("sync: dropped catalogue rows an earlier sync minted inside filex's own tree; the backend was not touched",
+			slog.String("tree", tree),
+			slog.Int("rows", dropped),
+			slog.String("storage", s.storage.Name))
+	}
+}
+
+// tombstone moves the stale candidates that are really gone into the trash
+// and returns how many it moved.
+//
+// ⚠⚠ A row inside one of filex's own trees is NEVER a candidate, whatever
+// else went wrong. The walk does not look in there, so such a row is always
+// "unseen"; for a directory row confirmGone has no object to Stat and says
+// yes; and the trash then holds a folder whose purge deletes its prefix on the
+// backend — `.versions/` is every version of every file. The reconcile passes
+// that run before this one are what clears those rows up; this refusal is
+// what makes their failure harmless.
+func (s *storageSyncer) tombstone(ctx context.Context, stale []*model.Node) int {
+	deleted := 0
+	for _, n := range stale {
+		if versioning.IsInternalTree(n.Path) {
+			continue
+		}
+		if !s.confirmGone(ctx, n) {
+			continue
+		}
+		if err := s.store.SoftDeleteNode(ctx, n.ID); err == nil {
+			deleted++
+			if s.index != nil {
+				_ = s.index.DeleteNode(ctx, n.ID)
+			}
+		}
+	}
+	return deleted
 }
 
 // confirmGone decides whether a node the walk did not see may be moved to
