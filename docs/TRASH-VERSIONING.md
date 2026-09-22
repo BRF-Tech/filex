@@ -286,6 +286,15 @@ If version history is what you are relying on, keep those three protocols out
 of the write path, or check the file's history after the first overwrite rather
 than assuming it.
 
+**Renames and moves are not in that table because they never overwrite.** A
+rename onto a name that is taken is refused (`409 NAME_TAKEN`); a move lands
+beside it as `name-copy`. ⚠ Until the rename was guarded it replaced the file
+that held the name with no snapshot, and the catalogue then dropped that file's
+row — so the versions it already had were lost with it. A WebDAV `MOVE` sent
+with `Overwrite: T` replaces the destination at the client's explicit request,
+and deletes it into the trash first (the protocol's delete-before-move), so it
+stays restorable from there.
+
 A snapshot is taken **only when** there is something to lose: the path already
 holds a catalogued **file**. A brand‑new file, a directory, and filex's own
 internal trees (`.versions/`, `.thumbs/`, `.filex-trash/`, `.keepdir` markers)

@@ -230,7 +230,7 @@ storage's root (or, when confined, your root).
 | POST | `/api/ai/upload/ticket` | `write` | `{path, expires_in_seconds?, max_bytes?}` → `{url, ticket, path, max_bytes, expires_at, curl}` |
 | PUT/POST | `/u/{ticket}` | *(none — see below)* | raw body (`curl -T`) or multipart `file` → `{entry:{…}}` |
 | POST | `/api/ai/mkdir` | `write` | `{path}` |
-| POST | `/api/ai/move` | `write` | `{src, dst}` — across storages too (see [below](#moving-files-between-storages)) |
+| POST | `/api/ai/move` | `write` | `{src, dst}` — across storages too (see [below](#moving-files-between-storages)). `409` when `dst` is already taken |
 | POST | `/api/ai/delete` | `delete` | `{path}` → soft-delete to trash |
 | POST | `/api/ai/share` | `write` | `{path, pin?, expires_in_days?, max_downloads?}` → `{url, token, pin?}` |
 | POST | `/api/ai/unshare` | `write` | `{token}` |
@@ -339,7 +339,7 @@ user's role + grants + confinement):
 | `file_write` | Create/overwrite a file (`content` text or `content_base64` binary). Content you generate — never a file off your disk. |
 | `file_upload_ticket` | Get a short-lived, **credential-free** URL (plus the ready `curl -T` line) for a LOCAL file of any size. The bytes never enter the conversation; the URL takes one upload to a fixed path. |
 | `file_delete` | Soft-delete to filex trash (recoverable from the UI). |
-| `file_move` | Move or rename a file/folder. Works across storages: the bytes are copied and verified, then the source is removed ([below](#moving-files-between-storages)). |
+| `file_move` | Move or rename a file/folder. Works across storages: the bytes are copied and verified, then the source is removed ([below](#moving-files-between-storages)). Refused when `dst` is already taken. |
 | `file_mkdir` | Create a directory. |
 | `file_search` | Search file/folder names **and** (by default) extracted file contents in a storage. Forgiving on separators and typos; words may be in any order and may be answered by a folder (`main code` finds `Code/main.go`); supports `tag:` / `-tag:` filters; `content=false` restores name-only. |
 | `file_share` | Public share link for a file/folder (folders → ZIP); optional PIN/expiry/max-downloads. Use this to hand a file to someone instead of streaming it back. |
@@ -504,6 +504,14 @@ the source removed.
 free the first one. A read-only destination, or a folder you have no editor
 right on, is refused before a byte moves. Same-storage moves are unchanged (a
 plain rename).
+
+**`dst` is never written over.** When something already has that path — in the
+same storage or in the other one — the move is refused with `409`
+(`"rapor.txt" already exists here`) and nothing moves; `503` when the backend
+cannot say. `dst` is a full path, not a folder to drop into, so pick a free
+name. A move onto itself changes nothing, and a case-only rename is allowed.
+(Before this, the move replaced the file that had the name, and a transfer
+between storages wrote over the destination file.)
 
 ## See also
 

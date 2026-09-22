@@ -305,7 +305,8 @@ Send it or don't.
 holds the name, the moved item lands beside it as `name-copy`, `name-copy-2`, …
 — within one storage exactly as between two. A move into the folder the item is
 already in changes nothing. (Before 0.41.0 a same-storage move replaced the
-file that held the name.)
+file that held the name.) A **rename** onto a taken name is refused instead —
+see `POST /api/files/manager?action=rename` below.
 
 ### `POST /api/files/copy` ![user](https://img.shields.io/badge/-user-blue)
 Same shape, same queued answer.
@@ -341,10 +342,26 @@ The unified form behind the three per-verb endpoints:
 { "path": "/storage1/new-folder" }
 ```
 
-### `POST /api/files/rename` ![user](https://img.shields.io/badge/-user-blue)
+### `POST /api/files/manager?action=rename` ![user](https://img.shields.io/badge/-user-blue)
 ```json
-{ "path": "/storage1/old.txt", "new_name": "new.txt" }
+{ "path": "alpha://reports", "item": "alpha://reports/old.txt", "name": "new.txt" }
 ```
+Renames one item inside its own folder and answers with the re-rendered
+listing. `name` is a leaf: empty, `/`, `\`, `.` and `..` are refused with `400`.
+
+**A rename never replaces what already has the name.** When a file or a folder
+already holds it — or the listing still shows a file there whose bytes have
+gone missing — the answer is `409 { "code": "NAME_TAKEN", "name": "new.txt" }`
+and nothing moves. When the backend cannot say whether the name is free, it is
+`503 { "code": "EXISTS_CHECK_FAILED" }`, never a rename on the chance. A rename
+that only changes the case (`a.txt` → `A.txt`) is allowed, also on a
+case-insensitive disk. Unlike a move, a rename is not given a `-copy` name: the
+person chose this one.
+
+⚠ Before this, the rename replaced the file that had the name — not into the
+trash — and its catalogue row was dropped with its version history, shares and
+comments. A folder renamed onto another folder's name on an object store was
+merged into it.
 
 ### `POST /api/files/delete` ![user](https://img.shields.io/badge/-user-blue)
 ```json

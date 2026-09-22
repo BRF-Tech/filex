@@ -400,6 +400,11 @@ func aiStatus(err error) int {
 	if errors.Is(err, errAISnapshotRefused) {
 		return http.StatusServiceUnavailable
 	}
+	// Same shape: the backend could not say whether a move's destination is
+	// free, so the move was refused. Transient, not a conflict.
+	if errors.Is(err, errNameCheckFailed) {
+		return http.StatusServiceUnavailable
+	}
 	// Permanent refusals, not server faults: a confined token reaching outside
 	// its root, or the bound user lacking the grant level. These must NOT fall
 	// through to mapDriverErr's 500 — a 5xx reads as "retry" to any client.

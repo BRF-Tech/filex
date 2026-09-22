@@ -184,7 +184,11 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.Name = strings.TrimSpace(body.Name)
-	if body.Name == "" || strings.ContainsAny(body.Name, "/\\") {
+	// "." and ".." are not names: joined onto the item's folder they point at
+	// the folder itself or at its parent. sanitizeUploadName is the one leaf
+	// guard every upload surface uses; a name must not be legal to rename to
+	// and illegal to upload.
+	if _, ok := sanitizeUploadName(body.Name); !ok || strings.ContainsAny(body.Name, "/\\") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad new name"})
 		return
 	}
@@ -229,8 +233,38 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		h.vfIndex(w, r, current, parentRel, storageNames, false)
 		return
 	}
+	// ⚠⚠ A rename never replaces what already has the name. Every driver's
+	// Move would (see destinationTaken), and the catalogue would then drop that
+	// file's row — versions, shares and comments included. Refused rather
+	// than given a "-copy" name the way a move is: the person typed this name,
+	// and the client's undo assumes the item landed exactly there.
+	taken, terr := destinationTaken(r.Context(), h.Store, drv, current.ID, srcRel, dstRel)
+	if terr != nil {
+		slog.Warn("rename refused: existence check inconclusive",
+			slog.Int64("storage", current.ID),
+			slog.String("path", dstRel),
+			slog.String("err", terr.Error()))
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": errNameCheckFailed.Error(),
+			"code":  "EXISTS_CHECK_FAILED",
+		})
+		return
+	}
+	if taken {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "something with that name already exists here",
+			"code":  "NAME_TAKEN",
+			"name":  body.Name,
+		})
+		return
+	}
 	if err := mv.Move(r.Context(), srcRel, dstRel); err != nil {
-		writeJSON(w, mapDriverErr(err), map[string]string{"error": "rename: " + err.Error()})
+		slog.Warn("rename failed",
+			slog.Int64("storage", current.ID),
+			slog.String("from", srcRel),
+			slog.String("to", dstRel),
+			slog.String("err", err.Error()))
+		writeJSON(w, mapDriverErr(err), map[string]string{"error": "rename: " + clientErrText(err)})
 		return
 	}
 
@@ -325,7 +359,12 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if err := mv.Move(r.Context(), srcRel, dstRel); err != nil {
-			writeJSON(w, mapDriverErr(err), map[string]string{"error": "move: " + err.Error()})
+			slog.Warn("move failed",
+				slog.Int64("storage", current.ID),
+				slog.String("from", srcRel),
+				slog.String("to", dstRel),
+				slog.String("err", err.Error()))
+			writeJSON(w, mapDriverErr(err), map[string]string{"error": "move: " + clientErrText(err)})
 			return
 		}
 		h.applyDBMove(r.Context(), current.ID, srcRel, dstRel)

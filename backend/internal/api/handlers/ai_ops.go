@@ -731,6 +731,19 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	if !ok {
 		return nil, storage.ErrUnsupported
 	}
+	if normalizeDBPath(relSrc) == normalizeDBPath(relDst) {
+		// Onto itself: nothing to move, and not a collision with itself.
+		return &aiEntry{
+			Path: joinAdapterPath(sDst.Name, relDst),
+			Name: path.Base(relDst),
+			Type: "file",
+		}, nil
+	}
+	// `dst` is a full path here, so this move is also the rename: it must not
+	// land on top of what already has the name (see destinationTaken).
+	if err := a.guardDestination(ctx, sDst, drv, relSrc, relDst); err != nil {
+		return nil, err
+	}
 	if err := mv.Move(ctx, relSrc, relDst); err != nil {
 		return nil, err
 	}
@@ -761,6 +774,11 @@ func (a *aiOps) moveAcross(ctx context.Context, sSrc *model.Storage, relSrc stri
 	}
 	dstDrv, err := a.resolver(sDst.ID)
 	if err != nil {
+		return nil, err
+	}
+	// The transfer writes file by file onto the destination, which would
+	// replace a file already there (and pour a folder into one).
+	if err := a.guardDestination(ctx, sDst, dstDrv, "", relDst); err != nil {
 		return nil, err
 	}
 	del, ok := srcDrv.(storage.Deleter)
@@ -795,6 +813,24 @@ func (a *aiOps) moveAcross(ctx context.Context, sSrc *model.Storage, relSrc stri
 		Name: path.Base(relDst),
 		Type: "file",
 	}, nil
+}
+
+// guardDestination refuses a move whose destination is already taken on st —
+// the same rule the explorer's rename applies (destinationTaken). srcRel is
+// the source when it lives in st, "" when it comes from another storage.
+func (a *aiOps) guardDestination(ctx context.Context, st *model.Storage, drv storage.Driver, srcRel, dstRel string) error {
+	taken, err := destinationTaken(ctx, a.store, drv, st.ID, srcRel, dstRel)
+	if err != nil {
+		slog.Warn("ai move refused: existence check inconclusive",
+			slog.Int64("storage", st.ID),
+			slog.String("path", dstRel),
+			slog.String("err", err.Error()))
+		return errNameCheckFailed
+	}
+	if taken {
+		return &nameTakenError{name: path.Base(normalizeDBPath(dstRel))}
+	}
+	return nil
 }
 
 // Mkdir creates a directory at `p` and mirrors it into the cache.
