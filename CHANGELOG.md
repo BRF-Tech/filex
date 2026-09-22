@@ -7,6 +7,214 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The fixes for one field report from a multi-tenant deployment on an S3-compatible
+backend with Windows and macOS desktop clients: a sync client that uploaded
+"preparing" JSON over 45 real files, a conflict loop that grew 52,575 copies, a
+watcher that listed 7,000 folders every 30 seconds, and thirteen more — plus
+what tracing them turned up.
+
+### Fixed
+
+- ⚠⚠ **A download is only ever the file.** Every non-browser download of a big
+  file (≥ `FILEX_CACHE_MIN_SIZE`) on a slow storage was answered `202
+  {"state":"preparing",…}`, and filex's own sync client took any `2xx` for the
+  file: the JSON was written to disk under the file's name and the next run
+  uploaded it over the real one — 45 files of 70–290 MB on one deployment,
+  outside any version window. Three independent layers now stand in the way:
+  the server answers `202` only to a browser navigation or a client that sends
+  `X-Filex-Accept-Prepare: 1` (everyone else gets the stream, and no
+  preparation is started for them — this protects every client already
+  installed); the CLI and the desktop app's sync, drag-out and "open with" ask
+  for `Range: bytes=0-`, which no server version answers with `202`, and accept
+  only a `200` or a `206` covering the whole object; and the sync engine refuses
+  a body whose length is not the size the listing reported.
+- ⚠⚠ **Renaming onto a name that is taken no longer destroys the file that had
+  it.** Renaming `a.txt` to `b.txt` in a folder holding a `b.txt` answered 200,
+  replaced b.txt's bytes and hard-deleted its row — version history, shares and
+  comments with it, nothing in the trash; on an object store a folder renamed
+  onto another folder's name was merged into it. A rename now answers `409
+  NAME_TAKEN` and nothing moves (`503 EXISTS_CHECK_FAILED` when the backend
+  cannot tell). A case-only rename still works on a case-insensitive disk, `.`
+  and `..` are refused, the agent API and MCP `file_move` refuse a taken
+  destination the same way, and errors no longer show the server's paths.
+- ⚠⚠ **Emptying the trash no longer deletes a file that came back under an old
+  name.** A trash entry the storage sync writes in place for a file it found gone
+  keeps that file's path; purging it deleted whatever stood there again — a new
+  file, or a whole folder that had come back. Only entries inside
+  `.filex-trash/` delete bytes now.
+- ⚠⚠ **A scan no longer catalogues `.versions/`, and cannot put version history
+  in the trash.** The walk skipped only `.filex-trash/`, so a full scan minted a
+  hidden row per snapshot (and for `.thumbs/`), counted in storage totals and
+  indexed for search — and once unseen, a snapshot folder row went to the trash
+  where it stood, and purging a trashed folder deletes its prefix: every version
+  of every file. The walk skips filex's own trees, rows an earlier scan minted
+  there are dropped from the catalogue before the delete pass (the storage and
+  `node_versions` are never touched), and the delete pass refuses anything
+  inside them. Share pages and cross-storage copies of a root stay out too.
+- ⚠ **A conflict compares the bytes before keeping two copies.** Most "changed in
+  both places" were the same file — a lost baseline, a reinstalled client, a
+  touched timestamp — and one 13 KB spreadsheet grew 14,724 nested
+  `(server copy …) (server copy …)` copies, one every ~30 s. Identical bytes now
+  settle the file. A real conflict's copy goes to the server too and is recorded
+  at once (a copy tidied away on the server is removed here instead of coming
+  back as a new file), its name never nests, and a taken name gets ` (2)`. A
+  folder on one side and a file on the other touches nothing.
+- ⚠ **An edit made while a sync run is busy is no longer recorded as synced.**
+  The baseline was rebuilt from the post-run snapshots, so a file edited on
+  either side while an hours-long run was busy elsewhere was marked in step and
+  never transferred — and a later edit of the stale copy overwrote the newer
+  one. Only what a run actually transferred is recorded now.
+- ⚠ **A folder with a non-ASCII name (`Müşteri`, `Çıktılar`) goes to the trash
+  with its contents,** and comes back with them. `SUBSTR` was given a byte
+  length where SQL counts characters, so the files stayed live under a folder
+  that was gone.
+- ⚠ **A staged upload is only reported `ok` once its file says `stored`.** The
+  two writes that flip the row after the storage write were unchecked, and the
+  staging was released regardless: one failed write left a listed, fully stored
+  file that answered `503 STAGING_GONE` on every read. The writes are retried
+  and must succeed before the staging goes. Files already stuck that way are
+  repaired by the next scan — and a boot pass for storages nobody scans — when
+  no staging session is left and the object has the committed size and is not
+  older than the commit. An object store's listing no longer erases a file's
+  mime type on drift.
+- ⚠ **Only a signed-in browser can pair a desktop app, and the pairing is a
+  person's token.** `POST /api/auth/desktop/complete` accepted any API token and
+  handed back a fresh `read,write,delete` token for its owner — a read-only
+  integration token could mint a full one. It now answers `403
+  session_required` to every token and mints nothing. New pairings are `user`
+  tokens with the scopes their owner could mint at `/api/tokens` (`read` for a
+  viewer), so the desktop window no longer answers `403 app_token` on its own
+  API keys, S3 keys, SSH keys and NFS panels, or hides Recent, Starred and
+  Shared with me.
+- **An overwrite records the new file's etag, size and time, not the ones it
+  replaced** — browser upload, text editor, file drop, WebDAV, the S3 gateway,
+  SFTP, FTPS, NFS, the agent API and archive extract. The content fingerprint
+  never moved, so the old words stayed searchable until the next scan, and
+  clients that compare etags (the desktop's "Open with") missed edits. When the
+  storage cannot be asked, the etag is left empty for the next scan to fill.
+- **A search without the index no longer loses its exact match.** A word
+  matching more names than the search reads (1,000, or 400 per storage from the
+  root) was cut alphabetically before it was ranked; exact and prefix names now
+  survive the cut on every engine, and `/api/files/search` ranks its whole
+  window before keeping `limit` rows. Escaped `_` and `%` match themselves on
+  SQLite, which had no `ESCAPE` clause.
+- **Emptying one storage's trash no longer runs forever** behind 500 or more
+  older rows of other storages (or other tenants).
+- **A sync run that is cut short is closed as `aborted`, not left `running`.**
+  Rows a stopped server left open are closed when the sync worker starts; the
+  tombstone guard compares with the last run that finished `ok` (a failed run's
+  ~0 "seen" had been switching the guard off); the dashboard shows a failed last
+  sync as an error — it compared against a status that is never written.
+- **The images run filex under `tini`,** which reaps the orphaned helpers
+  LibreOffice leaves behind: 19,110 zombies in ten days on one deployment, until
+  the healthcheck could not fork and every thumbnail failed. `init: true` is no
+  longer needed and harmless if kept.
+- **A revoked token stops the sync watcher.** `filex sync run --watch` retried a
+  401 every round, forever; it now stops at the first 401 with **exit status 3**
+  (every other failure exits 1). `sync run` also stops cleanly on SIGINT and
+  SIGTERM, with its checkpoint written.
+- **Desktop: a revoked or expired sign-in stops sync and asks to reconnect.** The
+  window showed "Can't reach … / Try again" forever while the bell and the
+  watcher retried every 15 and 30 seconds. The account is now marked signed out —
+  no watcher, no bell, across restarts — and offers **Reconnect**, which signs in
+  again for the same server and keeps the account's synced folders.
+- **Desktop: filex no longer switches itself back on at sign-in.** Every start
+  re-registered the login item, on Windows re-enabling an entry disabled in Task
+  Manager. Only the Settings switch writes it now, and at startup the switch
+  follows what the OS says it will do.
+- **Desktop: signing out stops that account's sync at once, and signing in again
+  restarts it with the new token** — the old watcher kept the old (often
+  revoked) token in its environment.
+- **Desktop: sync status is read in whole lines** (a line split across two pipe
+  reads showed "0/0", and a Turkish file name in an error could arrive garbled),
+  the watcher's last line before it exits is no longer lost, and a folder's
+  error clears once that folder syncs again.
+- **Desktop: the idle-time auto-update no longer stops an overnight sync;** it
+  waits until the engine is between rounds.
+- **A refused rename says why** in the explorer's dialog, instead of an event
+  the web app only logged; an invalid name says so instead of the Save button
+  doing nothing.
+
+### Added
+
+- **A first sync that would re-upload a stale copy holds it and asks.** With no
+  history, "new here" and "deleted on the server" look the same, and one client
+  put 9,665 cleaned-up files back on a server. A first run that would upload
+  more than 100 local-only files into a server folder that already has files
+  holds them (and any file that differs) and runs the rest: `filex sync confirm
+  <pair>` sends them, `filex sync discard <pair>` moves them to the local sync
+  trash so the folder matches the server. `sync list --json` carries `hold_new`
+  / `held`; the desktop app shows the count with **Upload them** and **Move to
+  local trash**.
+- **Bandwidth limits and a sync window.** `filex sync run --limit-down` /
+  `--limit-up <KiB/s>` cap all transfers of a run together (the bodies are
+  paced, never the connection), and `--window HH:MM-HH:MM` only starts rounds in
+  that part of the day — a round still busy when it closes stops cleanly and
+  continues in the next window. The desktop app offers both as presets in
+  Settings.
+- **Transfer progress in bytes, with an estimate:** `transfer: 120/11704 (1.2 GiB
+  of 52.6 GiB, about 8h 10m left)`, printed at least every 5 seconds. The desktop
+  app shows it on each folder's line, in its own language.
+- **`GET /api/files/manager?action=changes&path=…&since=<cursor>`** answers "has
+  anything under this folder changed since my cursor?" as `{ cursor, changed }`,
+  from an in-memory change log fed by every write surface. Every doubt — no
+  cursor, a restart, a cursor older than the log — is `changed`, and a change
+  counts only if the caller can see what it touched.
+- **Rescan one folder: `POST /api/admin/storages/{id}/sync?path=<folder>`.** The
+  same walk over one catalogued folder, synchronously, answering `{path,
+  scanned, added, updated, removed, reconciled}` (504 after ten minutes). Only
+  rows inside the folder can be removed, a listing that failed part-way removes
+  nothing, and no sync-run row is written.
+- **Desktop: Pause sync,** in the tray menu and Settings, remembered across
+  restarts, reboots and the hidden start at sign-in.
+- **Desktop: the computer stays awake while sync moves files** (the screen still
+  locks); an overnight first sync lost 1 h 40 min to idle sleep.
+- **The access log says who asked:** `user_id`, `token_id` (the row id, never the
+  secret) and, in multi-tenant mode, `tenant` on every `msg=http` line, plus
+  `action` for `/api/files/manager` (one of its own verbs, or `other`). The
+  query string is still never logged.
+- **A cut search result says so:** both search responses carry `truncated`, and
+  the explorer shows "More results than shown — narrow your search".
+
+### Changed
+
+- **An idle sync watcher asks what changed instead of re-walking the tree.** A
+  pair now runs only when its local tree changed, the server's change log says
+  something under its folder changed, its last run failed, or `--full-every`
+  (default 30 min) passed — instead of listing its whole server tree every 30 s
+  (one Mac with 7,048 folders sent 100–150 thousand listings an hour). Against a
+  server without the change log, a quiet pair's walks back off to `--watch-max`
+  (default 5 min).
+- **Deleting many files is several times faster.** A delete job trashes 4 items
+  at a time (`FILEX_OPS_DELETE_WORKERS`); jobs still run one after another,
+  items listed inside a folder that is also deleted are dropped first (the folder
+  lands whole in the trash), and progress is written about once a second. On S3
+  a trashed file takes three requests instead of four.
+- Default CORS allowed headers gain `Range` and `X-Filex-Accept-Prepare`;
+  `Content-Range` and `Retry-After` are exposed.
+
+### Upgrade notes
+
+- No migrations.
+- A programmatic client that relied on the `202` "preparing" answer must now send
+  `X-Filex-Accept-Prepare: 1`. Browser navigations are unchanged.
+- `POST /api/auth/desktop/complete` refuses API tokens (browser sessions only).
+  **Existing desktop pairings keep their `app` token** until the app signs in
+  again (then revoke the old *filex desktop* token) or an admin sends
+  `PATCH /api/admin/ai-tokens/{id} {"kind":"user"}` — see docs/DESKTOP.md.
+- A rename onto a taken name now answers `409` instead of replacing it; API
+  clients that relied on the overwrite must handle it (`filex client mv a b` onto
+  an existing `b` fails the same way).
+- The first full scan after upgrading drops the rows an earlier scan minted
+  under `.versions/` and `.thumbs/`; on a storage whose version history was a
+  large share of its objects the 70% tombstone guard may trip once.
+- The images start `/sbin/tini -s --` before the entrypoint; overriding the
+  entrypoint removes it (docs/DOCKER.md).
+- For out-of-tree `db.Store` implementations: `SearchNodes` gains a `prefer`
+  argument, `ListTrashedExpired` takes the storages to read, and there are new
+  methods (`ListNodesUnder`, `CountLiveNodesUnder`, `ListStaleNodesUnder`,
+  `ListUnstoredNodes`, `AbortUnfinishedSyncRuns`, `GetLastSyncRunByStatus`).
+
 ## [0.42.2] - 2026-09-19
 
 A fix release for the issue 32 follow-up and three things that were wrong on
