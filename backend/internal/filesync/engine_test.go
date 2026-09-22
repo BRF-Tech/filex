@@ -34,6 +34,11 @@ type fakeServer struct {
 	// afterTransfer runs at the end of every successful Download/Upload —
 	// the place a test pulls the plug mid-run.
 	afterTransfer func()
+	// served, when it has an entry, is what Download sends INSTEAD of the file
+	// it lists — a server answering with something other than the file, the
+	// way v0.20–v0.42 answered a big file on a slow storage with a JSON
+	// status report.
+	served map[string][]byte
 }
 
 func newFake(root string) *fakeServer {
@@ -103,7 +108,9 @@ func dirOf(rel string) string {
 	return rel
 }
 
-func (f *fakeServer) Download(_ context.Context, remote string, w io.Writer) (int64, error) {
+// Download ignores size on purpose: the engine must protect itself even from a
+// RemoteFS that does not check (the real adapter does).
+func (f *fakeServer) Download(_ context.Context, remote string, _ int64, w io.Writer) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	rel, err := f.rel(remote)
@@ -117,6 +124,9 @@ func (f *fakeServer) Download(_ context.Context, remote string, w io.Writer) (in
 	b, ok := f.files[rel]
 	if !ok {
 		return 0, fmt.Errorf("no such file: %s", rel)
+	}
+	if alt, ok := f.served[rel]; ok {
+		b = alt
 	}
 	n, err := w.Write(b)
 	if err == nil && f.afterTransfer != nil {

@@ -18,7 +18,10 @@ import (
 // the only honest way to test code that deletes files.
 type RemoteFS interface {
 	RemoteLister
-	Download(ctx context.Context, remote string, w io.Writer) (int64, error)
+	// Download writes the file at remote into w. size is what the listing
+	// said (-1 = unknown); an implementation should refuse a body of any
+	// other length before writing it, and the engine checks again after.
+	Download(ctx context.Context, remote string, size int64, w io.Writer) (int64, error)
 	Upload(ctx context.Context, localPath, remote string) error
 	Mkdir(ctx context.Context, remote string) error
 	Remove(ctx context.Context, remote string) error
@@ -661,7 +664,7 @@ func (e *Engine) apply(ctx context.Context, a Action, res *Result) error {
 
 	case ActionDownload:
 		e.logf("<- %s  (%s)", a.Rel, a.Reason)
-		if err := e.download(ctx, rp, lp, a.RemoteMod); err != nil {
+		if err := e.download(ctx, rp, lp, a.RemoteMod, a.RemoteSize); err != nil {
 			return err
 		}
 		res.Downloaded++
@@ -690,7 +693,7 @@ func (e *Engine) apply(ctx context.Context, a Action, res *Result) error {
 		// files in their own folder.
 		e.logf("!! %s  (%s) — keeping both", a.Rel, a.Reason)
 		sidePath := filepath.Join(filepath.Dir(lp), a.ConflictName)
-		if err := e.download(ctx, rp, sidePath, a.RemoteMod); err != nil {
+		if err := e.download(ctx, rp, sidePath, a.RemoteMod, a.RemoteSize); err != nil {
 			return err
 		}
 		res.Conflicts++
@@ -706,7 +709,13 @@ func (e *Engine) apply(ctx context.Context, a Action, res *Result) error {
 // download writes to a temporary file in the destination directory and renames
 // it into place, so an interrupted transfer can never be mistaken for a
 // complete file by the next run's snapshot.
-func (e *Engine) download(ctx context.Context, remote, dest string, remoteMod int64) error {
+//
+// ⚠ A body whose length is not the listed size is never renamed into place.
+// Once it wears the file's name, the next run sees a local file that differs
+// from its baseline — a local edit — and uploads it over the real one. That is
+// how 202 "preparing" JSON replaced 45 large files on a real server: every one
+// of them was listed at tens of megabytes and delivered as ~100 bytes.
+func (e *Engine) download(ctx context.Context, remote, dest string, remoteMod, size int64) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
@@ -720,8 +729,12 @@ func (e *Engine) download(ctx context.Context, remote, dest string, remoteMod in
 		os.Remove(tmpName) // no-op once the rename has happened
 	}()
 
-	if _, err := e.API.Download(ctx, remote, tmp); err != nil {
+	n, err := e.API.Download(ctx, remote, size, tmp)
+	if err != nil {
 		return err
+	}
+	if size >= 0 && n != size {
+		return fmt.Errorf("the server listed %d bytes but sent %d; not installed", size, n)
 	}
 	if err := tmp.Close(); err != nil {
 		return err

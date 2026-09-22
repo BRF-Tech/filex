@@ -252,11 +252,13 @@ func BuildRouter(d *Deps) http.Handler {
 
 	r.Use(Logger)
 	r.Use(Recoverer)
+	// Exposed Retry-After: a caller that opted in to the "preparing" answer
+	// (X-Filex-Accept-Prepare) has to be able to read how long to wait.
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   d.Cfg.CORS.AllowedOrigins,
 		AllowedMethods:   d.Cfg.CORS.AllowedMethods,
 		AllowedHeaders:   d.Cfg.CORS.AllowedHeaders,
-		ExposedHeaders:   []string{"Content-Length", "Content-Disposition"},
+		ExposedHeaders:   []string{"Content-Length", "Content-Disposition", "Content-Range", "Retry-After"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))

@@ -43,6 +43,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
 import { log } from './log.js';
+import { WHOLE_FILE_RANGE, wholeFileVerdict } from './download-guard.js';
 
 export interface DragItem {
   path: string; // wire path: `<depo>://rel`
@@ -94,10 +95,11 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  *
  * `net.request` hands back headers as a plain object and never validates them.
  */
-function get(ctx: PrepareContext, url: string): Promise<Electron.IncomingMessage> {
+function get(ctx: PrepareContext, url: string, range?: string): Promise<Electron.IncomingMessage> {
   return new Promise((resolve, reject) => {
     const req = net.request({ method: 'GET', url });
     req.setHeader('Authorization', `Bearer ${ctx.token}`);
+    if (range) req.setHeader('Range', range);
     req.on('response', (res) => resolve(res));
     req.on('error', (e) => reject(e));
     req.end();
@@ -255,9 +257,10 @@ export class DragOutCache {
     const url = new URL('/api/files/manager', ctx.serverUrl);
     url.searchParams.set('action', 'download');
     url.searchParams.set('path', remote);
-    const res = await get(ctx, url.toString());
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw new Error(`downloading ${remote} failed: server said ${res.statusCode}`);
+    const res = await get(ctx, url.toString(), WHOLE_FILE_RANGE);
+    const verdict = wholeFileVerdict(res.statusCode, res.headers['content-range']);
+    if (!verdict.ok) {
+      throw new Error(`downloading ${remote} failed: ${verdict.reason}`);
     }
     const tmp = `${dest}.filexpart`;
     xferLog('streaming', { remote, status: res.statusCode });
@@ -361,9 +364,10 @@ export class DragOutCache {
     const url = new URL('/api/files/manager', ctx.serverUrl);
     url.searchParams.set('action', 'download');
     url.searchParams.set('path', remote);
-    const res = await get(ctx, url.toString());
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw new Error(`downloading ${remote} failed: server said ${res.statusCode}`);
+    const res = await get(ctx, url.toString(), WHOLE_FILE_RANGE);
+    const verdict = wholeFileVerdict(res.statusCode, res.headers['content-range']);
+    if (!verdict.ok) {
+      throw new Error(`downloading ${remote} failed: ${verdict.reason}`);
     }
     // ⚠ Written to `.part` and renamed: a half-written file left at the real
     // path would be handed to the OS by the next drag and copied as if whole.

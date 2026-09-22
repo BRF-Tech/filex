@@ -246,6 +246,11 @@ func bigBody() []byte {
 	return b
 }
 
+// prepareOptIn is a programmatic client that can use the "preparing" answer:
+// it says so. A client that does not say so gets the file (see
+// TestAClientThatDidNotOptInGetsTheFileNotAStatusReport).
+var prepareOptIn = map[string]string{"Accept": "application/json", "X-Filex-Accept-Prepare": "1"}
+
 // ── the sequence the owner asked for ────────────────────────────────────────
 
 // TestSlowBigDownload_202ThenReadyThenBytes is the whole feature in one test:
@@ -257,7 +262,7 @@ func TestSlowBigDownload_202ThenReadyThenBytes(t *testing.T) {
 	body := bigBody()
 	f.seed(t, "big.bin", body)
 
-	first := f.download(t, "big.bin", map[string]string{"Accept": "application/json"}, "")
+	first := f.download(t, "big.bin", prepareOptIn, "")
 	require.Equal(t, http.StatusAccepted, first.StatusCode,
 		"a big file on a slow storage must be announced, not dribbled")
 	j := decodeJSON(t, first)
@@ -272,7 +277,7 @@ func TestSlowBigDownload_202ThenReadyThenBytes(t *testing.T) {
 
 	f.waitReady(t, "big.bin")
 
-	second := f.download(t, "big.bin", map[string]string{"Accept": "application/json"}, "")
+	second := f.download(t, "big.bin", prepareOptIn, "")
 	require.Equal(t, http.StatusOK, second.StatusCode)
 	require.Equal(t, body, bodyBytes(t, second), "the prepared copy must be the file, exactly")
 }
@@ -284,12 +289,18 @@ func TestPreparedCopyIsServedWithoutTouchingTheBackend(t *testing.T) {
 	body := bigBody()
 	f.seed(t, "big.bin", body)
 
-	f.download(t, "big.bin", map[string]string{"Accept": "application/json"}, "").Body.Close()
+	f.download(t, "big.bin", prepareOptIn, "").Body.Close()
 	f.waitReady(t, "big.bin")
 
 	before := f.reads.Load()
 	for i := 0; i < 10; i++ {
-		resp := f.download(t, "big.bin", map[string]string{"Accept": "application/json"}, "")
+		// Half of them never asked for the "preparing" answer: a copy that is
+		// ready serves everybody.
+		hdr := prepareOptIn
+		if i%2 == 1 {
+			hdr = nil
+		}
+		resp := f.download(t, "big.bin", hdr, "")
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		require.Equal(t, body, bodyBytes(t, resp))
 	}
@@ -305,7 +316,7 @@ func TestRangedReadFromThePreparedCopyIsByteIdentical(t *testing.T) {
 	body := bigBody()
 	f.seed(t, "big.bin", body)
 
-	f.download(t, "big.bin", map[string]string{"Accept": "application/json"}, "").Body.Close()
+	f.download(t, "big.bin", prepareOptIn, "").Body.Close()
 	f.waitReady(t, "big.bin")
 
 	cases := []struct {
@@ -367,7 +378,7 @@ func TestSmallFileOnSlowStorageIsServedImmediately(t *testing.T) {
 	small := []byte("small enough to just send")
 	f.seed(t, "small.txt", small)
 
-	resp := f.download(t, "small.txt", map[string]string{"Accept": "application/json"}, "")
+	resp := f.download(t, "small.txt", prepareOptIn, "")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, small, bodyBytes(t, resp))
 	require.Empty(t, cacheFiles(t, f.dir), "a small file must not occupy the cache at all")
@@ -385,7 +396,7 @@ func TestBigFileOnAStorageNobodyCalledSlowIsServedImmediately(t *testing.T) {
 	body := bigBody()
 	f.seed(t, "big.bin", body)
 
-	resp := f.download(t, "big.bin", map[string]string{"Accept": "application/json"}, "")
+	resp := f.download(t, "big.bin", prepareOptIn, "")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, body, bodyBytes(t, resp))
 	require.Empty(t, cacheFiles(t, f.dir))
@@ -433,7 +444,7 @@ func TestStagedNodeIsNeverCached(t *testing.T) {
 
 	require.NoError(t, f.store.SetNodeTransferState(context.Background(), n.ID, model.TransferStateStaged))
 
-	resp := f.download(t, "big.bin", map[string]string{"Accept": "application/json"}, "")
+	resp := f.download(t, "big.bin", prepareOptIn, "")
 	defer resp.Body.Close()
 	require.NotEqual(t, http.StatusAccepted, resp.StatusCode,
 		"a staged node must never be answered with a cache-preparing response")
@@ -453,24 +464,51 @@ func TestChangedFileIsNotServedFromTheOldCopy(t *testing.T) {
 	first := bigBody()
 	f.seed(t, "big.bin", first)
 
-	f.download(t, "big.bin", map[string]string{"Accept": "application/json"}, "").Body.Close()
+	f.download(t, "big.bin", prepareOptIn, "").Body.Close()
 	f.waitReady(t, "big.bin")
-	served := f.download(t, "big.bin", map[string]string{"Accept": "application/json"}, "")
+	served := f.download(t, "big.bin", prepareOptIn, "")
 	require.Equal(t, first, bodyBytes(t, served))
 
 	// Replaced on the backend, out of band — a NAS is exactly this.
 	second := append(bigBody(), []byte("and then some more")...)
 	require.NoError(t, os.WriteFile(filepath.Join(f.rootDir, "big.bin"), second, 0o644))
 
-	again := f.download(t, "big.bin", map[string]string{"Accept": "application/json"}, "")
+	again := f.download(t, "big.bin", prepareOptIn, "")
 	require.Equal(t, http.StatusAccepted, again.StatusCode,
 		"the changed file must be prepared afresh, not answered from the old copy")
 	again.Body.Close()
 	f.waitReady(t, "big.bin")
 
-	final := f.download(t, "big.bin", map[string]string{"Accept": "application/json"}, "")
+	final := f.download(t, "big.bin", prepareOptIn, "")
 	require.Equal(t, http.StatusOK, final.StatusCode)
 	require.Equal(t, second, bodyBytes(t, final), "the new content, not the cached old one")
+}
+
+// TestAClientThatDidNotOptInGetsTheFileNotAStatusReport — the data-loss fix.
+// Up to v0.42 every non-browser download of a big file on a slow storage got
+// 202 + {"state":"preparing",…}, and filex's own sync client took the 2xx for
+// the file: it wrote the JSON to disk and later uploaded it over the real file.
+// A client that never asked for that answer now gets what it asked for — the
+// bytes — and no preparation it did not ask for is started behind its back.
+func TestAClientThatDidNotOptInGetsTheFileNotAStatusReport(t *testing.T) {
+	for name, hdr := range map[string]map[string]string{
+		"asks for JSON":   {"Accept": "application/json"},
+		"XHR":             {"X-Requested-With": "XMLHttpRequest"},
+		"says nothing":    nil,
+		"accepts any":     {"Accept": "*/*"},
+		"axios's default": {"Accept": "application/json, text/plain, */*"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newSlowFixture(t)
+			body := bigBody()
+			f.seed(t, "big.bin", body)
+
+			resp := f.download(t, "big.bin", hdr, "")
+			require.Equal(t, http.StatusOK, resp.StatusCode, "a caller that did not opt in must get the file")
+			require.Equal(t, body, bodyBytes(t, resp))
+			require.Empty(t, cacheFiles(t, f.dir), "and no copy it did not ask for is prepared")
+		})
+	}
 }
 
 // cacheFiles lists the prepared copies on disk (ignoring temp files).

@@ -725,7 +725,10 @@ func Default() Config {
 			// Every header the explorer itself sends. ⚠ Content-Range rides on
 			// each chunk of an upload past one chunk (8 MiB); without it the
 			// preflight fails and only LARGE cross-origin uploads break.
-			AllowedHeaders: []string{"Authorization", "Content-Type", "X-Filex-Pin", "Content-Range"},
+			// X-Filex-Accept-Prepare is how an embedding page opts in to the
+			// "preparing" answer for a big file on a slow storage; Range is how
+			// a download client makes sure it never gets one.
+			AllowedHeaders: []string{"Authorization", "Content-Type", "X-Filex-Pin", "Content-Range", "Range", "X-Filex-Accept-Prepare"},
 		},
 	}
 }

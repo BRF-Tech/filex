@@ -102,6 +102,11 @@ type Action struct {
 	// and conflict actions, so the local copy can be stamped with it. 0 =
 	// the storage reported none.
 	RemoteMod int64
+	// RemoteSize carries the size the server LISTED on download and conflict
+	// actions. The engine refuses to install a body of any other length: it is
+	// how a status report sent in place of a file (a 202 "preparing" JSON, a
+	// proxy's error page) is told apart from the file.
+	RemoteSize int64
 }
 
 // Options tunes a plan.
@@ -227,13 +232,14 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 					Reason: "changed locally"})
 			case !lChanged && rChanged:
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					RemoteMod: r.ModMillis, Reason: "changed on the server"})
+					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "changed on the server"})
 			default:
 				// Both moved. Same size is not proof of same content, so we do
 				// not try to be clever: keep both and let the person decide.
 				out = append(out, Action{Kind: ActionConflict, Rel: rel,
 					ConflictName: conflictName(rel, SideRemote, opts.Now),
 					RemoteMod:    r.ModMillis,
+					RemoteSize:   r.Size,
 					Reason:       "changed in both places"})
 			}
 
@@ -257,13 +263,13 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 			switch {
 			case !hasB:
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					RemoteMod: r.ModMillis, Reason: "new file on the server"})
+					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "new file on the server"})
 			case opts.FirstRun:
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					RemoteMod: r.ModMillis, Reason: "first run — nothing is deleted"})
+					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "first run — nothing is deleted"})
 			case b.Remote != r.Signature():
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					RemoteMod: r.ModMillis, Reason: "deleted here but edited on the server — kept"})
+					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "deleted here but edited on the server — kept"})
 			default:
 				out = append(out, Action{Kind: ActionDeleteRemot, Rel: rel,
 					Reason: "deleted locally"})

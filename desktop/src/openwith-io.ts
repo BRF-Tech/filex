@@ -7,6 +7,7 @@
 
 import { net } from 'electron';
 
+import { WHOLE_FILE_RANGE, wholeFileVerdict } from './download-guard.js';
 import { OFFICE_MIME_TYPES, SCRATCH_DIR_NAME, type RemoteStat } from './openwith.js';
 
 export interface RemoteContext {
@@ -41,16 +42,19 @@ export const MAX_DOCUMENT_BYTES = 256 * 1024 * 1024;
  */
 function request(
   ctx: RemoteContext,
-  opts: { method: string; url: string; body?: Buffer; contentType?: string },
-): Promise<{ status: number; body: Buffer }> {
+  opts: { method: string; url: string; body?: Buffer; contentType?: string; range?: string },
+): Promise<{ status: number; body: Buffer; contentRange?: string | string[] }> {
   return new Promise((resolve, reject) => {
     const req = net.request({ method: opts.method, url: opts.url });
     req.setHeader('Authorization', 'Bearer ' + ctx.token);
     if (opts.contentType) req.setHeader('Content-Type', opts.contentType);
+    if (opts.range) req.setHeader('Range', opts.range);
     req.on('response', (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
-      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks) }));
+      res.on('end', () =>
+        resolve({ status: res.statusCode, body: Buffer.concat(chunks), contentRange: res.headers['content-range'] }),
+      );
       res.on('error', (e: Error) => reject(e));
     });
     req.on('error', (e) => reject(e));
@@ -176,13 +180,18 @@ export async function uploadFile(
   if (res.status < 200 || res.status >= 300) throw new Error(explain(res.status, res.body));
 }
 
-/** The bytes of one remote file. */
+/** The bytes of one remote file — never a status report standing in for it
+ *  (see download-guard.ts: a 202 body opened in Excel is the lucky case). */
 export async function downloadFile(ctx: RemoteContext, wirePath: string): Promise<Buffer> {
   const res = await request(ctx, {
     method: 'GET',
     url: managerUrl(ctx, { action: 'download', path: wirePath }),
+    range: WHOLE_FILE_RANGE,
   });
-  if (res.status < 200 || res.status >= 300) throw new Error(explain(res.status, res.body));
+  const verdict = wholeFileVerdict(res.status, res.contentRange);
+  if (!verdict.ok) {
+    throw new Error(res.status >= 300 ? explain(res.status, res.body) : verdict.reason);
+  }
   return res.body;
 }
 

@@ -783,8 +783,10 @@ See [NOTIFICATIONS.md](NOTIFICATIONS.md).
 | `FILEX_CORS_ALLOWED_ORIGINS` | `*` | Comma list. Restrict when embedding the component from specific origins. |
 
 `allowed_methods` / `allowed_headers` are `config.yaml` only. Default allowed
-headers: `Authorization, Content-Type, X-Filex-Pin, Content-Range`. If you use
-API‑token root confinement from a browser, add `X-Filex-Token` / `X-Filex-Root`.
+headers: `Authorization, Content-Type, X-Filex-Pin, Content-Range, Range,
+X-Filex-Accept-Prepare`. If you use API‑token root confinement from a browser,
+add `X-Filex-Token` / `X-Filex-Root`. `Content-Range` and `Retry-After` are
+exposed to the page.
 
 ⚠ If you set `allowed_headers` yourself, keep **`Content-Range`** in it: every
 chunk of an upload larger than the chunk size (8 MiB by default) is a `PUT`

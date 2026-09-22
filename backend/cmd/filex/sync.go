@@ -44,8 +44,8 @@ func (a apiAdapter) List(ctx context.Context, remote string) (*filesync.Listing,
 	return out, nil
 }
 
-func (a apiAdapter) Download(ctx context.Context, remote string, w io.Writer) (int64, error) {
-	return a.c.Download(ctx, remote, w)
+func (a apiAdapter) Download(ctx context.Context, remote string, size int64, w io.Writer) (int64, error) {
+	return a.c.DownloadSized(ctx, remote, w, size)
 }
 
 func (a apiAdapter) Upload(ctx context.Context, localPath, remote string) error {

@@ -466,11 +466,19 @@ func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Stor
 	//   - Only a request with NO Range header can be answered "not yet". A
 	//     Range is a resume or a seek from a client already committed to a
 	//     body, and 202 is not an answer it can use.
+	//   - Only a caller that can USE "not yet" gets it: a browser navigation
+	//     (the wait page) or a client that sends X-Filex-Accept-Prepare
+	//     (acceptsPrepare). Everyone else asked for a file and gets the file,
+	//     and no preparation is started behind its back. Until v0.42 every
+	//     non-browser caller got the 202 JSON, and filex's own sync client took
+	//     the 2xx for the file: it wrote the JSON to disk and uploaded it over
+	//     the real one. Old clients stay in the field for months, so the fix
+	//     has to live here, where it protects all of them at once.
 	if r.URL.Query().Get("cache") == "status" {
 		writeCacheStatus(w, src.Status(r.Context(), stat))
 		return
 	}
-	if asAttachment && r.Header.Get("Range") == "" {
+	if asAttachment && r.Header.Get("Range") == "" && (wantsHTML(r) || acceptsPrepare(r)) {
 		if prep := src.Prepare(r.Context(), stat); prep != nil && !prep.Ready {
 			writeCachePreparing(w, r, path.Base(rel), prep)
 			return

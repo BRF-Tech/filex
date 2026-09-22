@@ -770,7 +770,8 @@ backend fast. So when a **big** file lives on a **slow** storage, filex fetches
 it to local disk once and says so while it happens:
 
 1. the first `?action=download` is answered **`202`** — a progress page in a
-   browser, `{"state":"preparing","percent":N}` for an API client;
+   browser, or `{"state":"preparing","percent":N}` (with `Retry-After`) for an
+   API client that sent **`X-Filex-Accept-Prepare: 1`**;
 2. the client polls `?action=download&…&cache=status` (the page does it for
    you) until `{"ready":true}`;
 3. from then on the file is served from local disk — for **every** surface,
@@ -805,6 +806,14 @@ worse":
   A preview still *uses* a copy that already exists.
 * **`Range` requests** are never answered `202` — a resume or a seek is a client
   already committed to a body.
+* **An API client that did not opt in** is never answered `202`, and no copy is
+  prepared for it: it gets the file, streamed from the backend. ⚠ Before this
+  rule every non-browser download got the `202` JSON, and filex's own sync
+  client (and the desktop app's drag-out and "open with") took the `2xx` for the
+  file — the JSON was written to disk under the file's name and the next sync
+  uploaded it over the real file. `Accept: application/json` alone is **not** an
+  opt-in: HTTP libraries send it on every request. The CLI and the desktop app
+  ask for `Range: bytes=0-`, which no version of the server answers with `202`.
 * **Public share links** are never answered `202` either: they spend one of the
   link's capped downloads before bytes leave, and "not yet" is not something to
   charge a visitor for. They do read from a copy that exists.

@@ -13,9 +13,18 @@ package handlers
      * a browser (the explorer opens downloads with window.open, so the
        response IS the page the user is looking at) gets a progress page that
        polls and then starts the download itself;
-     * anything programmatic — XHR/fetch, the CLI, the desktop app, curl — gets
-       202 with {"state":"preparing","percent":N}. 202 and not 200, so a client
-       that ignores the body still cannot mistake it for the file.
+     * a programmatic client that ASKS for it — `X-Filex-Accept-Prepare: 1` —
+       gets 202 with {"state":"preparing","percent":N} and Retry-After, and
+       polls ?cache=status itself;
+     * every other programmatic client — XHR/fetch, the CLI, the desktop app,
+       curl — gets the file, streamed, and no preparation is started for it.
+
+   ⚠ That last line used to say those clients got the 202 too, "and not 200, so
+   a client that ignores the body still cannot mistake it for the file". filex's
+   own sync client did exactly that: any 2xx was the file, so it wrote the JSON
+   to disk under the file's name, and the next run uploaded it over the real
+   file (v0.20–v0.42; 45 files of 70–290 MB lost on one deployment). A status
+   report is only safe to send to a caller that said it can read one.
 
    ⚠ A 202 is only ever sent where nothing has been charged for it. Public
    share links reserve a download off the link's cap BEFORE any byte leaves
@@ -50,8 +59,24 @@ func wantsHTML(r *http.Request) bool {
 	return strings.Contains(accept, "text/html")
 }
 
+// PrepareOptInHeader is how a programmatic client says it can use the
+// "preparing" answer (202 + JSON + Retry-After) instead of a slow stream.
+const PrepareOptInHeader = "X-Filex-Accept-Prepare"
+
+// acceptsPrepare reports whether this programmatic request opted in to the
+// "preparing" answer. Nothing else counts: `Accept: application/json` is what
+// axios and friends send on EVERY request, so it cannot mean "I understand
+// that a download may answer with a status report".
+func acceptsPrepare(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	v := strings.TrimSpace(r.Header.Get(PrepareOptInHeader))
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
 // writeCachePreparing answers a request for a file whose local copy is still
-// being prepared.
+// being prepared. Only for callers that can use it: see vfStream.
 func writeCachePreparing(w http.ResponseWriter, r *http.Request, name string, prep *filebody.Prep) {
 	if wantsHTML(r) {
 		renderCacheWaitPage(w, r, name, prep)
