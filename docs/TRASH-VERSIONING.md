@@ -127,8 +127,13 @@ Trashed items are kept for a fixed window, then hard‑deleted automatically.
 A **daily background loop** scans for nodes whose `deleted_at` is older than the
 retention window and, for each one:
 
-1. deletes the backing storage object (**best‑effort** — if the driver delete
-   fails, the run logs a warning and still continues);
+1. deletes the backing storage object under `.filex-trash/` (**best‑effort** —
+   if the driver delete fails, the run logs a warning and still continues).
+   A row the storage sync soft‑deleted **where it stood** (it found the file
+   gone) has no bytes of its own, so only the row goes: whatever stands at its
+   path now arrived later and is left alone. ⚠ The purge used to delete that
+   path anyway, which destroyed a file that had come back under the old name —
+   and, for a folder row, the whole folder that stood there again;
 2. decrements the owner's [quota](STORAGE.md) usage (files only);
 3. hard‑deletes the DB row.
 

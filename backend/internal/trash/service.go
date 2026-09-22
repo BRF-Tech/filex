@@ -490,7 +490,14 @@ func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 	if n.Type == model.NodeTypeDirectory {
 		s.purgeDirDescendants(ctx, n)
 	}
-	if s.Resolver != nil {
+	if !ownsBytesAt(n.Path) {
+		// ⚠⚠ Soft-deleted where it stood (see ownsBytesAt): nothing of this
+		// row's is at its path, so whatever is there now arrived later. Only
+		// the row goes.
+		slog.Info("trash purge: row was deleted in place; leaving its path alone",
+			slog.Int64("node_id", n.ID),
+			slog.String("path", n.Path))
+	} else if s.Resolver != nil {
 		if drv, err := s.Resolver(n.StorageID); err == nil {
 			if d, ok := drv.(storage.Deleter); ok {
 				// `n.Path` is the actual on-disk location for trashed
@@ -536,6 +543,20 @@ func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 	return s.Store.HardDeleteNode(ctx, n.ID)
 }
 
+// ownsBytesAt reports whether a trashed row's own bytes can be at p — that is,
+// whether p is inside the trash.
+//
+// A row trashed the ordinary way was renamed into `.filex-trash/`, and its
+// bytes are there. A row soft-deleted WHERE IT STOOD never had bytes behind it
+// by the time it was: the storage sync's tombstone pass writes one only after
+// confirming the file is gone (confirmGone), and the queue's "already missing"
+// and "could not trash, deleted outright" branches only after the bytes are.
+// So anything at such a path arrived later — a new upload with the old name, a
+// restore from backup, a folder that exists again — and deleting it would
+// destroy a file nobody deleted; for a folder, recursively. Before this check
+// the purge did exactly that, 30 days after the tombstone was written.
+func ownsBytesAt(p string) bool { return IsTrashPath(p) }
+
 // purgeDirDescendants hard-purges every trashed row still parked under a
 // trashed directory's `.filex-trash/...` path (SoftDeleteAndRetag rewrites
 // descendants to live there). Files get their storage object deleted and
@@ -573,7 +594,7 @@ func (s *Service) purgeDirDescendants(ctx context.Context, dir *model.Node) {
 		drv, _ = s.Resolver(dir.StorageID)
 	}
 	for _, c := range descendants {
-		if c.Type == model.NodeTypeFile && drv != nil {
+		if c.Type == model.NodeTypeFile && drv != nil && ownsBytesAt(c.Path) {
 			if d, ok := drv.(storage.Deleter); ok {
 				if err := d.Delete(ctx, c.Path); err != nil && !errors.Is(err, storage.ErrNotFound) {
 					slog.Warn("trash storage delete failed",
