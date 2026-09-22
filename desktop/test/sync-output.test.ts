@@ -109,3 +109,75 @@ test('an unexpected exit is said out loud; a requested stop is not an error', ()
   assert.equal(b.status.running, false);
   assert.equal(b.status.lastError, null);
 });
+
+// ── an error is a statement about a round, not a verdict for the process ──
+//
+// lastError used to be sticky: set by any stderr line and never cleared until
+// the watcher restarted. One network blip at 09:00 kept the rail dot red and
+// the folder line saying "HTTP 502" all day while every later round
+// succeeded. It now clears when the SAME pair settles again.
+
+test('an error clears once the same pair settles again', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: list docs://x: HTTP 502\n', 'err');
+  assert.equal(t.status.lastError, 'pair-1: list docs://x: HTTP 502');
+  t.feed('pair-1: inventory: 3 item(s) here, listing the server…\n', 'out');
+  t.feed('pair-1: already in step\n', 'out');
+  assert.equal(t.status.lastError, null);
+  assert.deepEqual(t.status.errors, {});
+});
+
+test('…but not when a DIFFERENT pair settles', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: list docs://x: HTTP 502\n', 'err');
+  t.feed('pair-2: already in step\n', 'out');
+  assert.equal(t.status.lastError, 'pair-1: list docs://x: HTTP 502');
+  assert.deepEqual(Object.keys(t.status.errors ?? {}), ['pair-1']);
+});
+
+test('a round that finished with failures keeps them, attributed to its pair', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: transfer: 12/12\n', 'out');
+  t.feed('pair-1: 10/12 done — 3 up, 7 down, 0 removed here, 0 removed on the server  (2s)\n', 'out');
+  t.feed('  ! upload a.txt: HTTP 413\n', 'err');
+  assert.equal(t.status.lastError, '! upload a.txt: HTTP 413');
+  assert.deepEqual(t.status.errors, { 'pair-1': '! upload a.txt: HTTP 413' });
+  // The next round goes through: the failure is history.
+  t.feed('pair-1: 2/2 done — 2 up, 0 down, 0 removed here, 0 removed on the server  (1s)\n', 'out');
+  assert.equal(t.status.lastError, null);
+});
+
+test('…whichever of the two pipes the parent happens to read first', () => {
+  // stdout and stderr are separate pipes: the "  !" lines the engine writes
+  // AFTER the summary can reach us before it.
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: transfer: 12/12\n', 'out');
+  t.feed('  ! upload a.txt: HTTP 413\n', 'err');
+  t.feed('pair-1: 11/12 done — 11 up  (2s)\n', 'out');
+  assert.equal(t.status.lastError, '! upload a.txt: HTTP 413');
+  assert.deepEqual(Object.keys(t.status.errors ?? {}), ['pair-1']);
+});
+
+test('an incomplete round with no detail line yet still says it was incomplete', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: 10/12 done — 10 up  (2s)\n', 'out');
+  assert.equal(t.status.lastError, 'pair-1: 10/12 done — 10 up  (2s)');
+});
+
+test('lastError is the most recent error still standing', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: list docs://a: HTTP 502\n', 'err');
+  t.feed('pair-2: list docs://b: HTTP 503\n', 'err');
+  assert.equal(t.status.lastError, 'pair-2: list docs://b: HTTP 503');
+  t.feed('pair-2: already in step\n', 'out');
+  assert.equal(t.status.lastError, 'pair-1: list docs://a: HTTP 502');
+});
+
+test('an unpaired folder takes its error with it', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: list docs://a: HTTP 502\n', 'err');
+  t.feed('pair-2: list docs://b: HTTP 503\n', 'err');
+  assert.equal(t.retainPairs(new Set(['pair-1'])), true);
+  assert.equal(t.status.lastError, 'pair-1: list docs://a: HTTP 502');
+  assert.equal(t.retainPairs(new Set(['pair-1'])), false);
+});

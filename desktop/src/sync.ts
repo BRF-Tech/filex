@@ -164,13 +164,13 @@ export async function movePair(id: string, newLocal: string): Promise<void> {
  */
 export class SyncSupervisor {
   private procs = new Map<string, ReturnType<typeof spawn>>();
-  private status = new Map<string, SyncStatus>();
+  private trackers = new Map<string, SyncStatusTracker>();
   private stopping = false;
 
   constructor(private onChange: () => void) {}
 
   statuses(): SyncStatus[] {
-    return [...this.status.values()];
+    return [...this.trackers.values()].map((t) => t.status);
   }
 
   /** Starts watchers for accounts that have pairs, stops the rest. Safe to call
@@ -188,8 +188,17 @@ export class SyncSupervisor {
       if (!wanted.has(id)) {
         proc.kill();
         this.procs.delete(id);
-        this.status.delete(id);
       }
+    }
+    // Including a watcher that had already exited on its own: its account
+    // has nothing left to sync, so its last words are not news any more.
+    for (const id of [...this.trackers.keys()]) {
+      if (!wanted.has(id)) this.trackers.delete(id);
+    }
+    // A running watcher is not restarted for an unpaired folder (it re-reads
+    // pairs.json between rounds), so the folder's last error goes here.
+    for (const [id, tracker] of this.trackers) {
+      tracker.retainPairs(new Set(pairs.filter((p) => p.account === id).map((p) => p.id)));
     }
     for (const acc of accounts) {
       if (wanted.has(acc.id) && !this.procs.has(acc.id)) {
@@ -215,7 +224,7 @@ export class SyncSupervisor {
     // The engine's output is parsed in ONE place (src/sync-output.ts) — line
     // by line, not chunk by chunk — and the UI gets typed data.
     const tracker = new SyncStatusTracker(acc.id);
-    this.status.set(acc.id, tracker.status);
+    this.trackers.set(acc.id, tracker);
     this.procs.set(acc.id, proc);
 
     proc.stdout?.on('data', (c: Buffer) => {
@@ -251,7 +260,7 @@ export class SyncSupervisor {
       proc.kill();
       this.procs.delete(accountId);
     }
-    const st = this.status.get(accountId);
+    const st = this.trackers.get(accountId)?.status;
     if (st) {
       st.running = false;
       st.active = null;

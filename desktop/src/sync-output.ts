@@ -26,10 +26,15 @@ export interface SyncStatus {
   running: boolean;
   lastLine: string;
   lastRunAt: string | null;
+  /** The most recent error still standing — see `errors`. null when every
+   *  pair's last round went through. */
   lastError: string | null;
   /** The pair the engine is working on RIGHT NOW, or null between runs.
    *  One value, not a map: the engine walks its pairs sequentially. */
   active: SyncActivity | null;
+  /** Errors still standing, by pair id ('*' for the process itself). A pair's
+   *  entry goes away when a later round of THAT pair settles completely. */
+  errors?: Record<string, string>;
 }
 
 /**
@@ -101,9 +106,18 @@ export function parseEngineLine(raw: string, stream: 'out' | 'err'): EngineLine 
   return { kind: 'info', text: line };
 }
 
+/** The key for an error that belongs to no pair — `filex: …` as it exits. */
+const PROCESS = '*';
+
 /**
  * One account's watcher, as the app sees it: feed it the process's output and
  * read `status`.
+ *
+ * ⚠ An error is a statement about one ROUND of one pair, not a verdict on the
+ * process. It used to be sticky — any stderr line set lastError and nothing
+ * cleared it until the watcher restarted — so one network blip kept the rail
+ * dot red and the folder saying "HTTP 502" all day while every later round
+ * went through.
  */
 export class SyncStatusTracker {
   readonly status: SyncStatus;
@@ -113,6 +127,11 @@ export class SyncStatusTracker {
   // test runner strips types and nothing else, and a parameter property is
   // code, not a type (ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX).
   private readonly now: () => Date;
+  /** Standing errors in the order they were raised — the last one is shown. */
+  private readonly errors = new Map<string, string>();
+  /** The pair whose summary line came last: the engine prints a round's
+   *  `  ! <action failed>` lines right AFTER that pair's summary. */
+  private lastSettled: string | null = null;
 
   constructor(accountId: string, now: () => Date = () => new Date()) {
     this.now = now;
@@ -123,7 +142,25 @@ export class SyncStatusTracker {
       lastRunAt: null,
       lastError: null,
       active: null,
+      errors: {},
     };
+  }
+
+  /**
+   * Drops the errors of pairs that no longer exist. The watcher re-reads its
+   * pair list between rounds and is not restarted for an unpaired folder, so
+   * without this a removed pair's last error would stand until it restarted.
+   */
+  retainPairs(ids: ReadonlySet<string>): boolean {
+    let changed = false;
+    for (const key of [...this.errors.keys()]) {
+      if (key !== PROCESS && !ids.has(key)) {
+        this.errors.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) this.publishErrors();
+    return changed;
   }
 
   /** Feeds one chunk of stdout or stderr. True when the status changed — the
@@ -152,9 +189,8 @@ export class SyncStatusTracker {
   exited(code: number | null, stopping: boolean, signal?: string | null): void {
     this.status.running = false;
     this.status.active = null;
-    if (!stopping && code !== 0) {
-      this.status.lastError =
-        this.status.lastError ?? `sync stopped unexpectedly (exit ${code ?? signal ?? 'unknown'})`;
+    if (!stopping && code !== 0 && this.status.lastError === null) {
+      this.raise(PROCESS, `sync stopped unexpectedly (exit ${code ?? signal ?? 'unknown'})`);
     }
   }
 
@@ -175,14 +211,26 @@ export class SyncStatusTracker {
       }
       case 'settled':
         if (st.active?.pairId === ev.pairId) st.active = null;
+        this.lastSettled = ev.pairId;
+        if (ev.complete) {
+          this.clear(ev.pairId);
+        } else if (!this.errors.has(ev.pairId)) {
+          // Fewer actions went through than were planned. The engine names
+          // each failure on stderr, and those lines can arrive before or after
+          // this one; until they do, the summary itself is the news.
+          this.raise(ev.pairId, raw.trim());
+        }
         break;
       case 'pair-error':
-        st.lastError = ev.message;
         // `<pair-id>: <error>` means that pair's run died — it is not active.
         if (st.active?.pairId === ev.pairId) st.active = null;
+        this.raise(ev.pairId, ev.message);
         return true;
       case 'error':
-        st.lastError = ev.message;
+        // `  ! <action failed>` belongs to the round being reported: the
+        // active pair when stderr overtook the summary, otherwise the pair
+        // whose summary came last.
+        this.raise(st.active?.pairId ?? this.lastSettled ?? PROCESS, ev.message);
         return true;
       case 'info':
         break;
@@ -190,5 +238,21 @@ export class SyncStatusTracker {
     st.lastLine = raw.trim();
     st.lastRunAt = this.now().toISOString();
     return true;
+  }
+
+  private raise(key: string, message: string): void {
+    this.errors.delete(key); // re-insert: the newest error is the one shown
+    this.errors.set(key, message);
+    this.publishErrors();
+  }
+
+  private clear(key: string): void {
+    if (this.errors.delete(key)) this.publishErrors();
+  }
+
+  private publishErrors(): void {
+    this.status.errors = Object.fromEntries(this.errors);
+    const all = [...this.errors.values()];
+    this.status.lastError = all.length ? all[all.length - 1]! : null;
   }
 }

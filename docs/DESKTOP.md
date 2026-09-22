@@ -559,7 +559,9 @@ you have with `FILEX_CLI=/path/to/filex`.
 
 **A folder shows "attention"** — the line under it is the engine's own last
 message. `filex sync run --pair <id>` in a terminal shows the same thing with
-more detail.
+more detail. It is the news from that folder's LAST round, not a verdict: it
+clears by itself (and the dot on the rail turns back) as soon as a later round
+of the same folder goes through.
 
 **An Office document will not open**, or the editor area stays blank — first
 check that your server has OnlyOffice configured at all

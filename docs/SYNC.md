@@ -317,7 +317,9 @@ with `FILEX_CLI=/path/to/filex`, or reinstall the app.
 
 **Nothing transfers and the panel shows an error.** The line under each pair is
 the engine's own last message. `filex sync run --pair <id>` in a terminal shows
-the same thing with more detail.
+the same thing with more detail. The desktop app clears it once a later round of
+that pair goes through, so an error still on screen is one that is still
+happening.
 
 **A conflict copy appeared and I only edited it in one place.** Something else
 wrote to the server copy — another device, a share, or a web-UI save. Both
