@@ -43,7 +43,7 @@ with its `kind`:
 
 | Kind | What it is | Minted by | Identity surfaces |
 |---|---|---|---|
-| `user` | one person's own credential — their CLI, WebDAV/SFTP/FTPS/S3 client, `filex mount` | `POST /api/tokens` (self-service) | all of them |
+| `user` | one person's own credential — their CLI, WebDAV/SFTP/FTPS/S3 client, `filex mount`, the desktop app | `POST /api/tokens` (self-service); the desktop app's sign-in (`POST /api/auth/desktop/complete`, browser session only — see [DESKTOP.md](DESKTOP.md#the-token-the-app-is-given)) | all of them |
 | `app` | an integration — a host app's proxy, a bot, an MCP client | `POST /api/admin/ai-tokens` | suppressed |
 
 For an `app` token filex refuses every **self-service credential surface** with

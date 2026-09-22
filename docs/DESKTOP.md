@@ -106,6 +106,36 @@ notification; the rail shows a red dot on the account, and its file view reads
   stopped. The same button is on the account in *Settings → Accounts*.
 - **Sign out** forgets the account, as above.
 
+### The token the app is given
+
+Signing in gives the app a **personal** API token (kind `user`, see
+[MCP.md → Token kinds](MCP.md#token-kinds--user-vs-app)) that acts as you: its
+scopes are `read,write,delete`, or `read` alone for a **viewer** account — what
+you could mint for yourself on the API keys page, never more, never `admin`. It
+appears in your token list labelled *filex desktop — &lt;platform&gt;*; revoking it
+there signs that copy of the app out.
+
+The pairing is finished by your **signed-in browser session** and nothing else.
+`POST /api/auth/desktop/complete` answers `403` with `reason:
+"session_required"` to any API token of either kind, and mints nothing — a
+token must not be able to mint a wider one for its owner, and an integration's
+token must not be able to turn itself into a person's.
+
+⚠ **Pairings made before this version hold an `app` token.** The server minted
+them without a kind, which reads as `app`, so the desktop window answered `403`
+(`app_token`) on its API keys, S3 keys, SSH keys and NFS exports panels, and the
+explorer hid **Recent**, **Starred** and **Shared with me**. An existing pairing
+is not converted on upgrade; to fix one, **sign in again** to the same server as
+the same person (with **+**) — the account keeps its synced folders — then
+revoke the old *filex desktop* entry on the API keys page in your browser: the
+app forgets the old token, but nothing revokes it on the server. Or have an
+admin hand the existing token back to its person, which needs no new sign-in:
+
+```bash
+curl -X PATCH https://files.example.com/api/admin/ai-tokens/42 \
+  -H 'Content-Type: application/json' -b cookies.txt -d '{"kind":"user"}'
+```
+
 ---
 
 ## Opening and previewing files

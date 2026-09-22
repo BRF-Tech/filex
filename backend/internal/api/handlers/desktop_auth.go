@@ -95,11 +95,30 @@ type desktopCompleteReq struct {
 // does not matter here. It mints the desktop's durable token and parks it
 // behind a one-time code.
 //
+// ⚠⚠ A browser SESSION, and nothing else. The route sits in the group that also
+// accepts API tokens (routes.go), and until this check any token could call it
+// and walk away with a brand-new read,write,delete token for its owner — no
+// `root:` confinement, whatever scopes the calling token had. Measured with a
+// read-only integration token: 200, and a full token parked for collection.
+// Now that the minted token is a PERSON's (kind `user`), the same hole would
+// also let an embed's shared proxy token turn itself into a personal
+// credential, which is exactly what RequirePersonalCaller exists to prevent. A
+// token of either kind is refused, and nothing is minted or parked.
+//
 //	POST /api/auth/desktop/complete
 func (h *DesktopAuth) Complete(w http.ResponseWriter, r *http.Request) {
 	u := auth.UserFrom(r.Context())
 	if u == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if auth.TokenFrom(r.Context()) != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "desktop sign-in is completed in a signed-in browser, not with an API token: " +
+				"open the address the desktop app shows and sign in there",
+			// Machine-readable, like `app_token` on the credential surfaces.
+			"reason": "session_required",
+		})
 		return
 	}
 	var req desktopCompleteReq
@@ -127,10 +146,18 @@ func (h *DesktopAuth) Complete(w http.ResponseWriter, r *http.Request) {
 		UserID:    u.ID,
 		Label:     label,
 		TokenHash: apitoken.HashToken(plain),
-		// Full-capability token: the desktop app IS the user's client, and the
-		// sync engine has to read and write. Revocation is per-token from the
-		// server's token screen, which is what makes handing one out safe.
-		Scopes: "read,write,delete",
+		// The desktop app IS the user's client, and the sync engine has to read
+		// and write — as far as the account's role allows (desktopScopes).
+		// Revocation is per-token from the server's token screen, which is what
+		// makes handing one out safe.
+		Scopes: desktopScopes(u),
+		// ⚠ A PERSON's credential. Left empty, the kind fell to `app` (migration
+		// 00030's default, model.NormalizeTokenKind), and the desktop window —
+		// one person's own client — answered 403 `app_token` on its API keys,
+		// S3 keys, SSH keys and NFS panels, while the explorer hid Recent,
+		// Starred and Shared with me. Pairings made before this keep `app`
+		// until they are made again (docs/DESKTOP.md).
+		Kind: model.TokenKindUser,
 	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -154,6 +181,17 @@ func (h *DesktopAuth) Complete(w http.ResponseWriter, r *http.Request) {
 	h.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]any{"code": code, "email": u.Email})
+}
+
+// desktopScopes is what a paired desktop may do: read, write and delete its
+// owner's files — and only read for a viewer, because a viewer cannot mint
+// write or delete for themselves at /api/tokens either (SelfTokens.cappedScopes
+// refuses it). Never `admin`, never empty (empty means every scope).
+func desktopScopes(u *model.User) string {
+	if u.IsViewer() {
+		return apitoken.ScopeRead
+	}
+	return strings.Join([]string{apitoken.ScopeRead, apitoken.ScopeWrite, apitoken.ScopeDelete}, ",")
 }
 
 type desktopExchangeReq struct {

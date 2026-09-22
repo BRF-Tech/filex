@@ -832,6 +832,10 @@ func BuildRouter(d *Deps) http.Handler {
 		// calls this AFTER the user signed in however this install does it
 		// (local, OIDC, passkey), which is the whole point — a native form in
 		// the desktop app could never reach an SSO identity.
+		//
+		// ⚠ This group lets API tokens in; the handler turns every one of them
+		// away (403 `session_required`), because it MINTS a credential and a
+		// token must not be able to mint a wider one for its owner.
 		r.Post("/api/auth/desktop/complete", desktopAuthH.Complete)
 
 		// Per-user notifications (bell + history + read/unread).
