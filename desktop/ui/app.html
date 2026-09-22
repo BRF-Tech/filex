@@ -1021,6 +1021,11 @@
         'sync.phase_inventory': ['listing the server…', 'sunucu listeleniyor…'],
         'sync.phase_plan':      ['working out what to change…', 'neyin değişeceği hesaplanıyor…'],
         'sync.phase_transfer':  ['moving files — {done}/{total}', 'dosyalar aktarılıyor — {done}/{total}'],
+        'sync.phase_bytes':     ['{bytes} of {size}', '{bytes} / {size}'],
+        'sync.eta':             ['about {eta} left', 'yaklaşık {eta} kaldı'],
+        'sync.eta_h':           ['{h} h {m} min', '{h} sa {m} dk'],
+        'sync.eta_m':           ['{m} min', '{m} dk'],
+        'sync.eta_s':           ['{s} s', '{s} sn'],
         'sync.phase_settling':  ['finishing up…', 'tamamlanıyor…'],
         'sync.trash_kept':      ['Kept for 30 days:', '30 gün saklanıyor:'],
         'sync.trash_empty':     ['Nothing has been removed by sync.', 'Eşitleme hiçbir şey silmedi.'],
@@ -1585,10 +1590,31 @@
       // native menu built in the main process, and nothing in the file list can
       // tell it what language to speak. One control, in the one place that can
       // reach all three surfaces (this window, the tray, the explorer).
-      /** One of the engine's phases, in words, for the folder line. */
+      /** The engine's size ('1.2 GiB') with this window's decimal mark. */
+      function localSize(s) {
+        return LANG === 'tr' ? String(s).replace(/(\d)\.(\d)/, '$1,$2') : String(s);
+      }
+
+      /** The engine's estimate in this window's words; its own text when it
+       *  said something this window cannot read. */
+      function localEta(v) {
+        const t = v.etaSeconds;
+        if (typeof t !== 'number') return v.eta || '';
+        if (t >= 3600) return T('sync.eta_h', { h: String(Math.floor(t / 3600)), m: String(Math.floor((t % 3600) / 60)) });
+        if (t >= 60) return T('sync.eta_m', { m: String(Math.round(t / 60)) });
+        return T('sync.eta_s', { s: String(t) });
+      }
+
+      /** One of the engine's phases, in words, for the folder line — with the
+       *  bytes and the time left once the engine reports them. */
       function activityLine(v) {
         if (v.phase === 'transfer' && v.total > 0) {
-          return T('sync.phase_transfer', { done: String(v.done), total: String(v.total) });
+          let line = T('sync.phase_transfer', { done: String(v.done), total: String(v.total) });
+          if (v.bytesDone && v.bytesTotal) {
+            line += ', ' + T('sync.phase_bytes', { bytes: localSize(v.bytesDone), size: localSize(v.bytesTotal) });
+          }
+          if (v.eta) line += ' — ' + T('sync.eta', { eta: localEta(v) });
+          return line;
         }
         if (v.phase === 'plan') return T('sync.phase_plan');
         if (v.phase === 'settling') return T('sync.phase_settling');

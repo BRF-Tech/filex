@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { LineBuffer, SyncStatusTracker, parseEngineLine } from '../src/sync-output.ts';
+import { LineBuffer, SyncStatusTracker, parseEngineLine, parseEta } from '../src/sync-output.ts';
 
 test('a line split across two chunks is read as ONE line', () => {
   const b = new LineBuffer();
@@ -247,4 +247,43 @@ test('a window that closes mid-transfer ends the activity even without a summary
   assert.equal(t.status.active, null);
   assert.equal(t.status.waitingWindow, '22:00-07:00');
   assert.equal(t.status.lastError, null, 'a closing window is not an error');
+});
+
+// ── bytes and the time left ──
+//
+// "transfer: 120/11704" said nothing about the nine hours ahead. The engine
+// now appends `(<done> of <total>, about <eta> left)` — the bytes once there
+// are bytes to move, the estimate once it has one — and keeps the leading
+// "done/total" exactly as it was.
+
+test('the transfer line carries bytes and an estimate', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: transfer: 120/11704 (1.2 GiB of 52.6 GiB, about 8h 10m left)\n', 'out');
+  assert.deepEqual(t.status.active, {
+    pairId: 'pair-1', phase: 'transfer', done: 120, total: 11704,
+    bytesDone: '1.2 GiB', bytesTotal: '52.6 GiB', eta: '8h 10m', etaSeconds: 8 * 3600 + 10 * 60,
+  });
+});
+
+test('…the bytes without an estimate in the first seconds', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: transfer: 3/40 (512 B of 12.0 MiB)\n', 'out');
+  assert.deepEqual(t.status.active, {
+    pairId: 'pair-1', phase: 'transfer', done: 3, total: 40, bytesDone: '512 B', bytesTotal: '12.0 MiB',
+  });
+});
+
+test('…and an older engine\'s bare line still reads as before', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: transfer: 20/300\n', 'out');
+  assert.deepEqual(t.status.active, { pairId: 'pair-1', phase: 'transfer', done: 20, total: 300 });
+});
+
+test('the estimate is read into seconds, whatever unit the engine chose', () => {
+  assert.equal(parseEta('8h 10m'), 29400);
+  assert.equal(parseEta('1h 0m'), 3600);
+  assert.equal(parseEta('12m'), 720);
+  assert.equal(parseEta('45s'), 45);
+  assert.equal(parseEta('soon'), null);
+  assert.equal(parseEta(''), null);
 });

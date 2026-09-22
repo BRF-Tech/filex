@@ -353,8 +353,12 @@ rows for the engine:
 
 A change restarts the watchers at once, so it applies to a transfer already
 running. The line under each folder in Settings says what the engine is doing
-with that folder right now — listing the server, moving files `120/11704`,
-finishing up, waiting for the window — or the error from its last round.
+with that folder right now — listing the server, moving files, finishing up,
+waiting for the window — or the error from its last round. While files move it
+reads, for example, *moving files — 120/11704, 1.2 GiB of 52.6 GiB — about
+8 h 10 min left*: the byte counts appear once there are bytes to move, the
+estimate after the first few seconds of transfer, from the average rate so far
+(so a limit or a busy line shows up in it).
 
 > Sync runs while the app does, so a folder kept a moment ago starts filling on
 > the next round (30 seconds) — no restart — unless sync is paused (see

@@ -18,6 +18,50 @@ export interface SyncActivity {
   /** transfer only: actions done / planned. 0/0 elsewhere. */
   done: number;
   total: number;
+  /** transfer only, once there are bytes to move: the engine's own figures,
+   *  e.g. '1.2 GiB' of '52.6 GiB'. */
+  bytesDone?: string;
+  bytesTotal?: string;
+  /** transfer only, once the engine has an estimate: its words ('8h 10m')
+   *  and the same in seconds, for a window that words it in its language. */
+  eta?: string;
+  etaSeconds?: number;
+}
+
+/**
+ * `transfer: <done>/<total>` and, from engines that know, ` (<bytes done> of
+ * <bytes total>[, about <eta> left])`. The leading `done/total` never changes
+ * shape — the explorer's strip reads just that.
+ */
+const TRANSFER_RE = /^(\d+)\/(\d+)(?:\s+\((.+?) of (.+?)(?:, about (.+?) left)?\))?\s*$/;
+
+/** The engine's estimate ('8h 10m', '12m', '45s') in seconds, or null. */
+export function parseEta(text: string): number | null {
+  const m = /^(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?$/.exec(text.trim());
+  if (!m || (m[1] === undefined && m[2] === undefined && m[3] === undefined)) return null;
+  return Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0);
+}
+
+function transferActivity(pairId: string, detail: string): SyncActivity {
+  const m = TRANSFER_RE.exec(detail);
+  // A detail this parser does not know still has its counts in front.
+  const head = m ?? /^(\d+)\/(\d+)/.exec(detail);
+  const act: SyncActivity = {
+    pairId,
+    phase: 'transfer',
+    done: head ? Number(head[1]) : 0,
+    total: head ? Number(head[2]) : 0,
+  };
+  if (m && m[3] !== undefined && m[4] !== undefined) {
+    act.bytesDone = m[3];
+    act.bytesTotal = m[4];
+    if (m[5] !== undefined) {
+      act.eta = m[5];
+      const secs = parseEta(m[5]);
+      if (secs !== null) act.etaSeconds = secs;
+    }
+  }
+  return act;
 }
 
 /** What the supervisor has observed about one account's sync process. */
@@ -245,13 +289,10 @@ export class SyncStatusTracker {
     switch (ev.kind) {
       case 'progress': {
         st.waitingWindow = null; // a round started: we are inside the window
-        const tr = ev.phase === 'transfer' ? /^(\d+)\/(\d+)/.exec(ev.detail) : null;
-        st.active = {
-          pairId: ev.pairId,
-          phase: ev.phase,
-          done: tr ? Number(tr[1]) : 0,
-          total: tr ? Number(tr[2]) : 0,
-        };
+        st.active =
+          ev.phase === 'transfer'
+            ? transferActivity(ev.pairId, ev.detail)
+            : { pairId: ev.pairId, phase: ev.phase, done: 0, total: 0 };
         break;
       }
       case 'settled':

@@ -175,3 +175,16 @@ test('the folder line: a watcher that is gone without a word is "stopped"', () =
   const st = running({ running: false });
   assert.deepEqual(pairView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), { kind: 'stopped' });
 });
+
+test("the folder line carries the transfer's bytes and estimate through", () => {
+  const st = running({
+    active: {
+      pairId: 'pair-1', phase: 'transfer', done: 120, total: 11704,
+      bytesDone: '1.2 GiB', bytesTotal: '52.6 GiB', eta: '8h 10m', etaSeconds: 29400,
+    },
+  });
+  assert.deepEqual(pairView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
+    kind: 'active', phase: 'transfer', done: 120, total: 11704,
+    bytesDone: '1.2 GiB', bytesTotal: '52.6 GiB', eta: '8h 10m', etaSeconds: 29400,
+  });
+});
