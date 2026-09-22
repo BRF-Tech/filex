@@ -242,6 +242,27 @@ List the contents of a directory.
 
 **Status codes:** `200` ok · `403` forbidden · `404` path missing.
 
+### `GET /api/files/manager?action=changes` ![user](https://img.shields.io/badge/-user-blue)
+Has anything under a folder changed since the caller last asked?
+
+| Param   | Notes |
+|---------|-------|
+| `path`  | `<storage>://<folder>` (a file path works too) |
+| `since` | the `cursor` from the previous answer; empty = never asked |
+
+**Response 200** `{ "cursor": "<opaque>", "changed": true }`
+
+Answered from an in-memory change log fed by the same event chain that
+refreshes open explorers and folder sizes — every write surface (explorer,
+WebDAV, S3, SFTP, FTPS, NFS, trash and version restores, the ops queue). Every
+doubt reads as `changed`: no `since`, a cursor from before a restart, one older
+than the log still holds (4,096 changes per storage), an event on the way to
+the folder that does not say what it touched. Changes the catalogue learns from
+a **storage scan** (bytes written straight into the backend) do not pass
+through the log, which is why sync clients keep a slower full walk as a safety
+net. `403` when the caller cannot see the folder; `400` on a `..` segment;
+`501` on servers without the log.
+
 ### Filenames in `Content-Disposition`
 
 Every endpoint that serves bytes (`action=download` / `preview`, share

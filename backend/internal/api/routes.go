@@ -687,7 +687,14 @@ func BuildRouter(d *Deps) http.Handler {
 	sizes := syncpkg.NewSizeRefresher(func(ctx context.Context, storageID int64) error {
 		return syncpkg.RecomputeFolderSizes(ctx, d.Store, storageID)
 	}, hub, 2*time.Second, 15*time.Second)
-	emitter := sizes.Wrap(hub)
+	// H10: the change log sits in front of the chain, so it records exactly
+	// what the hub and the size refresher are told, and a sync client can ask
+	// "anything new under my folder?" (action=changes) instead of re-listing
+	// its whole tree every round. The refresher's own listing refreshes go
+	// straight to the hub and are, correctly, not changes.
+	changes := realtime.NewChangeLog(realtime.DefaultChangeLogCapacity)
+	mh.AttachChangeLog(changes)
+	emitter := changes.Wrap(sizes.Wrap(hub))
 	handlers.SetChangeEmitter(emitter)
 	// The protocol servers (WebDAV, S3, SFTP, FTPS, NFS) reach the catalogue
 	// through internal/protocolsync rather than through these handlers, so the

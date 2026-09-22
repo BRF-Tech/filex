@@ -23,6 +23,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
+	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
@@ -57,6 +58,9 @@ type Manager struct {
 	// or filex's staging area while a staged upload is still transferring.
 	// nil is fine and degrades to driver-only reads (filebody.Resolver).
 	Body *filebody.Resolver
+	// Changes answers `action=changes` (manager_changes.go). nil = 501, and a
+	// sync client falls back to walking its tree.
+	Changes *realtime.ChangeLog
 	// Quota enforces the per-user ceiling on the SYNCHRONOUS write paths.
 	// Large writes reach the staged path, which checks at `begin`; without
 	// this the small-file path had no ceiling at all, and a user could sail
@@ -369,6 +373,9 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 	switch action {
 	case "index", "subfolders":
 		h.vfIndex(w, r, current, rel, storageNames, action == "subfolders")
+		return
+	case "changes":
+		h.vfChanges(w, r, current, rel)
 		return
 	case "search":
 		filter := q.Get("filter")
