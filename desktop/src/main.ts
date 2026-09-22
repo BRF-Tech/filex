@@ -25,6 +25,7 @@ import {
   nativeTheme,
   net,
   powerMonitor,
+  powerSaveBlocker,
   protocol,
   session,
   shell,
@@ -83,6 +84,7 @@ import {
 } from './openwith-io.js';
 import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, movePair, removePair, type Pair } from './sync.js';
 import { watcherAccounts } from './sync-policy.js';
+import { SleepGuard, quietMomentForUpdate, syncBusy } from './power.js';
 import { PORTABLE_DATA_DIRNAME, portableMode } from './portable.js';
 
 // ─────────────────────────── portable build ───────────────────────────
@@ -159,6 +161,8 @@ let tray: Tray | null = null;
 let pendingAuth: PendingAuth | null = null;
 let quitting = false;
 let supervisor: SyncSupervisor | null = null;
+/** Keeps the computer out of idle sleep while sync is moving files. */
+let sleepGuard: SleepGuard | null = null;
 /** Local copies for dragging files OUT onto the desktop. See dragout.ts. */
 let dragCache: DragOutCache | null = null;
 /** The paths the last successful prepare() produced, keyed by the selection,
@@ -924,11 +928,18 @@ let applying = false;
 function watchForAQuietMoment(): void {
   if (quietMomentTimer) return;
   quietMomentTimer = setInterval(() => {
-    if (applying || updateState.status !== 'ready') return;
-    const windowOpen = BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible());
-    if (windowOpen) return;
-    if (powerMonitor.getSystemIdleTime() < IDLE_SECONDS_BEFORE_APPLY) return;
-    applyUpdateQuietly();
+    // ⚠ The engine counts as "someone": the swap stops every watcher, and an
+    // idle machine with no window open is exactly what an overnight first sync
+    // looks like. See quietMomentForUpdate (src/power.ts).
+    const now = quietMomentForUpdate({
+      ready: updateState.status === 'ready',
+      applying,
+      windowOpen: BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible()),
+      idleSeconds: powerMonitor.getSystemIdleTime(),
+      idleThreshold: IDLE_SECONDS_BEFORE_APPLY,
+      syncBusy: syncBusy(supervisor?.statuses() ?? []),
+    });
+    if (now) applyUpdateQuietly();
   }, 60_000);
 }
 
@@ -947,6 +958,7 @@ function applyUpdateQuietly(): void {
     quietMomentTimer = null;
   }
   supervisor?.stopAll();
+  sleepGuard?.release();
   quitting = true;
   // (silent, relaunch) — see the ⚠⚠ note above: the defaults are (false, false),
   // which shows the installer and then leaves the app closed.
@@ -3220,8 +3232,12 @@ if (!app.requestSingleInstanceLock()) {
     // The supervisor keeps a `filex sync run --watch` alive per account. It is
     // started here, not when the Sync folders window opens: syncing that only
     // happens while a panel is on screen is not syncing.
+    sleepGuard = new SleepGuard(powerSaveBlocker, (msg) => log('power', msg));
     supervisor = new SyncSupervisor(
       () => {
+        // While any pair is being worked on the machine does not idle-sleep;
+        // the moment none is, it may again. See src/power.ts.
+        sleepGuard?.update(syncBusy(supervisor?.statuses() ?? []));
         for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
       },
       (accountId) => markSignedOut(accountId, 'the sync engine was refused (HTTP 401)'),
@@ -3298,6 +3314,7 @@ if (!app.requestSingleInstanceLock()) {
     // after the app is gone, which is both surprising and impossible to stop
     // from the UI that no longer exists.
     supervisor?.stopAll();
+    sleepGuard?.release();
   });
 
   app.on('window-all-closed', () => {

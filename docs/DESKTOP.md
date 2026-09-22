@@ -458,6 +458,12 @@ Settings turns itself off to match, and filex never puts itself back. (After a
 reinstall into a different folder the switch can read off for the same reason;
 turn it on again once.)
 
+While any folder is being synced, filex keeps the computer from **idle-sleeping**
+— a first sync of a large store can take all night, and an overnight sleep used
+to cost hours of it. The screen still dims and locks as usual, and a closed lid,
+the power button or a flat battery still put the machine to sleep. The hold is
+released the moment the round settles, and on quit.
+
 **Pause sync** — in the tray menu, and as a switch at the top of *Settings →
 Synced folders* — stops every folder's sync, on every account, until you resume
 it. It is remembered: a paused filex stays paused after a restart, a reboot and
@@ -479,7 +485,10 @@ days — once the machine has been idle for ten minutes with no window open. It
 comes back where it was, in the tray. No installer window, no restart prompt.
 
 The sync watchers are stopped before the swap and start again on their own
-afterwards, so an update never lands in the middle of a transfer.
+afterwards, so an update never lands in the middle of a transfer. The idle-time
+install also **waits for sync**: an idle machine with no window open is exactly
+what an overnight first sync looks like, so it installs only once no folder is
+being worked on (or when you quit).
 
 *Settings → Updates* shows what it is doing and offers **Install it now** for
 anyone who would rather not wait. `FILEX_NO_UPDATE=1` turns the whole thing off.
