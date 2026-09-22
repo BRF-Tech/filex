@@ -88,6 +88,13 @@ individual rows, and the trash listing is flat — a deleted folder therefore
 shows its children as separate entries even though restoring the folder is one
 action.
 
+⚠ Until this was fixed, a folder whose name (or whose parent's name) is not plain
+ASCII — `Müşteri`, `Çıktılar` — went to the trash **without** its contents: the
+descendants were matched by a prefix length counted in bytes where the database
+counts characters. The files stayed live under a folder that was gone, and the
+next storage sync tombstoned them one by one, outside the folder's trash entry.
+Restoring such a folder had the same blind spot.
+
 > ⚠ **Sync clients delete in bulk.** A single `rclone sync --delete` run can
 > remove hundreds of files, and every one of them now lands in the trash. That
 > is the point — the run is recoverable — but it also means a bulk delete

@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
 
@@ -736,7 +737,7 @@ func (s *Store) retagTrashedSubtree(ctx context.Context, storageID int64, origPa
 		rows, err := s.db.QueryContext(ctx, `
 			SELECT id, path FROM nodes
 			WHERE storage_id=? AND deleted_at IS NULL AND SUBSTR(path,1,?)=?`,
-			storageID, len(pfx), pfx)
+			storageID, prefixChars(pfx), pfx)
 		if err != nil {
 			continue
 		}
@@ -789,7 +790,7 @@ func (s *Store) restoreTrashedSubtree(ctx context.Context, storageID int64, tras
 		rows, err := s.db.QueryContext(ctx, `
 			SELECT id, path FROM nodes
 			WHERE storage_id=? AND deleted_at IS NOT NULL AND SUBSTR(path,1,?)=?`,
-			storageID, len(pfx), pfx)
+			storageID, prefixChars(pfx), pfx)
 		if err != nil {
 			continue
 		}
@@ -822,6 +823,13 @@ func (s *Store) restoreTrashedSubtree(ctx context.Context, storageID int64, tras
 			WHERE id=?`, newPath, newHash, newPath, c.id)
 	}
 }
+
+// prefixChars is the length SUBSTR needs for a path prefix: SQL counts
+// CHARACTERS (SQLite, MySQL and PostgreSQL alike), Go's len counts bytes. Passing
+// len() made every folder whose path is not plain ASCII match none of its own
+// rows — "/Müşteri/" is 9 characters and 11 bytes — so the folder went to the
+// trash and its contents stayed live, and a restore left them in the trash.
+func prefixChars(p string) int { return utf8.RuneCountInString(p) }
 
 // subtreePrefixVariants normalizes candidate folder paths into the two
 // on-disk conventions the nodes.path column historically mixes (with and
