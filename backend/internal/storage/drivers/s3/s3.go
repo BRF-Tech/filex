@@ -694,7 +694,10 @@ func (d *Driver) Move(ctx context.Context, src, dst string) error {
 	if d.isDir(ctx, src) {
 		return d.copyDir(ctx, src, dst, true)
 	}
-	if err := d.Copy(ctx, src, dst); err != nil {
+	// copyObject, not Copy: Copy would ask "is this a folder?" a second time
+	// — one more HEAD for every file moved, which is what putting a file in
+	// the trash is. Across a bulk delete that was a quarter of every request.
+	if err := d.copyObject(ctx, src, dst); err != nil {
 		return err
 	}
 	_, err := d.client.DeleteObject(ctx, &s3.DeleteObjectInput{
@@ -714,6 +717,12 @@ func (d *Driver) Copy(ctx context.Context, src, dst string) error {
 	if d.isDir(ctx, src) {
 		return d.copyDir(ctx, src, dst, false)
 	}
+	return d.copyObject(ctx, src, dst)
+}
+
+// copyObject is the single-object half of Copy, for a caller that already
+// knows src is not a folder.
+func (d *Driver) copyObject(ctx context.Context, src, dst string) error {
 	_, err := d.client.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket:     aws.String(d.bucket),
 		CopySource: aws.String(encodeCopySource(d.bucket, d.key(src))),
