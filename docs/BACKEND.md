@@ -365,9 +365,16 @@ merged into it.
 
 ### `POST /api/files/delete` ![user](https://img.shields.io/badge/-user-blue)
 ```json
-{ "paths": ["/storage1/a.txt", "/storage1/sub/"] }
+{ "source": ["alpha://a.txt", "alpha://klasor"] }
 ```
-Returns `200 + { deleted: ["..."], failed: [{ path: "...", error: "..." }] }`.
+**Response 202** `{ "op": { "id": 13, "kind": "delete", … } }` — queued like a
+move; poll `GET /api/files/ops`. Every item goes to the trash.
+
+The items of one delete job are trashed several at a time
+(`FILEX_OPS_DELETE_WORKERS`, default 4 — [CONFIGURATION.md](CONFIGURATION.md)),
+and the job's `done`/`failed` counters are written about once a second while it
+runs. An item that lies inside another item of the same job is left to that one
+(it counts as done with it), so a folder goes to the trash whole.
 
 ### `GET /api/files/manager/shared-with-me` ![user](https://img.shields.io/badge/-user-blue)
 

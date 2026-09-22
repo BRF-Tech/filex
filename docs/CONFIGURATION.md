@@ -514,6 +514,27 @@ work on every driver. See [UPLOADS.md](UPLOADS.md).
 
 ---
 
+## File operations (copy · move · delete)
+
+Copy, move and delete from the explorer (`POST /api/files/copy`, `/move`,
+`/delete`, `/api/files/ops`) are queued jobs, run one at a time in the order
+they were submitted.
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_OPS_DELETE_WORKERS` | `4` | How many items of **one delete job** are put in the trash at the same time. Below 1 means the default. |
+
+Only the items inside a delete job overlap; jobs still run one after another,
+so a paste queued behind a delete still waits for it — it just waits much less.
+On an object store every trashed file is several round trips, so a delete is
+almost all waiting on the network: one item at a time, a job of tens of
+thousands of files ran for hours. Raise the value when the backend takes it;
+lower it (to `1` for the old behaviour) when it answers with throttling errors.
+An item inside another item of the same job (a file and its folder) is left to
+the folder, so the folder goes to the trash whole.
+
+---
+
 ## Antivirus (ClamAV)
 
 Optional. filex scans written files with ClamAV, reached either through a local
@@ -954,6 +975,7 @@ cors:
   allowed_methods: [GET, POST, PUT, DELETE, PATCH, OPTIONS]
   allowed_headers: [Authorization, Content-Type, X-Filex-Pin]
 queue:  { driver: sqlite, dsn: "", workers: 4, enabled: true }
+ops:    { delete_workers: 4 }        # items of one delete job trashed at once
 notify: { enabled: true, webhook_url: "", webhook_token: "" }
 demo:   { mode: false, user: demo@demo.com, pass: demo }
 sentry: { dsn: "", environment: "" }

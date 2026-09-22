@@ -98,6 +98,10 @@ type Service struct {
 	// live holds the byte counters of running cross-storage ops (progress.go).
 	live sync.Map
 
+	// deleteWorkers bounds how many items of ONE delete job are trashed at
+	// the same time (SetDeleteWorkers; delete_pool.go).
+	deleteWorkers int
+
 	wakeup chan struct{}
 	stopMu sync.Mutex
 	stop   chan struct{}
@@ -180,6 +184,7 @@ func NewForDialect(database *sql.DB, dialect string, resolver func(int64) (stora
 		db:              database,
 		dialect:         dialect,
 		storageResolver: resolver,
+		deleteWorkers:   DefaultDeleteWorkers,
 		wakeup:          make(chan struct{}, 1),
 		stop:            make(chan struct{}),
 	}
@@ -543,22 +548,28 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 	}
 
 	var lastErr error
-	for _, src := range op.Sources {
-		if ctx.Err() != nil {
-			break
+	if op.Kind == OpDelete {
+		// Several items at once, within this one job (delete_pool.go). The
+		// job itself still runs in queue order, like every other.
+		lastErr = s.runDeletes(ctx, drv, dstDrv, op)
+	} else {
+		for _, src := range op.Sources {
+			if ctx.Err() != nil {
+				break
+			}
+			if err := s.runOne(ctx, drv, dstDrv, op, src); err != nil {
+				op.Failed++
+				lastErr = err
+				slog.Warn("ops: step failed",
+					slog.Int64("op", op.ID),
+					slog.String("kind", op.Kind),
+					slog.String("src", src),
+					slog.String("err", err.Error()))
+			} else {
+				op.Done++
+			}
+			_, _ = s.db.ExecContext(ctx, s.q(`UPDATE pending_ops SET done=?, failed=? WHERE id=?`), op.Done, op.Failed, op.ID)
 		}
-		if err := s.runOne(ctx, drv, dstDrv, op, src); err != nil {
-			op.Failed++
-			lastErr = err
-			slog.Warn("ops: step failed",
-				slog.Int64("op", op.ID),
-				slog.String("kind", op.Kind),
-				slog.String("src", src),
-				slog.String("err", err.Error()))
-		} else {
-			op.Done++
-		}
-		_, _ = s.db.ExecContext(ctx, s.q(`UPDATE pending_ops SET done=?, failed=? WHERE id=?`), op.Done, op.Failed, op.ID)
 	}
 
 	status := StatusOK
@@ -573,9 +584,11 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		status = StatusPartial
 		errMsg = errMessage(lastErr)
 	}
+	// The counters ride along: a delete job writes its progress at most once
+	// a second, so the last item's count may not be on the row yet.
 	_, _ = s.db.ExecContext(ctx, s.q(
-		`UPDATE pending_ops SET status=?, error=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`),
-		status, errMsg, op.ID)
+		`UPDATE pending_ops SET status=?, error=?, done=?, failed=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`),
+		status, errMsg, op.Done, op.Failed, op.ID)
 }
 
 func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op, src string) error {

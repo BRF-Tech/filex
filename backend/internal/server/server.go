@@ -632,6 +632,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 
 	// Async ops queue — DB-backed, restart-safe.
 	opsSvc := ops.NewForDialect(sqlDB, cfg.DB.Driver, resolver)
+	opsSvc.SetDeleteWorkers(cfg.Ops.DeleteWorkers)
 	if err := opsSvc.Migrate(ctx); err != nil {
 		slog.Warn("ops: migrate", slog.String("err", err.Error()))
 	}

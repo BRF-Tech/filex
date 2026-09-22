@@ -105,6 +105,7 @@ type Config struct {
 	Search           SearchConfig `yaml:"search"`
 	CORS             CORSConfig   `yaml:"cors"`
 	Queue            QueueConfig  `yaml:"queue"`
+	Ops              OpsConfig    `yaml:"ops"`
 	Notify           NotifyConfig `yaml:"notify"`
 	Demo             DemoConfig   `yaml:"demo"`
 	Sentry           SentryConfig `yaml:"sentry"`
@@ -447,6 +448,20 @@ type QueueConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
 
+// OpsConfig — the copy/move/delete queue (internal/ops).
+type OpsConfig struct {
+	// DeleteWorkers is how many items of ONE delete job are put in the trash
+	// at the same time. FILEX_OPS_DELETE_WORKERS, default 4; anything below 1
+	// means the default.
+	//
+	// Jobs still run one after another, in the order they were queued — only
+	// the items inside a delete job overlap. On an object store every trashed
+	// file is several round trips, so a large delete is almost all waiting,
+	// and one item at a time made a delete of tens of thousands of files run
+	// for hours while every other queued job waited behind it.
+	DeleteWorkers int `yaml:"delete_workers"`
+}
+
 // LogConfig — slog level + format.
 type LogConfig struct {
 	Level  string `yaml:"level"`  // debug, info, warn, error
@@ -689,6 +704,9 @@ func Default() Config {
 			Driver:  "",
 			Workers: 4,
 			Enabled: true,
+		},
+		Ops: OpsConfig{
+			DeleteWorkers: 4,
 		},
 		Notify: NotifyConfig{
 			Enabled: true,
@@ -1093,6 +1111,11 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_QUEUE_WORKERS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			c.Queue.Workers = n
+		}
+	}
+	if v := os.Getenv("FILEX_OPS_DELETE_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.Ops.DeleteWorkers = n
 		}
 	}
 	if v := os.Getenv("FILEX_QUEUE_ENABLED"); v != "" {
