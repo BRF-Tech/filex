@@ -201,6 +201,7 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	settle := func(a Action, tmp Result, out outcome, err error) {
 		mu.Lock()
 		defer mu.Unlock()
+		cp.touched[a.Rel] = true
 		if err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("%s %s: %v", a.Kind, a.Rel, err))
 			e.logf("!! %s %s: %v", a.Kind, a.Rel, err)
@@ -290,8 +291,11 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 		res.Errors = append(res.Errors, "stopped: "+err.Error())
 	}
 
-	// Re-snapshot. Using the post-run state rather than assuming the plan
-	// succeeded means a partial failure cannot poison the baseline.
+	// Re-snapshot. The post-run state is what resolves the uploads still
+	// waiting for their remote signature and what adopts new twins — but it is
+	// NOT copied into the baseline wholesale any more (checkpoint.final): a
+	// path this run did not transfer keeps the row it had, so an edit made on
+	// either side WHILE the run was busy is still an edit next time.
 	local2, _, err := WalkLocal(e.Pair.Local)
 	if err != nil {
 		return res, fmt.Errorf("re-read %s: %w", e.Pair.Local, err)
@@ -300,7 +304,7 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	if err != nil {
 		return res, err
 	}
-	if err := e.Store.SaveBaseline(e.Pair.ID, NextBaseline(local2, remote2)); err != nil {
+	if err := e.Store.SaveBaseline(e.Pair.ID, cp.final(local2, remote2)); err != nil {
 		return res, err
 	}
 
@@ -531,6 +535,7 @@ type checkpoint struct {
 	local   Snapshot // pre-run snapshots: the signatures that were transferred
 	remote  Snapshot
 	pending map[string]Node // uploaded rel → its local node, remote side not yet listed
+	touched map[string]bool // every rel an action was attempted for, succeeded or not
 	dirty   int
 	last    time.Time
 }
@@ -540,7 +545,7 @@ func (e *Engine) newCheckpoint(base Baseline, local, remote Snapshot) *checkpoin
 	for k, v := range base {
 		rows[k] = v
 	}
-	return &checkpoint{e: e, rows: rows, local: local, remote: remote, pending: map[string]Node{}, last: time.Now()}
+	return &checkpoint{e: e, rows: rows, local: local, remote: remote, pending: map[string]Node{}, touched: map[string]bool{}, last: time.Now()}
 }
 
 func (c *checkpoint) every() int {
@@ -661,6 +666,68 @@ func (c *checkpoint) flush(ctx context.Context) {
 	}
 	c.dirty = 0
 	c.last = time.Now()
+}
+
+// final is the baseline a completed run leaves behind.
+//
+// ⚠ It used to be NextBaseline(post-run local, post-run remote): every path on
+// both sides recorded with whatever signatures it had at the END. An edit made
+// on either side while the run was busy — and a first sync can run for nine
+// hours — was therefore recorded as already in step and never transferred;
+// worse, a later edit on the stale side then went up over the newer one.
+//
+// So the rows come from what this run actually KNOWS was agreed:
+//
+//   - rows of transfers that completed (the checkpoint: a download's row is
+//     exact, an upload's remote side is resolved here from the post-run
+//     listing);
+//   - rows of paths this run did not touch stay exactly as they were, even
+//     if a side changed since — so the next run sees that change;
+//   - a path that is on both sides with no row yet is adopted only if
+//     neither side changed during the run (folders always: they carry no
+//     content);
+//   - a path gone from BOTH sides is forgotten.
+func (c *checkpoint) final(local2, remote2 Snapshot) Baseline {
+	out := make(Baseline, len(c.rows)+len(c.pending))
+	for rel, row := range c.rows {
+		l2, inL := local2[rel]
+		r2, inR := remote2[rel]
+		if !inL && !inR {
+			continue
+		}
+		if inL && inR && (l2.IsDir != row.IsDir || r2.IsDir != row.IsDir) {
+			continue // changed kind: let the planner look at it afresh
+		}
+		out[rel] = row
+	}
+	for rel, l := range c.pending {
+		if r, ok := remote2[rel]; ok && !r.IsDir {
+			out[rel] = BaselineEntry{Local: l.Signature(), Remote: r.Signature()}
+		}
+	}
+	for rel, l2 := range local2 {
+		r2, ok := remote2[rel]
+		if !ok || l2.IsDir != r2.IsDir {
+			continue
+		}
+		if _, have := out[rel]; have {
+			continue
+		}
+		if l2.IsDir {
+			out[rel] = BaselineEntry{Local: l2.Signature(), Remote: r2.Signature(), IsDir: true}
+			continue
+		}
+		if c.touched[rel] {
+			continue // its action failed: the next run tries again
+		}
+		l1, okL := c.local[rel]
+		r1, okR := c.remote[rel]
+		if !okL || !okR || l1.Signature() != l2.Signature() || r1.Signature() != r2.Signature() {
+			continue // appeared or changed during the run: look again next time
+		}
+		out[rel] = BaselineEntry{Local: l2.Signature(), Remote: r2.Signature()}
+	}
+	return out
 }
 
 // DefaultTransfers is how many uploads/downloads run concurrently. Four is
