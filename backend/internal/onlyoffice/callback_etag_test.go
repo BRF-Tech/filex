@@ -63,6 +63,10 @@ func TestCallback_SaveKeepsTheLandedEtag(t *testing.T) {
 
 			resp := h.save(t, StatusReadyForSaving, "EDITED IN THE OFFICE SUITE")
 			require.Equal(t, 0, resp["error"])
+			// The write event is emitted on a goroutine; wait for it, as the
+			// other callback tests do, so the harness's cleanup (which resets
+			// the process-wide sink) cannot race it.
+			h.sink.wait(t)
 
 			row, err := h.svc.Store.GetNode(context.Background(), h.node.ID)
 			require.NoError(t, err)

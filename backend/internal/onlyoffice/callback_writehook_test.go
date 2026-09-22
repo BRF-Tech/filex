@@ -282,6 +282,10 @@ func TestCallback_UnwiredSyncStillWrites(t *testing.T) {
 
 	resp := h.save(t, StatusReadyForSaving, "STILL SAVED")
 	assert.Equal(t, 0, resp["error"])
+	// The fallback gate still announces the save, on a goroutine. Wait for it:
+	// the harness's cleanup resets the process-wide sink, and a test that ends
+	// first races that emit (seen under -race).
+	h.sink.wait(t)
 
 	onDisk, err := os.ReadFile(filepath.Join(h.root, "budget.docx"))
 	require.NoError(t, err)
