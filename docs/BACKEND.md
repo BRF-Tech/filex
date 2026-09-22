@@ -1249,23 +1249,38 @@ write that overwrote an existing file — is in
 ## Admin: sync runs
 
 ### `GET /api/admin/sync-runs` ![admin](https://img.shields.io/badge/-admin-red)
-**Query**: `?storage_id=…&limit=50&offset=0`
+**Query**: `?storage_id=…&status=…&limit=50&offset=0` — runs of the last five
+days, newest first. A tenant admin sees its own storages' runs only.
 
 **Response 200**
 ```json
 {
-  "runs": [
+  "entries": [
     {
-      "id": 12, "storage_id": 1, "status": "completed",
+      "id": 12, "storage_id": 1, "status": "ok",
       "started_at": "...", "finished_at": "...",
-      "added": 4, "updated": 2, "removed": 1, "errors": 0
+      "seen_count": 1840, "added": 4, "updated": 2, "deleted": 1
     }
-  ]
+  ],
+  "total": 1, "limit": 50, "offset": 0
 }
 ```
 
+`status` is one of:
+
+| Status | Meaning |
+|---|---|
+| `running` | the run is walking the storage now (`finished_at` is absent) |
+| `ok` | the run finished |
+| `failed` | the run stopped on an error of its own — a backend that did not answer, a listing that failed; `error` says which |
+| `aborted` | the run was cut short: its context was cancelled (shutdown, a storage edit restarting the syncer) or ran past its time limit, or the server stopped in the middle of it and closed the row when it next started (`error`: `interrupted: the server stopped during the scan`). The catalogue is behind the backend until a run finishes |
+
+`seen_count` of the last run that finished `ok` is the tombstone guard's
+baseline ([STORAGE.md → Sync](STORAGE.md#sync)). The same rows are listed per
+storage at `GET /api/admin/storages/:id/sync-runs` (`entries`, `total`).
+
 ### `GET /api/admin/sync-runs/:id` ![admin](https://img.shields.io/badge/-admin-red)
-Includes per-error detail array.
+`{run, conflicts}`: the run above plus the sync conflicts detected during it.
 
 ---
 

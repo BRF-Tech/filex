@@ -268,8 +268,8 @@ loop:
       hard_delete(f)                              # catalogue only, bytes untouched
 
     # tombstone pass — a node not seen this run is a CANDIDATE, not a verdict
-    if seen < 0.7 * previous_run.seen:      # the whole listing looks wrong
-      skip the pass entirely
+    if seen < 0.7 * last_ok_run.seen:       # the whole listing looks wrong
+      skip the pass entirely                # (a failed/aborted run is no baseline)
     for f in db.files where storage_id=$id and seen_at < run_started:
       if f.path is inside filex's own trees: # never, whatever else went wrong:
         keep                                 # a trashed .versions/ folder purges
@@ -283,7 +283,13 @@ loop:
       else:
         soft_delete(f)                       # genuinely gone → trash
 
-    finish_sync_run(run)
+    finish_sync_run(run)                  # on a context the run's own
+                                          # cancellation cannot reach: "ok",
+                                          # "failed", or "aborted" if cut short
+
+  # at worker start, before any run: a row still open belongs to a process
+  # that is gone
+  close every sync_run with no finished_at as "aborted"
 ```
 
 ⚠ Absence from a listing is not proof of deletion, and answering it with

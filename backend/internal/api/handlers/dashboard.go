@@ -104,10 +104,19 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 		if last, err := h.Store.GetLastSyncRun(ctx, st.ID); err == nil && last != nil {
 			row.LastSyncAt = last.StartedAt
 			row.LastSyncStatus = last.Status
-			if last.Status == "error" {
+			// ⚠ The statuses the sync worker actually writes (poll.go). This
+			// compared with "error", which it has never written, so a storage
+			// whose last scan failed showed as "ok" here.
+			switch last.Status {
+			case "failed":
 				row.State = "error"
-			} else if last.Status == "running" {
+			case "running":
 				row.State = "running"
+			case "aborted":
+				// Stopped before it finished (closed when the server next
+				// started): the catalogue is behind the backend until a run
+				// completes.
+				row.State = "stale"
 			}
 		} else {
 			row.State = "stale"

@@ -2123,6 +2123,23 @@ func (s *Store) GetLastSyncRun(ctx context.Context, storageID int64) (*model.Syn
 	return scanSyncRun(row)
 }
 
+func (s *Store) GetLastSyncRunByStatus(ctx context.Context, storageID int64, status string) (*model.SyncRun, error) {
+	// id breaks a same-second tie: CURRENT_TIMESTAMP has no fraction here.
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'')
+		 FROM sync_runs WHERE storage_id=? AND status=? AND finished_at IS NOT NULL ORDER BY started_at DESC, id DESC LIMIT 1`, storageID, status)
+	return scanSyncRun(row)
+}
+
+func (s *Store) AbortUnfinishedSyncRuns(ctx context.Context, errMsg string) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE sync_runs SET status='aborted', finished_at=CURRENT_TIMESTAMP, error=? WHERE finished_at IS NULL`, errMsg)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (s *Store) GetSyncRun(ctx context.Context, id int64) (*model.SyncRun, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'')

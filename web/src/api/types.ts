@@ -119,9 +119,10 @@ export interface StorageRef {
   };
   last_sync_at?: string | null;
   /** Raw `sync_runs.status` of the last run: the backend writes 'ok',
-   *  'running' or 'failed'. ('error' is the sync-runs list's translated
-   *  spelling — accepted here too so both round-trip.) */
-  last_sync_state?: 'ok' | 'failed' | 'error' | 'running' | 'pending';
+   *  'running', 'failed' or 'aborted' (a run the server stopped in the middle
+   *  of, closed when it next started). ('error' is the sync-runs list's
+   *  translated spelling — accepted here too so both round-trip.) */
+  last_sync_state?: 'ok' | 'failed' | 'error' | 'running' | 'aborted' | 'pending';
   last_sync_error?: string | null;
   /** Replica fields. v0.1.18+: the canonical link is
    *  `replica_target_id` — a foreign key into the new

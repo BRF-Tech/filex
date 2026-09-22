@@ -1812,6 +1812,19 @@ func (s *Store) GetLastSyncRun(ctx context.Context, storageID int64) (*model.Syn
 	return scanSyncRun(s.db.QueryRowContext(ctx, `SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'') FROM sync_runs WHERE storage_id=$1 ORDER BY started_at DESC LIMIT 1`, storageID))
 }
 
+func (s *Store) GetLastSyncRunByStatus(ctx context.Context, storageID int64, status string) (*model.SyncRun, error) {
+	return scanSyncRun(s.db.QueryRowContext(ctx, `SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'') FROM sync_runs WHERE storage_id=$1 AND status=$2 AND finished_at IS NOT NULL ORDER BY started_at DESC, id DESC LIMIT 1`, storageID, status))
+}
+
+func (s *Store) AbortUnfinishedSyncRuns(ctx context.Context, errMsg string) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE sync_runs SET status='aborted', finished_at=NOW(), error=$1 WHERE finished_at IS NULL`, errMsg)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (s *Store) ListSyncRuns(ctx context.Context, storageID int64, limit int) ([]*model.SyncRun, error) {
 	if limit <= 0 {
 		limit = 50

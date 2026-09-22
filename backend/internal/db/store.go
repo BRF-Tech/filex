@@ -304,6 +304,16 @@ type Store interface {
 	FinishSyncRun(ctx context.Context, id int64, cursorAfter string, seen, added, updated, deleted int, status, errMsg string) error
 	GetSyncRun(ctx context.Context, id int64) (*model.SyncRun, error)
 	GetLastSyncRun(ctx context.Context, storageID int64) (*model.SyncRun, error)
+	// GetLastSyncRunByStatus is the most recent FINISHED run of a storage with
+	// the given status (sql.ErrNoRows when there is none) — the tombstone
+	// guard's baseline is the last run that finished "ok", never one that
+	// was cut short with whatever it had counted by then.
+	GetLastSyncRunByStatus(ctx context.Context, storageID int64, status string) (*model.SyncRun, error)
+	// AbortUnfinishedSyncRuns closes every run with no finished_at as
+	// "aborted", with errMsg as its error, and reports how many it closed.
+	// Called once when the sync worker starts, before any run of its own: a
+	// row still open then belongs to a process that is gone.
+	AbortUnfinishedSyncRuns(ctx context.Context, errMsg string) (int64, error)
 	ListSyncRuns(ctx context.Context, storageID int64, limit int) ([]*model.SyncRun, error)
 	ListSyncRunsAcrossAll(ctx context.Context, storageID int64, status string, limit, offset int) ([]*model.SyncRun, int64, error)
 	CreateSyncConflict(ctx context.Context, c *model.SyncConflict) error

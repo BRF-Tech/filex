@@ -429,7 +429,8 @@ directory if it is missing**, so a storage pointed at an *unmounted* path will
 cheerfully serve an empty directory, and the next sync run reads "empty backend"
 as "everything was deleted". The [tombstone guard](#sync) blocks the *first*
 such run — it skips the delete pass when a run sees less than ~70 % of what the
-previous run saw — but it only ever compares against the **previous run**. Once
+previous run saw — but it only ever compares against the **last run that
+finished `ok`**. Once
 that empty run is on record with a seen count of 0, the guard has nothing to
 compare against and the next empty run soft‑deletes the tree from the cache. It
 buys you one cycle, not safety. Nothing is deleted on the NAS itself, and a sync
@@ -680,10 +681,23 @@ with like. The same holds once more after the upgrade that stopped counting
 `.versions/` and `.thumbs/`, for a storage whose version history was a large
 share of its objects.
 
-⚠ The comparison is against the **previous run only**: a backend that stays empty records a run
-with a seen count of 0, and the run after that has nothing to compare against
-and deletes. The guard buys a cycle to notice the outage in — see
+⚠ The comparison is against the **last run that finished `ok`**. A run that
+failed or was cut short (`aborted`) records whatever it had counted when it
+stopped, usually 0, and it no longer resets the baseline: it used to, and the
+run after an interrupted scan then deleted with nothing to compare against. A
+backend that stays empty is another matter: its run finishes `ok` with a seen
+count of 0, and the run after that has nothing to compare against and deletes.
+The guard buys a cycle to notice the outage in — see
 [NAS trap 2](#nas-nfs-smb-and-friends).
+
+**A run always closes its own record.** A run that is cancelled — a shutdown,
+an edit to the storage that restarts its syncer, the ceiling on a manual scan —
+is recorded as `aborted` with the reason, not left `running`. A run the server
+died in the middle of is closed the same way the next time the sync worker
+starts (`interrupted: the server stopped during the scan`), before any new run
+begins. Until then such a row said `running` for ever: on the storage list, in
+the sync history, and to `filex thumb backfill`, which refuses to render over a
+catalogue a sync has not finished — an `aborted` last run included.
 
 **Cadence is per storage.** The poll loop uses the storage row's
 `sync_interval_s` (`900` when you don't set one; anything under 5 s is treated

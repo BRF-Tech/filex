@@ -91,7 +91,7 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 	}
 	seen, err := s.walk(ctx, "/", nil, &added, &updated, list)
 	if err != nil {
-		_ = s.store.FinishSyncRun(ctx, run.ID, "", seen, added, updated, 0, "failed", err.Error())
+		s.finishRun(ctx, run.ID, seen, added, updated, 0, err)
 		return err
 	}
 
@@ -119,8 +119,44 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 		slog.Warn("sync: folder-size recompute",
 			slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
 	}
-	_ = s.store.FinishSyncRun(ctx, run.ID, "", seen, added, updated, deleted, "ok", "")
-	return nil
+	s.finishRun(ctx, run.ID, seen, added, updated, deleted, nil)
+	// A run whose context died after the walk skipped whatever came after it
+	// (the tombstone pass, the folder sizes); it is recorded as aborted and
+	// the caller hears why.
+	return ctx.Err()
+}
+
+// finishRun closes the run's sync_runs row: "ok", "failed" (runErr), or
+// "aborted" when the run's own context was cancelled or ran out — a shutdown,
+// a storage edit restarting the syncer, the ceiling on a manual scan.
+//
+// ⚠ Always on a context the run's cancellation cannot reach. It used to close
+// the row on the run's own context, so exactly the runs that were cut short
+// tried to record their end on a dead context, failed silently, and said
+// `running` for ever.
+func (s *storageSyncer) finishRun(ctx context.Context, runID int64, seen, added, updated, deleted int, runErr error) {
+	status, msg := "ok", ""
+	switch {
+	case ctx.Err() != nil:
+		status, msg = "aborted", interruptedMessage(ctx.Err())
+	case runErr != nil:
+		status, msg = "failed", runErr.Error()
+	}
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := s.store.FinishSyncRun(fctx, runID, "", seen, added, updated, deleted, status, msg); err != nil {
+		slog.Warn("sync: could not close the run's record",
+			slog.Int64("run", runID), slog.String("status", status),
+			slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
+	}
+}
+
+// interruptedMessage says why a run stopped before it finished.
+func interruptedMessage(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "interrupted: the scan ran past its time limit"
+	}
+	return "interrupted: the scan was stopped before it finished (server shutdown or storage change)"
 }
 
 // CatalogueTree catalogues everything under dir on drv exactly as a sync pass
@@ -670,8 +706,15 @@ func (s *storageSyncer) confirmGone(ctx context.Context, n *model.Node) bool {
 	return true
 }
 
+// previousSeenCount is the tombstone guard's baseline: what the last run that
+// FINISHED ok saw.
+//
+// ⚠ Not simply the last run. A failed or aborted run records whatever it had
+// counted when it stopped — usually 0 — and as the baseline that switched the
+// guard off for the next run: a listing that came back half empty after an
+// interrupted scan went straight to the trash.
 func (s *storageSyncer) previousSeenCount(ctx context.Context) (int, error) {
-	last, err := s.store.GetLastSyncRun(ctx, s.storage.ID)
+	last, err := s.store.GetLastSyncRunByStatus(ctx, s.storage.ID, "ok")
 	if err != nil || last == nil {
 		return 0, err
 	}

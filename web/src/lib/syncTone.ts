@@ -9,6 +9,10 @@
 //
 // `'error'` stays accepted: it is what api/sync.ts translates `'failed'` into
 // for the sync-RUNS list, so both spellings reach a UI surface.
+//
+// `'aborted'` is a run the server stopped in the middle of (closed when it next
+// started): not a failure of the storage, not nothing either — the catalogue is
+// behind the backend until the next sync. Amber, as on the sync-runs list.
 export type SyncTone = 'emerald' | 'rose' | 'sky' | 'amber' | 'zinc';
 
 export function syncTone(state: string | undefined | null): SyncTone {
@@ -21,6 +25,7 @@ export function syncTone(state: string | undefined | null): SyncTone {
     case 'running':
       return 'sky';
     case 'pending':
+    case 'aborted':
       return 'amber';
     default:
       return 'zinc';

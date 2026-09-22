@@ -104,6 +104,8 @@ type catalogueState interface {
 //   - a sync is running → the rows it has not reached yet do not exist, so a
 //     backfill now leaves exactly those files without a thumbnail (the
 //     shots run: `{processed: 22, ok: 22}` and a grid of generic icons);
+//   - the last sync was interrupted (`aborted`) → the same half-built
+//     catalogue, with nothing left running to finish it;
 //   - never synced, the catalogue holds no file, and the backend's root is
 //     not empty → there is literally nothing to render.
 //
@@ -112,11 +114,23 @@ type catalogueState interface {
 // installing ffmpeg" is exactly this command's job there. It is logged,
 // because files placed on its backend directly would still be missed.
 func catalogueGap(ctx context.Context, store catalogueState, st *model.Storage, drv storage.Driver) string {
-	if run, err := store.GetLastSyncRun(ctx, st.ID); err == nil && run != nil && run.Status == "running" {
-		return fmt.Sprintf("a sync is still running (started %s UTC): the files it has not reached "+
-			"are not in the catalogue yet, so they would get no thumbnail. Wait for it to finish and run "+
-			"backfill again (if the server restarted mid-sync and nothing is running, start a new sync)",
-			run.StartedAt.UTC().Format("2006-01-02 15:04:05"))
+	if run, err := store.GetLastSyncRun(ctx, st.ID); err == nil && run != nil {
+		switch run.Status {
+		case "running":
+			return fmt.Sprintf("a sync is still running (started %s UTC): the files it has not reached "+
+				"are not in the catalogue yet, so they would get no thumbnail. Wait for it to finish and run "+
+				"backfill again (if the server restarted mid-sync and nothing is running, start a new sync)",
+				run.StartedAt.UTC().Format("2006-01-02 15:04:05"))
+		case "aborted":
+			// ⚠ The same half-built catalogue as a running sync, with nothing
+			// left to finish it: the run was cut short (closed as aborted when
+			// the server next started). Until this was said out loud, the
+			// closed row read "not running" and a backfill went ahead over it.
+			return fmt.Sprintf("the last sync was interrupted (started %s UTC) and never finished: the files "+
+				"it had not reached are not in the catalogue, so they would get no thumbnail. Start a new sync "+
+				"(Storages → Sync, or POST /api/admin/storages/%d/sync), wait for it to finish, then run backfill again",
+				run.StartedAt.UTC().Format("2006-01-02 15:04:05"), st.ID)
+		}
 	}
 	if st.LastSyncAt != nil {
 		return ""

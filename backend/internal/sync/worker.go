@@ -95,7 +95,23 @@ func (w *Worker) AttachAntivirus(fn func(ctx context.Context, n *model.Node)) {
 
 // Start launches one syncer per enabled storage. ctx is the parent
 // shutdown context.
+//
+// ⚠ First it closes every sync_runs row still open. A run records its own end,
+// and a process that stopped in the middle of one — restarted, killed, out of
+// memory — never did: its row said `running` for ever, on panels, to the
+// thumbnail backfill's "is a sync running?" check, and in the history. Nothing
+// of this process can be running yet, so an open row here belongs to one that
+// is gone.
+//
+// This is Start's job and not server.New's on purpose: `filex thumb backfill`
+// builds a whole Server beside a live one (it never calls Start), and closing
+// rows there would declare the live server's scan dead while it walks.
 func (w *Worker) Start(ctx context.Context) error {
+	if n, err := w.store.AbortUnfinishedSyncRuns(ctx, AbortedAtStartup); err != nil {
+		slog.Warn("sync: could not close the runs a previous process left open", slog.String("err", err.Error()))
+	} else if n > 0 {
+		slog.Info("sync: closed runs a previous process left open as aborted", slog.Int64("runs", n))
+	}
 	storages, err := w.store.ListEnabledStorages(ctx)
 	if err != nil {
 		return fmt.Errorf("sync: list storages: %w", err)
@@ -231,6 +247,10 @@ type storageSyncer struct {
 	runMu    sync.Mutex
 	inFlight atomic.Bool
 }
+
+// AbortedAtStartup is the error recorded on a sync_runs row the worker closes
+// at start because the process that opened it is gone.
+const AbortedAtStartup = "interrupted: the server stopped during the scan"
 
 // ErrRunInProgress is what RunOnce (and so Worker.Trigger) returns when this
 // storage is already being walked. It is not a failure of the run — the run
