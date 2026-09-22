@@ -48,6 +48,7 @@ import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } f
 import { DragOutCache, createPlaceholders, fulfilDrop, type DragItem } from './dragout.js';
 import { localDriveRoots, watchForDrop } from './dropwatch.js';
 import { log, logPath } from './log.js';
+import { loginItemWrite, osWillLaunch, preferenceAfterStartup, type LoginItemReport } from './login-item.js';
 import { DesktopNotifier, type NotificationRow } from './notifications.js';
 import {
   OFFICE_EXTENSIONS,
@@ -938,14 +939,37 @@ function setLinuxAutostart(on: boolean): void {
   fs.writeFileSync(file, body, 'utf8');
 }
 
-/** True when the OS will actually launch this app at the next sign-in — read
- *  back from the OS, never from our own intent. */
-function loginItemActive(): boolean {
-  if (process.platform === 'linux') return fs.existsSync(linuxAutostartFile());
-  if (!app.isPackaged) return false;
-  return app.getLoginItemSettings(loginItemSpec()).openAtLogin;
+/** Whether this run can have a login item at all: a dev run refuses to write
+ *  one (it could only register the bare electron binary — see above). */
+function loginItemSupported(): boolean {
+  return app.isPackaged || process.platform === 'linux';
 }
 
+/** What the OS says about our login item right now. */
+function loginItemReport(): LoginItemReport {
+  if (process.platform === 'linux') {
+    return { platform: 'linux', autostartFile: fs.existsSync(linuxAutostartFile()) };
+  }
+  if (!app.isPackaged) return { platform: process.platform };
+  const s = app.getLoginItemSettings(loginItemSpec());
+  return {
+    platform: process.platform,
+    openAtLogin: s.openAtLogin,
+    executableWillLaunchAtLogin: s.executableWillLaunchAtLogin,
+    launchItems: s.launchItems,
+    status: s.status,
+  };
+}
+
+/** True when the OS will actually launch this app at the next sign-in — read
+ *  back from the OS, never from our own intent. See src/login-item.ts for why
+ *  that is not `openAtLogin` on Windows. */
+function loginItemActive(): boolean {
+  return osWillLaunch(loginItemReport());
+}
+
+/** ⚠ Called from the Settings switch ONLY. Startup never writes the login
+ *  item — see reconcileLoginItem(). */
 function setLoginItem(on: boolean): void {
   if (process.platform === 'linux') {
     setLinuxAutostart(on);
@@ -954,7 +978,31 @@ function setLoginItem(on: boolean): void {
   // A dev run must not write a login item at all: the only command it could
   // write is the one described above.
   if (!app.isPackaged) return;
-  app.setLoginItemSettings({ openAtLogin: on, ...loginItemSpec() });
+  app.setLoginItemSettings(loginItemWrite(on, process.platform, loginItemSpec()));
+}
+
+/**
+ * At startup the PREFERENCE follows the OS — never the other way round.
+ *
+ * ⚠ This used to be "re-assert the login item whenever the preference is on",
+ * so an install that had moved kept working — and so did a client the user had
+ * disabled in Task Manager or removed from the OS list: it came back, with its
+ * sync, at the next sign-in. Whoever switched it off out there meant it. If the
+ * OS will no longer launch us, the switch in Settings goes off to match, and
+ * nothing is written; turning it back on is one click, and that click is the
+ * only thing that writes a login item.
+ */
+function reconcileLoginItem(): void {
+  const report = loginItemReport();
+  const keep = preferenceAfterStartup(state.launchAtLogin, loginItemSupported(), report);
+  if (keep === state.launchAtLogin) return;
+  log('login', 'the OS will not start filex at sign-in any more; the preference follows it', report);
+  state.launchAtLogin = keep;
+  try {
+    saveState(state);
+  } catch (e) {
+    log('login', 'could not store the preference', String((e as Error)?.message ?? e));
+  }
 }
 
 function publicState() {
@@ -986,7 +1034,7 @@ function publicState() {
     launchAtLoginEffective: loginItemActive(),
     // A dev run deliberately refuses to write one (see setLoginItem), and the
     // settings panel has to say WHY rather than show a switch that does nothing.
-    launchAtLoginSupported: app.isPackaged || process.platform === 'linux',
+    launchAtLoginSupported: loginItemSupported(),
     appVersion: app.getVersion(),
     update: updateState,
     // Set on a build that can never apply an update in place — an ad-hoc
@@ -3071,12 +3119,14 @@ if (!app.requestSingleInstanceLock()) {
     // Whether this build can swap itself decides WHICH updater to wire, so it
     // runs first.
     void detectManualUpdates().then(wireAutoUpdate);
-    // Re-assert the login item on every packaged start. The command stored in
-    // the registry is a full path, and an install that MOVES leaves it pointing
-    // at nothing — which is what an upgrade from a per-machine install to a
-    // per-user one does. Rewriting it here costs a registry write and keeps the
-    // setting honest across reinstalls.
-    if (state.launchAtLogin && !loginItemActive()) setLoginItem(true);
+    // The login item is NOT re-asserted here. It used to be, whenever the
+    // preference was on — which brought back a client the user had disabled
+    // in Task Manager (setLoginItemSettings also clears that flag). Now the
+    // preference follows the OS; see reconcileLoginItem(). The cost: after an
+    // install that MOVED (per-machine → per-user), the old entry points
+    // elsewhere, the switch reads off, and one click in Settings writes the
+    // new one.
+    reconcileLoginItem();
     // A launch the user did not initiate stays in the tray. Opening a window at
     // sign-in — on top of whatever else the desktop is still restoring — is the
     // behaviour that makes people turn the setting off again.

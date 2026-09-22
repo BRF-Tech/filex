@@ -431,7 +431,16 @@ background*, and the window close becomes a real quit.
 *Start when I sign in* registers filex as a login item. Settings reports what the
 OS actually did with that request, not what was asked for: policies and
 sandboxes refuse it often enough that showing our own intent back would be a
-lie.
+lie. On Windows that means the Task Manager flag too — an entry that is still in
+the registry but switched off in *Startup apps* reads as off.
+
+That switch is the **only** thing that writes the login item. If you turn filex
+off in the OS's own list instead — Task Manager's *Startup apps* or *Settings →
+Apps → Startup* on Windows, *Login Items* on macOS, the autostart entry on
+Linux — the app takes that as your answer: at its next start the switch in
+Settings turns itself off to match, and filex never puts itself back. (After a
+reinstall into a different folder the switch can read off for the same reason;
+turn it on again once.)
 
 Quit properly from the tray menu.
 
