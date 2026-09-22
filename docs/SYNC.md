@@ -192,6 +192,7 @@ filex sync move <pair-id> <new-local-path>
 filex sync remove <pair-id>
 filex sync run [--pair <id>] [--account <label>] [--watch <interval>] [--dry-run] [--quiet] [--transfers <n>]
                [--limit-down <KiB/s>] [--limit-up <KiB/s>] [--window HH:MM-HH:MM]
+               [--watch-max <duration>] [--full-every <duration>]
 filex sync trash [--pair <id>] [--restore <path>]
 filex sync confirm <pair-id>
 filex sync discard <pair-id>
@@ -282,10 +283,17 @@ sides. Unpairing is not deleting.
   edited so that its size *and* timestamp are unchanged is not noticed. Hashing
   every file on every pass would make large folders unusable; this is the same
   trade-off rsync makes by default.
-- **Polling, not file-system events.** `--watch` re-scans on an interval
-  (the desktop app uses 30 seconds). Very large folders take as long as a walk
-  takes — the server side is listed eight folders at a time, the local side is
-  one directory walk.
+- **Asking, not walking.** `--watch` looks at every pair each interval (the
+  desktop app uses 30 seconds), but a pair only **runs** when something moved:
+  its local tree changed (one local walk, no request), or the server's change
+  log says something under its folder changed (`action=changes`, one request),
+  or its last run failed. A full walk still happens every `--full-every`
+  (default 30 minutes) as a safety net for changes the log cannot see — bytes
+  written straight into the storage and found by a scan. Before this, one Mac
+  with 7,048 synced folders listed its whole tree every round: 100–150
+  thousand requests an hour, around the clock. Against a server without the
+  change log, a quiet pair's walks back off from the interval to `--watch-max`
+  (default 5 minutes) and snap back as soon as something moves.
 - **A dead connection is detected, not waited out.** The client pings an idle
   HTTP/2 connection (30 s) and bounds dialing, TLS and the wait for response
   headers; a transfer's body is deliberately unbounded, so a large file may

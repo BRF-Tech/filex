@@ -193,3 +193,69 @@ func TestSyncRun_RejectsABadWindowOrLimit(t *testing.T) {
 	err, _, _ = runSync(t, context.Background(), "run", "--url", "http://x", "--token", "t", "--limit-up", "-1")
 	require.ErrorContains(t, err, "cannot be negative")
 }
+
+// feedServer is a tiny server with one empty folder, docs://work, that
+// counts listings and change-log questions. withFeed=false answers `changes`
+// the way every server before it does: 501.
+func feedServer(t *testing.T, withFeed bool) (srv *httptest.Server, index, changes *int64) {
+	t.Helper()
+	var mu sync.Mutex
+	index, changes = new(int64), new(int64)
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		q := r.URL.Query()
+		switch q.Get("action") {
+		case "index":
+			*index++
+			_, _ = w.Write([]byte(`{"adapter":"docs","files":[]}`))
+		case "changes":
+			*changes++
+			if !withFeed {
+				w.WriteHeader(http.StatusNotImplemented)
+				_, _ = w.Write([]byte(`{"error":"action not implemented: changes"}`))
+				return
+			}
+			_, _ = fmt.Fprintf(w, `{"cursor":"e.1","changed":%v}`, q.Get("since") != "e.1")
+		default:
+			w.WriteHeader(http.StatusNotImplemented)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, index, changes
+}
+
+// H10: an idle watcher no longer re-lists the tree every tick.
+func TestSyncWatch_AQuietPairIsNotWalkedAgain(t *testing.T) {
+	dir, st := syncEnv(t)
+	srv, index, changes := feedServer(t, true)
+	_, err := st.AddPair(filesync.Pair{Local: filepath.Join(dir, "mirror"), Remote: "docs://work"})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	err, _, _ = runSync(t, ctx, "run", "--url", srv.URL, "--token", "t", "--watch", "20ms")
+	require.NoError(t, err)
+
+	require.LessOrEqual(t, *index, int64(2), "one run: the inventory walk and the settle walk, then no listing at all")
+	require.Greater(t, *changes, int64(5), "every tick asks the change log instead")
+}
+
+// Against an older server the watcher still walks, backing off while nothing
+// happens.
+func TestSyncWatch_WithoutAChangeLogItBacksOff(t *testing.T) {
+	dir, st := syncEnv(t)
+	srv, index, _ := feedServer(t, false)
+	_, err := st.AddPair(filesync.Pair{Local: filepath.Join(dir, "mirror"), Remote: "docs://work"})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	err, _, _ = runSync(t, ctx, "run", "--url", srv.URL, "--token", "t", "--watch", "20ms")
+	require.NoError(t, err)
+
+	// ~25 ticks; the old watcher walked on every one of them (2 listings each).
+	require.Greater(t, *index, int64(2), "it still walks")
+	require.Less(t, *index, int64(14), "but not on every tick: got %d listings", *index)
+}

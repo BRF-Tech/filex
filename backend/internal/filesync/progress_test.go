@@ -66,3 +66,24 @@ func TestTransferProgressCarriesBytes(t *testing.T) {
 		t.Fatalf("last transfer line = %q, want %q (all lines: %q)", last, want, lines)
 	}
 }
+
+// The watcher compares a fresh local walk with what the last run reported;
+// the two must agree when nothing changed, and differ when something did.
+func TestLocalFingerprintMatchesTheRunsOwn(t *testing.T) {
+	r := newRig(t)
+	r.writeLocal("a/b.txt", "x")
+	r.writeRemote("c.txt", "y")
+	res := r.run()
+
+	fp, err := LocalFingerprint(r.engine.Pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fp == "" || fp != res.LocalFingerprint {
+		t.Fatalf("fresh %q vs run %q", fp, res.LocalFingerprint)
+	}
+	r.writeLocal("a/b.txt", "edited")
+	if fp2, _ := LocalFingerprint(r.engine.Pair); fp2 == fp {
+		t.Fatal("an edit must change the fingerprint")
+	}
+}

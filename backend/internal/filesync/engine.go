@@ -72,6 +72,9 @@ type Result struct {
 	Identical int
 	// Held counts local items left alone for a decision (Pair.HoldNew).
 	Held int
+	// LocalFingerprint digests the local side as the run left it
+	// (FingerprintSnapshot); "" when the run did not get that far.
+	LocalFingerprint string
 }
 
 // Engine runs one pair.
@@ -339,6 +342,7 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	if err := e.Store.SaveBaseline(e.Pair.ID, cp.final(local2, remote2)); err != nil {
 		return res, err
 	}
+	res.LocalFingerprint = FingerprintSnapshot(local2)
 	if holding {
 		res.Held = len(held)
 		if err := e.Store.recordHold(e.Pair.ID, triggered, held); err != nil {
@@ -483,6 +487,7 @@ func (e *Engine) runFile(ctx context.Context) (Result, error) {
 	if err := e.Store.SaveBaseline(e.Pair.ID, NextBaseline(local2, remote2)); err != nil {
 		return res, err
 	}
+	res.LocalFingerprint = FingerprintSnapshot(local2)
 
 	if n, err := e.Store.PruneTrash(e.Pair.ID, e.trashDays(), e.now()); err != nil {
 		res.Errors = append(res.Errors, "prune trash: "+err.Error())

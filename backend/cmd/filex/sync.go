@@ -235,6 +235,8 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 		limitDown int64
 		limitUp   int64
 		windowArg string
+		watchMax  time.Duration
+		fullEvery time.Duration
 	)
 	c := &cobra.Command{
 		Use:   "run",
@@ -283,68 +285,64 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 				return nil
 			}
 
-			run := func(ctx context.Context, pairs []filesync.Pair) error {
-				for _, p := range pairs {
-					// ⚠ One token cannot speak for two servers. The desktop app
-					// runs one process per signed-in account and filters here;
-					// without that, pairs belonging to account B would be
-					// synced with account A's credentials and fail — or worse,
-					// hit a different server's folder of the same name.
-					if p.Paused || (pairID != "" && p.ID != pairID) || (account != "" && p.Account != account) {
-						continue
-					}
-					if dryRun {
-						if err := printPlan(ctx, cmd, api, st, p); err != nil {
-							if so := signedOut(err); so != nil {
-								return so
-							}
-							fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", p.ID, err)
-						}
-						continue
-					}
-					eng := &filesync.Engine{Pair: p, API: apiAdapter{api}, Store: st, Transfers: transfers}
-					// Progress prints even with --quiet. The desktop app starts
-					// this command with --quiet and mirrors the LAST stdout line
-					// into its panel; without these lines a big first sync spent
-					// its whole inventory phase looking dead.
-					eng.Progress = func(s string) { fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", p.ID, s) }
-					if !quietOut {
-						eng.Log = func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
-					}
-					res, err := eng.Run(ctx)
-					if err != nil {
-						if so := signedOut(err); so != nil {
-							return so
-						}
-						if ctx.Err() != nil {
-							return nil // asked to stop; the checkpoint is flushed
-						}
-						fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", p.ID, err)
-						continue
-					}
-					printResult(cmd, p, res)
-				}
-				return nil
+			// ⚠ One token cannot speak for two servers. The desktop app runs
+			// one process per signed-in account and filters here; without
+			// that, pairs belonging to account B would be synced with account
+			// A's credentials and fail — or worse, hit a different server's
+			// folder of the same name.
+			eligible := func(p filesync.Pair) bool {
+				return !p.Paused && (pairID == "" || p.ID == pairID) && (account == "" || p.Account == account)
 			}
 
-			// round runs every pair once inside the sync window, if there is
-			// one: a round that is still busy when the window closes is
-			// cancelled like a Ctrl-C (its checkpoint flushed) and picks up in
-			// the next window.
-			round := func() error {
-				rctx := ctx
-				if win != nil {
-					var cancel context.CancelFunc
-					rctx, cancel = context.WithDeadline(ctx, win.closesAfter(nowFunc()))
-					defer cancel()
+			// runPair runs one pair and reports it. stop is non-nil only when
+			// the whole watcher has to end (the token is gone).
+			runPair := func(ctx context.Context, p filesync.Pair) (res filesync.Result, runErr, stop error) {
+				if dryRun {
+					if err := printPlan(ctx, cmd, api, st, p); err != nil {
+						if so := signedOut(err); so != nil {
+							return res, err, so
+						}
+						fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", p.ID, err)
+						return res, err, nil
+					}
+					return res, nil, nil
 				}
-				if err := run(rctx, pairs); err != nil {
-					return err
+				eng := &filesync.Engine{Pair: p, API: apiAdapter{api}, Store: st, Transfers: transfers}
+				// Progress prints even with --quiet. The desktop app starts
+				// this command with --quiet and mirrors the LAST stdout line
+				// into its panel; without these lines a big first sync spent
+				// its whole inventory phase looking dead.
+				eng.Progress = func(s string) { fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", p.ID, s) }
+				if !quietOut {
+					eng.Log = func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
 				}
+				res, err := eng.Run(ctx)
+				if err != nil {
+					if so := signedOut(err); so != nil {
+						return res, err, so
+					}
+					if ctx.Err() == nil { // a stop request or a closing window is not an error
+						fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", p.ID, err)
+					}
+					return res, err, nil
+				}
+				printResult(cmd, p, res)
+				return res, nil, nil
+			}
+
+			// A round's context ends when the sync window closes, so a round
+			// still busy then stops like a Ctrl-C (its checkpoint flushed) and
+			// carries on in the next window.
+			withinWindow := func() (context.Context, context.CancelFunc) {
+				if win == nil {
+					return context.WithCancel(ctx)
+				}
+				return context.WithDeadline(ctx, win.closesAfter(nowFunc()))
+			}
+			windowClosed := func(rctx context.Context) {
 				if win != nil && ctx.Err() == nil && rctx.Err() != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "sync: the sync window %s closed; the rest continues when it opens\n", win)
 				}
-				return nil
 			}
 
 			if watch <= 0 {
@@ -352,9 +350,67 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "sync: outside the sync window %s; nothing was done\n", win)
 					return nil
 				}
-				return round()
+				rctx, cancel := withinWindow()
+				defer cancel()
+				for _, p := range pairs {
+					if !eligible(p) {
+						continue
+					}
+					if _, _, stop := runPair(rctx, p); stop != nil {
+						return stop
+					}
+					if rctx.Err() != nil {
+						break
+					}
+				}
+				windowClosed(rctx)
+				return nil
 			}
+
 			fmt.Fprintf(cmd.OutOrStdout(), "Watching %d pair(s); checking every %s. Ctrl-C to stop.\n", len(pairs), watch)
+			// Which pairs actually need a run this tick is the planner's call
+			// (watch.go): a quiet pair costs one `changes` request and a local
+			// walk, not a listing of its whole server tree.
+			planner := newWatchPlanner(watch, watchMax, fullEvery)
+			tick := func() error {
+				rctx, cancel := withinWindow()
+				defer cancel()
+				seen := map[string]bool{}
+				for _, p := range pairs {
+					if !eligible(p) {
+						continue
+					}
+					seen[p.ID] = true
+					p := p
+					d, err := planner.decide(p, nowFunc(),
+						func() (string, error) { return filesync.LocalFingerprint(p) },
+						func(since string) (string, bool, error) { return api.Changes(rctx, p.Remote, since) })
+					if err != nil {
+						if so := signedOut(err); so != nil {
+							return so
+						}
+						continue
+					}
+					if !d.run {
+						continue
+					}
+					res, runErr, stop := runPair(rctx, p)
+					if stop != nil {
+						return stop
+					}
+					if rctx.Err() != nil {
+						windowClosed(rctx)
+						return nil // unfinished: not recorded, the next tick runs it again
+					}
+					fp := res.LocalFingerprint
+					if fp == "" {
+						fp, _ = filesync.LocalFingerprint(p)
+					}
+					planner.ran(p, nowFunc(), d.cursor, res, runErr, fp)
+				}
+				planner.forget(seen)
+				return nil
+			}
 			waiting := false
 			for {
 				if win != nil && !win.contains(nowFunc()) {
@@ -364,7 +420,7 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 					}
 				} else {
 					waiting = false
-					if err := round(); err != nil {
+					if err := tick(); err != nil {
 						return err
 					}
 				}
@@ -394,6 +450,8 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 	c.Flags().Int64Var(&limitDown, "limit-down", 0, "cap downloads at this many KiB/s, all transfers together (0 = no limit)")
 	c.Flags().Int64Var(&limitUp, "limit-up", 0, "cap uploads at this many KiB/s, all transfers together (0 = no limit)")
 	c.Flags().StringVar(&windowArg, "window", "", "only start transfer rounds between these local times, e.g. 22:00-07:00 (may wrap midnight)")
+	c.Flags().DurationVar(&watchMax, "watch-max", 5*time.Minute, "with --watch, the longest wait between walks of a quiet pair on a server that cannot report changes")
+	c.Flags().DurationVar(&fullEvery, "full-every", 30*time.Minute, "with --watch, walk every pair at least this often even when nothing seems to change (0 = never)")
 	return quiet(c)
 }
 
