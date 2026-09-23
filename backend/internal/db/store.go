@@ -144,6 +144,12 @@ type Store interface {
 	CreateSession(ctx context.Context, userID int64, token string, expiresAt time.Time, ip, ua string) (*model.Session, error)
 	GetSessionByToken(ctx context.Context, token string) (*model.Session, error)
 	DeleteSession(ctx context.Context, token string) error
+	// SetSessionIDToken / GetSessionIDToken keep the IdP's id_token beside an
+	// OIDC session, so sign-out can end the IdP's session too (id_token_hint).
+	// Get returns "" — never an error — for a session that has none or does
+	// not exist: sign-out falls back to local-only and must not fail on it.
+	SetSessionIDToken(ctx context.Context, token, idToken string) error
+	GetSessionIDToken(ctx context.Context, token string) (string, error)
 	DeleteSessionsForUser(ctx context.Context, userID int64, exceptToken string) error
 	CountActiveSessions(ctx context.Context) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) error

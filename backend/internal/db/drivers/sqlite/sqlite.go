@@ -1207,6 +1207,24 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	return err
 }
 
+// SetSessionIDToken implements db.Store (migration 00042).
+func (s *Store) SetSessionIDToken(ctx context.Context, token, idToken string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET id_token=? WHERE token=?`, idToken, token)
+	return err
+}
+
+// GetSessionIDToken implements db.Store: "" for a session without one or no
+// session at all. Expiry is deliberately not checked — the IdP accepts an
+// expired id_token as a hint, and sign-out is exactly when it has expired.
+func (s *Store) GetSessionIDToken(ctx context.Context, token string) (string, error) {
+	var idToken sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT id_token FROM sessions WHERE token=?`, token).Scan(&idToken)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return idToken.String, err
+}
+
 // DeleteSessionsForUser removes every session for the user except the
 // supplied "current" token (so the caller stays signed in after a
 // password change).

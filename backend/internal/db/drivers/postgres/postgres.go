@@ -1029,6 +1029,22 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	return err
 }
 
+// SetSessionIDToken implements db.Store (migration 00042).
+func (s *Store) SetSessionIDToken(ctx context.Context, token, idToken string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET id_token=$1 WHERE token=$2`, idToken, token)
+	return err
+}
+
+// GetSessionIDToken implements db.Store — see the SQLite store for the rules.
+func (s *Store) GetSessionIDToken(ctx context.Context, token string) (string, error) {
+	var idToken sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT id_token FROM sessions WHERE token=$1`, token).Scan(&idToken)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return idToken.String, err
+}
+
 func (s *Store) DeleteExpiredSessions(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= NOW()`)
 	return err
