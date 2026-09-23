@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Signing out of an SSO session signs you out.** "Sign out" dropped filex's
+  own session and nothing else. The IdP's session stayed open, so with
+  `FILEX_OIDC_AUTO_REDIRECT` the sign-in page went straight back to the IdP,
+  which issued a new code without a form: the same account was signed in again
+  about half a second later (measured on Keycloak 26, same `session_state` every
+  time). Nobody could switch accounts, and on a shared computer the next person
+  got the previous one's files. filex now does OpenID Connect RP-Initiated
+  Logout: the callback keeps the id_token with the session (migration 00042),
+  `POST /api/auth/logout` answers with the IdP's end-session URL (`logout_url`,
+  with `id_token_hint`, so Keycloak does not stop on "Do you want to log out?"),
+  and the web app follows it. The IdP sends the browser back to the sign-in page
+  of the front door it came from (`/admin/login` or `/drive/login`, with
+  `?signed_out=1`), which right after a sign-out says so and does not start SSO
+  by itself.
+
+### Upgrade notes
+
+- **Allow the post-logout redirect in your IdP**, or sign-out ends on the IdP's
+  "invalid redirect URI" page: `https://<host>/admin/login?signed_out=1` and
+  `https://<host>/drive/login?signed_out=1`, or simply `https://<host>/*`. On
+  Keycloak that is the client's *Valid post logout redirect URIs*; left empty it
+  allows only the *Valid redirect URIs*, which for filex is the callback alone.
+  Multi-tenant: on every tenant's client. See [docs/SSO.md](docs/SSO.md#signing-out).
+- `FILEX_OIDC_LOGOUT=local` keeps the previous behavior (filex's session only).
+- Sessions signed in before the upgrade kept no id_token; they sign out of filex
+  only, as before, until they expire (12 h). An IdP whose discovery document has
+  no `end_session_endpoint` is unaffected.
+
 ## [0.42.2] - 2026-09-19
 
 A fix release for the issue 32 follow-up and three things that were wrong on

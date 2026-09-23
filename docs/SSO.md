@@ -52,6 +52,11 @@ Create a **confidential** OIDC client with:
 
 - **Redirect URI:** `https://files.example.com/api/auth/oidc/callback`
   (exactly `FILEX_PUBLIC_URL` + `/api/auth/oidc/callback`).
+- **Post-logout redirect URIs:** `https://files.example.com/admin/login?signed_out=1`
+  and `https://files.example.com/drive/login?signed_out=1` — or simply
+  `https://files.example.com/*`. Where the IdP sends the browser back after
+  [signing out](#signing-out); without them sign-out ends on the IdP's "invalid
+  redirect URI" page.
 - **Grant type:** Authorization Code (standard flow).
 - **Client authentication:** on (you'll get a client secret).
 
@@ -59,7 +64,9 @@ Note the **issuer URL**, **client ID**, and **client secret**.
 
 > **Keycloak:** the issuer is `https://id.example.com/realms/<realm>`. Create the
 > client under that realm, enable "Client authentication", set the redirect URI,
-> and copy the secret from the **Credentials** tab.
+> and copy the secret from the **Credentials** tab. Put the post-logout URIs in
+> **Valid post logout redirect URIs** — left empty, Keycloak allows only the
+> *Valid redirect URIs*, which for filex is the callback alone.
 
 ### 2. Configure filex
 
@@ -155,6 +162,47 @@ first boot — see
 
 ---
 
+## Signing out
+
+An SSO session has two halves: filex's own session and the IdP's. **Sign out**
+ends both (OpenID Connect RP-Initiated Logout 1.0):
+
+1. filex deletes its session and clears the cookie, as always;
+2. `POST /api/auth/logout` answers with the IdP's end-session URL
+   (`logout_url`) — its `end_session_endpoint` from discovery, with the
+   `id_token_hint` kept from sign-in, `client_id`, and
+   `post_logout_redirect_uri`;
+3. the web app sends the browser there; the IdP ends its session and sends the
+   browser back to the sign-in page of the front door it came from
+   (`/admin/login?signed_out=1` or `/drive/login?signed_out=1`);
+4. that page says "You are signed out." and does **not** start SSO by itself,
+   even with `FILEX_OIDC_AUTO_REDIRECT` — whoever signs in next picks the
+   account.
+
+Why both: ending only filex's half was not signing out. With
+`FILEX_OIDC_AUTO_REDIRECT` the sign-in page went straight back to the IdP, whose
+session was still open, and the IdP issued a new code without a form — the same
+account was signed in again half a second later, and on a shared computer the
+next person got the previous one's files.
+
+Sign-out stays filex-only when:
+
+- `FILEX_OIDC_LOGOUT=local` — the operator wants people to stay signed in at
+  the IdP (other apps on the same SSO keep working);
+- the IdP's discovery document has no `end_session_endpoint`;
+- the session did not come from SSO (password, LDAP), or was signed in before
+  the upgrade that added this (no id_token was kept; it expires within 12 h).
+
+The id_token is kept on the session row (`sessions.id_token`) only when the IdP
+can end sessions, and leaves with the session. It is never handed to a
+different IdP: one whose `iss` does not match the tenant's issuer is ignored.
+
+Multi-tenant: the end-session URL is the tenant's own IdP, resolved from the
+request host exactly like sign-in, and each tenant's client needs its own
+post-logout redirect URIs.
+
+---
+
 ## Configuration reference
 
 | Env var | Required | Description |
@@ -165,6 +213,7 @@ first boot — see
 | `FILEX_OIDC_CLIENT_SECRET` | yes* | Client secret (confidential client). |
 | `FILEX_OIDC_REDIRECT_URL` | no | Defaults to `FILEX_PUBLIC_URL` + `/api/auth/oidc/callback`. Whatever it resolves to must match the IdP exactly. |
 | `FILEX_OIDC_AUTO_REDIRECT` | no | `true` makes the login page start the OIDC flow straight away instead of showing the password form; `?local=1` still reaches the form. See [CONFIGURATION.md](CONFIGURATION.md#authentication). |
+| `FILEX_OIDC_LOGOUT` | no | What **Sign out** ends: `idp` (default) — filex's session and the IdP's, when the IdP supports it; `local` — filex's session only. See [Signing out](#signing-out). |
 | `FILEX_OIDC_ROLE_CLAIM` | no | Claim holding roles/groups (string or array). |
 | `FILEX_OIDC_ADMIN_GROUP` | no | Value within that claim that elevates a user to admin. |
 
@@ -228,6 +277,20 @@ scope — make sure it's assigned and the user has an email.
 ### Redirect fails / "invalid redirect_uri"
 The IdP's registered redirect URI must equal `FILEX_OIDC_REDIRECT_URL` **exactly**
 (scheme, host, path). Update the client in the IdP or the env var so they match.
+
+### Sign-out ends on the IdP's "invalid redirect URI" page
+The IdP does not allow the post-logout redirect. Add
+`https://<host>/admin/login?signed_out=1` and `https://<host>/drive/login?signed_out=1`
+(or `https://<host>/*`) to the client's post-logout redirect URIs — on Keycloak,
+**Valid post logout redirect URIs**. Or set `FILEX_OIDC_LOGOUT=local` to keep
+sign-out inside filex.
+
+### Signing out and back in lands on the same account without a form
+The IdP's session survived the sign-out. Check that the IdP advertises
+`end_session_endpoint` in `/.well-known/openid-configuration` and that
+`FILEX_OIDC_LOGOUT` is not `local`. A session signed in before the upgrade has
+no id_token to end the IdP session with — sign in again once. Until then the
+sign-in page at least waits after a sign-out instead of starting SSO by itself.
 
 ### User logs in but isn't admin
 The mapping is applied at every sign-in, so the person has to sign in again after
