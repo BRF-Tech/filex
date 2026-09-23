@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The operations list no longer ships every path of every op.** `GET
+  /api/files/ops` returns the newest 200 rows, and a row kept every path it
+  was given: a bulk delete queued in batches left rows of up to 82 KB, and 200
+  of them made an 11.5 MB answer that the explorer downloaded and parsed on
+  every mount — and every 2 s while a copy, move or delete ran. A list row now
+  carries the first 5 sources (`sources_truncated` when there were more),
+  `source_count`, and `source_dir`, the folder a delete came from, which the
+  operations center already knew how to show. `GET /api/files/ops/{id}` still
+  returns every source.
+- **Pages cached at full size are scaled down.** Before 0.41.0 PDF and office
+  thumbnails were written at page size (794×1123 for A4, 100–400 KB), and the
+  fix in 0.41.0 changed only new renders, so an upgraded install kept serving
+  every older page at full size — on one install 14,706 of 43,467 thumbnails,
+  1.68 GB of a 2.2 GB cache, and ~3.6 MB of decoded image per card in the
+  browser for a folder of office documents. Once per boot the thumbnail sweeper
+  now rewrites any cached thumbnail wider than 320 px at the size a new render
+  gets; a portrait video frame, 320 px wide, is left alone. Nothing is deleted
+  or regenerated, it runs in the background, and `FILEX_THUMBS_SWEEP_INTERVAL=0`
+  turns it off with the sweep.
+
 ## [0.42.2] - 2026-09-19
 
 A fix release for the issue 32 follow-up and three things that were wrong on
