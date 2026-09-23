@@ -39,6 +39,7 @@ const UserSettingsModal = defineAsyncComponent(
 import { effectiveTheme } from '@/lib/theme';
 import { explorerAuth, openTriggerPref } from '@/lib/explorerConfig';
 import { fetchVisibleStorages, type VisibleStorage } from '@/lib/visibleStorages';
+import { signOut } from '@/lib/signOut';
 // Live collaboration (WebSocket + presence) now lives INSIDE @brftech/filex-core's
 // FileExplorer, so every consumer (this panel + the embedded webcomponent) gets
 // it automatically — no per-page realtime wiring here anymore.
@@ -62,8 +63,7 @@ const storages = useStoragesStore();
 // profiles and for admins and non-admins alike.
 const showSettings = ref(false);
 async function doLogout() {
-  await auth.logout();
-  router.push({ name: 'login' });
+  await signOut(auth, router);
 }
 
 /* === gorunum:v4-hostmenu — the explorer's "⋯" moves in here ================

@@ -153,7 +153,8 @@
     "errInvalid": "E-mail, username or password is wrong",
     "errLocked": "Account is locked. Contact your administrator.",
     "errGeneric": "Something went wrong. Try again.",
-    "errOidc": "SSO sign-in failed. Try again, or sign in with password."
+    "errOidc": "SSO sign-in failed. Try again, or sign in with password.",
+    "signedOut": "You are signed out."
   },
   "dashboard": {
     "title": "Dashboard",

@@ -66,9 +66,16 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function logout(): Promise<void> {
+  /**
+   * Ends the session. Resolves to the IdP's end-session URL when signing out
+   * has to continue there (an SSO session whose IdP can end sessions), else
+   * null. Navigating is the caller's job — see lib/signOut.
+   */
+  async function logout(returnTo?: string): Promise<string | null> {
+    let idpLogout: string | null = null;
     try {
-      await AuthApi.logout();
+      const res = await AuthApi.logout(returnTo);
+      idpLogout = res?.logout_url || null;
     } catch {
       // ignore — we still clear local state
     } finally {
@@ -76,6 +83,7 @@ export const useAuthStore = defineStore('auth', () => {
       permissions.value = [];
       sessionStorage.removeItem('filex.bearer');
     }
+    return idpLogout;
   }
 
   function can(perm: string): boolean {

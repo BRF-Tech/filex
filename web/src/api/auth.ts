@@ -12,8 +12,18 @@ export const AuthApi = {
     return data;
   },
 
-  async logout(): Promise<void> {
-    await api.post('/auth/logout');
+  /**
+   * Ends filex's session. For an SSO session the answer also carries
+   * `logout_url` — the IdP's end-session URL, where the browser continues so
+   * the IdP's session ends too. `returnTo` is the sign-in page the IdP sends
+   * the browser back to (`/admin/login` or `/drive/login`; lib/signOut).
+   */
+  async logout(returnTo?: string): Promise<{ ok?: boolean; logout_url?: string }> {
+    const { data } = await api.post<{ ok?: boolean; logout_url?: string }>(
+      '/auth/logout',
+      returnTo ? { return_to: returnTo } : undefined,
+    );
+    return data ?? {};
   },
 
   oidcStartUrl(provider: string = 'oidc', returnTo: string = '/admin/'): string {

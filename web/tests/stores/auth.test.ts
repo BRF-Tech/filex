@@ -112,6 +112,30 @@ describe('stores/auth', () => {
     expect(sessionStorage.getItem('filex.bearer')).toBeNull();
   });
 
+  // An SSO session has an IdP half too: the server hands back where to end it.
+  it('logout resolves to the IdP end-session URL when the server returns one', async () => {
+    (AuthApi.logout as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      logout_url: 'https://idp.example.test/logout?id_token_hint=x',
+    });
+    const store = useAuthStore();
+    store.$patch({
+      user: { id: 1, email: 'x@x', display_name: 'x', role: 'user', created_at: '', updated_at: '' },
+    });
+
+    const next = await store.logout('/drive/login');
+
+    expect(next).toBe('https://idp.example.test/logout?id_token_hint=x');
+    expect(AuthApi.logout).toHaveBeenCalledWith('/drive/login');
+    expect(store.user).toBeNull();
+  });
+
+  it('logout resolves to null when signing out is local only', async () => {
+    (AuthApi.logout as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+    const store = useAuthStore();
+    expect(await store.logout()).toBeNull();
+  });
+
   it('logout swallows API errors and still clears local state', async () => {
     (AuthApi.logout as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('network'));
     const store = useAuthStore();

@@ -73,6 +73,12 @@ const demoPass = computed(() => caps.data.demo_pass || 'demo');
 // password" link (?local=1) for break-glass/admin logins.
 const wantLocal = computed(() => route.query.local !== undefined);
 const oidcError = computed(() => route.query.error === 'oidc');
+// Straight after "Sign out" (lib/signOut, or the IdP sending the browser back
+// once it has ended its own session). The page says so and does NOT start SSO
+// by itself: wherever the IdP's session outlived the sign-out (an IdP without
+// RP-initiated logout, FILEX_OIDC_LOGOUT=local) that would sign the same
+// account straight back in — which is what "Sign out" used to do.
+const signedOut = computed(() => route.query.signed_out !== undefined);
 const autoRedirect = computed(
   () => caps.data.oidc_auto_redirect === true && oidcEnabled.value && !demoMode.value,
 );
@@ -138,12 +144,14 @@ onMounted(async () => {
   if (!caps.loaded) await caps.fetch();
   // Loop guards: never auto-redirect when the visitor explicitly asked for
   // the password form (?local=1), when the IdP round-trip just failed
-  // (?error=... — redirecting again would loop), or when the tenant is
-  // locked out (?maintenance=1). The OIDC callback itself is a backend
-  // route, so the SPA never mounts on it.
+  // (?error=... — redirecting again would loop), when the tenant is
+  // locked out (?maintenance=1), or right after signing out (?signed_out —
+  // see `signedOut`). The OIDC callback itself is a backend route, so the
+  // SPA never mounts on it.
   if (
     autoRedirect.value &&
     !wantLocal.value &&
+    !signedOut.value &&
     route.query.error === undefined &&
     route.query.maintenance === undefined
   ) {
@@ -368,6 +376,14 @@ function startOidc() {
           <template v-else>
             <p v-if="oidcError" role="alert" class="lg-alert">
               {{ t('login.errOidc') }}
+            </p>
+            <p
+              v-else-if="signedOut"
+              role="status"
+              class="lg-note"
+              data-testid="login-signed-out"
+            >
+              {{ t('login.signedOut') }}
             </p>
 
             <!-- SSO is the primary path whenever OIDC is configured. -->
@@ -826,6 +842,16 @@ function startOidc() {
 }
 .lg-alert--form {
   margin: 24px 0 0;
+}
+/* Same box as .lg-alert, in the page's quiet voice: news, not an error. */
+.lg-note {
+  margin: 20px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-elev);
+  font-size: var(--fe-text-md);
+  color: var(--fe-text-muted);
 }
 .lg-alert code {
   font-family: var(--fe-font-mono);

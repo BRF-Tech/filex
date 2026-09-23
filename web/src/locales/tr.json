@@ -153,7 +153,8 @@
     "errInvalid": "E-posta, kullanıcı adı ya da şifre yanlış",
     "errLocked": "Hesap kilitli. Yöneticiyle iletişime geç.",
     "errGeneric": "Bir şeyler ters gitti. Tekrar dene.",
-    "errOidc": "SSO girişi başarısız oldu. Tekrar dene veya parola ile giriş yap."
+    "errOidc": "SSO girişi başarısız oldu. Tekrar dene veya parola ile giriş yap.",
+    "signedOut": "Çıkış yaptın."
   },
   "dashboard": {
     "title": "Panel",

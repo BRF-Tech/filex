@@ -12,6 +12,7 @@ import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue';
 import { useI18n } from 'vue-i18n';
 
 import { useAuthStore } from '@/stores/auth';
+import { signOut } from '@/lib/signOut';
 // gorunum:v3-shell — ⚠ no LocaleSwitcher and no DarkModeToggle here any more.
 // Both did a job the user-settings modal already does, one click away in the
 // account menu below (Preferences → Language, Preferences → Theme), and the
@@ -59,8 +60,7 @@ const auth = useAuthStore();
 const { t } = useI18n();
 
 async function logout() {
-  await auth.logout();
-  router.push({ name: 'login' });
+  await signOut(auth, router);
 }
 
 function gotoSearch() {
