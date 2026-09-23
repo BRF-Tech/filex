@@ -219,7 +219,7 @@ Laravel conventions of the sister projects.
 | `sync_runs`                  | per-storage sync history with counts and errors |
 | `audit_events`               | all auditable user actions |
 | `external_services`          | OnlyOffice/Drawio config + last_check |
-| `thumbs`                     | thumbnail cache index (bytes live on disk; released when the node is purged, and a reconciler sweeps orphans at boot and every `FILEX_THUMBS_SWEEP_INTERVAL`) |
+| `thumbs`                     | thumbnail cache index (bytes live on disk; released when the node is purged, and a reconciler sweeps orphans at boot and every `FILEX_THUMBS_SWEEP_INTERVAL`; at boot it also re-fits pages cached at full size before 0.41.0) |
 | `migration_lock`             | goose migration lock |
 
 ER diagram (high-level):

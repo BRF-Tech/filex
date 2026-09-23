@@ -178,6 +178,9 @@ func (p *Pipeline) ReapOrphans(ctx context.Context) (ReapResult, error) {
 }
 
 // RunReaper reconciles once at boot and then on every tick until ctx is done.
+// The boot pass is followed by one RefitOversized pass (refit.go): the files
+// it rewrites can only come from a version before 0.41.0, so once per start is
+// enough and the ticks stay the cheap orphan sweep they always were.
 //
 // interval <= 0 disables it entirely (FILEX_THUMBS_SWEEP_INTERVAL=0) — a kill
 // switch for an operator who would rather run `filex thumb` maintenance by
@@ -207,6 +210,7 @@ func (p *Pipeline) RunReaper(ctx context.Context, interval time.Duration) {
 			slog.String("interval", interval.String()))
 	}
 	pass()
+	p.refitPass(ctx)
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {

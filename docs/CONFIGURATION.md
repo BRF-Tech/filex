@@ -678,7 +678,7 @@ regenerable, and a single folder-share archive can be tens of gigabytes.
 |---|---|---|
 | `FILEX_THUMBS_ENABLED` | `true` | Master switch. |
 | `FILEX_THUMB_BACKFILL_ON_BOOT` | — | Set `once` to backfill missing thumbnails on startup. |
-| `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | How often cached thumbnails whose node no longer exists are deleted (also once at boot). `0` disables it. |
+| `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | How often cached thumbnails whose node no longer exists are deleted (also once at boot). Once per boot the same worker also scales down pages cached at full size by a version before 0.41.0. `0` disables both. |
 | `FILEX_THUMBS_URL_TTL` | `24h` | How long a stamped `thumb_url` (`?exp=&sig=`) stays valid. The stamp is what lets a bare `<img src>` fetch a preview with no header and no cookie; an authenticated caller never needs one. ⚠ `0` means *use the default*, not "never expires". See [thumbnails.md → Serving](thumbnails.md#serving). |
 
 Kinds and their tool requirements (auto‑detected on `PATH`; the default Docker
