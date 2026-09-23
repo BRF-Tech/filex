@@ -52,6 +52,14 @@ type OIDCDriver interface {
 	HandleCallback(w http.ResponseWriter, r *http.Request) (*model.User, string, error)
 }
 
+// OIDCLogoutDriver is an optional capability of an OIDCDriver: RP-initiated
+// logout (OpenID Connect RP-Initiated Logout 1.0). EndSessionURL returns where
+// to send the browser so the IdP ends its own session too — idToken is the one
+// kept for the session being signed out — or "" to keep sign-out local.
+type OIDCLogoutDriver interface {
+	EndSessionURL(r *http.Request, idToken, postLogoutRedirect string) string
+}
+
 // userCtxKey is unexported to prevent collision.
 type userCtxKey struct{}
 

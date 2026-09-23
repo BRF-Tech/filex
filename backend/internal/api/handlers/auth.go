@@ -31,6 +31,9 @@ type Auth struct {
 	// internal/tenanturl — it is the one implementation of this rule, and
 	// redirectBase below is now just its caller.
 	Tenants tenanturl.Resolver
+	// OIDCLocalLogout (FILEX_OIDC_LOGOUT=local) keeps sign-out inside filex:
+	// the IdP's session is left open, as it was before RP-initiated logout.
+	OIDCLocalLogout bool
 }
 
 // NewAuth constructs an Auth handler.
@@ -143,13 +146,71 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Logout clears the cookie + revokes the server-side session.
+// Logout clears the cookie + revokes the server-side session — and, for an
+// OIDC session, answers with the IdP's end-session URL as `logout_url` so the
+// web app can end the IdP's session too (see idpLogoutURL).
+//
+// Optional body: {"return_to": "/admin/login" | "/drive/login"} — the sign-in
+// page of the front door the person was using, where the IdP sends the browser
+// back once it is done.
 func (h *Auth) Logout(w http.ResponseWriter, r *http.Request) {
+	out := map[string]any{"ok": true}
 	if c, err := r.Cookie(authlocal.SessionCookieName); err == nil && c.Value != "" {
+		// Before the delete: the id_token lives on the session row.
+		if u := h.idpLogoutURL(w, r, c.Value); u != "" {
+			out["logout_url"] = u
+		}
 		_ = h.Store.DeleteSession(r.Context(), c.Value)
 	}
 	h.clearSessionCookie(w, r)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, out)
+}
+
+// signedOutPages are the only places the IdP may send the browser back to
+// after sign-out: the sign-in page of either front door (router/index.ts).
+// `signed_out` tells the page not to start SSO again on its own.
+var signedOutPages = map[string]string{
+	"/admin/login": "/admin/login?signed_out=1",
+	"/drive/login": "/drive/login?signed_out=1",
+}
+
+// idpLogoutURL is the IdP half of signing out (OpenID Connect RP-Initiated
+// Logout 1.0), or "" to keep sign-out local.
+//
+// ⚠ Without it signing out was not signing out. filex dropped its own session
+// and nothing else, so in SSO-first mode (FILEX_OIDC_AUTO_REDIRECT) the login
+// page went straight back to the IdP, whose session was still open: a new code
+// without a form, the same account signed in again ~0.5 s later (measured on
+// Keycloak 26), and on a shared computer the next person got the previous
+// one's files.
+//
+// Local when: the operator chose FILEX_OIDC_LOGOUT=local, the session kept no
+// id_token (password/LDAP sign-in, or one from before this version), or the
+// driver/IdP cannot end sessions. The post-logout address is picked from
+// signedOutPages — never taken from the request — so sign-out cannot be turned
+// into an open redirect; the IdP must list it among its allowed post-logout
+// redirect URIs (docs/SSO.md).
+func (h *Auth) idpLogoutURL(w http.ResponseWriter, r *http.Request, session string) string {
+	if h.OIDCLocalLogout {
+		return ""
+	}
+	lo, ok := h.OIDCAuth.(auth.OIDCLogoutDriver)
+	if !ok {
+		return ""
+	}
+	idToken, err := h.Store.GetSessionIDToken(r.Context(), session)
+	if err != nil || idToken == "" {
+		return ""
+	}
+	var body struct {
+		ReturnTo string `json:"return_to"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body)
+	page, ok := signedOutPages[body.ReturnTo]
+	if !ok {
+		page = signedOutPages["/admin/login"]
+	}
+	return lo.EndSessionURL(r, idToken, h.redirectBase(r)+page)
 }
 
 // OIDCStart redirects to the IdP.

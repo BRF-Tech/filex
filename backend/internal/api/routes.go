@@ -438,6 +438,7 @@ func BuildRouter(d *Deps) http.Handler {
 	seth := handlers.NewSettings(d.Store)
 	seth.AttachMailer(d.Mailer)
 	authh := handlers.NewAuth(d.Store, d.LocalAuth, d.OIDCAuth, d.Cfg.PublicURL, d.Cfg.MultiTenant, d.Cfg.CookieDomain)
+	authh.OIDCLocalLogout = d.Cfg.Auth.OIDC.LocalLogout()
 	provH := handlers.NewProviders(d.Store, d.Cfg.MultiTenant)
 	sxh := handlers.NewSearch(d.Index, d.Store)
 	sxh.AttachACL(d.ACL)

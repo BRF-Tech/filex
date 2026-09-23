@@ -485,7 +485,19 @@ type OIDCConfig struct {
 	// (SSO-first installs). The password form stays reachable via ?local=1
 	// for break-glass/admin logins. OFF by default — unchanged behavior.
 	AutoRedirect bool `yaml:"auto_redirect"`
+	// Logout picks what signing out of an OIDC session ends (FILEX_OIDC_LOGOUT):
+	//   "idp" (default) — filex's session AND the IdP's, when the IdP
+	//                     advertises an end_session_endpoint (RP-initiated
+	//                     logout; the IdP must allow the post-logout redirect,
+	//                     docs/SSO.md);
+	//   "local"         — filex's session only; the person stays signed in at
+	//                     the IdP (the behavior before this option existed).
+	// Anything else means the default.
+	Logout string `yaml:"logout"`
 }
+
+// LocalLogout reports whether signing out leaves the IdP's session alone.
+func (o OIDCConfig) LocalLogout() bool { return strings.EqualFold(o.Logout, "local") }
 
 // LDAPConfig — directory bind.
 type LDAPConfig struct {
@@ -1018,6 +1030,9 @@ func applyEnv(c *Config) {
 	}
 	if v := getenvFirst("FILEX_OIDC_AUTO_REDIRECT", "FILEX_AUTH_OIDC_AUTO_REDIRECT"); v != "" {
 		c.Auth.OIDC.AutoRedirect = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := getenvFirst("FILEX_OIDC_LOGOUT", "FILEX_AUTH_OIDC_LOGOUT"); v != "" {
+		c.Auth.OIDC.Logout = v
 	}
 	if v := os.Getenv("FILEX_ONLYOFFICE_URL"); v != "" {
 		c.ExternalServices.OnlyOffice.URL = v
