@@ -10323,6 +10323,16 @@ filex-explorer {
   display: block;
   height: 100%;
   overflow: auto;
+  /* ⚠⚠ Reserve the vertical scrollbar's room even when it is not showing.
+     ListView lays the table out against this box's width, and without the
+     reserve the width depends on the scrollbar the layout itself summons:
+     where a scrollbar takes room (Windows, or macOS set to "always show") the
+     table overflowed by a pixel, the scrollbars came, the pane shrank, the
+     table was laid out narrower, the scrollbars went — every frame. A 12-row
+     folder froze Edge and Opera for ~30 s and ran a Chrome tab out of memory
+     on a Windows PC; grid view opened it at once. Overlay scrollbars (macOS by
+     default, phones) take no room, so there this reserves nothing. */
+  scrollbar-gutter: stable;
 }
 
 /* ⚠⚠ FLEX ROWS, not grid rows. A sticky GRID item is confined to its own grid

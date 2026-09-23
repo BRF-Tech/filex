@@ -440,6 +440,8 @@ export type {
   ViewPrefsSlot,
   ViewPrefsTransport,
 } from './lib/viewPrefs';
+export { WIDTH_FLIP_WINDOW_MS, createWidthSettler } from './lib/widthSettler';
+export type { WidthSettler } from './lib/widthSettler';
 
 /* gruplama — the date ladder every listing view draws its headings from.
  *

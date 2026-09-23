@@ -62,6 +62,7 @@ import {
   widthsAreAuto,
   type ColumnId,
 } from '../lib/viewPrefs'; /* tablo:t1 */
+import { createWidthSettler } from '../lib/widthSettler';
 import StarButton from './StarButton.vue';
 
 const props = defineProps<{
@@ -507,7 +508,9 @@ const candidateCols = computed<ColumnId[]>(() => {
  * the case the old media query could not see. It is also the SCROLLPORT's
  * width — `.fe-list` is the scrolling box now, so `contentRect` already has
  * the vertical scrollbar taken out of it and the auto widths are computed
- * against the room a row really has. 0 until the first observation, which
+ * against the room a row really has. Its `scrollbar-gutter: stable` keeps that
+ * room the same whether the scrollbar is showing or not, so the table's own
+ * layout cannot move it. 0 until the first observation, which
  * `tableLayout` reads as "keep the shipped widths" so the first paint is not a
  * guess that then jumps.
  */
@@ -532,9 +535,13 @@ function onListScroll(ev: Event) {
 
 onMounted(() => {
   if (!listEl.value || typeof ResizeObserver === 'undefined') return;
+  /* ⚠ Through the settler, never straight in: the layout this width feeds can
+     change the width it was measured from (see lib/widthSettler.ts). */
+  const settler = createWidthSettler();
   ro = new ResizeObserver((entries) => {
     const w = entries[0]?.contentRect?.width ?? 0;
-    if (Math.abs(w - listWidth.value) >= 1) listWidth.value = w;
+    const next = settler.observe(w, performance.now());
+    if (next !== null) listWidth.value = next;
   });
   ro.observe(listEl.value);
 });
