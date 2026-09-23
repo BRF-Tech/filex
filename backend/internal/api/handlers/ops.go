@@ -366,7 +366,8 @@ func (o *Ops) SubmitDelete(w http.ResponseWriter, r *http.Request) {
 // most-recent rows across all statuses (capped at 200 service-side).
 //
 // Response shape mirrors what the SPA's `opsApi.list` already
-// understands: `{ "ops": [Op, …] }`. The frontend's `normalizeOp`
+// understands: `{ "ops": [Op, …] }`, each row with its sources cut to a
+// preview and counted (opListRow). The frontend's `normalizeOp`
 // adapter then translates the backend's raw shape into the SPA's
 // `PendingOp` contract.
 func (o *Ops) List(w http.ResponseWriter, r *http.Request) {
@@ -393,10 +394,75 @@ func (o *Ops) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if list == nil {
-		list = []*ops.Op{}
+	rows := make([]opListRow, 0, len(list))
+	for _, op := range list {
+		rows = append(rows, newOpListRow(op))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ops": list})
+	writeJSON(w, http.StatusOK, map[string]any{"ops": rows})
+}
+
+// listSourcesPreview is how many of an op's sources one LIST row carries.
+//
+// A row stores every path it was given, and this listing is what the explorer
+// fetches when it mounts and, while an op runs, every 2 s. A bulk delete queued
+// in batches of a few hundred paths left rows of up to 82 KB — 200 of them made
+// an 11.5 MB answer that every browser opening the drive downloaded and parsed.
+// Nothing that reads the list shows the paths: both trays count progress from
+// `total`, and the explorer's operations center labels a row with its
+// destination or, for a delete, the folder it came from (source_dir, which
+// the server never sent before). GET /ops/{id} still answers every source.
+const listSourcesPreview = 5
+
+// opListRow is one LIST row: the op as stored, its sources cut to a preview
+// and counted. The outer Sources shadows the embedded one in the JSON.
+type opListRow struct {
+	*ops.Op
+	Sources          []string `json:"sources"`
+	SourceCount      int      `json:"source_count"`
+	SourcesTruncated bool     `json:"sources_truncated,omitempty"`
+	SourceDir        string   `json:"source_dir,omitempty"`
+}
+
+func newOpListRow(op *ops.Op) opListRow {
+	row := opListRow{
+		Op:          op,
+		Sources:     op.Sources,
+		SourceCount: len(op.Sources),
+		SourceDir:   commonSourceDir(op.Sources),
+	}
+	if row.Sources == nil {
+		row.Sources = []string{}
+	}
+	if len(row.Sources) > listSourcesPreview {
+		row.Sources = row.Sources[:listSourcesPreview]
+		row.SourcesTruncated = true
+	}
+	return row
+}
+
+// commonSourceDir is the deepest folder holding every source, in the sources'
+// own storage-relative form; "" is the storage root.
+func commonSourceDir(sources []string) string {
+	var common []string
+	for i, s := range sources {
+		var segs []string
+		if d := path.Dir(strings.Trim(s, "/")); d != "." {
+			segs = strings.Split(d, "/")
+		}
+		if i == 0 {
+			common = segs
+			continue
+		}
+		n := 0
+		for n < len(common) && n < len(segs) && common[n] == segs[n] {
+			n++
+		}
+		common = common[:n]
+		if n == 0 {
+			break
+		}
+	}
+	return strings.Join(common, "/")
 }
 
 // Status returns the live or final state of a submitted op.

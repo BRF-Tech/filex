@@ -701,7 +701,8 @@ List the caller's ops, newest first (at most 200). `?status=running` filters.
   "ops": [
     {
       "id": 42, "kind": "move", "storage_id": 3, "dest_storage_id": 4,
-      "sources": ["videos/talk.mp4"], "dest": "archive",
+      "sources": ["videos/talk.mp4"], "source_count": 1, "source_dir": "videos",
+      "dest": "archive",
       "total": 1, "done": 0, "failed": 0,
       "bytes_total": 20983257, "bytes_done": 8388608,
       "status": "running", "created_at": "...", "started_at": "..."
@@ -719,9 +720,16 @@ List the caller's ops, newest first (at most 200). `?status=running` filters.
   walk finishes, or when the tree is too large to measure; draw a moving
   indicator then, not a percentage. They are live counters in the worker's
   memory and are gone once the operation ends.
+- `sources` is a **preview** in this list: the first 5 paths, with
+  `sources_truncated: true` when there were more. `source_count` is the full
+  count, and `source_dir` the deepest folder holding every source (omitted at
+  the storage root). A queued bulk delete stores every path it was given, so
+  without the cut one row could weigh tens of KB and the list megabytes.
+  `GET /api/files/ops/:id` returns every source.
 
 ### `GET /api/files/ops/:id` ![user](https://img.shields.io/badge/-user-blue)
-Single op detail; same shape, plus `error` when it failed.
+Single op detail with **every** source (no `source_count` / `source_dir`),
+plus `error` when it failed.
 
 `status` is one of `pending | running | ok | failed | partial` — `partial` when
 some sources failed and others did not.
