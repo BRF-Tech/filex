@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **List view no longer loops on its own scrollbars.** Where a scrollbar takes
+  room (Windows, or macOS set to "always show"), a folder whose rows only just
+  fit the pane could send the list into a layout loop: the table overflowed by
+  a pixel, the scrollbars came, the pane shrank, the table was laid out
+  narrower, the scrollbars went — every frame. Reported from the field: a
+  12-file folder froze Edge and Opera for ~30 s and ran a Chrome tab out of
+  memory ("Out of Memory") on a Windows PC, while grid view opened it at once.
+  `.fe-list` now reserves the scrollbar's room (`scrollbar-gutter: stable`),
+  and the list's width observer settles a width that flips back within 500 ms
+  on the narrower of the two instead of laying the table out again.
+
 ## [0.42.2] - 2026-09-19
 
 A fix release for the issue 32 follow-up and three things that were wrong on
