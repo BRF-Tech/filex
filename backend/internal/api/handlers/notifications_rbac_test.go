@@ -192,7 +192,7 @@ func TestNotifications_WorkerAlertReachesOnlyMembersWhoCanSeeTheFile(t *testing.
 // holds it write into the folder. Being able to SEE a folder — as a viewer, or
 // only as a folder one walks through to reach a grant — is not a reason to be
 // handed that. Members receive only the broadcast kinds in
-// notify.MemberMayReceive; the admins of the tenant still get the notice.
+// notify.MemberBell; the admins of the tenant still get the notice.
 //
 // RED PROOF (unfixed code): writer's bell listed the drop notice, token
 // included.

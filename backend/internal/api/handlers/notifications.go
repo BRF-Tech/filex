@@ -115,8 +115,8 @@ func bellFor(ctx context.Context, user *model.User) notify.Bell {
 // RBAC storage most members may not open most folders: members were reading
 // the names of files deleted from folders they have no grant on. So a member
 // gets a broadcast only when it is a kind a member may receive at all
-// (notify.MemberMayReceive — never a link's bearer token, never an alarm meant
-// for the operator) and the explorer would list what it names:
+// (notify.MemberBell's kinds — never a link's bearer token, never an alarm
+// meant for the operator) and the explorer would list what it names:
 // acl.Set.CanSee, the predicate the listing itself uses, including the ancestor
 // folders a member walks through to reach a grant. An admin is not asked:
 // admins bypass RBAC in the listing too.
@@ -150,7 +150,7 @@ func (h *Notifications) visibleTo(ctx context.Context, user *model.User, bell no
 			kept = append(kept, n)
 			continue
 		}
-		if !user.IsAdmin() && !notify.MemberMayReceive(n.Event) {
+		if !bell.Admits(n.Event) {
 			continue
 		}
 		sid, rel, ok := notificationPlace(n)
@@ -257,7 +257,9 @@ func (h *Notifications) UnreadCount(w http.ResponseWriter, r *http.Request) {
 		// and an unbounded walk of the notifications table on every poll of the
 		// bell is not a trade worth making for a number nobody reads past two
 		// digits. The rows walked are the caller's own and the few broadcast
-		// kinds their bell takes at all (notify.Bell).
+		// kinds their bell takes at all (notify.Bell). ⚠ Unread rows the caller
+		// may not see still take places in it: an alert behind five hundred of
+		// them is not counted until a "mark all read" moves past them.
 		rows, _, err := h.Service.List(r.Context(), &uid, bell, true, notificationBadgeMax, 0)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -299,11 +301,51 @@ func (h *Notifications) MarkRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := user.ID
+	// A row addressed to the caller: its own column, which the store stamps for
+	// its addressee and nobody else.
 	if err := h.Service.MarkRead(r.Context(), id, &uid); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// A broadcast: the caller's own mark, and only on one the caller's bell
+	// shows. Anything else — another user's row, a kind the bell does not read,
+	// a file the caller may not see, an id nobody has — answers the same 204,
+	// so the endpoint says nothing about which ids exist.
+	if n := h.readableBroadcast(r.Context(), user, id); n != nil {
+		if err := h.Service.MarkBroadcastsRead(r.Context(), uid, []int64{n.ID}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// readableBroadcast returns the broadcast with this id when the caller may
+// mark it read, nil otherwise.
+//
+// An admin nobody confines reads every broadcast — in the admin history too,
+// including routine rows no bell shows — so every one is theirs to mark. For
+// everybody else it is the list's own answer: a kind their bell reads
+// (notify.Bell.Admits) that survives the per-row pass.
+func (h *Notifications) readableBroadcast(ctx context.Context, user *model.User, id int64) *model.Notification {
+	if h.Store == nil {
+		return nil
+	}
+	n, err := h.Store.GetNotification(ctx, id)
+	if err != nil || n == nil || n.UserID != nil {
+		return nil
+	}
+	bell := bellFor(ctx, user)
+	if bell == notify.AdminBell {
+		return n
+	}
+	if !bell.Admits(n.Event) {
+		return nil
+	}
+	if kept, _ := h.visibleTo(ctx, user, bell, []*model.Notification{n}); len(kept) == 0 {
+		return nil
+	}
+	return n
 }
 
 // MarkAllRead clears the user's unread queue.
@@ -321,6 +363,12 @@ func (h *Notifications) MarkAllRead(w http.ResponseWriter, r *http.Request) {
 	}
 	uid := user.ID
 	if err := h.Service.MarkAllRead(r.Context(), &uid); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// Every broadcast up to now, for the caller alone. Rows their bell does not
+	// show are read for them too, which changes nothing anybody can see.
+	if err := h.Service.MarkAllBroadcastsRead(r.Context(), uid); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -418,7 +466,12 @@ func (h *Notifications) AdminList(w http.ResponseWriter, r *http.Request) {
 	onlyUnread := r.URL.Query().Get("unread") == "true"
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	rows, total, err := h.Service.List(r.Context(), nil, notify.AdminBell, onlyUnread, limit, offset)
+	// A broadcast's read state is per reader: the history shows the caller's.
+	var reader int64
+	if u := auth.UserFrom(r.Context()); u != nil {
+		reader = u.ID
+	}
+	rows, total, err := h.Service.History(r.Context(), reader, onlyUnread, limit, offset)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

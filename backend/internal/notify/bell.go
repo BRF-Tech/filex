@@ -74,10 +74,23 @@ var memberBroadcastEvents = []EventType{
 	EventFileUploadFailed,
 }
 
-// MemberMayReceive reports whether a broadcast of this event may reach a
-// member at all (the file it names must still be one they can see).
-func MemberMayReceive(event string) bool {
-	for _, e := range memberBroadcastEvents {
+// Admits reports whether b reads a broadcast of this event at all — the Go
+// twin of the SQL filter, for a caller holding one row rather than a query
+// (marking a row read by its id). Which of the admitted rows a reader keeps is
+// still the per-row pass in the HTTP layer.
+func (b Bell) Admits(event string) bool {
+	switch b {
+	case MemberBell:
+		return hasEvent(memberBroadcastEvents, event)
+	case TenantAdminBell:
+		return hasEvent(fileBroadcastEvents, event)
+	default:
+		return !hasEvent(personalEvents, event)
+	}
+}
+
+func hasEvent(events []EventType, event string) bool {
+	for _, e := range events {
 		if string(e) == event {
 			return true
 		}
@@ -97,13 +110,16 @@ func (b Bell) filter() model.BroadcastFilter {
 	}
 }
 
-// bellFilter is b's filter for a bell read and the zero filter for the
-// admin-global one (userID nil), which is the audit and keeps every row.
+// bellFilter is b's filter for userID's bell, read state included, and the
+// zero filter for the admin-global one (userID nil), which is the audit and
+// keeps every row.
 func bellFilter(userID *int64, b Bell) model.BroadcastFilter {
 	if userID == nil {
 		return model.BroadcastFilter{}
 	}
-	return b.filter()
+	f := b.filter()
+	f.ReaderID = *userID
+	return f
 }
 
 func eventIDs(events []EventType) []string {

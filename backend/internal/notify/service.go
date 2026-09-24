@@ -39,8 +39,19 @@ type Service interface {
 	// broadcasts a per-user read takes) is ignored there.
 	List(ctx context.Context, userID *int64, bell Bell, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error)
 	UnreadCount(ctx context.Context, userID *int64, bell Bell) (int64, error)
+	// History is the admin-global list with each broadcast's read state as
+	// readerID has it (0: the rows' own column).
+	History(ctx context.Context, readerID int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error)
+	// MarkRead and MarkAllRead stamp rows ADDRESSED to userID only. A
+	// broadcast is read per reader: MarkBroadcastsRead marks single ones,
+	// after the caller has checked the reader may see them, and
+	// MarkAllBroadcastsRead reads every broadcast up to now for the reader —
+	// ones their bell does not show included, which only ever changes what
+	// that reader sees.
 	MarkRead(ctx context.Context, id int64, userID *int64) error
 	MarkAllRead(ctx context.Context, userID *int64) error
+	MarkBroadcastsRead(ctx context.Context, readerID int64, ids []int64) error
+	MarkAllBroadcastsRead(ctx context.Context, readerID int64) error
 	GetSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error)
 	UpsertSettings(ctx context.Context, s *model.NotificationSettings) error
 
@@ -556,6 +567,24 @@ func (s *service) List(ctx context.Context, userID *int64, bell Bell, onlyUnread
 		n.HydrateTarget()
 	}
 	return rows, total, err
+}
+
+// History reads the admin-global list: every row, a broadcast carrying
+// readerID's read state. One hydrate path with List, for the same reason.
+func (s *service) History(ctx context.Context, readerID int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error) {
+	rows, total, err := s.store.ListNotifications(ctx, nil, onlyUnread, nil, model.BroadcastFilter{ReaderID: readerID}, limit, offset)
+	for _, n := range rows {
+		n.HydrateTarget()
+	}
+	return rows, total, err
+}
+
+func (s *service) MarkBroadcastsRead(ctx context.Context, readerID int64, ids []int64) error {
+	return s.store.MarkBroadcastsRead(ctx, readerID, ids)
+}
+
+func (s *service) MarkAllBroadcastsRead(ctx context.Context, readerID int64) error {
+	return s.store.MarkAllBroadcastsRead(ctx, readerID)
 }
 
 func (s *service) UnreadCount(ctx context.Context, userID *int64, bell Bell) (int64, error) {

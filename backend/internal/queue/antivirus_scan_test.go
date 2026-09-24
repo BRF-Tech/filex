@@ -110,8 +110,13 @@ func (c *captureNotify) List(context.Context, *int64, notify.Bell, bool, int, in
 func (c *captureNotify) UnreadCount(context.Context, *int64, notify.Bell) (int64, error) {
 	return 0, nil
 }
-func (c *captureNotify) MarkRead(context.Context, int64, *int64) error { return nil }
-func (c *captureNotify) MarkAllRead(context.Context, *int64) error     { return nil }
+func (c *captureNotify) History(context.Context, int64, bool, int, int) ([]*model.Notification, int64, error) {
+	return nil, 0, nil
+}
+func (c *captureNotify) MarkBroadcastsRead(context.Context, int64, []int64) error { return nil }
+func (c *captureNotify) MarkAllBroadcastsRead(context.Context, int64) error       { return nil }
+func (c *captureNotify) MarkRead(context.Context, int64, *int64) error            { return nil }
+func (c *captureNotify) MarkAllRead(context.Context, *int64) error                { return nil }
 func (c *captureNotify) GetSettings(context.Context, int64) (*model.NotificationSettings, error) {
 	return nil, nil
 }
