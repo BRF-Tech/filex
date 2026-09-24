@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **The bell no longer names files the reader cannot open.** Every queued
+  copy, move and delete — and the commit of every staged upload — was written
+  as a notification addressed to nobody, because the ops worker has no request
+  user and the event never looked at the actor the queue row carries. The
+  bell hands such a row to every account, so on an RBAC storage members read
+  the names of files deleted from folders they have no grant on — tens of
+  thousands of rows on one instance. Now:
+  - the event is addressed to the person who queued the work, exactly like its
+    synchronous twin;
+  - a member receives only two kinds of broadcast — an antivirus hit and a
+    failed upload — and only about a file the explorer would list for them
+    (the listing's own grant check). Admins still get every broadcast about
+    their tenant; operator alarms that name no storage (replica reports,
+    update notices) go to admins only, and a drop or share notice with no
+    owner — it carries the link's bearer token — no longer reaches members;
+  - which broadcasts a bell reads is decided in SQL, so routine file activity
+    addressed to nobody (the rows already in the table) and rows a reader may
+    not see can no longer bury the reader's own rows. Those rows stay in the
+    admin history.
+- **Multi-tenant: `GET /api/admin/notifications` and
+  `POST /api/admin/notifications/test` are supertenant-only.** The first
+  returned every tenant's notifications — file paths included — to the admin
+  of any tenant; the second let a tenant admin fire deliveries at the
+  instance's webhook receivers. A tenant admin reads the tenant's own events in
+  their bell.
+
 ## [0.42.2] - 2026-09-19
 
 A fix release for the issue 32 follow-up and three things that were wrong on

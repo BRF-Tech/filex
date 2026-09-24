@@ -423,16 +423,46 @@ and never a credential. The title and body are the same strings the bell shows.
 
 ## In-app bell (endpoints)
 
-Authenticated user endpoints, scoped to the **current user** (they see their own
-notifications plus any broadcast notifications). All return **503** when the
-subsystem is disabled.
+Authenticated user endpoints, scoped to the **current user**. All return **503**
+when the subsystem is disabled.
+
+What a bell holds:
+
+- **Rows addressed to the user.** Routine file activity (`file.uploaded`,
+  `file.updated`, `file.moved`, `file.trashed`, `file.deleted`) is always
+  addressed to the person who did it, including when the queue finished the
+  work (a queued copy/move/delete, the commit of a staged upload): the queue
+  row names who asked, and the event is theirs.
+- **Broadcasts** (rows addressed to nobody: antivirus alerts, replica
+  reports, update notices, a drop or escrow notice with no owner on record)
+  go to **admins**. A member receives only two kinds — an antivirus hit
+  (`file.infected`) and an upload that never landed (`file.upload_failed`) —
+  and only when the file it names is one they could see in the explorer: the
+  same grants and the same "ancestor folders of a grant" rule the listing
+  uses. Everything else is for admins: an operator alarm names no storage, a
+  drop or share notice carries the link's bearer token.
+- In **multi-tenant** mode the tenant boundary applies first: nobody receives
+  a row about another tenant's storage, a tenant admin gets the broadcasts
+  that name a file in their tenant, and a row that names no storage reaches
+  only the supertenant's admins.
+- A broadcast of **routine** file activity (a surface that could not say who
+  asked — every queued operation before this rule existed) is in no bell at
+  all; it stays in the table and in the admin list below.
+
+Which broadcasts a bell takes is decided in SQL, so rows a reader may not see
+never fill their page. The badge (`unread-count`) counts exactly what the list
+would show.
+
+⚠ **Read state is shared.** A broadcast has one `read_at`: whoever marks it
+read (`read` or `read-all`) marks it read for every reader, including rows the
+marking user cannot see. Per-reader read state is not implemented.
 
 | Method & path | Purpose |
 |---|---|
 | `GET /api/notifications?unread=&limit=&offset=` | Paginated history → `{items, total, limit, offset}`. `unread=true` returns only unread rows. |
 | `GET /api/notifications/unread-count` | Bell badge number → `{count}`. |
 | `POST /api/notifications/{id}/read` | Mark one notification read → `204`. |
-| `POST /api/notifications/read-all` | Mark all of the user's notifications read → `204`. |
+| `POST /api/notifications/read-all` | Mark all of the user's notifications read → `204`. Broadcasts are marked read for everyone (see above). |
 | `GET /api/notifications/settings` | Read [per-user settings](#per-user-settings). |
 | `PATCH /api/notifications/settings` | Update per-user settings. |
 
@@ -465,6 +495,12 @@ mean the same thing.
 
 Admin-session endpoints under `/api/admin`. These give the **global** view (all
 users' notifications plus broadcasts) and manage the webhook at runtime.
+
+⚠ In multi-tenant mode the global history, the test event and the legacy
+webhook config are **supertenant-only** (`403 supertenant_only` for a tenant
+admin): all three span every tenant — a history row names its tenant only
+inside `meta`, and the test event goes to the instance's webhook receivers. A
+tenant admin reads the tenant's own events in their bell, which is scoped.
 
 | Method & path | Purpose |
 |---|---|
