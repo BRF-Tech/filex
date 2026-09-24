@@ -573,7 +573,7 @@ See [ARCHIVES.md](ARCHIVES.md) for the provider matrix and security model.
 
 | Env var | Default | Description |
 |---|---|---|
-| `FILEX_ARCHIVE_7Z_BIN` | `7zz` or `7z` on `PATH` | 7-Zip executable used for ZIP/7z/TAR creation, encryption and multi-format extraction. |
+| `FILEX_ARCHIVE_7Z_BIN` | `7zz` or `7z` on `PATH` | 7-Zip executable used for ZIP/7z/TAR creation, encryption and multi-format extraction. Version 24.07 or newer is required. |
 | `FILEX_ARCHIVE_WORK_DIR` | `<data-dir>/archive-work` | Private local staging directory for provider input and output. |
 
 ```yaml

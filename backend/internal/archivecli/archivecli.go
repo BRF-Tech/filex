@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -230,23 +231,69 @@ func FormatFromPath(name string) string {
 	return CanonicalFormat(ext)
 }
 
+const (
+	minimumSevenZipMajor = 24
+	minimumSevenZipMinor = 7
+)
+
+func minimumSevenZipVersion() string {
+	return fmt.Sprintf("%d.%02d", minimumSevenZipMajor, minimumSevenZipMinor)
+}
+
+var sevenZipVersionPattern = regexp.MustCompile(`(?i)7-zip(?: \(z\)| \[[^]]+\])?\s+([0-9]{2,})\.([0-9]{2})`)
+
+func validateSevenZipVersion(output string) (string, error) {
+	match := sevenZipVersionPattern.FindStringSubmatch(output)
+	if match == nil {
+		return "", fmt.Errorf("%w: 7-Zip version could not be determined", ErrUnavailable)
+	}
+	major, _ := strconv.Atoi(match[1])
+	minor, _ := strconv.Atoi(match[2])
+	version := match[1] + "." + match[2]
+	if major < minimumSevenZipMajor || (major == minimumSevenZipMajor && minor < minimumSevenZipMinor) {
+		return version, fmt.Errorf("%w: 7-Zip %s is older than required %s", ErrUnavailable, version, minimumSevenZipVersion())
+	}
+	return version, nil
+}
+
+func probeSevenZipVersion(path string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "i").CombinedOutput()
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("%w: 7-Zip version probe timed out", ErrUnavailable)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%w: 7-Zip version probe failed", ErrUnavailable)
+	}
+	return validateSevenZipVersion(string(out))
+}
+
 func (s *Service) sevenZipPath() (string, error) {
 	if s == nil {
 		return "", ErrUnavailable
 	}
-	if p := strings.TrimSpace(s.cfg.SevenZipBin); p != "" {
+	p := strings.TrimSpace(s.cfg.SevenZipBin)
+	if p != "" {
 		st, err := os.Stat(p)
 		if err != nil || st.IsDir() {
 			return "", fmt.Errorf("%w: configured 7-Zip binary %q is not executable", ErrUnavailable, p)
 		}
-		return p, nil
-	}
-	for _, name := range []string{"7zz", "7z"} {
-		if p, err := exec.LookPath(name); err == nil {
-			return p, nil
+	} else {
+		for _, name := range []string{"7zz", "7z"} {
+			if found, err := exec.LookPath(name); err == nil {
+				p = found
+				break
+			}
+		}
+		if p == "" {
+			return "", fmt.Errorf("%w: 7zz or 7z was not found on PATH", ErrUnavailable)
 		}
 	}
-	return "", fmt.Errorf("%w: 7zz or 7z was not found on PATH", ErrUnavailable)
+	if _, err := probeSevenZipVersion(p); err != nil {
+		return "", err
+	}
+	return p, nil
 }
 
 func firstLine(s string) string {
@@ -268,7 +315,7 @@ func (s *Service) Providers(ctx context.Context) []ProviderStatus {
 	}
 	if p, err := s.sevenZipPath(); err != nil {
 		slog.Warn("archive provider unavailable", slog.String("provider", "sevenzip"), slog.String("err", err.Error()))
-		seven.Error = "7-Zip executable is unavailable"
+		seven.Error = "7-Zip " + minimumSevenZipVersion() + " or newer is unavailable"
 	} else {
 		seven.Available = true
 		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)

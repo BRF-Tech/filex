@@ -16,6 +16,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testSevenZipVersionEnv = "FILEX_TEST_7ZIP_VERSION"
+
+func TestMain(m *testing.M) {
+	if version := os.Getenv(testSevenZipVersionEnv); version != "" {
+		_, _ = os.Stdout.WriteString("7-Zip (z) " + version + " (test helper)\n")
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
 type memorySettings map[string]string
 
 func (m memorySettings) GetSetting(_ context.Context, key string) (string, error) {
@@ -98,6 +108,37 @@ Hard Link = folder/report.txt
 	assert.False(t, entries[1].IsLink)
 	assert.True(t, entries[2].IsLink)
 	assert.True(t, entries[3].IsLink)
+}
+
+func TestSevenZipMinimumVersion(t *testing.T) {
+	version, err := validateSevenZipVersion("7-Zip (z) 24.09 (x64)")
+	require.NoError(t, err)
+	assert.Equal(t, "24.09", version)
+
+	version, err = validateSevenZipVersion("7-Zip [64] 23.01")
+	assert.Equal(t, "23.01", version)
+	assert.ErrorIs(t, err, ErrUnavailable)
+	assert.Contains(t, err.Error(), "required "+minimumSevenZipVersion())
+
+	_, err = validateSevenZipVersion("not a 7-Zip banner")
+	assert.ErrorIs(t, err, ErrUnavailable)
+
+	_, err = validateSevenZipVersion("copyright 24.09")
+	assert.ErrorIs(t, err, ErrUnavailable)
+}
+
+func TestSevenZipPathRejectsOutdatedBinary(t *testing.T) {
+	bin, err := os.Executable()
+	require.NoError(t, err)
+
+	t.Setenv(testSevenZipVersionEnv, "23.01")
+	_, err = New(memorySettings{}, Config{SevenZipBin: bin}).sevenZipPath()
+	assert.ErrorIs(t, err, ErrUnavailable)
+
+	t.Setenv(testSevenZipVersionEnv, "24.09")
+	resolved, err := New(memorySettings{}, Config{SevenZipBin: bin}).sevenZipPath()
+	require.NoError(t, err)
+	assert.Equal(t, bin, resolved)
 }
 
 func TestProviderErrorsAreClassified(t *testing.T) {
@@ -196,13 +237,8 @@ func TestCompressedTarDetectionAndDiscovery(t *testing.T) {
 }
 
 func TestSevenZipEncryptedRoundTrip(t *testing.T) {
-	bin, err := exec.LookPath("7zz")
-	if err != nil {
-		bin, err = exec.LookPath("7z")
-	}
-	if err != nil {
-		t.Skip("7-Zip is not installed")
-	}
+	bin := supportedSevenZip(t)
+	var err error
 
 	root := t.TempDir()
 	source := filepath.Join(root, "source")
@@ -247,13 +283,7 @@ func TestSevenZipEncryptedRoundTrip(t *testing.T) {
 }
 
 func TestSevenZipTarFormatsRoundTrip(t *testing.T) {
-	bin, err := exec.LookPath("7zz")
-	if err != nil {
-		bin, err = exec.LookPath("7z")
-	}
-	if err != nil {
-		t.Skip("7-Zip is not installed")
-	}
+	bin := supportedSevenZip(t)
 
 	for _, format := range []string{"tar", "tar.gz", "tar.bz2", "tar.xz"} {
 		t.Run(format, func(t *testing.T) {
@@ -305,13 +335,8 @@ func TestSevenZipTarFormatsRoundTrip(t *testing.T) {
 }
 
 func TestSevenZipTarStreamCancellationRemovesPartialOutput(t *testing.T) {
-	bin, err := exec.LookPath("7zz")
-	if err != nil {
-		bin, err = exec.LookPath("7z")
-	}
-	if err != nil {
-		t.Skip("7-Zip is not installed")
-	}
+	bin := supportedSevenZip(t)
+	var err error
 
 	root := t.TempDir()
 	source := filepath.Join(root, "source")
@@ -335,6 +360,21 @@ func TestSevenZipTarStreamCancellationRemovesPartialOutput(t *testing.T) {
 	assert.ErrorIs(t, err, os.ErrNotExist, "a cancelled stream must remove its partial destination")
 	_, err = os.Stat(filepath.Join(root, "cancelled.tar"))
 	assert.ErrorIs(t, err, os.ErrNotExist, "a streamed TAR must never be materialised")
+}
+
+func supportedSevenZip(t *testing.T) string {
+	t.Helper()
+	bin, err := exec.LookPath("7zz")
+	if err != nil {
+		bin, err = exec.LookPath("7z")
+	}
+	if err != nil {
+		t.Skip("7-Zip is not installed")
+	}
+	if _, err := probeSevenZipVersion(bin); err != nil {
+		t.Skipf("installed 7-Zip is unsupported: %v", err)
+	}
+	return bin
 }
 
 func entryNames(entries []Entry) []string {

@@ -13,10 +13,12 @@ selection toolbar.
 | Built-in Go ZIP | ZIP | ZIP | No |
 | 7-Zip (`7zz` or `7z`) | ZIP, 7z, TAR, TAR.GZ, TAR.BZ2, TAR.XZ | ZIP, 7z, RAR, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, gzip, bzip2, xz | ZIP and 7z |
 
-The full Docker image includes 7-Zip. The slim image deliberately does not;
-install a provider alongside filex or point filex at one with the environment
-variables below. 7-Zip can extract RAR archives, but RAR creation is deferred
-to a later release because it requires the proprietary RAR CLI and a licence.
+The full Docker image includes 7-Zip. filex requires 7-Zip 24.07 or newer
+and refuses older or unidentifiable provider versions. The slim image
+deliberately does not; install a provider alongside filex or point filex at one
+with the environment variables below. 7-Zip can extract RAR archives, but RAR
+creation is deferred to a later release because it requires the proprietary
+RAR CLI and a licence.
 
 Compressed TAR creation streams a TAR-producing 7-Zip process directly into a
 gzip, bzip2 or xz process. Both processes are started without a shell, managed

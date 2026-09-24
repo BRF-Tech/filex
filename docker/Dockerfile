@@ -122,7 +122,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
 # ---------------------------------------------------------------------------
 # Stage 4: Runtime with full thumbnail toolchain
 # ---------------------------------------------------------------------------
-FROM alpine:3.20
+FROM alpine:3.22
 
 # Single apk layer — keeps the Docker layer cache friendly when nothing in
 # the dep list changes between builds.
@@ -150,7 +150,7 @@ RUN apk --no-cache add \
         tzdata \
         su-exec \
         tini \
-        7zip \
+        '7zip>=24.09-r0' \
         ffmpeg \
         imagemagick \
         ghostscript \
