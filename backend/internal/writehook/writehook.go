@@ -16,8 +16,9 @@
 // api.BuildRouter) with the same nil-safe, package-level sink pattern
 // as handlers.SetNotifySink / SetAntivirusEnqueue: unconfigured hooks
 // are no-ops, so tests and unwired deployments never crash. It imports
-// only auth/model/notify — no handlers, db, or storage — so any surface
-// package (api/handlers, dav, …) can import it without a cycle.
+// only auth/model/notify and quotastore's context keys — no handlers, db
+// access, or storage — so any surface package (api/handlers, dav, …) can
+// import it without a cycle.
 package writehook
 
 import (
@@ -28,6 +29,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
 )
 
 // Origin values for the `origin` parameter — the frozen set every
@@ -320,6 +322,13 @@ func emit(ctx context.Context, e notify.Event) {
 	if e.Actor == nil {
 		if u := auth.UserFrom(ctx); u != nil {
 			e.Actor = &notify.ActorRef{ID: u.ID, Email: u.Email}
+		} else if id := quotastore.ExplicitActorFrom(ctx); id > 0 {
+			// ⚠ The ops worker (queued copy/move/delete, and the commit of
+			// every staged upload) has no request user, but the queue row names
+			// who asked and ops.execute puts them back with WithActor. Asking
+			// only auth.UserFrom wrote all of that activity with user_id NULL —
+			// a broadcast into the bell of every member, whatever their grants.
+			e.Actor = &notify.ActorRef{ID: id}
 		}
 	}
 	if e.UserID == nil && e.Actor != nil && e.Actor.ID != 0 {

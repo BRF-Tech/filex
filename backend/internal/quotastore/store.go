@@ -181,6 +181,23 @@ func ActorFrom(ctx context.Context) int64 {
 	return OwnerFrom(ctx)
 }
 
+// ExplicitActorFrom returns the actor a background surface named with
+// WithActor, or 0 when it named nobody.
+//
+// ⚠ It never falls back: not to the owner, not to the authenticated user. It
+// answers the narrower question writehook asks for a notification — "whom is
+// this event FROM" — and ActorFrom's owner fallback is the wrong answer there.
+// The copy mirror bills the SOURCE file's owner when an old queue row names
+// nobody (handlers/manager_opsync.go); that person did not make the copy, and
+// the copy may sit in a folder they cannot open, so an event addressed to them
+// would tell them about it.
+func ExplicitActorFrom(ctx context.Context) int64 {
+	if v, ok := ctx.Value(actorCtxKey{}).(int64); ok && v > 0 {
+		return v
+	}
+	return 0
+}
+
 // externalCtxKey marks writes that arrived from outside filex through an
 // anonymous drop link.
 type externalCtxKey struct{}

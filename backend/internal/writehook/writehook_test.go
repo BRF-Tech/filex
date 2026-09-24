@@ -15,6 +15,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
 )
 
 // fakeSink captures Send calls. Only Send is implemented — the embedded
@@ -150,6 +151,40 @@ func TestOnFileTrashed_EmitsEventWithTrashPath(t *testing.T) {
 	assert.Equal(t, "/doc.txt", e.Body)
 	assert.Equal(t, "/.filex-trash/1__doc.txt", e.Meta["trash_path"])
 	assert.Equal(t, OriginShareX, e.Meta["origin"])
+}
+
+// The ops worker has no request user. What it has is the queue row's actor
+// (`pending_ops.actor_id`), which ops.execute puts back on the context with
+// quotastore.WithActor — and that is who the event is from. Without it every
+// queued copy/move/delete, and every staged upload commit, was written with
+// `user_id = NULL`: a broadcast into the bell of every member of the instance.
+func TestEmit_WorkerActorOwnsTheEvent(t *testing.T) {
+	sink, _ := install(t)
+	ctx := quotastore.WithActor(quotastore.WithOwner(context.Background(), 42), 42)
+
+	OnFileTrashed(ctx, 3, "/muhasebe/maas.xlsx", "maas.xlsx", "/.filex-trash/1__maas.xlsx", OriginOps)
+
+	e := sink.waitEvent(t)
+	require.NotNil(t, e.UserID, "a queued delete was recorded as a broadcast")
+	assert.Equal(t, int64(42), *e.UserID)
+	require.NotNil(t, e.Actor)
+	assert.Equal(t, int64(42), e.Actor.ID)
+}
+
+// An OWNER is not an actor. The copy mirror bills the source file's owner when
+// an old queue row names nobody (manager_opsync.go) — that person did not make
+// the copy, and the copy may sit in a folder they cannot open, so the event
+// must not be addressed to them. quotastore.ActorFrom falls back to the owner;
+// the notification must not.
+func TestEmit_OwnerAloneIsNotTheActor(t *testing.T) {
+	sink, _ := install(t)
+	ctx := quotastore.WithOwner(context.Background(), 7)
+
+	OnFileDeleted(ctx, 3, "/x/y.pdf", "y.pdf", OriginOps)
+
+	e := sink.waitEvent(t)
+	assert.Nil(t, e.UserID)
+	assert.Nil(t, e.Actor)
 }
 
 func TestUnconfigured_Noop(t *testing.T) {
