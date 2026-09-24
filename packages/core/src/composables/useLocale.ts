@@ -295,7 +295,11 @@ function instantOf(value: WhenInput): Date | null {
 }
 
 const DATE_PART: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
-const TIME_PART: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+// ⚠ The clock is the LANGUAGE's short time, not a field list: `hour: 'numeric'`
+//   printed Turkish "8:05" where Turkish writes "08:05", and `'2-digit'` would
+//   print English "08:05 AM". Only noticed on CI: its zone is UTC, so the
+//   test's 08:05Z stayed before ten there and became 11:05 at +3 (2026-09-24).
+const TIME_PART: Intl.DateTimeFormatOptions = { timeStyle: 'short' };
 
 /**
  * An instant as a person reads it — THE date format of the product: the

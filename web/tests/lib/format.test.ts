@@ -155,6 +155,15 @@ describe('the admin panel prints what the explorer prints', () => {
     expect(formatDate('2026-09-12T08:05:00Z', 'tr')).toMatch(/2026, \d{2}:\d\d/);
   });
 
+  // ⚠ Built from LOCAL fields so the hour is before ten in every zone: the case
+  //   above only failed where the machine's zone kept 08:05Z before ten (CI is
+  //   UTC; +3 turns it into 11:05 and hides the missing zero).
+  it("a clock before ten is written the language's way, whatever the machine's zone", () => {
+    const early = new Date(2026, 8, 12, 8, 5).toISOString();
+    expect(formatDate(early, 'tr')).toMatch(/2026, 08:05$/);
+    expect(formatDate(early, 'en')).toMatch(/2026, 8:05\s?AM$/);
+  });
+
   it("a size is written the way the language writes numbers, with the catalogue's units", () => {
     expect(formatBytes(1_960, 'tr')).toBe('1,96 KB');
     expect(formatBytes(1_960, 'en')).toBe('1.96 KB');
