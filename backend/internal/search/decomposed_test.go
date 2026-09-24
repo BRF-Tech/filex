@@ -151,6 +151,31 @@ func TestIndexSchemaVersion_DecomposedNamesNeedRebuild(t *testing.T) {
 	}
 }
 
+// TestNormalize_FullyLowerCasedDottedCapitalI: lower-casing `İ` the full
+// Unicode way — JavaScript's toLowerCase(), Python's lower() — gives `i`
+// followed by U+0307 COMBINING DOT ABOVE, and composition leaves that pair
+// alone. Nobody types it, but a client or an agent that lower-cases a query
+// before sending it does, and so does software that lower-cases a filename.
+// The dot adds nothing to a letter that already has one.
+func TestNormalize_FullyLowerCasedDottedCapitalI(t *testing.T) {
+	if got := Normalize("i\u0307pek"); got != "ipek" {
+		t.Errorf("Normalize(i+U+0307 pek) = %q, want %q", got, "ipek")
+	}
+	ipek := nfd(ipekName)
+	if got := PrepareQuery("i\u0307pek ada yılmaz").ScoreName(ipek, "/"+ipek); !got.OK {
+		t.Errorf("a fully lower-cased query must match the name, got %+v", got)
+	}
+	if got := PrepareQuery("ipek").ScoreName("i\u0307pek.pdf", "/i\u0307pek.pdf"); !got.OK {
+		t.Errorf("a name lower-cased that way must answer `ipek`, got %+v", got)
+	}
+	if !matchesAll(PlanFallback("ipek").Terms, "i\u0307pek.pdf") {
+		t.Error("the fallback must reach a name lower-cased that way")
+	}
+	if !matchesAll(PlanFallback("i\u0307pek").Terms, ipek) {
+		t.Error("a fully lower-cased query must reach the decomposed name")
+	}
+}
+
 // likeMatches is how SQLite's LIKE answers a `%word%` pattern: case folded
 // for ASCII letters only, every other character compared as it is.
 func likeMatches(pattern, s string) bool {

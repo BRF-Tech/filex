@@ -168,6 +168,8 @@ func TestSearch_DecomposedNamesAndLongQueries(t *testing.T) {
 				{"Gürel", c.gurel, true},
 				{"İpek Ada Yılmaz", c.ipek, true},
 				{"ipek", c.ipek, true},
+				// Lower-cased by a client the full Unicode way: `İ` -> `i` + U+0307.
+				{"i\u0307pek ada yılmaz", c.ipek, true},
 				{"GÜREL", c.gurel, true},
 			}
 			for _, tc := range cases {

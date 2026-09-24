@@ -18,9 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     or `İ` in it missed every such name — 71 388 of 169 471 on the instance
     that reported it — and the index's separator-blind copy cut such a word
     in two at its mark (`gu rel`). Both search paths now compare names
-    composed (NFC); the stored name is not touched. The index document
-    schema goes to 3, so an existing index is rebuilt automatically, in the
-    background, on the first start.
+    composed (NFC); the stored name is not touched. A query a client
+    lower-cased the full Unicode way (`İ` → `i` + U+0307) matches too. The
+    index document schema goes to 3, so an existing index is rebuilt
+    automatically, in the background, on the first start.
   - **Without the index, only the longest word reached the database.** The
     fallback took the first 1000 rows by name holding that one word and
     checked the others afterwards; when it was a word most files share, the

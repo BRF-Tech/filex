@@ -60,12 +60,28 @@ const indexVersionKey = "filex:index_schema"
 // every call, fast path included, because the closure on its slow path
 // captures its arguments — measured as two allocations per candidate in
 // BenchmarkScorerPerCandidate, which had been flat zero.
+//
+// One more fold on the way: a dot above on a letter that already has one
+// is dropped. Lower-casing `İ` the full Unicode way — JavaScript's
+// toLowerCase(), Python's lower() — gives `i` + U+0307, which composition
+// leaves as it is; a client that lower-cases a query before sending it, or
+// software that lower-cased a filename, would otherwise never meet the `i`
+// on the other side. U+0307 can compose, so a string holding it never
+// takes the fast path above.
 func canonical(s string) string {
 	if norm.NFC.QuickSpanString(s) == len(s) {
 		return s
 	}
-	return norm.NFC.String(s)
+	s = norm.NFC.String(s)
+	if strings.Contains(s, "\u0307") {
+		s = dotOnDottedLetter.Replace(s)
+	}
+	return s
 }
+
+// dotOnDottedLetter drops U+0307 COMBINING DOT ABOVE after the two
+// lower-case letters that carry a dot of their own (see canonical).
+var dotOnDottedLetter = strings.NewReplacer("i\u0307", "i", "j\u0307", "j")
 
 // Normalize maps a filename — or a raw user query — onto the
 // separator-blind form both sides of a search are compared in:

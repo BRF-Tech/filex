@@ -123,7 +123,10 @@ before they are compared, so `Gürel` typed on a keyboard finds a `Gürel` a Mac
 uploaded, and a name pasted from a Finder window finds one uploaded from
 Windows. The stored name is never changed. A combining mark that survives
 composition (every Devanagari vowel sign is one) is part of its word, not a
-separator.
+separator. One mark is dropped instead: a dot above on `i` or `j`, which have
+one already. Lower-casing `İ` the full Unicode way (JavaScript's
+`toLowerCase()`, Python's `lower()`) gives `i` followed by U+0307, and a query a
+client lower-cased like that would otherwise match nothing.
 
 Before this, every query word with `ü`, `ö`, `ç`, `ş`, `ğ` or `İ` in it matched
 only the composed names, and the normaliser cut each decomposed word in two at
