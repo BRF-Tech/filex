@@ -386,14 +386,24 @@ func (s *Service) RunDailyLoop(ctx context.Context, interval time.Duration) {
 //  2. delete backing object via Deleter;
 //  3. decrement owner quota;
 //  4. hard-delete the row.
+//
+// ⚠⚠ It walks the trash with a cursor. It used to ask for "the oldest batch"
+// on every pass and rely on the purge to empty the window — but a row it
+// skipped (another storage, another tenant) or failed to purge stayed in the
+// window, and once a full batch of those sat at the head every pass was the
+// same batch: nothing purged, no end. A tenant emptying their own trash on an
+// instance where any other tenant had 500 older deleted files spun until the
+// proxy gave up; the nightly worker, which has no deadline, would never have
+// stopped.
 func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, storageID int64) (PurgeResult, error) {
 	if s == nil || s.Store == nil {
 		return PurgeResult{}, errors.New("trash: service not initialised")
 	}
 	const batchSize = 500
 	var res PurgeResult
+	var after int64
 	for {
-		batch, err := s.Store.ListTrashedExpired(ctx, cutoff, batchSize)
+		batch, err := s.Store.ListTrashedExpired(ctx, cutoff, after, batchSize)
 		if err != nil {
 			return res, fmt.Errorf("trash: list: %w", err)
 		}
@@ -401,6 +411,14 @@ func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, storageI
 			return res, nil
 		}
 		for _, n := range batch {
+			after = max(after, n.ID)
+			// A run that was cut short stops HERE, and says so. Carrying on
+			// through the batch failed every remaining row on the dead context
+			// — each one logged and counted as a failed purge — and then the
+			// run returned nil, as if it had finished.
+			if err := ctx.Err(); err != nil {
+				return res, err
+			}
 			// The storage the caller narrowed to, if any. Filtered here for
 			// the same reason tenancy is: the service walks the whole trash in
 			// batches, so the handler has no list it could filter instead.

@@ -385,7 +385,18 @@ type Store interface {
 	GetUserDisplayNames(ctx context.Context, ids []int64) (map[int64]string, error)
 
 	// Trash retention
-	ListTrashedExpired(ctx context.Context, before time.Time, limit int) ([]*model.Node, error)
+	//
+	// ListTrashedExpired returns up to `limit` soft-deleted nodes whose
+	// deleted_at is older than `before`, in id order, strictly after `afterID`
+	// (0 starts at the first). A sweep passes the last id it saw back in, so
+	// every row is met once per run whatever the caller did with it.
+	//
+	// ⚠ The cursor is the id, never deleted_at. SQLite keeps CURRENT_TIMESTAMP
+	// as `YYYY-MM-DD HH:MM:SS` and the driver writes a time.Time parameter in
+	// another spelling, so a timestamp cursor compared unequal to the rows that
+	// share its second — and a trash emptied in one burst shares very few
+	// seconds between tens of thousands of rows.
+	ListTrashedExpired(ctx context.Context, before time.Time, afterID int64, limit int) ([]*model.Node, error)
 	// ListTrashed returns soft-deleted nodes (paginated). storage filter optional.
 	ListTrashed(ctx context.Context, storageID *int64, limit, offset int) ([]*model.Node, int, error)
 	RestoreNode(ctx context.Context, id int64) error
