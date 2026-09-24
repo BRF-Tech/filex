@@ -65,6 +65,7 @@ import {
 } from '../lib/viewPrefs'; /* tablo:t1 — per-folder columns */
 import DataTable, { type DataColumn } from './DataTable.vue';
 import StarButton from './StarButton.vue';
+import ThumbTile from './ThumbTile.vue';
 
 const props = defineProps<{
   files: FileNode[];
@@ -786,21 +787,24 @@ const tableGroups = computed(() =>
         v-html="encryptedFolderTile()"
       ></span>
       <!-- tablo:t1 — the real thumbnail, at the tile's own size so the row
-           height does not move. `draggable="false"`: dragging an <img> puts a
-           'Files' MIME on the dataTransfer and the parent's upload handler
-           re-uploads the thing you were only moving. -->
-      <img
-        v-else-if="thumbOf(row)"
+           height does not move. ⚠⚠ Through ThumbTile, never read in this
+           template: here, each thumbnail that arrived re-rendered every row of
+           the table. The tile draws the <img> (`draggable="false"`: dragging
+           an <img> puts a 'Files' MIME on the dataTransfer and the parent's
+           upload handler re-uploads the thing you were only moving) and the
+           type tile until then. -->
+      <ThumbTile
+        v-else
+        :node="row"
+        :src-of="thumbOf"
         class="fe-list__icon fe-list__icon--img"
         :class="{ 'fe-thumb--page': drawsAsPage(row) }"
-        :src="thumbOf(row)!"
         alt=""
         aria-hidden="true"
-        loading="lazy"
-        draggable="false"
-      />
-      <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
-      <span v-else class="fe-list__icon fe-list__icon--svg" aria-hidden="true" v-html="fileIconTile(row)"></span>
+      >
+        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
+        <span class="fe-list__icon fe-list__icon--svg" aria-hidden="true" v-html="fileIconTile(row)"></span>
+      </ThumbTile>
       <div class="fe-list__name-wrap">
         <span class="fe-list__name" :title="nameTitle(row)">
           <!-- ⚠ RTL: `<bdi>` — the name is the person's text, not the

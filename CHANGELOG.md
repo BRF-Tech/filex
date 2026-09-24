@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A big folder no longer re-renders itself once per thumbnail.** The
+  thumbnail loader kept every object URL in one reactive record and replaced
+  the record as each thumbnail arrived, so every arrival re-rendered whatever
+  had read a thumbnail — the whole grid, gallery or table. A field report: a
+  folder of 344 files, about 240 of them with thumbnails, ran a Chrome tab on
+  a Windows PC out of memory when a sub-folder was clicked while they were
+  still arriving, and froze Edge and Opera for about 30 s; on a fast Mac the
+  same click took about 4 s. It happened in grid view as well as list view,
+  with `.fe-list`'s scrollbar reserve (#39) live. Measured with 60 files whose
+  thumbnails arrive one at a time, the grid asked for a thumbnail 9,150 times
+  and the table 5,490; every view asks 120 times now. Each thumbnail is drawn
+  by a component of its own (`ThumbTile`), so an arrival re-renders the tile
+  that shows it. Found by Berk Başarır.
+- **A thumbnail is fetched when its tile comes near the screen**, not for every
+  file in the folder the moment it opens: one shared IntersectionObserver
+  (`lib/nearViewport`), 300 px ahead, the way the text previews already
+  load.
+- **A thumbnail is not fetched again because its URL was signed again.** The
+  cache was keyed by the signed URL, whose expiry moves every hour; it is keyed
+  by the thumbnail's path and the file's `last_modified` now, so a new version
+  of the file is fetched and a new signature is not. And past the cache's cap
+  of 500, dropping the oldest thumbnail no longer wakes the tile still showing
+  it — that tile fetched it again, whose arrival dropped the next oldest, for
+  as long as the folder was open.
+
 ## [0.43.0] - 2026-09-24
 
 The release that makes filex extensible. **Apps** are a second kind of

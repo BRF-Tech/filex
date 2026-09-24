@@ -25,6 +25,7 @@ import {
   type FilePreview,
 } from '../lib/filePreview'; /* gorunum:v1-preview */
 import StarButton from './StarButton.vue';
+import ThumbTile from './ThumbTile.vue';
 import { applyDragGhost } from '../lib/dragGhost';
 import { parentDirOf } from '../lib/listing'; /* the folder a row sits in — one split rule for every view */
 import {
@@ -358,41 +359,34 @@ function metaFor(n: FileNode): string {
             v-html="fileIconTile(n)"
           ></span>
         </template>
-        <!-- draggable="false" for the same reason as GridView: HTML5 image
-             drag adds a 'Files' MIME to dataTransfer, which would trip the
-             parent's upload handler on internal drags. -->
-        <img
-          v-else-if="thumbOf(n)"
-          :src="thumbOf(n)!"
+        <!-- ⚠⚠ Through ThumbTile, as in GridView: read in this template, each
+             thumbnail that arrived re-rendered every tile of the folder. The
+             tile draws the <img> (draggable="false", same reason as GridView)
+             and the play badge over a video frame; its slot until then. -->
+        <ThumbTile
+          v-else
+          :node="n"
+          :src-of="thumbOf"
+          :video-badge="drawsAsVideo(n)"
           :alt="n.basename"
           :class="{ 'fe-thumb--page': drawsAsPage(n) /* gorunum:v1-preview — crop a page from its TOP */ }"
-          loading="lazy"
-          draggable="false"
-        />
-        <!-- ikon:emoji — see GridView: the folder shape survives, the padlock
-             is cut out of it, and the name the 🔒 never had is on the span. -->
-        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
-        <span
-          v-else-if="isEncryptedFolder(n)"
-          class="fe-gal__icon fe-gal__icon--svg"
-          role="img"
-          :aria-label="t('e2e.badge')"
-          v-html="encryptedFolderTile()"
-        ></span>
-        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
-        <span v-else class="fe-gal__icon fe-gal__icon--svg" v-html="fileIconTile(n)"></span>
+        >
+          <!-- ikon:emoji — see GridView: the folder shape survives, the padlock
+               is cut out of it, and the name the 🔒 never had is on the span. -->
+          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
+          <span
+            v-if="isEncryptedFolder(n)"
+            class="fe-gal__icon fe-gal__icon--svg"
+            role="img"
+            :aria-label="t('e2e.badge')"
+            v-html="encryptedFolderTile()"
+          ></span>
+          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
+          <span v-else class="fe-gal__icon fe-gal__icon--svg" v-html="fileIconTile(n)"></span>
+        </ThumbTile>
         <!-- Same star chip as the grid, same component, same rule: painted
              when starred, on hover/focus otherwise. It sits above .fe-gal__meta
              (which is aria-hidden and covers the tile's foot on hover). -->
-        <!-- gorunum:v1-preview — a frame lifted out of a video is, on a card,
-             indistinguishable from a photograph. The badge is the difference,
-             and it is drawn only over a real frame: a video that fell back to
-             its type tile already says what it is. -->
-        <span
-          v-if="!previewKind(n) && thumbOf(n) && drawsAsVideo(n)"
-          class="fe-thumb__play"
-          aria-hidden="true"
-        ></span>
         <!-- issue #26 — the card's checkbox, the one click that selects: the
              corner opposite the star, on the same reveal rule plus "anything
              is selected" (styles/base.css .fe-item-check). -->
