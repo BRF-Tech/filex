@@ -210,6 +210,7 @@ func (a *AIAdmin) Register(r chi.Router) {
 		r.Get("/", a.trash.List)
 		r.Post("/restore", a.trash.Restore)
 		r.Post("/empty", a.trash.AdminEmpty)
+		r.Get("/empty", a.trash.EmptyStatus)
 		r.Delete("/{id}", a.trash.Purge)
 	})
 
@@ -626,9 +627,15 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.trash.Restore, method: http.MethodPost, path: "/api/ai/admin/trash/restore", body: in.Body}
 		})
-	regAdminTool(r, "admin_trash_empty", "Purge trash. body: {older_than_days?} (0/omitted wipes everything soft-deleted).",
+	regAdminTool(r, "admin_trash_empty", "Purge trash. body: {older_than_days?, storage_id?} (0/omitted wipes everything soft-deleted). "+
+		"Answers with the final counts when the purge finishes within a few seconds; otherwise 202 {running: true, total, purged, …} "+
+		"while it goes on in the background — follow it with admin_trash_empty_status.",
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.trash.AdminEmpty, method: http.MethodPost, path: "/api/ai/admin/trash/empty", body: in.Body}
+		})
+	regAdminTool(r, "admin_trash_empty_status", "Progress of the latest admin_trash_empty: {running, total, purged, failed, bytes, started_at, finished_at, error}.",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.trash.EmptyStatus, method: http.MethodGet, path: "/api/ai/admin/trash/empty"}
 		})
 	regAdminTool(r, "admin_trash_purge", "Hard-delete a single trashed node by id.",
 		func(in adminIDIn) reqSpec {

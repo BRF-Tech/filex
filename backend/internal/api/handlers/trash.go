@@ -5,17 +5,20 @@
 //	GET  /api/files/manager/trash                          (auth)  list trashed
 //	POST /api/files/manager/restore                        (auth)  body {node_id}
 //	DELETE /api/admin/trash/{id}                           (admin) immediate single purge
-//	POST /api/admin/trash/empty?older_than_days=N          (admin) immediate batch purge
+//	POST /api/admin/trash/empty?older_than_days=N          (admin) start a batch purge
+//	GET  /api/admin/trash/empty                            (admin) that purge's progress
 package handlers
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -35,7 +38,16 @@ type Trash struct {
 	ACL     *acl.Resolver
 	// Index puts a restored file back into search. Optional; nil skips it.
 	Index *search.Index
+	// EmptyWait is how long AdminEmpty waits for the purge it started before
+	// answering 202 with the run's progress instead. Zero is defaultEmptyWait.
+	EmptyWait time.Duration
 }
+
+// defaultEmptyWait is short enough to sit well inside every timeout in front
+// of the endpoint — the admin page's HTTP client gives up at 30s, nginx at
+// 60s, Cloudflare at 100s — and long enough that an ordinary trash is gone
+// before the answer, which is then the final count, as it always was.
+const defaultEmptyWait = 2 * time.Second
 
 // AttachSearchIndex wires the search index. ⚠ Deleting a file removes its
 // document from the index (correctly). Restoring it never put the document
@@ -171,55 +183,151 @@ func (h *Trash) announceRestore(ctx context.Context, nodeID int64) {
 	})
 }
 
-// AdminEmpty triggers an immediate purge.
+// AdminEmpty starts "empty the trash now" and answers when it is over or when
+// EmptyWait has passed, whichever comes first: 200 with the final counts, or
+// 202 with the run's progress so far — which GET on the same path
+// (EmptyStatus) keeps reporting until the run ends. 409 BUSY while another
+// purge holds the trash; 400 for a request it cannot read.
 //
-// `older_than_days` may also arrive in the JSON body (the admin SPA's
-// trashApi.empty posts {storage_id, older_than_days}). 0/missing wipes
-// everything currently soft-deleted.
+// `older_than_days` and `storage_id` arrive in the query or the JSON body
+// (the admin SPA's trashApi.empty posts {storage_id, older_than_days}).
+// 0/missing days wipes everything currently soft-deleted; 0/missing storage
+// is every storage the caller can reach.
+//
+// ⚠⚠ The purge used to run inside this request, and a large trash cannot be
+// purged inside any request. 61,844 files needed the better part of an hour;
+// nginx answered 504 at sixty seconds, the request's context was cancelled,
+// and the purge died mid-batch — while the admin page, whose HTTP client had
+// given up at thirty, showed nothing at all. Now the run belongs to the
+// server (trash.Service.StartEmpty) and this request only watches it for a
+// moment.
 func (h *Trash) AdminEmpty(w http.ResponseWriter, r *http.Request) {
-	older := 0
-	// ⚠ Read, not merely decoded: this field was parsed into a struct and
-	// dropped, while the admin UI's confirmation promised it narrowed the
-	// purge. Emptying "one storage" emptied all of them, permanently.
-	var storageID int64
-	if v := r.URL.Query().Get("storage_id"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
-			storageID = n
-		}
+	older, storageID, err := emptyRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
-	if v := r.URL.Query().Get("older_than_days"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			older = n
-		}
-	}
-	// Accept the same field as a JSON body too (frontend uses POST body).
-	if r.Body != nil && r.ContentLength > 0 {
-		var body struct {
-			OlderThanDays *int   `json:"older_than_days"`
-			StorageID     *int64 `json:"storage_id"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
-			if body.OlderThanDays != nil && *body.OlderThanDays >= 0 {
-				older = *body.OlderThanDays
-			}
-			if body.StorageID != nil && *body.StorageID > 0 {
-				storageID = *body.StorageID
+	run, err := h.Service.StartEmpty(r.Context(), older, storageID)
+	if errors.Is(err, trash.ErrBusy) {
+		// The second press of a button that seemed to do nothing. The caller's
+		// own run comes back with the refusal, so the page can show it; a run
+		// another tenant started is not described at all.
+		body := map[string]any{"error": "the trash is already being emptied", "code": "BUSY"}
+		if cur, ok := h.Service.LastEmpty(r.Context()); ok {
+			if st := cur.Status(); st.Running {
+				body["job"] = st
 			}
 		}
+		writeJSON(w, http.StatusConflict, body)
+		return
 	}
-	res, err := h.Service.EmptyOlderThan(r.Context(), older, storageID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	// Frontend reads `purged` count.
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"purged":  res.Deleted,
-		"failed":  res.Failed,
-		"scanned": res.Scanned,
-		"bytes":   res.Bytes,
-	})
+	wait := h.EmptyWait
+	if wait <= 0 {
+		wait = defaultEmptyWait
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-run.Done():
+	case <-timer.C:
+	case <-r.Context().Done():
+		return // the caller has gone; the run has not
+	}
+	st := run.Status()
+	if !st.Running && st.Error != "" {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": st.Error})
+		return
+	}
+	code := http.StatusOK
+	if st.Running {
+		code = http.StatusAccepted
+	}
+	writeJSON(w, code, emptyAnswer(st))
+}
+
+// EmptyStatus reports the caller's latest "empty the trash now": still
+// running, or how it ended. `{"running": false}` alone when the caller's
+// tenant has not started one since the server did.
+func (h *Trash) EmptyStatus(w http.ResponseWriter, r *http.Request) {
+	run, ok := h.Service.LastEmpty(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{"running": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, emptyAnswer(run.Status()))
+}
+
+// emptyAnswer is a run's status, flattened beside the `ok` this endpoint has
+// always answered with. The counters keep their old names (purged, failed,
+// scanned, bytes), so a caller written for the synchronous endpoint still
+// reads a finished run correctly.
+func emptyAnswer(st trash.EmptyStatus) any {
+	return struct {
+		OK bool `json:"ok"`
+		trash.EmptyStatus
+	}{true, st}
+}
+
+// emptyRequest reads what AdminEmpty was asked to purge.
+//
+// ⚠ storage_id is read, not merely decoded: it was once parsed into a struct
+// and dropped, while the admin UI's confirmation promised it narrowed the
+// purge. Emptying "one storage" emptied all of them, permanently.
+//
+// ⚠⚠ And anything it cannot read is an error, never a default. The body used
+// to be decoded into one struct and, on any decode error, ignored whole — so
+// {"storage_id":2,"older_than_days":""}, what the admin page sent once its
+// days box had been typed in and cleared, lost the storage_id along with the
+// bad field and emptied every storage the caller could reach. A negative day
+// count, or a storage_id that was not a number, was dropped the same way and
+// meant "everything"; so did a misspelt field. A narrowing that cannot be
+// read stops this request instead of widening it.
+func emptyRequest(r *http.Request) (olderThanDays int, storageID int64, err error) {
+	const badStorage = "storage_id must be a storage id"
+	const badDays = "older_than_days must be a whole number of days, 0 or more"
+	q := r.URL.Query()
+	if v := q.Get("storage_id"); v != "" {
+		if storageID, err = strconv.ParseInt(v, 10, 64); err != nil || storageID < 0 {
+			return 0, 0, errors.New(badStorage)
+		}
+	}
+	if v := q.Get("older_than_days"); v != "" {
+		if olderThanDays, err = strconv.Atoi(v); err != nil || olderThanDays < 0 {
+			return 0, 0, errors.New(badDays)
+		}
+	}
+	if r.Body == nil || r.ContentLength == 0 {
+		return olderThanDays, storageID, nil
+	}
+	var body struct {
+		OlderThanDays *int   `json:"older_than_days"`
+		StorageID     *int64 `json:"storage_id"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		if errors.Is(err, io.EOF) {
+			return olderThanDays, storageID, nil // an empty body of unknown length
+		}
+		return 0, 0, errors.New("bad json: " + err.Error())
+	}
+	if body.StorageID != nil {
+		if *body.StorageID < 0 {
+			return 0, 0, errors.New(badStorage)
+		}
+		storageID = *body.StorageID
+	}
+	if body.OlderThanDays != nil {
+		if *body.OlderThanDays < 0 {
+			return 0, 0, errors.New(badDays)
+		}
+		olderThanDays = *body.OlderThanDays
+	}
+	return olderThanDays, storageID, nil
 }
 
 // List returns soft-deleted nodes for the admin trash view.

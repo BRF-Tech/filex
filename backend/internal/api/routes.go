@@ -1161,6 +1161,9 @@ func BuildRouter(d *Deps) http.Handler {
 
 			r.Route("/trash", func(r chi.Router) {
 				r.Post("/empty", trashH.AdminEmpty)
+				// The progress of the empty POST started: a large trash is
+				// purged in the background and the page polls this.
+				r.Get("/empty", trashH.EmptyStatus)
 				r.Delete("/{id}", trashH.Purge)
 			})
 
