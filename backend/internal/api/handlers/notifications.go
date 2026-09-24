@@ -396,6 +396,21 @@ func (h *Notifications) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 //
 //	GET /admin/api/notifications?unread=true&limit=50&offset=0
 func (h *Notifications) AdminList(w http.ResponseWriter, r *http.Request) {
+	// ⚠ BEFORE the "notifications offline" 503, same ordering as the webhook
+	// config below.
+	//
+	// This is every event the instance recorded — every tenant's file paths,
+	// every user's bell — and a tenant admin read all of it: the route only
+	// asks for an admin, and in multi-tenant mode that means the admin of ANY
+	// tenant. Filtering it is not a gate's job: a row names its tenant only
+	// inside meta_json (and the replica events not at all), so a scoped page
+	// would come back short with a count that describes rows it removed. A
+	// tenant's own events already reach its admins through the bell, which is
+	// scoped (visibleTo). A per-tenant audit is a feature, with a tenant column
+	// behind it.
+	if !requireSupertenant(w, r, "the notification history holds every tenant's events") {
+		return
+	}
 	if h.Service == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "notifications offline"})
 		return
@@ -421,6 +436,14 @@ func (h *Notifications) AdminList(w http.ResponseWriter, r *http.Request) {
 //
 //	POST /admin/api/notifications/test
 func (h *Notifications) AdminTest(w http.ResponseWriter, r *http.Request) {
+	// ⚠ BEFORE the 503, same ordering as its siblings. The test event goes to
+	// the instance's global webhook and to every webhook target — the
+	// operator's receivers, not a tenant's — and lands as a row only the
+	// supertenant's bell can show, so a tenant admin could only ever use it to
+	// fire deliveries at somebody else's endpoint.
+	if !requireSupertenant(w, r, "the test event goes to every webhook destination of the instance") {
+		return
+	}
 	if h.Service == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "notifications offline"})
 		return
