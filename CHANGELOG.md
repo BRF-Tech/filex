@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thumbnails arrive one at a time, the grid asked for a thumbnail 9,150 times
   and the table 5,490; every view asks 120 times now. Each thumbnail is drawn
   by a component of its own (`ThumbTile`), so an arrival re-renders the tile
-  that shows it. Found by Berk Başarır.
+  that shows it. Found by Berk Başarır ([#50](https://github.com/BRF-Tech/filex/pull/50)).
 - **A thumbnail is fetched when its tile comes near the screen**, not for every
   file in the folder the moment it opens: one shared IntersectionObserver
   (`lib/nearViewport`), 300 px ahead, the way the text previews already
