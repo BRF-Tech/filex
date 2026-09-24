@@ -34,6 +34,23 @@ type fakeServer struct {
 	// afterTransfer runs at the end of every successful Download/Upload —
 	// the place a test pulls the plug mid-run.
 	afterTransfer func()
+	// beforeUpload runs inside Upload before the precondition is checked —
+	// where a test lands a browser save "in the same second".
+	beforeUpload func(rel string)
+	// uploadErr, when set, refuses an upload of rel for as long as it returns
+	// an error — a lock (423), a size limit, a full quota.
+	uploadErr func(rel string) error
+	// ignoreExpect plays a server older than the upload precondition.
+	ignoreExpect bool
+	// noUploadEcho plays a server whose upload answer carries no listing.
+	noUploadEcho bool
+	// Counters for assertions about traffic.
+	uploads, refused, lists, downloads, mkdirs int
+	// served, when it has an entry, is what Download sends INSTEAD of the file
+	// it lists — a server answering with something other than the file, the
+	// way v0.20–v0.42 answered a big file on a slow storage with a JSON
+	// status report.
+	served map[string][]byte
 }
 
 func newFake(root string) *fakeServer {
@@ -61,6 +78,7 @@ func (f *fakeServer) rel(remote string) (string, error) {
 func (f *fakeServer) List(_ context.Context, remote string) (*Listing, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.lists++
 	rel, err := f.rel(remote)
 	if err != nil {
 		return nil, err
@@ -69,7 +87,8 @@ func (f *fakeServer) List(_ context.Context, remote string) (*Listing, error) {
 		return nil, err
 	}
 	if rel != "" && !f.dirs[rel] {
-		return nil, fmt.Errorf("not a directory: %s", rel)
+		// What the real adapter does with the server's 404.
+		return nil, fmt.Errorf("%w: not a directory: %s", ErrRemoteNotFound, rel)
 	}
 	var out Listing
 	seen := map[string]bool{}
@@ -103,7 +122,9 @@ func dirOf(rel string) string {
 	return rel
 }
 
-func (f *fakeServer) Download(_ context.Context, remote string, w io.Writer) (int64, error) {
+// Download ignores size on purpose: the engine must protect itself even from a
+// RemoteFS that does not check (the real adapter does).
+func (f *fakeServer) Download(_ context.Context, remote string, _ int64, w io.Writer) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	rel, err := f.rel(remote)
@@ -118,6 +139,10 @@ func (f *fakeServer) Download(_ context.Context, remote string, w io.Writer) (in
 	if !ok {
 		return 0, fmt.Errorf("no such file: %s", rel)
 	}
+	f.downloads++
+	if alt, ok := f.served[rel]; ok {
+		b = alt
+	}
 	n, err := w.Write(b)
 	if err == nil && f.afterTransfer != nil {
 		f.afterTransfer()
@@ -125,36 +150,62 @@ func (f *fakeServer) Download(_ context.Context, remote string, w io.Writer) (in
 	return int64(n), err
 }
 
-func (f *fakeServer) Upload(_ context.Context, localPath, remote string) error {
+// Upload behaves like the real server's conditional upload: `expect` is
+// checked against what a listing would report right now, and the answer
+// carries the written file as the listing shows it (unless the fake plays an
+// older server with noUploadEcho).
+func (f *fakeServer) Upload(_ context.Context, localPath, remote, expect string) (*ListedFile, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	rel, err := f.rel(remote)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := f.fail[rel]; err != nil {
 		delete(f.fail, rel)
-		return err
+		return nil, err
+	}
+	if f.uploadErr != nil {
+		if err := f.uploadErr(rel); err != nil {
+			return nil, err
+		}
+	}
+	if f.beforeUpload != nil {
+		f.beforeUpload(rel)
+	}
+	if expect != "" && !f.ignoreExpect {
+		cur, exists := f.files[rel]
+		switch {
+		case expect == "none" && exists,
+			expect != "none" && (!exists || fmt.Sprintf("%d:%d", len(cur), f.mod[rel]) != expect):
+			f.refused++
+			return nil, fmt.Errorf("%w: HTTP 412", ErrRemoteChanged)
+		}
 	}
 	b, err := os.ReadFile(localPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if f.dirs[rel] {
-		return fmt.Errorf("refusing to write a file onto the folder %s", rel)
+		return nil, fmt.Errorf("refusing to write a file onto the folder %s", rel)
 	}
 	f.files[rel] = b
 	f.clock += 1000
 	f.mod[rel] = f.clock
+	f.uploads++
 	if f.afterTransfer != nil {
 		f.afterTransfer()
 	}
-	return nil
+	if f.noUploadEcho {
+		return nil, nil
+	}
+	return &ListedFile{Basename: path.Base(rel), Size: int64(len(b)), LastModified: f.mod[rel]}, nil
 }
 
 func (f *fakeServer) Mkdir(_ context.Context, remote string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.mkdirs++
 	rel, err := f.rel(remote)
 	if err != nil {
 		return err
@@ -763,7 +814,7 @@ func TestInterruptedFirstRunResumesWithoutConflicts(t *testing.T) {
 // The slack in adoption is two seconds — FAT's mtime step, and a cover for
 // tools that stamp times through float seconds and land a millisecond off
 // (measured: 1,667 conflict pairs from exactly that). Outside it, the
-// planner stays as suspicious as ever.
+// planner stays as suspicious as ever — and the engine compares the bytes.
 func TestAdoptionToleratesCoarseMtimes(t *testing.T) {
 	r := newRig(t)
 	r.srv.files["a.txt"] = []byte("same bytes")
@@ -794,8 +845,11 @@ func TestAdoptionToleratesCoarseMtimes(t *testing.T) {
 		t.Fatal(err)
 	}
 	res = r.run()
-	if res.Conflicts != 1 {
-		t.Fatalf("5s off must conflict, got %+v", res)
+	// Outside the slack the planner still refuses to adopt on metadata alone;
+	// the engine then compares the bytes, finds them equal, and settles the
+	// pair without a copy.
+	if res.Planned != 1 || res.Conflicts != 0 || res.Identical != 1 || res.Uploaded != 0 {
+		t.Fatalf("5s off must be planned as a conflict and resolved as identical, got %+v", res)
 	}
 }
 
@@ -1009,11 +1063,20 @@ func TestAnInterruptedRunResumesFromItsCheckpoint(t *testing.T) {
 	if err != nil || !had {
 		t.Fatalf("no checkpoint on disk: had=%v err=%v", had, err)
 	}
-	if len(rows) != 16 {
-		t.Fatalf("checkpoint must hold the 16 settled files, has %d", len(rows))
+	// The two folders the run created are recorded too (a folder row is
+	// what later lets a folder DELETE propagate); the files are what this
+	// test is about.
+	files := 0
+	for _, e := range rows {
+		if !e.IsDir {
+			files++
+		}
+	}
+	if files != 16 {
+		t.Fatalf("checkpoint must hold the 16 settled files, has %d (rows: %v)", files, rows)
 	}
 	if e, ok := rows["up/u03.txt"]; !ok || e.Remote == "" || e.Local == "" {
-		t.Fatalf("an upload's row must carry BOTH signatures (the remote one from a listing): %+v ok=%v", e, ok)
+		t.Fatalf("an upload's row must carry BOTH signatures (the remote one from the server's answer): %+v ok=%v", e, ok)
 	}
 
 	r.srv.afterTransfer = nil

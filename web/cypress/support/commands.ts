@@ -16,6 +16,9 @@ declare global {
       /** Logs in via the visible form. Slow path — exercises the
        *  Login.vue happy path. */
       uiLogin(email?: string, password?: string): Chainable<void>;
+      /** Presses the sign-in form's own submit button — found by what it IS,
+       *  never by what it SAYS (see the note on the command). */
+      submitLogin(): Chainable<void>;
       /** Authenticated GET. Returns the parsed JSON body. */
       adminGet<T = unknown>(path: string): Chainable<T>;
     }
@@ -67,13 +70,36 @@ Cypress.Commands.add('uiLogin', (email, password) => {
   cy.visit('/admin/login');
   cy.get('input[type="email"], input[name="email"]').first().clear().type(e);
   cy.get('input[type="password"], input[name="password"]').first().clear().type(p);
-  cy.contains('button', /sign in|giriş|giris|login/i)
-    .filter(':visible')
-    .first()
-    .click();
+  cy.submitLogin();
   // The start page: Home for every account by default, the dashboard for an
   // admin who picked it in user settings (web/src/lib/startPage.ts, 0.41.0).
   cy.url().should('match', /\/admin\/(home|dashboard)([?#]|$)/);
+});
+
+/**
+ * The sign-in form's submit button: the `type="submit"` button of the form
+ * that holds the password field.
+ *
+ * ⚠⚠ NOT by its text. This used to be `cy.contains('button', /sign
+ * in|giriş|giris|login/i)`, and Cypress's Electron follows the operating
+ * system's language — so on a Turkish machine the page opens in Turkish, and
+ * the day a translation pass renamed the button ("Giriş yap" → "Oturum
+ * aç", one word per concept, v0.43.0) every spec behind the login helpers
+ * went red with the product working (measured on the v0.43.0 release run:
+ * 8 tests in 5 specs). A regex of every language the button has been in is a
+ * list that goes stale at the next rename; what the button IS does not change.
+ * Both sign-in layouts in Login.vue have exactly one submit button inside the
+ * form that holds the password, so this finds the right one in either.
+ */
+Cypress.Commands.add('submitLogin', () => {
+  cy.get('input[type="password"], input[name="password"]')
+    .filter(':visible')
+    .first()
+    .closest('form')
+    .find('button[type="submit"]')
+    .filter(':visible')
+    .first()
+    .click();
 });
 
 Cypress.Commands.add('adminGet', <T = unknown,>(path: string) => {

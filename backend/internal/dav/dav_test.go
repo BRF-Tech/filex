@@ -196,7 +196,8 @@ func TestBasicAuthWithPasswordAndToken(t *testing.T) {
 	// API token as the Basic password.
 	admin, err := ha.store.GetUserByEmail(context.Background(), ha.adminEmail)
 	require.NoError(t, err)
-	tok := ha.mintToken(t, admin.ID, "")
+	// Every file verb, named: an empty list grants nothing since v0.43.0.
+	tok := ha.mintToken(t, admin.ID, "read,write,delete")
 	resp = ha.req(t, "PROPFIND", "/dav/", ha.adminEmail, tok, "", map[string]string{"Depth": "1"})
 	require.Equal(t, http.StatusMultiStatus, resp.StatusCode)
 

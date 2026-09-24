@@ -9,15 +9,23 @@
 // about to carry two copies of the arithmetic that produces them.
 //
 // The rule, once: hang the panel 6px under the button, flush with the button's
-// RIGHT edge (both controls sit at the end of the row, where a left-edge anchor
-// hangs the panel off the viewport), and — when the caller gives a width — keep
-// the whole panel on screen. That last part is not decoration: at 390px the bell
-// sits a button's width left of the avatar, and a 360px panel flush with its
-// right edge started 20px off the left of the phone.
+// END edge — its right edge in a left-to-right interface, its LEFT edge in a
+// right-to-left one (both controls sit at the end of the row, where a
+// start-edge anchor hangs the panel off the viewport) — and, when the caller
+// gives a width, keep the whole panel on screen. That last part is not
+// decoration: at 390px the bell sits a button's width left of the avatar, and a
+// 360px panel flush with its right edge started 20px off the left of the phone.
+//
+// ⚠ RTL: the arithmetic is the LTR arithmetic measured from the other side of
+// the viewport, so the answer carries `left` instead of `right`; bind both
+// (`{ right: pos.right, left: pos.left }`) and the absent one is simply not set.
 
 export interface AnchoredPanelPosition {
   top: string;
-  right: string;
+  /** Distance from the viewport's right edge — left-to-right interfaces. */
+  right?: string;
+  /** Distance from the viewport's left edge — right-to-left interfaces. */
+  left?: string;
   /** Present only when a width was asked for. */
   width?: string;
   /** Room left under the anchor, for a scrolling list inside the panel. */
@@ -33,6 +41,8 @@ export interface AnchorOptions {
   gap?: number;
   /** Ceiling for `maxHeight`. */
   maxHeight?: number;
+  /** The direction the header is drawn in (core `dirOfElement(button)`). */
+  dir?: 'ltr' | 'rtl';
 }
 
 /** The DOM element behind a template ref that may be a component (Headless UI's buttons are). */
@@ -43,18 +53,21 @@ export function refElement(r: unknown): HTMLElement | null {
   return typeof HTMLElement !== 'undefined' && el instanceof HTMLElement ? el : null;
 }
 
-export function anchorUnderRightEdge(
-  rect: Pick<DOMRect, 'bottom' | 'right'>,
+export function anchorUnderEndEdge(
+  rect: { bottom: number; right: number; left?: number },
   viewport: { width: number; height: number },
   opts: AnchorOptions = {},
 ): AnchoredPanelPosition {
+  const rtl = opts.dir === 'rtl';
+  const side = rtl ? 'left' : 'right';
   const gutter = opts.gutter ?? 8;
   const top = Math.round(rect.bottom + (opts.gap ?? 6));
-  const flush = Math.round(viewport.width - rect.right);
+  // The gap between the button's END edge and the viewport's end edge.
+  const flush = Math.round(rtl ? (rect.left ?? 0) : viewport.width - rect.right);
   const room = Math.max(200, viewport.height - top - gutter);
   const maxHeight = `${opts.maxHeight ? Math.min(opts.maxHeight, room) : room}px`;
-  if (!opts.width) return { top: `${top}px`, right: `${flush}px`, maxHeight };
+  if (!opts.width) return { top: `${top}px`, [side]: `${flush}px`, maxHeight };
   const width = Math.max(0, Math.min(opts.width, viewport.width - gutter * 2));
-  const right = Math.min(Math.max(flush, gutter), viewport.width - width - gutter);
-  return { top: `${top}px`, right: `${Math.round(right)}px`, width: `${Math.round(width)}px`, maxHeight };
+  const offset = Math.min(Math.max(flush, gutter), viewport.width - width - gutter);
+  return { top: `${top}px`, [side]: `${Math.round(offset)}px`, width: `${Math.round(width)}px`, maxHeight };
 }

@@ -4,6 +4,7 @@ import { SyncApi, type SyncRunListParams } from '@/api/sync';
 import type { PaginatedResponse, SyncRun } from '@/api/types';
 import { extractError } from '@/api/client';
 import { useStoragesStore } from '@/stores/storages';
+import { t } from '@/i18n';
 
 const EMPTY: PaginatedResponse<SyncRun> = { items: [], total: 0, page: 1, page_size: 25 };
 
@@ -19,7 +20,7 @@ export const useSyncStore = defineStore('sync', () => {
     try {
       runs.value = await SyncApi.list(params);
     } catch (e: unknown) {
-      error.value = extractError(e, 'Failed to load sync runs');
+      error.value = extractError(e, t('errors.loadFailed'));
     } finally {
       loading.value = false;
     }

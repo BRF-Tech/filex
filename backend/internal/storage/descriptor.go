@@ -103,6 +103,49 @@ type Descriptor struct {
 	// on a fresh instance). Surfaces want it in the same payload: a picker
 	// can say "no presigned URLs" before anything is saved.
 	Capabilities Capabilities `json:"capabilities"`
+
+	// ScanFields are the settings a STORAGE on this driver has for the scan
+	// that catalogues it (ScanFields()), as opposed to Fields, which the
+	// driver's Init reads. They live in the same config map and are drawn by
+	// the same form component, but only where a storage is edited: a
+	// replication target is never scanned, so its dialog leaves them out.
+	// Filled by Descriptors(); the registry does not hold them, which keeps
+	// TestDescriptorMatchesInit about what Init reads.
+	ScanFields []Field `json:"scan_fields,omitempty"`
+}
+
+// ScanExcludeKey is the storage config key holding a storage's scan
+// exclusions: glob patterns, one per line, for paths the scan must not walk.
+// internal/scanrule reads it; the key lives here so the descriptor that offers
+// it and the code that reads it name the same thing.
+const ScanExcludeKey = "scan_exclude"
+
+// ScanFields returns the scan settings every storage has, whatever its driver.
+// A fresh slice: callers cannot edit the set.
+//
+// ⚠ The help text says what the setting is NOT, on purpose: an excluded path is
+// not walked, catalogued, indexed, thumbnailed or virus-scanned, but it is still
+// on the storage and still served to whoever asks for it by path — the file
+// protocols and the AI tools read the storage directly. It saves work; it is
+// not an access control.
+func ScanFields() []Field {
+	return []Field{{
+		Key:     ScanExcludeKey,
+		Type:    FieldString,
+		Label:   "Paths to exclude from scanning",
+		I18nKey: "storages.fields.scanExclude",
+		Help: "One pattern per line, relative to the storage root: * matches within a name, " +
+			"** any number of folders, and a pattern without a / matches that name at any depth " +
+			"(.* skips every hidden file and folder). The scan does not go into a matching folder, " +
+			"and matching files are not catalogued, indexed, thumbnailed or virus-scanned. This " +
+			"saves work; it is not access control — the files stay on the storage, reachable by " +
+			"path, over WebDAV/SFTP and through the AI tools. Anything catalogued before you add " +
+			"a pattern stays as it is.",
+		HelpI18nKey: "storages.fieldHelp.scanExclude",
+		Placeholder: ".*\ndownloads/incomplete/**\n*.tmp",
+		Monospace:   true,
+		Multiline:   true,
+	}}
 }
 
 // Field returns the field with the given key.
@@ -241,6 +284,7 @@ func Descriptors() []Descriptor {
 		if drv, err := Get(out[i].Driver); err == nil {
 			out[i].Capabilities = ComputeCapabilities(drv)
 		}
+		out[i].ScanFields = ScanFields()
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Driver < out[j].Driver })
 	return out

@@ -274,6 +274,12 @@ pass, forever; scanning on sight would re-scan the entire storage every sync
 interval — 96 times a day on the 15-minute default — for content nothing had
 touched.
 
+⚠ **A path the storage excludes from scanning is not scanned here either.**
+The walk does not go into it ([STORAGE.md → Scan exclusions](STORAGE.md#scan-exclusions)),
+so a file that lands under `downloads/incomplete/**` on disk is never handed
+to ClamAV by the sync. A file written there *through* filex — an upload, a
+WebDAV save — is scanned like any other upload.
+
 Drift is the backend's etag where there is one, and **size + modification time
 where there is not** — `local`, `sftp`, `smb` and `ftp` always, plus any WebDAV
 server that omits the header and any storage plugin that reports no etag. See

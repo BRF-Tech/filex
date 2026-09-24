@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, useId } from 'vue';
+import { computed, ref, useId } from 'vue';
+import { onFieldInvalid } from '@/lib/formCheck';
 
 interface Option {
   value: string | number;
@@ -30,7 +31,12 @@ const emit = defineEmits<{
 const fallback = useId();
 const selectId = computed(() => props.name ?? fallback);
 
+/* The browser's verdict, in the panel's language (see ui/Input). */
+const nativeError = ref('');
+const shownError = computed(() => props.error || nativeError.value);
+
 function onChange(ev: Event) {
+  nativeError.value = '';
   const v = (ev.target as HTMLSelectElement).value;
   // Coerce back to number if every option is numeric.
   const allNumeric = props.options.every((o) => typeof o.value === 'number');
@@ -64,12 +70,13 @@ const padding = computed(() => {
         :value="modelValue ?? ''"
         :required="required"
         :disabled="disabled"
-        :aria-invalid="error ? 'true' : undefined"
+        :aria-invalid="shownError ? 'true' : undefined"
         :class="[
-          'input-base appearance-none pr-9',
+          'input-base appearance-none pe-9',
           padding,
-          error && 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30',
+          shownError && 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30',
         ]"
+        @invalid="(e) => (nativeError = onFieldInvalid(e))"
         @change="onChange"
       >
         <option v-if="placeholder" value="" disabled>{{ placeholder }}</option>
@@ -83,7 +90,7 @@ const padding = computed(() => {
         </option>
       </select>
       <svg
-        class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500"
+        class="pointer-events-none absolute end-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500"
         viewBox="0 0 20 20"
         fill="currentColor"
         aria-hidden="true"
@@ -95,7 +102,7 @@ const padding = computed(() => {
         />
       </svg>
     </div>
-    <p v-if="error" class="error-text">{{ error }}</p>
+    <p v-if="shownError" class="error-text" data-testid="field-error">{{ shownError }}</p>
     <p v-else-if="hint" class="help-text">{{ hint }}</p>
   </div>
 </template>

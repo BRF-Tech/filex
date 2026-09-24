@@ -78,4 +78,22 @@ describe('nodeRowToFileNode', () => {
     expect(n?.extension).toBe('');
     expect(n?.thumb_url).toBeUndefined();
   });
+
+  it('asks for a thumbnail only where the server said there is one', () => {
+    // ⚠ 2026-09-21: every file on Recent / Starred / a tag view got a made-up
+    // `/api/files/thumb/<id>`, and every docx, note and diagram answered
+    // `404 "not ready"` — ten requests, ten 404s for one Recent view.
+    const none = nodeRowToFileNode(
+      { id: 82, path: 'letter.docx', name: 'letter.docx', type: 'file', storage: 'drive' },
+      multi,
+    );
+    expect(none?.thumb_url).toBeUndefined();
+    const url = '/api/files/thumb/56?exp=1&sig=abc';
+    const ready = nodeRowToFileNode(
+      { id: 56, path: 'square.jpg', name: 'square.jpg', type: 'file', storage: 'drive', thumb_url: url },
+      multi,
+    );
+    // The server's URL, signature and all — never one rebuilt from the id.
+    expect(ready?.thumb_url).toBe(url);
+  });
 });

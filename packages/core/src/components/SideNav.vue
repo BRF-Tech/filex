@@ -30,7 +30,12 @@
  */
 import { computed, ref } from 'vue';
 import { useLocale } from '../composables/useLocale';
+import { inlineStartX } from '../lib/direction';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
+import { actionIconSvg } from '../lib/actionIcons';
+import type { TagItem, TagKind } from '../lib/tags';
+import TagKindIcon from './TagKindIcon.vue';
+import StorageTags from './StorageTags.vue';
 import ContextMenu, { type ContextAction } from './ContextMenu.vue';
 
 /** The virtual listings the panel can open. '' = an ordinary folder.
@@ -61,6 +66,18 @@ export interface NavStorage {
   readOnly?: boolean;
 }
 
+/**
+ * A row of the "Apps" section — an app plugin's `home` view, already read in
+ * the viewer's language by the host (docs/APP-PLUGINS-API.md → Placements).
+ */
+export interface NavApp {
+  /** `<plugin>/<view>` — what `open-app` carries back. */
+  key: string;
+  label: string;
+  /** A manifest icon name; drawn when `lib/actionIcons` has it, else the plugin glyph. */
+  icon?: string;
+}
+
 const props = defineProps<{
   /** Expanded (labels visible) vs collapsed to the icon rail. */
   expanded: boolean;
@@ -86,14 +103,17 @@ const props = defineProps<{
    * dynamic in name. Still presentational here — the host fetches
    * `tags/all` (once, cached) and hands the list over, exactly as it does
    * for storages. */
-  /** Every tag that exists, alphabetical. Empty → the section shows its own
-   *  "no tags yet" line rather than disappearing. */
-  tags?: string[];
+  /** Every tag the person can see, alphabetical, WITH its kind (v0.43:
+   *  personal or team). Empty → the section shows its own "no tags yet" line
+   *  rather than disappearing. */
+  tags?: TagItem[];
   /** False until the first answer arrives, so "no tags yet" is never shown
    *  to somebody who is simply still waiting. */
   tagsLoaded?: boolean;
   /** The tag currently on screen (activeView === 'tag'). */
   activeTag?: string;
+  /** …and its kind ('' = a view of both kinds, e.g. an old `#.tag~x` link). */
+  activeTagKind?: TagKind | '';
   /**
    * Show the Connections entries — "How to connect" and "API keys".
    * ⚠ Never derived from a role here or anywhere: the backend decides what a
@@ -101,6 +121,18 @@ const props = defineProps<{
    * accounts that need it (see ExplorerConfig.connections).
    */
   showConnections?: boolean;
+  /**
+   * paylas:m1 — draw the "My shares" row (mirrors ExplorerConfig.mySharesVisible).
+   *
+   * ⚠ Absent means NO, and that is the one place this prop differs from
+   * `trashVisible` beside it: the row's destination is a page of the HOST, so
+   * a panel that draws it without being asked draws a button that does
+   * nothing. Vue casts an absent Boolean prop to `false`, which is exactly the
+   * answer wanted here — a host that says nothing has not promised a screen.
+   * (The inverse default is the trap lib-wide; see ExplorerConfig.trashVisible,
+   * read as `!== false`, and `withDefaults` everywhere a default is ON.)
+   */
+  showMyShares?: boolean;
   /**
    * Draw the surfaces that only mean something for ONE person: API keys,
    * Recent, Starred, Shared with me. False when the caller is an app token —
@@ -152,12 +184,18 @@ const props = defineProps<{
   quota?: { used: number; total: number; unlimited: boolean } | null;
   /** Resolved theme — the teleported New menu leaves the `.fe` variable scope. */
   theme?: ThemeMode;
+  /**
+   * App plugins — the `home` views, one row each under "Apps". Empty or
+   * absent hides the section entirely: a heading over nothing is a promise
+   * the deployment cannot keep.
+   */
+  apps?: NavApp[];
 }>();
 
 const emit = defineEmits<{
   (e: 'toggle'): void;
   (e: 'open-view', view: NavDest): void;
-  (e: 'open-tag', tag: string): void;
+  (e: 'open-tag', tag: string, kind: TagKind): void;
   (e: 'open-storage', name: string): void;
   (e: 'open-root'): void;
   (e: 'upload'): void;
@@ -165,13 +203,25 @@ const emit = defineEmits<{
   (e: 'new-document'): void;
   (e: 'open-connections'): void;
   (e: 'open-tokens'): void;
+  /**
+   * "My shares" — the public links THIS person handed out.
+   *
+   * ⚠ Unlike every other row in the views group, it does not change the
+   * listing: the screen lives in the HOST (the SPA's `my-shares` route), so
+   * the panel can only announce the intent and the host decides where it
+   * lands. A host with no such screen does not listen, and nothing here
+   * pretends otherwise.
+   */
+  (e: 'open-my-shares'): void;
+  /** App plugins — an "Apps" row: open that `home` view. */
+  (e: 'open-app', key: string): void;
   /* surucu:d1 — "Request files": the access modal on THIS folder, drop tab. */
   (e: 'request-files'): void;
   /** Drawer scrim / Esc — narrow mode only. */
   (e: 'close'): void;
 }>();
 
-const { t, formatSize } = useLocale(() => props.locale);
+const { t, formatSize, dir } = useLocale(() => props.locale);
 
 // In drawer mode "expanded" is the only meaningful state: a rail inside an
 // overlay would be an overlay that shows nothing but icons while covering the
@@ -242,6 +292,14 @@ const views = computed(() => {
 
 const writable = computed(() => props.canWrite !== false);
 
+/** App plugins — the "Apps" rows, with a glyph the icon library knows. */
+const appRows = computed(() =>
+  (props.apps ?? []).map((a) => ({
+    ...a,
+    svg: actionIconSvg(a.icon && actionIconSvg(a.icon) !== '' ? a.icon : 'plugin'),
+  })),
+);
+
 /**
  * The storage the listing is in is mounted read-only. Its "+ New" menu is not
  * disabled but GONE: on a read-only mount there is no folder where any of
@@ -251,6 +309,14 @@ const writable = computed(() => props.canWrite !== false);
 const activeReadOnly = computed(
   () => !!props.activeStorage && props.storages.some((s) => s.name === props.activeStorage && s.readOnly === true),
 );
+
+/**
+ * The Trash is read-only in the same sense, and gets the same answer: no
+ * "+ New". It used to stand there with every row greyed (QA, 2026-09-21) —
+ * nothing is ever made inside the Trash, so a menu of things you cannot make
+ * there only asks a question it cannot answer.
+ */
+const newShown = computed(() => !activeReadOnly.value && props.activeView !== 'trash');
 
 /**
  * Which row reads as the one you are standing on.
@@ -283,10 +349,28 @@ function isActiveDest(key: NavDest): boolean {
 const TAG_PEEK = 8;
 const tagsExpanded = ref(false);
 const allTags = computed(() => props.tags ?? []);
-const visibleTags = computed(() =>
-  tagsExpanded.value ? allTags.value : allTags.value.slice(0, TAG_PEEK),
+/* etiket:k2 (v0.43.0) — the list is two GROUPS, Personal then Team, each under
+ * its own caption with the kind's glyph, and each row repeats the glyph. Until
+ * this release there was one kind, shared with every account on the server,
+ * and the panel never said so (tester, 2026-09-22). The peek applies per
+ * group: sixty personal tags must not push the team's off the panel. */
+const tagGroups = computed(() =>
+  (['personal', 'team'] as TagKind[])
+    .map((kind) => {
+      const list = allTags.value.filter((tag) => tag.kind === kind);
+      return { kind, list, visible: tagsExpanded.value ? list : list.slice(0, TAG_PEEK) };
+    })
+    .filter((g) => g.list.length > 0),
 );
-const hiddenTagCount = computed(() => Math.max(0, allTags.value.length - visibleTags.value.length));
+const hiddenTagCount = computed(() =>
+  tagGroups.value.reduce((n, g) => n + g.list.length - g.visible.length, 0),
+);
+const anyGroupLong = computed(() => tagGroups.value.some((g) => g.list.length > TAG_PEEK));
+
+function tagIsActive(tag: TagItem): boolean {
+  if (props.activeView !== 'tag' || props.activeTag !== tag.name) return false;
+  return !props.activeTagKind || props.activeTagKind === tag.kind;
+}
 /* The section is rendered as soon as the panel knows there ARE tags, and also
  * once the answer came back empty — an empty section that says why is how a
  * user learns the feature exists at all. It stays hidden only while the first
@@ -341,7 +425,8 @@ const newActions = computed<ContextAction[]>(() => {
 function openNewMenu() {
   const r = newBtnEl.value?.getBoundingClientRect();
   newMenuRef.value?.show(
-    { clientX: r ? r.left : 0, clientY: r ? r.bottom + 6 : 0 } as MouseEvent,
+    // ⚠ RTL: hangs from the pill's START edge (its right side in RTL).
+    { clientX: r ? inlineStartX(r, dir.value) : 0, clientY: r ? r.bottom + 6 : 0 } as MouseEvent,
     [],
   );
 }
@@ -436,7 +521,7 @@ const toggleLabel = computed(() => t('sidenav.close'));
            stand here behind `v-if="!newMenu"` (Upload + New folder) is gone:
            both verbs are the first two rows of this menu. -->
       <button
-        v-if="!activeReadOnly"
+        v-if="newShown"
         ref="newBtnEl"
         type="button"
         class="fe-sidenav__new"
@@ -494,58 +579,113 @@ const toggleLabel = computed(() => t('sidenav.close'));
 
     <div class="fe-sidenav__scroll">
       <ul class="fe-sidenav__group" :aria-label="t('sidenav.views')">
-        <li v-for="v in views" :key="v.key">
-          <button
-            type="button"
-            class="fe-sidenav__item"
-            :class="{ 'is-active': isActiveDest(v.key) }"
-            :aria-current="isActiveDest(v.key) ? 'page' : undefined"
-            :title="v.label"
-            :aria-label="v.label"
-            :data-testid="`sidenav-view-${v.key}`"
-            @click="emit('open-view', v.key)"
-          >
-            <svg
-              class="fe-ficon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-              focusable="false"
+        <template v-for="v in views" :key="v.key">
+          <li>
+            <button
+              type="button"
+              class="fe-sidenav__item"
+              :class="{ 'is-active': isActiveDest(v.key) }"
+              :aria-current="isActiveDest(v.key) ? 'page' : undefined"
+              :title="v.label"
+              :aria-label="v.label"
+              :data-testid="`sidenav-view-${v.key}`"
+              @click="emit('open-view', v.key)"
             >
-              <template v-if="v.key === 'home'">
-                <path d="M4 10.5L12 4l8 6.5" />
-                <path d="M6 9.8V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.8" />
-                <path d="M10 20v-5.5h4V20" />
-              </template>
-              <template v-else-if="v.key === 'myfiles'">
-                <path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8A1.5 1.5 0 0 1 20.5 10v7.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" />
-              </template>
-              <template v-else-if="v.key === 'recent'">
-                <circle cx="12" cy="12" r="8.5" />
-                <path d="M12 7.5V12l3 2" />
-              </template>
-              <template v-else-if="v.key === 'starred'">
-                <path d="M12 4l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z" />
-              </template>
-              <template v-else-if="v.key === 'shared'">
-                <circle cx="17.5" cy="6.5" r="2.5" />
-                <circle cx="6.5" cy="12" r="2.5" />
-                <circle cx="17.5" cy="17.5" r="2.5" />
-                <path d="M8.8 10.8l6.4-3.2M8.8 13.2l6.4 3.2" />
-              </template>
-              <template v-else>
-                <path d="M4.5 7h15" />
-                <path d="M9.5 7V5.2A1.2 1.2 0 0 1 10.7 4h2.6a1.2 1.2 0 0 1 1.2 1.2V7" />
-                <path d="M6.5 7l.9 11.1A1.4 1.4 0 0 0 8.8 19.4h6.4a1.4 1.4 0 0 0 1.4-1.3L17.5 7" />
-              </template>
-            </svg>
-            <span v-if="showLabels" class="fe-sidenav__text">{{ v.label }}</span>
-          </button>
-        </li>
+              <svg
+                class="fe-ficon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <template v-if="v.key === 'home'">
+                  <path d="M4 10.5L12 4l8 6.5" />
+                  <path d="M6 9.8V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.8" />
+                  <path d="M10 20v-5.5h4V20" />
+                </template>
+                <template v-else-if="v.key === 'myfiles'">
+                  <path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8A1.5 1.5 0 0 1 20.5 10v7.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" />
+                </template>
+                <template v-else-if="v.key === 'recent'">
+                  <circle cx="12" cy="12" r="8.5" />
+                  <path d="M12 7.5V12l3 2" />
+                </template>
+                <template v-else-if="v.key === 'starred'">
+                  <path d="M12 4l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z" />
+                </template>
+                <template v-else-if="v.key === 'shared'">
+                  <circle cx="17.5" cy="6.5" r="2.5" />
+                  <circle cx="6.5" cy="12" r="2.5" />
+                  <circle cx="17.5" cy="17.5" r="2.5" />
+                  <path d="M8.8 10.8l6.4-3.2M8.8 13.2l6.4 3.2" />
+                </template>
+                <template v-else>
+                  <path d="M4.5 7h15" />
+                  <path d="M9.5 7V5.2A1.2 1.2 0 0 1 10.7 4h2.6a1.2 1.2 0 0 1 1.2 1.2V7" />
+                  <path d="M6.5 7l.9 11.1A1.4 1.4 0 0 0 8.8 19.4h6.4a1.4 1.4 0 0 0 1.4-1.3L17.5 7" />
+                </template>
+              </svg>
+              <span v-if="showLabels" class="fe-sidenav__text">{{ v.label }}</span>
+            </button>
+          </li>
+
+          <!-- paylas:m1 — "My shares", directly under "Shared with me".
+               The pair is one question asked in both directions: what other
+               people handed to me, and what I handed out. A person hunting for
+               a link they minted looks where the sharing rows are, not under
+               Connections — that group is the one-time setup corner (how to
+               mount this, which API keys exist), and burying a daily lookup in
+               it is how a screen stays undiscovered.
+
+               ⚠ Anchored to the 'shared' row rather than appended to the group:
+               it has to sit BESIDE its mirror, and `views` may or may not carry
+               "My files" above it. That anchoring also carries the app-token
+               rule for free — `views` drops the identity rows for an app token,
+               so "Shared with me" goes and this row goes with it, which is
+               right: an app token is not a person and has shared nothing.
+
+               ⚠ It emits rather than navigates. The destination is a host
+               route, not a listing this panel can open — which is exactly why
+               `showMyShares` gates it and why that gate is OFF unless a host
+               asks. In an embed (`<filex-explorer>` on work.example.com, in the
+               fishapp, on fm.example.com) nothing listens for `open-my-shares`, so
+               an ungated row would be the one entry in this panel that draws,
+               takes a click and leads nowhere. Every other row is either
+               handled inside FileExplorer or gated by a flag of its own
+               (`trashVisible`, `showConnections`); this one now is too. -->
+          <li v-if="v.key === 'shared' && showMyShares">
+            <button
+              type="button"
+              class="fe-sidenav__item"
+              :title="t('sidenav.myshares')"
+              :aria-label="t('sidenav.myshares')"
+              data-testid="sidenav-my-shares"
+              @click="emit('open-my-shares')"
+            >
+              <!-- A chain link, against the three-node graph the row above
+                   draws: what leaves here is a URL. -->
+              <svg
+                class="fe-ficon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path d="M10 13.5a4.5 4.5 0 0 0 6.8.5l2.7-2.7a4.5 4.5 0 0 0-6.36-6.36L11.6 6.5" />
+                <path d="M14 10.5a4.5 4.5 0 0 0-6.8-.5l-2.7 2.7a4.5 4.5 0 0 0 6.36 6.36l1.53-1.53" />
+              </svg>
+              <span v-if="showLabels" class="fe-sidenav__text">{{ t('sidenav.myshares') }}</span>
+            </button>
+          </li>
+        </template>
       </ul>
 
       <!-- etiket:t1 — Tags. Between the views and the storages because a tag
@@ -557,35 +697,36 @@ const toggleLabel = computed(() => t('sidenav.close'));
       <div v-if="showTags" class="fe-sidenav__section">
         <template v-if="showLabels">
           <p class="fe-sidenav__heading">{{ t('sidenav.tags') }}</p>
-          <ul class="fe-sidenav__group" :aria-label="t('sidenav.tags')">
-            <li v-for="tag in visibleTags" :key="tag">
-              <button
-                type="button"
-                class="fe-sidenav__item fe-sidenav__item--tag"
-                :class="{ 'is-active': activeView === 'tag' && activeTag === tag }"
-                :aria-current="activeView === 'tag' && activeTag === tag ? 'page' : undefined"
-                :title="tag"
-                :aria-label="tag"
-                :data-testid="`sidenav-tag-${tag}`"
-                @click="emit('open-tag', tag)"
-              >
-                <svg
-                  class="fe-ficon"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                  focusable="false"
+          <template v-for="g in tagGroups" :key="g.kind">
+            <!-- etiket:k2 — whose tags these are, in words and in the glyph
+                 every tag chip carries. -->
+            <p class="fe-sidenav__subheading" :data-testid="`sidenav-tags-${g.kind}`">
+              <TagKindIcon :kind="g.kind" :size="12" />
+              <span>{{ t(`sidenav.tags.${g.kind}`) }}</span>
+            </p>
+            <ul
+              class="fe-sidenav__group"
+              :aria-label="`${t('sidenav.tags')} — ${t(`sidenav.tags.${g.kind}`)}`"
+            >
+              <li v-for="tag in g.visible" :key="`${tag.kind}:${tag.name}`">
+                <button
+                  type="button"
+                  class="fe-sidenav__item fe-sidenav__item--tag"
+                  :class="{ 'is-active': tagIsActive(tag) }"
+                  :aria-current="tagIsActive(tag) ? 'page' : undefined"
+                  :title="t(`tags.chip.${tag.kind}`, { tag: tag.name })"
+                  :aria-label="t(`tags.chip.${tag.kind}`, { tag: tag.name })"
+                  :data-testid="`sidenav-tag-${tag.name}`"
+                  :data-tag-kind="tag.kind"
+                  @click="emit('open-tag', tag.name, tag.kind)"
                 >
-                  <path d="M4 4.5h7l9 9-6.5 6.5-9-9z" />
-                  <circle cx="8" cy="8.5" r="1.4" />
-                </svg>
-                <span class="fe-sidenav__text">{{ tag }}</span>
-              </button>
-            </li>
+                  <TagKindIcon class="fe-ficon" :kind="tag.kind" :size="16" />
+                  <span class="fe-sidenav__text">{{ tag.name }}</span>
+                </button>
+              </li>
+            </ul>
+          </template>
+          <ul class="fe-sidenav__group" :aria-label="t('sidenav.tags')">
             <!-- Nothing tagged yet: the section stays, and says how tags get
                  made. A section that only exists once you already know the
                  feature teaches nobody. -->
@@ -602,7 +743,7 @@ const toggleLabel = computed(() => t('sidenav.close'));
                 {{ t('sidenav.tags.more', { count: hiddenTagCount }) }}
               </button>
             </li>
-            <li v-else-if="tagsExpanded && allTags.length > 8">
+            <li v-else-if="tagsExpanded && anyGroupLong">
               <button
                 type="button"
                 class="fe-sidenav__more"
@@ -707,14 +848,37 @@ const toggleLabel = computed(() => t('sidenav.close'));
               <!-- A read-only mount says so on the row, where the user looks
                    for it. The admin list had an "RO" badge; the people it
                    applied to never saw one (issue #30). -->
-              <span
+              <StorageTags
                 v-if="showLabels && s.readOnly"
-                class="fe-sidenav__tag"
-                role="img"
+                read-only
+                :locale="locale"
+                class="fe-sidenav__stags"
                 data-testid="sidenav-storage-readonly"
-                :aria-label="t('sidenav.storage.readOnly')"
-                >{{ t('sidenav.storage.readOnly') }}</span
-              >
+              />
+            </button>
+          </li>
+        </ul>
+      </div>
+
+      <!-- App plugins — "Apps": one row per `home` view. Between the storages
+           and Connections: an app is a place you go, like a drive, not a
+           setting. Hidden entirely when there are none. -->
+      <div v-if="appRows.length" class="fe-sidenav__section" data-testid="sidenav-apps">
+        <p v-if="showLabels" class="fe-sidenav__heading">{{ t('sidenav.apps') }}</p>
+        <hr v-else class="fe-sidenav__rule" aria-hidden="true" />
+        <ul class="fe-sidenav__group" :aria-label="t('sidenav.apps')">
+          <li v-for="a in appRows" :key="a.key">
+            <button
+              type="button"
+              class="fe-sidenav__item"
+              :title="a.label"
+              :aria-label="a.label"
+              :data-testid="`sidenav-app-${a.key}`"
+              @click="emit('open-app', a.key)"
+            >
+              <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
+              <span class="fe-sidenav__appicon" aria-hidden="true" v-html="a.svg"></span>
+              <span v-if="showLabels" class="fe-sidenav__text">{{ a.label }}</span>
             </button>
           </li>
         </ul>

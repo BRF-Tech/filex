@@ -10,35 +10,26 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
-	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
-// internalDirs are filex's own bookkeeping trees. Nothing inside them is a
-// user file, and versioning a write into .versions/ would recurse: Restore
-// writes the live path back from there, and Snapshot writes into it.
-//
-// VersionsPrefix (service.go), not the bare literal ".versions": it is the
-// exported const versionKey() itself builds snapshot keys from, in this same
-// package, so this exemption and that key construction share one source of
-// truth instead of two copies that could drift.
-var internalDirs = []string{VersionsPrefix, ".thumbs", trash.Prefix}
-
 // isInternalPath reports whether rel lives inside one of filex's own trees, or
-// is a keepdir marker.
+// is a keepdir marker — syspath.Hidden, the one list. Nothing there is a user
+// file, and versioning a write into .versions/ would recurse: Restore writes
+// the live path back from there, and Snapshot writes into it.
+//
+// ⚠ It used to carry its own three-name list (versions, thumbs, trash), so
+// every editor save of a desktop open-with working copy (`.filex-open/`) was
+// snapshotted into `.versions/<id>/<n>`: history for a transient copy whose
+// original lives on somebody's computer, in a folder nobody can see, kept for
+// the full retention window. VersionsPrefix is syspath.Versions, so the key
+// versionKey() builds and this exemption still share one source of truth.
 func isInternalPath(rel string) bool {
 	clean := strings.TrimPrefix(path.Clean("/"+strings.TrimSpace(rel)), "/")
 	if clean == "" {
 		return true
 	}
-	if path.Base(clean) == ".keepdir" {
-		return true
-	}
-	for _, d := range internalDirs {
-		if clean == d || strings.HasPrefix(clean, d+"/") {
-			return true
-		}
-	}
-	return false
+	return syspath.Hidden(clean)
 }
 
 // GuardOverwrite is the versioning half of writehook.BeforeOverwrite: if a

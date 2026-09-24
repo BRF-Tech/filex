@@ -1,5 +1,12 @@
 # File conversion (converter)
 
+> ⚠⚠ **Legacy — being retired.** Since v0.43.0 conversion is an
+> [app](APP-PLUGINS.md#converting-files): install the **Convert** app and its
+> *Convert…* row is the only one in the file menu. This iframe converter is
+> offered **only** where the Convert app is not available *and* this service is
+> configured, and *External services* marks it **legacy**. Everything below
+> describes the legacy side-car.
+
 filex can convert files between formats **entirely in the browser** — no server
 runs the conversion and the file is never uploaded to a third party. A
 **Convert** action (right‑click a file, or the selection toolbar) opens a format
@@ -8,14 +15,17 @@ result is written back into the current folder.
 
 It is an **optional** integration: filex embeds a self‑hosted build of
 [p2r3/convert](https://github.com/p2r3/convert) (an in‑browser WASM converter)
-in a hidden iframe. When it isn't configured, the Convert action simply doesn't
-appear.
+in a hidden iframe. When it is not configured, an **administrator** sees the
+Convert entry greyed with where to set it up (*External services*); everybody
+else does not see it at all.
 
 ⚠ Configured is not the only condition. The action also stays hidden on a
 **multi-selection** (it converts one file at a time), where you **cannot write**
-(the result has to be saved beside the source), and **inside an end-to-end
-encrypted folder**, where the server only holds ciphertext and a conversion
-would have nothing to read. A folder is offered the action greyed out.
+(this converter has to save the result beside the source — the Convert *app*
+asks where to put it instead, so it is offered on a read-only storage too),
+and **inside an end-to-end encrypted folder**, where the server only holds
+ciphertext and a conversion would have nothing to read. A folder is offered
+the action greyed out.
 
 - [Enable it](#enable-it)
 - [How it works](#how-it-works)

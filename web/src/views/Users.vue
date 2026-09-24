@@ -9,6 +9,7 @@ import { useCapabilitiesStore } from '@/stores/capabilities';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { User, UserRole } from '@/api/types';
+import { emailProblem, refusalField } from '@/lib/accountRules';
 import { formatRelative } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
@@ -16,7 +17,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Modal from '@/components/ui/Modal.vue';
-import Table, { type Column } from '@/components/ui/Table.vue';
+import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 import ResetPasswordModal from '@/components/ResetPasswordModal.vue';
 
 const { t, locale } = useI18n();
@@ -46,6 +47,41 @@ const newPassword = ref('');
 const creating = ref(false);
 const deleting = ref(false);
 
+/*
+ * ⚠ "Add user" is checked HERE before anything is sent, and what the server
+ * still refuses is said INSIDE the dialog. An empty submit used to reach the
+ * server and come back as "email required" — English, in a toast drawn
+ * BEHIND the dialog's backdrop, so nobody read it (release-candidate sweep,
+ * 2026-09-21). The address is judged by lib/accountRules.ts, the same rules
+ * the profile form and the server use.
+ */
+const createTried = ref(false);
+const createRefusal = ref<{ field: string; message: string } | null>(null);
+const createFailure = ref('');
+watch(newEmail, () => {
+  createRefusal.value = null;
+  createFailure.value = '';
+});
+const newEmailError = computed(() => {
+  if (createRefusal.value?.field === 'email') return createRefusal.value.message;
+  // Said while typing once something is typed, and for an empty box only
+  // after a submit — an error on a box nobody has reached yet is noise.
+  if (!createTried.value && !newEmail.value.trim()) return '';
+  const p = emailProblem(newEmail.value);
+  return p ? t(`account.errors.${p.key}`, p.params ?? {}) : '';
+});
+
+function openCreate() {
+  newEmail.value = '';
+  newName.value = '';
+  newPassword.value = '';
+  newRole.value = 'viewer';
+  createTried.value = false;
+  createRefusal.value = null;
+  createFailure.value = '';
+  showCreate.value = true;
+}
+
 async function load() {
   await users.fetch({
     q: q.value || undefined,
@@ -60,21 +96,42 @@ watch([q, role], () => {
   load();
 });
 
-const roleOptions = [
+// ⚠ computed, not a plain array: a label built once at setup keeps the
+// language the page was opened in when the language changes.
+const roleOptions = computed(() => [
   { value: '', label: t('common.all') },
   { value: 'admin', label: t('users.roles.admin') },
   { value: 'user', label: t('users.roles.user') },
   { value: 'viewer', label: t('users.roles.viewer') },
-];
+]);
 
-const createRoleOptions = roleOptions.filter((o) => o.value !== '');
+const createRoleOptions = computed(() => roleOptions.value.filter((o) => o.value !== ''));
 
-const columns = computed<Column<User>[]>(() => [
-  { key: 'email', label: t('common.email'), sortable: true },
-  { key: 'display_name', label: t('users.fields.displayName') },
-  { key: 'role', label: t('common.role'), cell: 'slot' },
-  { key: 'last_login_at', label: t('users.fields.lastLogin'), cell: 'slot' },
-  { key: 'actions', label: t('common.actions'), cell: 'slot', align: 'right', width: '180px' },
+/* The explorer's table (DataTable): every column resizes, hides, moves and
+ * sorts, and the arrangement is remembered on the account under
+ * `admin.users`. ⚠ The list is paged by the SERVER, which has no sort
+ * parameter — so while it spans more than one page the table closes its
+ * headers and says why, rather than re-ordering 25 rows of 300 and calling
+ * that sorted. (It used to draw an arrow on Email and move nothing at all.) */
+const ROLE_RANK: Record<UserRole, number> = { admin: 0, user: 1, viewer: 2 };
+const columns = computed<DataColumn<User>[]>(() => [
+  { id: 'email', label: t('common.email'), sortable: true, width: 240 },
+  { id: 'display_name', label: t('users.fields.displayName'), sortable: true, width: 180 },
+  {
+    id: 'role',
+    label: t('common.role'),
+    sortable: true,
+    width: 110,
+    sortValue: (u) => ROLE_RANK[u.role] ?? 9,
+  },
+  {
+    id: 'last_login_at',
+    label: t('users.fields.lastLogin'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 150,
+    sortValue: (u) => (u.last_login_at ? Date.parse(u.last_login_at) : null),
+  },
 ]);
 
 const roleTone = (r: UserRole) => {
@@ -84,6 +141,9 @@ const roleTone = (r: UserRole) => {
 };
 
 async function submitCreate() {
+  createTried.value = true;
+  createFailure.value = '';
+  if (newEmailError.value || creating.value) return;
   creating.value = true;
   try {
     await users.create({
@@ -99,7 +159,9 @@ async function submitCreate() {
     newPassword.value = '';
     newRole.value = 'viewer';
   } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.generic')));
+    const refusal = refusalField(e);
+    if (refusal) createRefusal.value = refusal;
+    else createFailure.value = extractError(e, t('errors.generic'));
   } finally {
     creating.value = false;
   }
@@ -120,6 +182,37 @@ async function confirmDelete() {
 }
 
 onMounted(load);
+
+/** The row's verbs. They were three unlabelled icon buttons — a pencil, a key
+ *  and a bin — which is the row the owner pointed at ("karma karışık"): the
+ *  key meant "reset password" and nothing on screen said so.
+ *
+ * ⚠ On the read-only demo the two writing verbs stay VISIBLE and greyed, with
+ * the reason in their title, rather than vanishing: grey with a reason reads
+ * as a rule, absent reads as a feature that does not exist. Delete and reset
+ * keep their own confirmation dialogs (`showDelete`, `showReset`). */
+function rowActions(_row: User): ContextAction[] {
+  const ro = caps.demoReadOnly;
+  const why = ro ? t('userSettings.demoReadOnly') : undefined;
+  return [
+    { key: 'edit', label: t('common.edit'), icon: 'rename' },
+    { key: 'reset', label: t('users.resetPassword'), icon: 'lock', disabled: ro, title: why },
+    {
+      key: 'delete',
+      label: t('common.delete'),
+      icon: 'delete',
+      danger: true,
+      disabled: ro,
+      title: why,
+    },
+  ];
+}
+
+function onRowAction(key: string, row: User) {
+  if (key === 'edit') router.push({ name: 'users.edit', params: { id: row.id } });
+  else if (key === 'reset') showReset.value = row;
+  else if (key === 'delete') showDelete.value = row;
+}
 </script>
 
 <template>
@@ -134,14 +227,15 @@ onMounted(load);
           <RefreshCcw class="h-4 w-4" />
           {{ t('common.refresh') }}
         </Button>
-        <Button v-if="!caps.demoReadOnly" @click="showCreate = true">
+        <Button v-if="!caps.demoReadOnly" @click="openCreate">
           <Plus class="h-4 w-4" />
           {{ t('users.addNew') }}
         </Button>
       </div>
     </div>
 
-    <Table
+    <DataTable
+      table-id="admin.users"
       :columns="columns"
       :rows="users.page.items"
       :loading="users.loading"
@@ -150,7 +244,10 @@ onMounted(load);
       :page-size="pageSize"
       :total="users.page.total"
       row-key="id"
-      @page="(p) => ((page = p), load())"
+      :row-actions="(row: User) => rowActions(row)"
+      :row-actions-test-id="(row: User) => `user-actions-${row.id}`"
+      @row-action="(key: string, row: User) => onRowAction(key, row)"
+      @page="(p: number) => ((page = p), load())"
     >
       <template #toolbar>
         <Input
@@ -177,43 +274,29 @@ onMounted(load);
         }}</span>
       </template>
 
-      <template #cell-actions="{ row }">
-        <div class="flex items-center justify-end gap-1">
-          <Button
-            size="xs"
-            variant="ghost"
-            @click="router.push({ name: 'users.edit', params: { id: (row as User).id } })"
-            :title="t('common.edit')"
-          >
-            <Pencil class="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            v-if="!caps.demoReadOnly"
-            size="xs"
-            variant="ghost"
-            @click="showReset = row as User"
-            :title="t('users.resetPassword')"
-          >
-            <KeyRound class="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            v-if="!caps.demoReadOnly"
-            size="xs"
-            variant="ghost"
-            @click="showDelete = row as User"
-            :title="t('common.delete')"
-          >
-            <Trash2 class="h-3.5 w-3.5 text-rose-500" />
-          </Button>
-        </div>
-      </template>
-    </Table>
+    </DataTable>
 
     <!-- Create modal -->
     <Modal v-model="showCreate" :title="t('users.newTitle')" size="md">
-      <form class="space-y-3" @submit.prevent="submitCreate">
-        <Input v-model="newEmail" type="email" :label="t('common.email')" required />
-        <Input v-model="newName" :label="t('users.fields.displayName')" required />
+      <!-- ⚠ novalidate: the boxes are marked `required` for the star and for
+           assistive tech, but the checking is ours (said in the panel's
+           language, inside the dialog). Without it the browser intercepts
+           Enter / a submit button with its own bubble, in the BROWSER's
+           language, and our check never runs (seen in the RC re-test,
+           2026-09-21: an empty New webhook save showed no message of ours). -->
+      <form class="space-y-3" novalidate @submit.prevent="submitCreate">
+        <Input
+          v-model="newEmail"
+          type="email"
+          :label="t('common.email')"
+          required
+          :error="newEmailError || null"
+          name="new-user-email"
+        />
+        <!-- ⚠ Not marked required: the server creates an account without a
+             display name (the address stands in for it), so a star here was a
+             rule the form did not keep. -->
+        <Input v-model="newName" :label="t('users.fields.displayName')" name="new-user-name" />
         <Select v-model="newRole" :options="createRoleOptions" :label="t('common.role')" />
         <Input
           v-model="newPassword"
@@ -222,6 +305,14 @@ onMounted(load);
           autocomplete="new-password"
           :hint="t('users.passwordOptionalHint')"
         />
+        <p v-if="createFailure" class="error-text" role="alert" data-testid="user-create-error">{{ createFailure }}</p>
+        <!-- ⚠ Enter in a box submits: the form's visible buttons sit in the
+             dialog footer, OUTSIDE this <form>, and a form with more than one
+             field and no submit button of its own ignores Enter (implicit
+             submission needs one). Visually hidden, not display:none — some
+             engines skip a display:none default button. RC re-test,
+             2026-09-21: Enter in the Add user e-mail box did nothing. -->
+        <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true" data-testid="user-create-submit">{{ t('common.create') }}</button>
       </form>
       <template #footer>
         <Button variant="ghost" @click="showCreate = false">{{ t('common.cancel') }}</Button>

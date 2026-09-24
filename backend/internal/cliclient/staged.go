@@ -20,10 +20,11 @@ package cliclient
 //  2. **The bookmark is written before the first chunk**, not after. The window
 //     this closes is a crash between `begin` and the first PUT — small, and
 //     exactly the window a flaky link keeps landing in.
-//  3. **A body is a *os.File section**, never a wrapped reader. io.NewSectionReader
-//     keeps the request body seekable and exactly as long as the Content-Range
-//     claims; net/http can then retry it, and a short body is impossible rather
-//     than merely unlikely.
+//  3. **A body is an *os.File section**, exactly as long as the Content-Range
+//     claims: a short body is impossible rather than merely unlikely. The only
+//     thing ever wrapped around it is the upload limiter, which passes every
+//     byte through unchanged, and GetBody rebuilds the same section so
+//     net/http can replay it.
 
 import (
 	"context"
@@ -34,9 +35,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/brf-tech/filex/backend/internal/regfile"
 )
 
 // DefaultStagedThreshold is the size at which the CLI switches from the
@@ -104,8 +108,9 @@ type opStatus struct {
 // uploadStaged pushes localPath into destDir/name over the resumable protocol,
 // continuing an interrupted session when one exists. It returns the raw commit
 // response so `--json` keeps printing a server payload.
-func (c *Client) uploadStaged(ctx context.Context, destDir RemotePath, name, localPath string, size int64, mod time.Time) ([]byte, error) {
-	f, err := os.Open(localPath)
+func (c *Client) uploadStaged(ctx context.Context, destDir RemotePath, name, localPath string, size int64, mod time.Time, expect string) ([]byte, error) {
+	// regfile, not os.Open: a named pipe would hold this open forever (#38).
+	f, err := regfile.Open(localPath)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +160,11 @@ func (c *Client) uploadStaged(ctx context.Context, destDir RemotePath, name, loc
 		c.saveResume(key, rec)
 	}
 
-	raw, err := c.commitStaged(ctx, id)
+	// The precondition rides on the COMMIT: that is when the file is replaced,
+	// and for a large upload it can be minutes after the listing it was
+	// planned from. A refused commit leaves the bookmark — the staged bytes are
+	// still the server's, and the retry costs a request, not the file.
+	raw, err := c.commitStaged(ctx, id, expect)
 	if err != nil {
 		return nil, err
 	}
@@ -321,11 +330,14 @@ func (c *Client) putChunk(ctx context.Context, id string, f *os.File, offset, le
 	// A section of the open file: seekable, exactly `length` long, and
 	// replayable by net/http. Never io.MultiReader — that is what once cost
 	// the S3 SDK its ability to measure a body (manager_mutate.go:585).
-	body := io.NewSectionReader(f, offset, length)
-	req, err := c.newRequest(ctx, http.MethodPut, "/api/files/upload/"+id, nil, body)
+	section := func() io.Reader {
+		return c.UpLimit.Reader(ctx, io.NewSectionReader(f, offset, length))
+	}
+	req, err := c.newRequest(ctx, http.MethodPut, "/api/files/upload/"+id, nil, section())
 	if err != nil {
 		return 0, err
 	}
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(section()), nil }
 	req.ContentLength = length
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, offset+length-1, total))
@@ -359,8 +371,12 @@ func (c *Client) stagedStatus(ctx context.Context, id string) (*statusResponse, 
 
 // commitStaged finalises the upload; the server verifies size and the declared
 // digest before it accepts.
-func (c *Client) commitStaged(ctx context.Context, id string) ([]byte, error) {
-	req, err := c.newRequest(ctx, http.MethodPost, "/api/files/upload/"+id+"/commit", nil, nil)
+func (c *Client) commitStaged(ctx context.Context, id, expect string) ([]byte, error) {
+	var q url.Values
+	if expect != "" {
+		q = url.Values{"expect": {expect}}
+	}
+	req, err := c.newRequest(ctx, http.MethodPost, "/api/files/upload/"+id+"/commit", q, nil)
 	if err != nil {
 		return nil, err
 	}

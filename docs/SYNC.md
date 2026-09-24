@@ -28,7 +28,9 @@ test run that cannot disturb your real pairings. An empty value is ignored.
 filex client login                        # once, per server
 filex sync add ~/Documents/work docs://work
 filex sync run                            # one pass
-filex sync run --watch 30s                # keep going
+filex sync run --watch 30s                # keep going: changes sync as they happen;
+                                          # every 30 s it ASKS what changed, and walks
+                                          # every pair once in a while (--full-every)
 ```
 
 The remote side is always `storage://path`. A bare path is ambiguous as soon as
@@ -46,10 +48,35 @@ failure mode is *too many copies*, never *the file is gone*.
 | First run of a pair | **Nothing is deleted.** Both sides are merged. |
 | New on one side | Copied to the other |
 | Changed on one side | Copied over |
-| Changed in **both** places | **Both are kept** — yours keeps its name, the server's copy lands beside it as `report (server copy 2026-08-07 14-05).xlsx` |
+| Changed in **both** places, to the **same bytes** | Nothing to keep twice: the path is settled, no copy is made |
+| Changed in **both** places, differently | **Both are kept, on both sides** — yours keeps its name, the server's version lands beside it as `report (server copy 2026-08-07 14-05).xlsx` here *and* on the server |
 | Deleted on one side, untouched on the other | The delete carries across |
 | Deleted on one side, **edited** on the other | The edit wins; the file comes back |
-| A folder on one side, a file of the same name on the other | Refused, both kept — the same collision the server-side guard rejects |
+| A folder on one side, a file of the same name on the other | Refused, nothing touched — the same collision the server-side guard rejects |
+
+### A conflict compares the bytes first
+
+"Changed in both places" is decided on size and modification time, and most
+such changes are the same file: a pair whose history was lost, a reinstalled
+client, a scanner that touched a timestamp. So before keeping two copies the
+engine downloads the server's version and **compares it byte for byte** with
+yours. The same bytes settle the file; only a real difference makes a copy.
+
+When it does, the copy goes to the server too, under the same name, and both
+files are recorded at once — a copy you later tidy away on the server is
+removed here as well (into the local trash) instead of coming back as a new
+file. A copy's name never nests: a conflict on `report (server copy …).xlsx`
+makes another `report (server copy …).xlsx`, not `report (server copy …)
+(server copy …).xlsx`, and a name already taken gets ` (2)`. (Before this, one
+busy spreadsheet on a client that kept losing its history grew 14,724 nested
+copies, one every ~30 seconds.)
+
+### An edit made while a run is busy is not lost
+
+A run of a large tree takes a while — a first sync can take hours. Only what
+the run actually **transferred** is recorded as in step; a file that changed
+on either side while the run was busy with others keeps its previous history,
+so the next run sees the change and carries it across.
 
 ### The first run never deletes
 
@@ -57,6 +84,30 @@ With no record of a previous sync there is no way to tell *"you deleted this"*
 from *"you have not downloaded it yet"*. Guessing wrong empties someone's
 folder, so the first pass is a union merge. From the second run on, deletes
 propagate.
+
+### A first run that would re-upload a stale copy asks first
+
+With no history, a file that is **new here** and a file that was **deleted on
+the server** look exactly the same — and the first run copies both up. That is
+right for a folder you are pairing for the first time, and exactly wrong for
+an old mirror of a folder that has since been tidied on the server: one client
+put 9,665 cleaned-up files back that way.
+
+So a first run that would upload **more than 100** files the server does not
+have, into a server folder that **already has files**, holds them instead. The
+rest of the run goes ahead (downloads, identical files); the held items — and
+any file that differs between the two sides — are left exactly as they are,
+and the pair shows `holding N item(s)` until you decide:
+
+```bash
+filex sync confirm <pair-id>   # they are wanted: the next run uploads them
+filex sync discard <pair-id>   # they are stale: into the local sync trash; the next run makes this side match the server
+```
+
+`discard` never touches a file you edited after it was held, and everything it
+moves is recoverable with `filex sync trash` for 30 days. A first sync into an
+**empty** server folder is never held. `filex sync list --json` carries
+`hold_new` and `held` for the desktop app, which offers the same two choices.
 
 ### An interrupted first run resumes
 
@@ -127,6 +178,28 @@ pair; **Keep online only** removes the pair and asks whether the local copy
 should go to the Trash or stay. See
 **[docs/DESKTOP.md](DESKTOP.md#keeping-folders-on-this-computer)**.
 
+The app also has a **Pause sync** switch (tray menu and Settings). Paused, it
+runs no watcher at all — for any account, and across restarts — until it is
+resumed. A `filex sync run` you start in a terminal is not affected: the pause
+is the app's, not the pairs'.
+
+A pair that is holding items for a decision (`hold_new` / `held` in
+`filex sync list --json`) gets a notice on its card in Settings with the count
+and two buttons — **Upload them** runs `filex sync confirm <pair>`, **Move to
+local trash** runs `filex sync discard <pair>` after asking — and the account's
+watcher is restarted after either.
+
+Settings' **Download limit**, **Upload limit** and **When to sync** presets are
+handed to every watcher as `--limit-down` / `--limit-up` (KiB/s) and
+`--window HH:MM-HH:MM`; a change restarts the watchers. Nothing is passed while
+they are left at *Unlimited* / *Any time*.
+
+When the server refuses an account's token (HTTP 401 — revoked or expired), the
+engine stops instead of retrying, and the app keeps that account's watcher
+stopped — across restarts — until you **Reconnect** it. Reconnecting as the
+same person keeps the account's pairs, so the next round is an ordinary
+incremental one.
+
 ⚠ A pair's remote path may not contain a `..` segment. Nothing legitimate needs
 one — the server resolves paths from its own storage root — and a client that
 turns a remote path into a local folder name would otherwise be told, by the
@@ -141,8 +214,12 @@ filex sync add <local-folder> <storage://path> [--account <label>] [--file]
 filex sync list [--json]
 filex sync move <pair-id> <new-local-path>
 filex sync remove <pair-id>
-filex sync run [--pair <id>] [--account <label>] [--watch <interval>] [--dry-run] [--quiet] [--transfers <n>]
+filex sync run [--pair <id>] [--account <label>] [--watch <interval>] [--live=false] [--dry-run] [--quiet] [--transfers <n>]
+               [--limit-down <KiB/s>] [--limit-up <KiB/s>] [--window HH:MM-HH:MM]
+               [--watch-max <duration>] [--full-every <duration>]
 filex sync trash [--pair <id>] [--restore <path>]
+filex sync confirm <pair-id>
+filex sync discard <pair-id>
 ```
 
 `move` repoints a pair at a folder (or file) that you have **already moved** on
@@ -163,6 +240,22 @@ deepest-first order. Server folders are listed eight at a time for the same
 reason: the inventory of a 3,000-folder tree is minutes rather than a quarter of
 an hour.
 
+`--limit-down` / `--limit-up` cap the transfer rate in KiB/s — **all transfers
+of the run together**, not each one: `--transfers` only changes how many files
+move at once, never how fast. A first sync of 52 GiB once held a server's
+~18 Mbit line for nine hours and everyone else using that server felt it. The
+limit paces the file bodies, not the connection, so the client's
+dead-connection pings are never delayed by it.
+
+`--window 22:00-07:00` only starts rounds between those local times (a window
+may wrap midnight). A round still busy when the window closes is stopped the
+way Ctrl-C stops it — its checkpoint written — and carries on in the next
+window. Outside the window a watcher says `sync: waiting for the sync window …`
+once and waits; a one-off `sync run` does nothing and says so.
+
+The `transfer:` progress line carries bytes and, after the first few seconds,
+an estimate: `transfer: 120/11704 (1.2 GiB of 52.6 GiB, about 8h 10m left)`.
+
 `--dry-run` prints exactly what would happen and touches nothing — worth running
 the first time you pair a folder that already has files in it.
 
@@ -182,13 +275,110 @@ settling. The desktop app runs the engine exactly this way and mirrors the last
 line into its panel, and a first sync of a large store spends minutes listing
 before it transfers anything; silence there reads as a broken app.
 
-A watcher started with `--watch` **re-reads `pairs.json` between rounds**, so a
-folder paired — or unpaired — while it runs joins (or leaves) the next round.
-The desktop app keeps one watcher per account alive for days and does not
-restart it for a new pair.
+A watcher started with `--watch` **re-reads `pairs.json` the moment it
+changes** (and on every tick besides), so a folder paired — or unpaired —
+while it runs starts syncing (or stops) at once. The desktop app keeps one
+watcher per account alive for days and does not restart it for a new pair.
+
+`--live=false` turns the live paths below off and leaves the plain interval
+poll — the behaviour before v0.43.
 
 Removing a pair stops the syncing and **leaves every file where it is**, on both
 sides. Unpairing is not deleting.
+
+---
+
+## How fast a change arrives
+
+A watcher (`--watch`) does not wait for its next lap. Three things wake it:
+
+- **The server announces its changes.** The engine opens the same WebSocket
+  the web explorer uses and subscribes to every paired server folder with a
+  *recursive* watch (see [Realtime](REALTIME.md#watching-a-whole-tree-sync-clients)).
+  When a folder changes — a save in the web text editor, an ONLYOFFICE save, an
+  upload, a delete, a rename, a write over WebDAV/SFTP/S3/NFS — that folder is
+  reconciled on its own: one listing of it on the server and one on disk,
+  instead of a walk of the whole tree. A change that adds or removes a folder
+  widens that pass to the folder's subtree.
+- **The local folders are watched by the file system.** A save on this computer
+  reconciles the folder it happened in. The engine's own downloads raise
+  file-system events too; a folder whose files still carry exactly what the
+  last pass wrote is recognised from the disk alone and costs no request.
+- **The interval** — `--watch 30s` — is now a question, not a walk. On each
+  tick a pair whose stream is down asks the server's change log what moved
+  under its folder (`action=changes`) and reconciles only that; a pair
+  nothing points at costs nothing. The walk of a whole pair is the safety
+  net underneath, on its own schedule (`--full-every`, 30 minutes by
+  default), for changes the log cannot see.
+
+Measured on one Windows machine against a local server, each over six edits
+made at random moments:
+
+| | before (poll every 30 s) | now |
+|---|---|---|
+| web text editor save → file on disk | 6.2–24.8 s, median 15.2 s | 0.19–0.22 s, median 0.20 s |
+| ONLYOFFICE save (callback) → file on disk | 0.5–25.9 s, median 2.9 s | 0.19–0.21 s, median 0.20 s |
+| save on this computer → on the server | 9.4–29.0 s, median 25.3 s | 0.43–0.61 s, median 0.46 s |
+
+The numbers are mostly deliberate waits. An editor's save is several
+file-system events, and a browser autosave or a force-save is a burst of
+announcements, so the engine waits for a moment of quiet before it acts —
+**150 ms** after a server announcement, **400 ms** after a local event — and
+never more than **2 s** after the first change of a burst, so an editor that
+saves every second is still synced while it keeps going, at most every two
+seconds rather than once per save.
+
+The watcher prints how changes reach it, and the desktop app shows the same
+word under each synced folder:
+
+| Line | Meaning |
+|---|---|
+| `live: connected — watching N folder(s)` | subscribed; server-side changes arrive as they happen |
+| `live: polling — …` | this server cannot announce changes (older than 0.43, or its realtime is off) — server-side changes are found by asking its change log on the next tick, or by the `--full-every` walk on a server that has no log; local changes are still sent at once |
+| `live: offline — …; retrying in 8s` | the server is unreachable; reconnecting with backoff (1 s doubling to 1 min). Every reconnect asks the change log what happened while the connection was down, because those changes were announced to nobody. |
+| `pair-1: local: poll-only — too-large\|unavailable — …` | changes made on this computer in THAT folder cannot be watched and are found by reading the folder on the next tick; the desktop app says so under the folder (`pair-1: local: watched` when it recovers) |
+
+The tick stays at the `--watch` interval while the stream is live, and costs
+one local fingerprint per pair: the walk of a whole pair happens on the
+`--full-every` schedule whether the stream is up or down, so correctness
+never depends on the new path alone.
+
+### When both sides change the same file at once
+
+Once changes travel instantly, "edited in the browser and on the desktop in the
+same second" stops being a corner case, and the rule is the same as ever: both
+versions are kept. Two things make it hold at that speed:
+
+- A pass never replaces or trashes a local file that changed after the pass
+  looked at it. A download re-checks the file right before it is put in place;
+  if it was saved meanwhile, the download stands down, the watcher prints
+  `~ … both versions are kept on the next pass`, and the pass that follows a
+  second later keeps both.
+- An upload carries the server version it was planned from, and the server
+  refuses it if the file was saved in the browser after that (see
+  [conditional uploads](UPLOADS.md#conditional-uploads-expect)). Same outcome from
+  the other side. An older server ignores the precondition and the upload
+  replaces the file as it always did.
+
+Two conflicts on one file inside the same minute get two side copies
+(`… (server copy 2026-08-07 14-05) 2.txt`), not one overwriting the other.
+
+⚠ A delete is the one write without a server-side precondition: a browser save
+landing between a pass's listing and its delete request is deleted with it —
+into the server's trash, where it stays restorable. The window is one request.
+
+### What the engine records after a pass
+
+The baseline — what both sides looked like when they last agreed — is built
+from what the pass **did**, not from a second look at both trees afterwards.
+That second look used to fold anything that changed during the pass into the
+baseline as "agreed", so a browser save that landed while a pass was running
+was never downloaded, a local save made during a pass was never uploaded, and
+a failed download of a changed file was recorded as done. A pass now records a
+download as the file it wrote plus the server version it downloaded, an upload
+as the file it sent plus the server's answer, and leaves every other row as it
+was; anything that changed meanwhile is still a change for the next pass. It
+also means a full check walks the server tree once, not twice.
 
 ---
 
@@ -201,7 +391,12 @@ sides. Unpairing is not deleting.
   complete; one left behind by a crash is never uploaded as a file nobody
   named.
 - Symlinks. A link pointing outside the folder would upload files you never put
-  there; one pointing inside makes the walk infinite.
+  there; one pointing inside makes the walk infinite. ⚠ This is the desktop
+  engine walking a folder on **your** machine, and it is deliberately stricter
+  than a `local` **storage** on the server, which follows in-root links and can
+  be told to follow outward ones — see [Symlinks](STORAGE.md#symlinks). The
+  difference is that a storage has a declared root to measure against and a
+  cycle guard behind it; a sync folder is whatever you dragged in.
 - OS clutter: `.DS_Store`, `Thumbs.db`, `desktop.ini`, recycle bins.
 - Anything unreadable — a locked file is reported, not fatal. One file must not
   stop the other thousand.
@@ -214,10 +409,36 @@ sides. Unpairing is not deleting.
   edited so that its size *and* timestamp are unchanged is not noticed. Hashing
   every file on every pass would make large folders unusable; this is the same
   trade-off rsync makes by default.
-- **Polling, not file-system events.** `--watch` re-scans on an interval
-  (the desktop app uses 30 seconds). Very large folders take as long as a walk
-  takes — the server side is listed eight folders at a time, the local side is
-  one directory walk.
+- **The live paths are an accelerator; the interval check is the guarantee.** A
+  file written to the server's storage *behind filex's back* (not through
+  filex) is not announced — see [Realtime](REALTIME.md#what-does-not-announce-itself)
+  — and arrives with the next full walk (`--full-every`, below).
+- **Asking, not walking.** The `--watch` interval (the desktop app uses 30
+  seconds) looks at every pair, but a pair is only **walked** when something
+  says so: its local tree changed (one local walk, no request) — normally the
+  file-system watcher caught that already; the server's change log says
+  something under its folder changed (`action=changes`, one request — asked
+  only while the change stream is down, and once on every reconnect for
+  whatever happened while it was); a folder whose last pass failed is due a
+  retry (that folder only, with a growing gap); or `--full-every` passed
+  (default 30 minutes), the safety net for changes the log cannot see — bytes
+  written straight into the storage and found by a scan. Before this, one Mac
+  with 7,048 synced folders listed its whole tree every round: 100–150
+  thousand requests an hour, around the clock. Against a server without the
+  change log, a quiet pair's walks back off from the interval to `--watch-max`
+  (default 5 minutes) and snap back as soon as something moves.
+- **Local events have platform limits.** The file-system watcher adds one watch
+  per folder. On Linux that counts against `fs.inotify.max_user_watches`; on
+  macOS every *file* costs a descriptor as well, so a pair of more than 4 000
+  items is left to the interval check there (`FILEX_SYNC_WATCH_BUDGET=<n>` sets
+  such a cap on any platform — useful on a Linux machine short of inotify
+  watches). Either way the watcher says so once,
+  for that pair (`pair-1: local: poll-only — too-large — …` or
+  `… — unavailable — <reason>`, and `pair-1: local: watched` if it recovers),
+  the desktop app shows it under that folder, and nothing else changes.
+- **A full walk is a walk.** Very large folders take as long as a walk takes —
+  the server side is listed eight folders at a time, the local side is one
+  directory walk.
 - **A dead connection is detected, not waited out.** The client pings an idle
   HTTP/2 connection (30 s) and bounds dialing, TLS and the wait for response
   headers; a transfer's body is deliberately unbounded, so a large file may
@@ -239,13 +460,27 @@ sides. Unpairing is not deleting.
 not find the `filex` binary it ships. Install the CLI and point the app at it
 with `FILEX_CLI=/path/to/filex`, or reinstall the app.
 
-**Nothing transfers and the panel shows an error.** The line under each pair is
-the engine's own last message. `filex sync run --pair <id>` in a terminal shows
-the same thing with more detail.
+**Nothing transfers and the panel shows an error.** The line under each folder
+is the engine's own last message **for that folder**. An error belongs to the
+folder it happened in and disappears once that folder's next pass is clean, so
+an error still on screen is one that is still happening; only a failure that is
+not about any one folder (the engine could not start, the token was refused) is
+shown under all of them. Every line the engine prints names its pair
+(`pair-1: ! download a.txt: …`), so `filex sync run --pair <id>` in a terminal
+shows the same thing with more detail. A summary ending in `, N failed` is a
+pass that had errors; `note:` lines (a skipped symlink) are worth reading and
+not failures.
 
 **A conflict copy appeared and I only edited it in one place.** Something else
 wrote to the server copy — another device, a share, or a web-UI save. Both
 versions are on disk; keep the one you want and delete the other.
+
+**Server-side edits take a tick to arrive instead of no time at all.** The
+watcher is not subscribed to the change stream, so it has to ask on the
+`--watch` interval rather than being told: its last `live:` line says why. `polling` means the
+server is older than 0.43 or has realtime switched off; `offline` means the
+socket cannot be opened — a reverse proxy in front of filex must pass WebSocket
+upgrades for `/api/ws` (see [Deployment](DEPLOYMENT.md)).
 
 **"sync folder … is missing but pair … has history; nothing was touched."** The
 pair's local folder is not where the pair says it is. If you moved it,
@@ -257,3 +492,12 @@ you — see above.
 **"list …: HTTP 502" (or a timeout) and nothing happened.** The server folder
 could not be listed, so the run stopped rather than treat the folder as gone.
 It is retried on the next round.
+
+**The watcher stopped: "signed out: the server no longer accepts this token
+(HTTP 401)".** The token was revoked (or has expired), and a watcher that kept
+retrying it would only fill the server's log. `filex sync run` stops at the
+first 401 with **exit status 3** — every other failure exits 1 — so a
+supervisor can tell "sign in again" from "try again". Sign in again
+(`filex client login`, or *Reconnect* in the desktop app) and start it again.
+A stop request (Ctrl-C, SIGTERM) cancels the run in flight cleanly: the
+checkpoint is written, so the next run resumes where this one stopped.

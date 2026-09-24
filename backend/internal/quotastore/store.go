@@ -106,6 +106,7 @@ package quotastore
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
@@ -181,6 +182,23 @@ func ActorFrom(ctx context.Context) int64 {
 	return OwnerFrom(ctx)
 }
 
+// ExplicitActorFrom returns the actor a background surface named with
+// WithActor, or 0 when it named nobody.
+//
+// ⚠ It never falls back: not to the owner, not to the authenticated user. It
+// answers the narrower question writehook asks for a notification — "whom is
+// this event FROM" — and ActorFrom's owner fallback is the wrong answer there.
+// The copy mirror bills the SOURCE file's owner when an old queue row names
+// nobody (handlers/manager_opsync.go); that person did not make the copy, and
+// the copy may sit in a folder they cannot open, so an event addressed to them
+// would tell them about it.
+func ExplicitActorFrom(ctx context.Context) int64 {
+	if v, ok := ctx.Value(actorCtxKey{}).(int64); ok && v > 0 {
+		return v
+	}
+	return 0
+}
+
 // externalCtxKey marks writes that arrived from outside filex through an
 // anonymous drop link.
 type externalCtxKey struct{}
@@ -236,6 +254,8 @@ type Store struct {
 	db.Store
 	q       *quota.Service
 	metrics Metrics
+	// purging serialises HardDeleteNode per node (see there).
+	purging [64]sync.Mutex
 }
 
 // Ensure the decorator still satisfies the full interface.
@@ -442,7 +462,18 @@ func (s *Store) stampActorByID(ctx context.Context, id int64) {
 // Called by the trash purge, by the retention loop, and by the permanent-delete
 // paths on drivers that cannot preserve the bytes (WebDAV/ai_ops on a driver
 // with no Mover) — all of them genuine destruction.
+//
+// ⚠⚠ One purge of a row at a time. The release is "read the row, delete it,
+// subtract its size", and two purges of the same row that overlap both read
+// it before either deletes it — so both subtract, and the owner is billed back
+// for the bytes twice (v0.43.0, PR #47: three "empty trash" presses racing over
+// one trash; the sweeps are serialised now, but a single-item purge can still
+// meet a sweep on the same row). Serialised per node, the second purge reads
+// the row after the first has deleted it, finds nothing, and releases nothing.
 func (s *Store) HardDeleteNode(ctx context.Context, id int64) error {
+	mu := &s.purging[uint64(id)%uint64(len(s.purging))]
+	mu.Lock()
+	defer mu.Unlock()
 	before, _ := s.Store.GetNode(ctx, id)
 	var owner *int64
 	if before != nil && before.Type == model.NodeTypeFile {

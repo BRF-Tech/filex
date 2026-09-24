@@ -42,7 +42,7 @@ const TREE: Record<string, Listing> = {
     dirname: 'main://docs',
     read_only: false,
     perm: 'owner',
-    files: [d('main://docs/2026')],
+    files: [d('main://docs/2026'), { path: 'main://docs/nda.pdf', basename: 'nda.pdf', type: 'file' }],
   },
   'main://docs/2026': {
     adapter: 'main',
@@ -201,6 +201,42 @@ describe('DestinationPickerModal', () => {
 
   it('stays inert while the parent is running the operation', async () => {
     const { w } = await open({ startAt: 'main://docs', busy: true });
+    expect(confirm(w).attributes('disabled')).toBeDefined();
+  });
+});
+
+// An app plugin's `file-chooser` asks the SAME dialog for a file: the files
+// are listed beside the folders, a file is ticked rather than walked into,
+// and the answer is the file's wire path. A folder pick never sees a file
+// row, so nothing above changes.
+describe('DestinationPickerModal — pick: file', () => {
+  it('folder mode never lists files', async () => {
+    const { w } = await open({ startAt: 'main://docs' });
+    expect(rowFor(w, '2026').exists()).toBe(true);
+    expect(rowFor(w, 'nda.pdf').exists()).toBe(false);
+  });
+
+  it('lists files, ticks one, and answers its path', async () => {
+    const { w } = await open({ startAt: 'main://docs', mode: 'choose', pick: 'file' });
+    expect(rowFor(w, '2026').exists()).toBe(true);
+    const file = rowFor(w, 'nda.pdf');
+    expect(file.exists()).toBe(true);
+    expect(confirm(w).attributes('disabled')).toBeDefined();
+    expect(reason(w).text()).toMatch(/select a file/i);
+    await file.trigger('click');
+    await flush();
+    expect(file.classes()).toContain('is-picked');
+    expect(confirm(w).attributes('disabled')).toBeUndefined();
+    expect(w.find('[data-testid="destpicker-target"]').text()).toContain('nda.pdf');
+    await confirm(w).trigger('click');
+    expect(w.emitted('pick')).toEqual([['main://docs/nda.pdf']]);
+  });
+
+  it('walking into another folder drops the tick', async () => {
+    const { w } = await open({ startAt: 'main://docs', mode: 'choose', pick: 'file' });
+    await rowFor(w, 'nda.pdf').trigger('click');
+    await rowFor(w, '2026').trigger('click');
+    await flush();
     expect(confirm(w).attributes('disabled')).toBeDefined();
   });
 });

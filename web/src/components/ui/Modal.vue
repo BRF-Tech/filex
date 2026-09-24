@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
+// The module-level `t` (no injection): this dialog is mounted by component
+// tests that install no i18n plugin, and the one word it says must still
+// follow the active language.
+import { t } from '@/i18n';
 
 interface Props {
   modelValue: boolean;
@@ -93,7 +97,7 @@ const sizeClass = {
           v-if="!preventClose"
           type="button"
           class="rounded-md p-1 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-800"
-          aria-label="Close"
+          :aria-label="t('common.close')"
           @click="close"
         >
           <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">

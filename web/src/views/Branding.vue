@@ -1,23 +1,25 @@
 <script setup lang="ts">
 /* wiring:e1 — Branding settings page: identity fields for the public
    share/drop/PIN pages + the login screen, with a live preview card. */
-import { computed, onMounted, reactive, ref, watchEffect } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Save, Palette, RotateCcw, Upload } from 'lucide-vue-next';
 
 import { useSettingsStore } from '@/stores/settings';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
+import { formatBytes } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
 import Spinner from '@/components/ui/Spinner.vue';
-import LogoMark from '@/components/LogoMark.vue';
+import { PublicLinkPreview } from '@brftech/filex-core';
+import { effectiveTheme } from '@/lib/theme';
 
 const LOGO_MAX_BYTES = 256 * 1024;
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const settings = useSettingsStore();
 const toast = useToastStore();
 
@@ -49,6 +51,18 @@ const accentValid = computed(() => /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(f
 // `settings.accentInvalid` are the same value on purpose: an example that
 // disagrees with the preview teaches the operator the wrong colour.
 const previewAccent = computed(() => (accentValid.value ? form.accent : '#2f6ceb'));
+
+/** The preview in the light/dark this panel is in (the public page follows
+ *  the visitor's own choice, then the instance default, then the system). */
+const previewTheme = ref<'light' | 'dark'>(effectiveTheme());
+let themeObserver: MutationObserver | null = null;
+onMounted(() => {
+  themeObserver = new MutationObserver(() => {
+    previewTheme.value = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+  });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+});
+onBeforeUnmount(() => themeObserver?.disconnect());
 
 function pickLogo() {
   fileInput.value?.click();
@@ -145,7 +159,7 @@ onMounted(() => settings.fetch());
             :model-value="form.logo_url"
             :label="t('branding.logo')"
             :hint="t('branding.logoHelp')"
-            placeholder="https://… veya data:image/…"
+            :placeholder="t('branding.logoPlaceholder')"
             monospace
             @update:model-value="(v) => (form.logo_url = v as string)"
           />
@@ -229,46 +243,25 @@ onMounted(() => settings.fetch());
         </div>
       </form>
 
-      <!-- ── Live preview (public share page mock) ── -->
+      <!-- ── Live preview: the REAL public page (PublicLinkPreview) ── -->
+      <!-- ⚠ It was a hand-drawn mock — a centred card, an icon and a
+           full-width button — of a page that is left-aligned and plain
+           (release-candidate sweep, 2026-09-21, QA #25). It is now the public
+           shell and share body `/s/<token>` mounts, fed the unsaved values. -->
       <div class="card card-body space-y-3">
         <h2 class="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
           {{ t('branding.preview') }}
         </h2>
-        <div
-          class="rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 flex flex-col items-center gap-4"
-          style="background: linear-gradient(160deg, #f5f7fb, #e9edf4)"
-        >
-          <div v-if="form.logo_url || form.name" class="flex items-center gap-2.5 max-w-full">
-            <img v-if="form.logo_url" :src="form.logo_url" alt="" class="h-8 max-w-[160px] object-contain" />
-            <span v-if="form.name" class="font-bold text-zinc-900 break-words">{{ form.name }}</span>
-          </div>
-          <div class="w-full max-w-xs rounded-2xl bg-white border border-zinc-200 shadow-lg p-6 text-center">
-            <div
-              class="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full"
-              :style="{ backgroundColor: previewAccent + '22', color: previewAccent }"
-            >
-              <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7z"/></svg>
-            </div>
-            <div class="text-sm font-semibold text-zinc-900">{{ t('branding.previewFile') }}</div>
-            <div class="mt-0.5 text-xs text-zinc-500">rapor-2026.pdf · 1.2 MB</div>
-            <button
-              type="button"
-              class="mt-4 w-full rounded-lg py-2.5 text-sm font-semibold text-white"
-              :style="{ backgroundColor: previewAccent }"
-            >
-              {{ t('branding.previewDownload') }}
-            </button>
-          </div>
-          <div class="flex flex-col items-center gap-1.5">
-            <div v-if="form.footer_text" class="text-xs text-zinc-500 text-center break-words max-w-xs">
-              {{ form.footer_text }}
-            </div>
-            <div v-if="!form.hide_powered_by" class="inline-flex items-center gap-1.5 text-xs text-zinc-500">
-              <LogoMark class="h-4 w-4" />
-              <span>{{ t('branding.poweredByLine') }}</span>
-            </div>
-          </div>
-        </div>
+        <PublicLinkPreview
+          :brand-name="form.name"
+          :logo-url="form.logo_url"
+          :accent="accentValid ? form.accent : ''"
+          :footer-text="form.footer_text"
+          :hide-powered-by="form.hide_powered_by"
+          :locale="locale"
+          :theme="previewTheme"
+          :sample="{ name: t('branding.previewFileName'), size: 1_240_000, mime: 'application/pdf' }"
+        />
         <p class="text-xs text-zinc-500 dark:text-zinc-400">{{ t('branding.previewHelp') }}</p>
       </div>
     </div>

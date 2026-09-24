@@ -18,7 +18,8 @@ import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { FTPSFacts, SSHPublicKey } from '../types/SSHKeys';
 import { useLocale } from '../composables/useLocale';
 import { useSSHKeys } from '../composables/useSSHKeys';
-import { useScrolledX } from '../composables/useScrolledX';
+import DataTable, { type DataColumn } from './DataTable.vue';
+import type { ContextAction } from './ContextMenu.vue';
 import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
@@ -51,7 +52,6 @@ const emit = defineEmits<{
 
 const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
 const { t, formatDate } = useLocale(locale);
-const { scrolledX, onScroll } = useScrolledX();
 
 const { keys, connection, loading, error, canAdd, hasUsableKey, load, add, setDisabled, remove } =
   useSSHKeys(props.config);
@@ -94,6 +94,62 @@ async function submit() {
   } finally {
     busy.value = false;
   }
+}
+
+/** The row's verbs, behind its one `Actions` control. ⚠ `remove` keeps the
+ *  two-step confirmation it had as a loose button: the first pick arms it and
+ *  the label becomes "Confirm", the second pick deletes the key. */
+function rowActions(k: SSHPublicKey): ContextAction[] {
+  /* The whole control used to be `:disabled="busy"`; the table draws the
+     control now, so each verb carries it. */
+  return [
+    {
+      key: 'toggle',
+      label: k.disabled_at ? t('conn.sshkeys.enable') : t('conn.sshkeys.disable'),
+      icon: k.disabled_at ? 'check' : 'lock',
+      disabled: busy.value,
+    },
+    {
+      key: 'remove',
+      label: confirmRemove.value === k.id ? t('conn.sshkeys.confirm') : t('conn.sshkeys.remove'),
+      icon: 'delete',
+      danger: true,
+      disabled: busy.value,
+    },
+  ];
+}
+
+/** The list's columns — the product's one table (DataTable). */
+const columns = computed<DataColumn<SSHPublicKey>[]>(() => [
+  {
+    id: 'name',
+    label: t('conn.sshkeys.col.name'),
+    sortable: true,
+    width: 180,
+    format: (k) => k.name || t('conn.sshkeys.noName'),
+  },
+  {
+    id: 'fingerprint',
+    label: t('conn.sshkeys.col.fingerprint'),
+    sortable: true,
+    width: 240,
+    sortValue: (k) => fingerprintOf(k),
+    title: (k) => fingerprintOf(k),
+  },
+  {
+    id: 'lastUsed',
+    label: t('conn.sshkeys.col.lastUsed'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 140,
+    format: (k) => (k.last_used_at ? shortDate(k.last_used_at) : t('conn.sshkeys.neverUsed')),
+    sortValue: (k) => (k.last_used_at ? new Date(k.last_used_at).getTime() : null),
+  },
+]);
+
+function onRowAction(key: string, k: SSHPublicKey) {
+  if (key === 'toggle') void toggle(k);
+  else if (key === 'remove') void drop(k);
 }
 
 async function toggle(k: SSHPublicKey) {
@@ -172,35 +228,28 @@ function fingerprintOf(k: SSHPublicKey): string {
       <p class="fe-s3keys__hint">{{ t('conn.sshkeys.noCopyId') }}</p>
     </div>
 
+    <!-- ⚠ THE table (DataTable — the explorer's own), not a table of its own:
+         reachable from the admin panel's Connections menu and from the
+         explorer, so it resizes, sorts, hides and moves columns and remembers
+         that on the account (`conn.sshkeys`), like every other table. -->
     <p v-if="loading" class="fe-s3keys__muted">…</p>
-    <div v-else-if="keys.length" class="fe-s3keys__scroll" :class="{ 'is-scrolled-x': scrolledX }" @scroll.passive="onScroll">
-      <table class="fe-s3keys__table">
-        <thead>
-          <tr>
-            <th>{{ t('conn.sshkeys.col.name') }}</th>
-            <th>{{ t('conn.sshkeys.col.fingerprint') }}</th>
-            <th>{{ t('conn.sshkeys.col.lastUsed') }}</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="k in keys" :key="k.id" :class="{ 'is-off': !!k.disabled_at }">
-            <td>{{ k.name || t('conn.sshkeys.noName') }}</td>
-            <td><code>{{ fingerprintOf(k) }}</code></td>
-            <td>{{ k.last_used_at ? shortDate(k.last_used_at) : t('conn.sshkeys.neverUsed') }}</td>
-            <td class="fe-s3keys__actions">
-              <button class="fe-s3keys__link" :disabled="busy" @click="toggle(k)">
-                {{ k.disabled_at ? t('conn.sshkeys.enable') : t('conn.sshkeys.disable') }}
-              </button>
-              <button class="fe-s3keys__link is-danger" :disabled="busy" @click="drop(k)">
-                {{ confirmRemove === k.id ? t('conn.sshkeys.confirm') : t('conn.sshkeys.remove') }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <p v-else-if="canAdd" class="fe-s3keys__muted">{{ t('conn.sshkeys.empty') }}</p>
+    <DataTable
+      v-else
+      table-id="conn.sshkeys"
+      :columns="columns"
+      :rows="keys"
+      row-key="id"
+      :locale="locale"
+      :empty="t('conn.sshkeys.empty')"
+      :row-class="(k: SSHPublicKey) => (k.disabled_at ? 'is-muted' : undefined)"
+      :row-actions="rowActions"
+      :row-actions-test-id="(k: SSHPublicKey) => `ssh-key-actions-${k.id}`"
+      @row-action="(key: string, k: SSHPublicKey) => onRowAction(key, k)"
+    >
+      <template #cell-fingerprint="{ row }">
+        <code class="tbl-mono">{{ fingerprintOf(row) }}</code>
+      </template>
+    </DataTable>
   </section>
 </template>
 

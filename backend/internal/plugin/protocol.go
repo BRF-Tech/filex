@@ -74,6 +74,8 @@
 package plugin
 
 import (
+	"path"
+	"strings"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -189,6 +191,19 @@ type Object struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
+// cleanObjectPath normalises a path a plugin sent: forward slashes, no
+// leading slash, no `.`/`..` segments, "" for the root. A plugin's answer is
+// somebody else's code naming files inside filex — a Path of "../../etc" or a
+// Name of ".." must not reach the surfaces that join it to anything.
+func cleanObjectPath(p string) string {
+	return strings.TrimPrefix(path.Clean("/"+p), "/")
+}
+
+// listable says whether an object may appear in a LISTING: it has to name a
+// real child. The root ("", ".", "..") is a valid stat answer and never a
+// valid list entry.
+func (o Object) listable() bool { return cleanObjectPath(o.Path) != "" }
+
 func (o Object) toStorage() storage.Object {
 	kind := storage.ObjectKind(o.Kind)
 	switch kind {
@@ -196,8 +211,19 @@ func (o Object) toStorage() storage.Object {
 	default:
 		kind = storage.KindFile
 	}
+	// The name is derived from the path, never taken from the plugin: the
+	// two disagreeing is exactly the kind of answer nothing above can check.
+	p := cleanObjectPath(o.Path)
+	name := ""
+	if p != "" {
+		name = path.Base(p)
+	}
+	size := o.Size
+	if size < 0 {
+		size = 0
+	}
 	return storage.Object{
-		Path: o.Path, Name: o.Name, Size: o.Size, Kind: kind,
+		Path: p, Name: name, Size: size, Kind: kind,
 		Mime: o.Mime, Etag: o.Etag, Mtime: o.Mtime, Metadata: o.Metadata,
 	}
 }

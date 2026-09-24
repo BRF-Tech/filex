@@ -91,6 +91,19 @@ type Capabilities struct {
 	// DefaultLocale, when set (FILEX_DEFAULT_LOCALE), pins the initial UI
 	// language for users who haven't picked one — overriding browser detection.
 	DefaultLocale string `json:"default_locale,omitempty"`
+
+	// AppPlugins says whether in-process WebAssembly app plugins are on
+	// (internal/wasmplugin). When Enabled is false the explorer makes no
+	// plugin calls at all.
+	AppPlugins AppPluginsCapabilities `json:"app_plugins"`
+}
+
+// AppPluginsCapabilities is the app-plugin block of the snapshot.
+type AppPluginsCapabilities struct {
+	Enabled bool `json:"enabled"`
+	// Engines lists which heavy engines (ffmpeg, imagemagick, …) a plugin
+	// may be handed on this host — informational for the admin panel.
+	Engines map[string]bool `json:"engines,omitempty"`
 }
 
 // StorageCapabilities describes a single backend's optional features. Used

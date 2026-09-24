@@ -14,7 +14,7 @@ import { api } from './client';
  */
 export interface PendingOp {
   id: number;
-  op_type: 'copy' | 'move' | 'delete';
+  op_type: 'copy' | 'move' | 'delete' | 'trash-empty';
   status: 'pending' | 'running' | 'done' | 'error';
   progress_total: number;
   progress_done: number;

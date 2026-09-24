@@ -33,6 +33,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
 // DefaultRetention is the per-node version count kept by Cleanup if the
@@ -41,7 +42,7 @@ const DefaultRetention = 20
 
 // VersionsPrefix is prepended to each snapshot key. Changing it invalidates
 // existing snapshots; do not change without a migration.
-const VersionsPrefix = ".versions"
+const VersionsPrefix = syspath.Versions
 
 // StorageResolver maps a storage_id to a live driver. Same shape as the
 // resolver used by the rest of the API layer.

@@ -17,6 +17,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -32,9 +33,17 @@ var ErrSkipped = errors.New("thumb: skipped")
 
 // Pipeline coordinates thumbnail generation.
 type Pipeline struct {
-	store    db.Store
-	storages map[int64]storage.Driver
-	cacheDir string
+	store db.Store
+	// storagesMu guards storages. ⚠ AttachStorage is called from the server's
+	// storage resolver, which runs on every queue worker goroutine (content
+	// index, thumbnails) as well as on requests, while GenerateThumb reads the
+	// map on others. Unguarded, two first touches of storages at once killed
+	// the whole process — "fatal error: concurrent map writes" at
+	// pipeline.go:85, measured in a full e2e run on 2026-09-21 (every later
+	// spec then failed with ECONNREFUSED).
+	storagesMu sync.RWMutex
+	storages   map[int64]storage.Driver
+	cacheDir   string
 	// body resolves where a node's bytes are: the storage driver, or filex's
 	// staging area while a staged upload is still transferring. Nil-safe.
 	body *filebody.Resolver
@@ -82,7 +91,9 @@ func New(store db.Store, cacheDir string, caps Capabilities) *Pipeline {
 // AttachStorage registers a Driver for a storage ID — needed because the
 // pipeline reads source bytes from the originating storage.
 func (p *Pipeline) AttachStorage(id int64, drv storage.Driver) {
+	p.storagesMu.Lock()
 	p.storages[id] = drv
+	p.storagesMu.Unlock()
 }
 
 // GenerateThumb dispatches based on node MIME and updates the thumbnails
@@ -97,7 +108,9 @@ func (p *Pipeline) GenerateThumb(ctx context.Context, node *model.Node) error {
 	if node == nil || node.Type != model.NodeTypeFile {
 		return ErrSkipped
 	}
+	p.storagesMu.RLock()
 	drv, ok := p.storages[node.StorageID]
+	p.storagesMu.RUnlock()
 	if !ok {
 		return errors.New("thumb: no driver attached for storage")
 	}

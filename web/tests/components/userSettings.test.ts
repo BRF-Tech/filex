@@ -25,17 +25,19 @@
 // picking a zone actually moves the module both date formatters read
 // (`the time zone is offered because something reads it`). If that reader is
 // ever removed, the control has to go with it.
-import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { mount, type VueWrapper } from '@vue/test-utils';
+import { describe, expect, it, afterEach, beforeEach, vi } from 'vitest';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
 
-import { activeTimeZone as coreActiveTimeZone } from '@brftech/filex-core';
+import { activeTimeZone as coreActiveTimeZone, registerLocale, resetLocales } from '@brftech/filex-core';
 import { formatDate } from '@/lib/format';
 import { startRouteName } from '@/lib/startPage';
 import UserSettingsModal from '@/components/UserSettingsModal.vue';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationsStore } from '@/stores/notifications';
+import { useCapabilitiesStore } from '@/stores/capabilities';
+import { useToastStore } from '@/stores/toast';
 import en from '@/locales/en.json';
 import type { NotificationSettings, User } from '@/api/types';
 
@@ -90,16 +92,37 @@ const NON_ADMIN: User = {
   updated_at: '2026-09-01T00:00:00Z',
 };
 
+/**
+ * Every modal this file mounts, so `afterEach` can take it down again.
+ *
+ * ⚠⚠ A mounted UserSettingsModal is NOT inert: it starts
+ * `setInterval(refreshTzNow, 1000)` and only clears it in `onBeforeUnmount`.
+ * Left mounted, sixteen of them go on ticking after the file's environment is
+ * torn down, and the first tick to land afterwards re-renders a component
+ * whose `window` is gone — "ReferenceError: window is not defined", reported
+ * against whichever file was unlucky, with every test still green. Vitest
+ * counts that unhandled rejection and exits non-zero, so the gate is red and
+ * the list of failures is empty (seen on the v0.43.0 release branch, only in
+ * the full parallel run — this file alone always passed).
+ */
+const live: VueWrapper[] = [];
+
 function mountModal(): VueWrapper {
   const i18n = createI18n({ legacy: false, locale: 'en', fallbackLocale: 'en', messages: { en } });
-  return mount(UserSettingsModal, {
+  const w = mount(UserSettingsModal, {
     props: { modelValue: true },
     global: { plugins: [i18n] },
     attachTo: document.body,
   });
+  live.push(w);
+  return w;
 }
 
 describe('UserSettingsModal', () => {
+  afterEach(() => {
+    while (live.length) live.pop()!.unmount();
+  });
+
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
@@ -179,6 +202,60 @@ describe('UserSettingsModal', () => {
       in_app_enabled: false,
       muted_events: ['file.moved'],
     });
+  });
+
+  // ⚠ Measured in the release-candidate sweep (2026-09-21): the dialog offered
+  // "A virus is found in a file" with scanning off and "…opened with the
+  // escrow key" with no escrow key — switches that can never fire.
+  it('offers only the events that can happen on this instance', async () => {
+    const auth = useAuthStore();
+    auth.user = NON_ADMIN;
+    const caps = useCapabilitiesStore();
+    const notif = useNotificationsStore();
+    caps.data = { ...caps.data, antivirus: false, e2e_escrow: { enabled: false }, app_plugins: { enabled: false } };
+    const w = mountModal();
+    await notif.fetchSettings();
+    await w.vm.$nextTick();
+    await w.find('[data-testid="user-settings-tab-notifications"]').trigger('click');
+    for (const ev of ['file.infected', 'e2e.escrow_used', 'plugin.notice']) {
+      expect(w.find(`[data-testid="user-settings-event-${ev}"]`).exists(), `${ev} offered with its service off`).toBe(false);
+    }
+    expect(w.find('[data-testid="user-settings-event-share.created"]').exists()).toBe(true);
+
+    caps.data = { ...caps.data, antivirus: true, e2e_escrow: { enabled: true }, app_plugins: { enabled: true } };
+    await w.vm.$nextTick();
+    for (const ev of ['file.infected', 'e2e.escrow_used', 'plugin.notice']) {
+      expect(w.find(`[data-testid="user-settings-event-${ev}"]`).exists(), `${ev} missing with its service on`).toBe(true);
+    }
+  });
+
+  // QA #39, the admin half of the rule every "needs a service" entry follows
+  // (core lib/serviceGate): an administrator, who can switch the service on,
+  // sees the switch GREYED with the reason — not hidden, not live.
+  it('shows an administrator the impossible events greyed, with the reason', async () => {
+    const auth = useAuthStore();
+    auth.user = NON_ADMIN;
+    const caps = useCapabilitiesStore();
+    const notif = useNotificationsStore();
+    caps.data = {
+      ...caps.data,
+      caller_admin: true,
+      antivirus: false,
+      e2e_escrow: { enabled: true },
+      app_plugins: { enabled: true },
+    };
+    const w = mountModal();
+    await notif.fetchSettings();
+    await w.vm.$nextTick();
+    await w.find('[data-testid="user-settings-tab-notifications"]').trigger('click');
+    const sw = w.find('[data-testid="user-settings-event-file.infected"]');
+    expect(sw.exists(), 'an administrator is shown the event').toBe(true);
+    expect(sw.attributes('disabled'), 'but it cannot be switched').toBeDefined();
+    expect(sw.attributes('aria-checked')).toBe('false');
+    expect(w.find('[data-testid="user-settings-event-off-file.infected"]').text()).toContain('Virus scanning is off');
+    const live = w.find('[data-testid="user-settings-event-share.created"]');
+    expect(live.attributes('disabled')).toBeUndefined();
+    expect(w.find('[data-testid="user-settings-event-off-e2e.escrow_used"]').exists()).toBe(false);
   });
 
   it('mutes one event without disturbing the bell flag or the other mutes', async () => {
@@ -279,7 +356,7 @@ describe('UserSettingsModal', () => {
     await pick('Europe/Istanbul', 'ist');
     expect(coreActiveTimeZone()).toBe('Europe/Istanbul');
     // The SAME instant, +03:00 — the offset, not a different moment.
-    expect(formatDate('2026-09-12T00:30:00Z', 'en')).toContain('03:30 AM');
+    expect(formatDate('2026-09-12T00:30:00Z', 'en')).toContain('3:30 AM');
 
     // And it reaches the account, so the next browser agrees.
     expect(updateProfile).toHaveBeenCalledWith({ timezone: 'Europe/Istanbul' });
@@ -356,6 +433,74 @@ describe('UserSettingsModal', () => {
     });
   });
 
+  // Release-candidate sweep, 2026-09-21: "bu-bir-eposta-degil" was saved as
+  // the address with "Profil kaydedildi"; a username with "ş" came back after
+  // Save as the server's raw English in a toast. Both are now said under
+  // their box while typed, and Save waits.
+  it('says what is wrong with the address under its box, and does not save it', async () => {
+    const auth = useAuthStore();
+    auth.user = NON_ADMIN;
+    const w = mountModal();
+    await w.vm.$nextTick();
+
+    expect(w.find('[data-testid="profile-email-error"]').exists()).toBe(false);
+    await w.find('[data-testid="profile-email"]').setValue('bu-bir-eposta-degil');
+    const err = w.find('[data-testid="profile-email-error"]');
+    expect(err.exists()).toBe(true);
+    expect(err.text()).toBe('This is not an email address. Write it as name@example.com.');
+    expect(w.find('[data-testid="profile-email"]').attributes('aria-invalid')).toBe('true');
+
+    const save = w.find('[data-testid="user-settings-save-profile"]');
+    expect(save.attributes('disabled')).toBeDefined();
+    await save.trigger('click');
+    expect(updateProfile).not.toHaveBeenCalled();
+
+    // A dotless domain is an address: the first administrator's is admin@local.
+    await w.find('[data-testid="profile-email"]').setValue('kaya@local');
+    expect(w.find('[data-testid="profile-email-error"]').exists()).toBe(false);
+    expect(w.find('[data-testid="user-settings-save-profile"]').attributes('disabled')).toBeUndefined();
+  });
+
+  it('says what is wrong with the username in words, not the server log line', async () => {
+    const auth = useAuthStore();
+    auth.user = NON_ADMIN;
+    const w = mountModal();
+    await w.vm.$nextTick();
+
+    await w.find('[data-testid="profile-username"]').setValue('ayşe');
+    const err = w.find('[data-testid="profile-username-error"]');
+    expect(err.text()).toBe('“ş” cannot be used in a username. Use a–z, 0–9, dot, dash or underscore.');
+    expect(err.text()).not.toContain('invalid username');
+    await w.find('[data-testid="user-settings-save-profile"]').trigger('click');
+    expect(updateProfile).not.toHaveBeenCalled();
+  });
+
+  it('puts a refusal the server still makes under the box it is about, not in a toast', async () => {
+    const auth = useAuthStore();
+    auth.user = NON_ADMIN;
+    const toasts = useToastStore();
+    updateProfile.mockRejectedValue({
+      response: {
+        status: 409,
+        data: { error: 'email_taken', field: 'email', message: 'That address belongs to another account.' },
+      },
+    });
+    const w = mountModal();
+    await w.vm.$nextTick();
+
+    await w.find('[data-testid="profile-email"]').setValue('taken@example.com');
+    await w.find('[data-testid="user-settings-save-profile"]').trigger('click');
+    await flushPromises();
+
+    expect(w.find('[data-testid="profile-email-error"]').text()).toBe('That address belongs to another account.');
+    // ⚠ Not "Profile saved": that is what the duplicate address used to get.
+    expect(toasts.toasts.map((x) => x.message)).toEqual([]);
+
+    // Typing again is a new question; the old answer goes.
+    await w.find('[data-testid="profile-email"]').setValue('free@example.com');
+    expect(w.find('[data-testid="profile-email-error"]').exists()).toBe(false);
+  });
+
   it('persists the theme and the density where their readers look', async () => {
     const auth = useAuthStore();
     auth.user = NON_ADMIN;
@@ -371,5 +516,29 @@ describe('UserSettingsModal', () => {
     await w.find('[data-testid="user-settings-density"]').trigger('click');
     // packages/core's Toolbar reads this at setup — see tests/lib/density.
     expect(localStorage.getItem('filex.density')).toBe('compact');
+  });
+
+  // ⚠⚠ The language field offered `[en, tr]`, written here, and its
+  // `currentLocale` turned anything that was not `tr` into `en` — so a
+  // language pack's language could be installed and never chosen, and once
+  // chosen elsewhere this dialog said the person was reading English.
+  it("offers every language the instance has, a language pack's included, and marks the active one", async () => {
+    const auth = useAuthStore();
+    auth.user = NON_ADMIN;
+    registerLocale({ code: 'es', source: 'plugin', plugin: 'lang-es' });
+    try {
+      const i18n = createI18n({ legacy: false, locale: 'es', fallbackLocale: 'en', messages: { en } });
+      const w = mount(UserSettingsModal, { props: { modelValue: true }, global: { plugins: [i18n] }, attachTo: document.body });
+      live.push(w);
+      await w.vm.$nextTick();
+      await w.find('[data-testid="user-settings-tab-preferences"]').trigger('click');
+      const es = w.find('[data-testid="user-settings-locale-es"]');
+      expect(es.exists()).toBe(true);
+      expect(es.text()).toBe('Español');
+      expect(es.attributes('aria-pressed')).toBe('true');
+      expect(w.find('[data-testid="user-settings-locale-en"]').attributes('aria-pressed')).toBe('false');
+    } finally {
+      resetLocales();
+    }
   });
 });

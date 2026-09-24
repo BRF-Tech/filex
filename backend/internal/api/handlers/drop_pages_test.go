@@ -51,7 +51,7 @@ func assertNoBlankChrome(t *testing.T, body string) {
 	if m := emptyTagRe.FindString(body); m != "" {
 		t.Fatalf("public page rendered an empty user-visible element: %q", m)
 	}
-	if strings.Contains(body, `<html lang="">`) {
+	if strings.Contains(body, `<html lang=""`) { // with or without the dir that follows it
 		t.Fatalf(`public page rendered <html lang=""> — the language never reached the template`)
 	}
 	if strings.Contains(body, "<no value>") {

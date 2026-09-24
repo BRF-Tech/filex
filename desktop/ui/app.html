@@ -149,8 +149,15 @@
         display: flex; align-items: center; justify-content: center;
         transition: background .12s, color .12s;
       }
-      #winctl button:hover { background: var(--fe-bg-hover, rgba(128,128,128,.16)); color: var(--fe-text); }
-      #winctl button.winctl--close:hover { background: #e53935; color: #fff; }
+      /* The close button turns the product's danger red with the product's
+         on-colour glyph — exactly the pair .fe-btn--danger paints (core
+         base.css). It was #e53935 on #fff: a near-miss of --fe-danger #dc2626
+         that no theme could reach, so on the dark themes (danger #f87171,
+         on-colour #15171c) the one red the window drew was the light theme's.
+         The hover's rgba() fallback could never apply: every theme defines
+         --fe-bg-hover. test/chrome-tokens.test.ts holds this. */
+      #winctl button:hover { background: var(--fe-bg-hover); color: var(--fe-text); }
+      #winctl button.winctl--close:hover { background: var(--fe-danger); color: var(--fe-text-on-primary); }
 
       /* The workspace = the old body: the account rail beside the main pane. */
       #workspace { flex: 1; min-height: 0; display: flex; }
@@ -447,6 +454,17 @@
         background: var(--fe-bg-elev);
       }
       .between { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+      /* Items the engine holds for a decision — a notice inside the folder's
+         card, not a dialog: nothing is lost while it waits, and the rest of
+         the folder keeps syncing. */
+      .hold {
+        margin-top: var(--fe-gap-sm);
+        padding: var(--fe-gap-sm) var(--fe-gap);
+        border-inline-start: 3px solid var(--fe-warning);
+        border-radius: var(--fe-radius-sm);
+        background: var(--fe-bg);
+      }
+      .hold .row { margin-top: var(--fe-gap-sm); }
       .row { display: flex; gap: var(--fe-gap-sm); align-items: center; }
       .label { font-size: var(--fe-text-sm); font-weight: 500; color: var(--fe-text); }
       .muted { color: var(--fe-text-muted); font-size: var(--fe-text-xs); }
@@ -860,6 +878,10 @@
         'boot.unreachable_sub': ['The server did not answer. It may be offline, or this computer may be off the network.',
                                  'Sunucu yanıt vermedi. Kapalı olabilir ya da bu bilgisayar ağ dışında olabilir.'],
         'boot.retry':           ['Try again', 'Yeniden dene'],
+        'boot.signed_out':      ['Signed out of {host}', '{host} oturumu kapandı'],
+        'boot.signed_out_sub':  ["The server no longer accepts this computer's sign-in — it was revoked or it expired. Sync for this account is stopped. “Reconnect” signs in again in your browser and keeps this account's synced folders.",
+                                 'Sunucu bu bilgisayarın oturumunu artık kabul etmiyor — iptal edilmiş ya da süresi dolmuş. Bu hesabın eşitlemesi durdu. «Yeniden bağlan» tarayıcında tekrar giriş yapar ve bu hesabın eşitlenen klasörlerini korur.'],
+        'boot.reconnect':       ['Reconnect', 'Yeniden bağlan'],
 
         'rail.add':             ['Add another account', 'Başka bir hesap ekle'],
         'rail.settings':        ['Settings', 'Ayarlar'],
@@ -878,9 +900,9 @@
         'set.sub':              ["This app's settings, plus the storage connections of the server you are signed in to.",
                                  'Bu uygulamanın ayarları ve bağlı olduğunuz sunucunun depo bağlantıları.'],
         'set.connections':      ['Storage connections', 'Depo bağlantıları'],
-        'set.connections_sub':  ['Connect this server to a bucket, a share or another server — and see how to mount it from this computer.',
-                                 'Bu sunucuyu bir bucket, bir paylaşım ya da başka bir sunucuya bağlayın — ve bu bilgisayardan nasıl bağlanacağınızı görün.'],
-        'set.connections_open': ['Manage storages', 'Depoları yönet'],
+        'set.connections_sub':  ['See how to reach this server from this computer — mount it, or connect with an S3 client, over SFTP or with this app. Storages themselves are created and edited in the admin panel.',
+                                 'Bu sunucuya bu bilgisayardan nasıl erişileceğini görün — bağlayın ya da bir S3 istemcisi, SFTP veya bu uygulamayla erişin. Depoların kendisi yönetim panelinde oluşturulur ve düzenlenir.'],
+        'set.connections_open': ['How to connect', 'Nasıl bağlanılır'],
         'set.close':            ['Close settings', 'Ayarları kapat'],
         // ⚠ Names the rail's + rather than drawing a second one. See the note
         // over settingsHtml().
@@ -889,8 +911,29 @@
         'set.accounts':         ['Accounts', 'Hesaplar'],
         'set.admin':            ['Admin panel ↗', 'Yönetim paneli ↗'],
         'set.signout':          ['Sign out', 'Çıkış yap'],
+        'set.reconnect':        ['Reconnect', 'Yeniden bağlan'],
+        'set.signed_out':       ["Signed out by the server — this account's sync is stopped until you reconnect.",
+                                 'Sunucu oturumu kapattı — yeniden bağlanana kadar bu hesabın eşitlemesi durdu.'],
         'set.no_accounts':      ['No accounts.', 'Hesap yok.'],
         'set.folders':          ['Synced folders', 'Eşitlenen klasörler'],
+        'set.pause':            ['Pause sync', 'Eşitlemeyi duraklat'],
+        'set.pause_sub':        ['Nothing is uploaded or downloaded until you resume — and it stays paused after a restart. The tray menu has the same switch.',
+                                 'Sen sürdürene kadar hiçbir şey yüklenmez ya da indirilmez — yeniden başlatınca da duraklatılmış kalır. Aynı düğme tepsi menüsünde de var.'],
+        'set.limit_down':       ['Download limit', 'İndirme sınırı'],
+        'set.limit_down_sub':   ['How fast folder sync may download, for each signed-in account. Opening or dragging a file in this window is not limited.',
+                                 'Klasör eşitlemenin indirme hızı, oturum açılmış her hesap için ayrı. Bu pencerede dosya açmak ya da sürüklemek sınırlanmaz.'],
+        'set.limit_up':         ['Upload limit', 'Yükleme sınırı'],
+        'set.limit_up_sub':     ['How fast folder sync may upload — so a big first sync does not fill the line everyone else on the server uses.',
+                                 'Klasör eşitlemenin yükleme hızı — büyük bir ilk eşitleme sunucudaki herkesin kullandığı hattı doldurmasın.'],
+        'set.limit_none':       ['Unlimited', 'Sınırsız'],
+        'set.limit_mb':         ['{n} MB/s', '{n} MB/sn'],
+        'set.limit_custom':     ['Currently {n} KB/s', 'Şu an {n} KB/sn'],
+        'set.window':           ['When to sync', 'Ne zaman eşitlensin'],
+        'set.window_sub':       ['Evenings & nights is 19:00–08:00, nights 22:00–07:00, local time. Outside those hours no new sync round starts; one still running when they end stops and carries on next time.',
+                                 'Akşam ve gece 19:00–08:00, gece 22:00–07:00 arasıdır (yerel saat). Bu saatlerin dışında yeni eşitleme turu başlamaz; saat dolduğunda süren tur durur ve bir sonrakinde devam eder.'],
+        'set.window_any':       ['Any time', 'Her zaman'],
+        'set.window_19:00-08:00': ['Evenings & nights', 'Akşam ve gece'],
+        'set.window_22:00-07:00': ['Nights', 'Gece'],
         'set.no_engine':        ['The sync engine is missing from this build, so nothing will transfer.',
                                  'Bu sürümde eşitleme motoru yok, hiçbir dosya aktarılmayacak.'],
         'set.no_folders':       ['No folders are syncing yet.', 'Henüz eşitlenen klasör yok.'],
@@ -989,6 +1032,39 @@
         'sync.waiting':         ['waiting to start', 'başlaması bekleniyor'],
         'sync.watching':        ['watching for changes', 'değişiklikler izleniyor'],
         'sync.stopped':         ['stopped', 'durdu'],
+        // How changes reach the engine (LiveState in src/syncstatus.ts). One word
+        // and what it means — no new UI, just the truth about the speed.
+        'sync.live.connected':  ['Live — changes arrive as they happen', 'Canlı — değişiklikler anında geliyor'],
+        'sync.live.polling':    ['Polling — this server does not announce changes; checked every 30 s',
+                                 'Yoklama — bu sunucu değişiklikleri bildirmiyor; 30 sn’de bir kontrol ediliyor'],
+        'sync.live.offline':    ['Offline — the server cannot be reached; retrying',
+                                 'Çevrimdışı — sunucuya ulaşılamıyor; yeniden deneniyor'],
+        // Keys are the engine's codes (LocalNote in src/syncstatus.ts).
+        'sync.local.too-large': ['Changes made on this computer are found by the 30-second check — the folder has too many items to watch',
+                                 'Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur — klasörde izlenemeyecek kadar çok öğe var'],
+        'sync.local.unavailable': ['Changes made on this computer are found by the 30-second check — the folder cannot be watched',
+                                 'Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur — klasör izlenemiyor'],
+        'sync.paused':          ['paused — resume sync to continue', 'duraklatıldı — devam etmek için eşitlemeyi sürdür'],
+        'sync.signed_out':      ['stopped — the server signed this account out; Reconnect to continue',
+                                 'durdu — sunucu bu hesabın oturumunu kapattı; devam etmek için Yeniden bağlan'],
+        'sync.window_wait':     ['waiting for the sync window, {window}', 'eşitleme saatleri bekleniyor, {window}'],
+        'sync.held_one':        ['1 item on this computer is not on the server or differs from it.',
+                                 'Bu bilgisayardaki 1 öğe sunucuda yok ya da sunucudakinden farklı.'],
+        'sync.held_many':       ['{n} items on this computer are not on the server or differ from it.',
+                                 'Bu bilgisayardaki {n} öğe sunucuda yok ya da sunucudakinden farklı.'],
+        'sync.held_sub':        ["filex is holding them back instead of uploading them: this folder's first sync would have sent a great many items into a server folder that already has content — which is what an old copy of the folder looks like. Everything else keeps syncing.",
+                                 'filex bunları yüklemek yerine bekletiyor: bu klasörün ilk eşitlemesi, zaten içeriği olan bir sunucu klasörüne çok sayıda öğe gönderecekti — bu, klasörün eski bir kopyasına benziyor. Geri kalan her şey eşitlenmeye devam ediyor.'],
+        'sync.held_upload':     ['Upload them', 'Sunucuya yükle'],
+        'sync.held_discard':    ['Move to local trash', 'Yerel çöpe taşı'],
+        'sync.phase_inventory': ['listing the server…', 'sunucu listeleniyor…'],
+        'sync.phase_plan':      ['working out what to change…', 'neyin değişeceği hesaplanıyor…'],
+        'sync.phase_transfer':  ['moving files — {done}/{total}', 'dosyalar aktarılıyor — {done}/{total}'],
+        'sync.phase_bytes':     ['{bytes} of {size}', '{bytes} / {size}'],
+        'sync.eta':             ['about {eta} left', 'yaklaşık {eta} kaldı'],
+        'sync.eta_h':           ['{h} h {m} min', '{h} sa {m} dk'],
+        'sync.eta_m':           ['{m} min', '{m} dk'],
+        'sync.eta_s':           ['{s} s', '{s} sn'],
+        'sync.phase_settling':  ['finishing up…', 'tamamlanıyor…'],
         'sync.trash_kept':      ['Kept for 30 days:', '30 gün saklanıyor:'],
         'sync.trash_empty':     ['Nothing has been removed by sync.', 'Eşitleme hiçbir şey silmedi.'],
 
@@ -1189,8 +1265,9 @@
       }
 
       /**
-       * Where a clicked notification asked us to land: `{ storage, folder,
-       * select }` from the shared resolver (web/src/lib/notificationTarget.ts,
+       * Where a clicked notification asked us to land: `{ kind: 'folder',
+       * storage, folder, select, open }` or `{ kind: 'trash', select }` from
+       * the shared resolver (web/src/lib/notificationTarget.ts,
        * imported by the main process — this page never works it out itself).
        * Consumed by the next mountExplorer() and then cleared.
        */
@@ -1202,9 +1279,23 @@
        * ⚠ Compared attribute-by-attribute rather than through a
        * `[data-fe-path="…"]` selector: a real file name may contain a quote or
        * a backslash, and a selector built by concatenation breaks on exactly
-       * those names. The click goes through the component's own row handler,
-       * so the selection behaves afterwards as if a hand had made it.
+       * those names.
+       *
+       * ⚠⚠ THE CHECKBOX, NEVER THE ROW. Since issue #26 a click anywhere
+       * else on a row OPENS it — under `openTrigger: 'single'`, and on touch
+       * whatever the setting — so this clicked the row and the notification
+       * about a file opened that file instead of pointing at it, with the
+       * eight-second loop below re-opening it on every pass. web/src/views/
+       * Explore.vue has said "the checkbox, never the row" since that issue;
+       * this surface was the copy that never got the note. A tick also ADDS to
+       * a selection rather than replacing it, so anything else still ticked is
+       * unticked first: the notification points at ONE file.
        */
+      function tickRow(row) {
+        const box = row.querySelector('.fe-list__check');
+        if (box) box.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      }
+
       async function revealRow(qualified) {
         if (!qualified) return false;
         const deadline = Date.now() + 8000;
@@ -1216,19 +1307,129 @@
         let stable = 0;
         while (Date.now() < deadline) {
           const row = Array.from(document.querySelectorAll('[data-fe-path]'))
-            .find((el) => el.getAttribute('data-fe-path') === qualified);
+            .find((el) => sameRowPath(el.getAttribute('data-fe-path'), qualified));
           if (row && row.getAttribute('aria-selected') === 'true') {
             if (++stable >= 3) return true;
           } else {
             stable = 0;
             if (row) {
+              for (const other of Array.from(document.querySelectorAll('[data-fe-path][aria-selected="true"]'))) {
+                if (other !== row) tickRow(other);
+              }
               row.scrollIntoView({ block: 'center' });
-              row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              tickRow(row);
             }
           }
           await new Promise((r) => setTimeout(r, 200));
         }
         return false;
+      }
+
+      /**
+       * `#qldemo/Documents` → `qldemo://Documents`. The inverse of the hash the
+       * explorer writes, for the one case with no row to select.
+       *
+       * ⚠ Kept in step with web/src/lib/notificationTarget.ts
+       * (`qualifiedFromHash`). This page is plain HTML served from disk — it
+       * cannot import a TypeScript module — but it can at least not invent a
+       * second rule: same two shapes, same conversion.
+       */
+      function qualifiedFromFolder(dest) {
+        if (!dest || !dest.storage) return '';
+        return dest.folder ? dest.storage + '://' + dest.folder : dest.storage + '://';
+      }
+
+      /**
+       * Two spellings of one row's `data-fe-path`: `docs://Documents/a.txt`
+       * and `docs:///Documents/a.txt`. The Trash view builds its rows from the
+       * ORIGINAL path, which is stored with a leading slash, so an exact
+       * comparison found nothing to select there.
+       *
+       * ⚠ Kept in step with web/src/lib/notificationTarget.ts (`sameRowPath`)
+       * for the same reason as qualifiedFromFolder above.
+       */
+      function sameRowPath(a, b) {
+        const norm = (p) => {
+          const s = String(p == null ? '' : p);
+          const at = s.indexOf('://');
+          return at < 0 ? s : s.slice(0, at + 3) + s.slice(at + 3).replace(/^\/+/, '');
+        };
+        return norm(a) === norm(b);
+      }
+
+      /**
+       * Where the explorer mounts for a clicked notification: the folder, or
+       * the Trash view (`.trash`, the sentinel the explorer opens as its Trash
+       * view — web/src/lib/notificationTarget.ts `TRASH_VIEW_PATH`).
+       */
+      function startPathOf(dest) {
+        if (!dest) return '';
+        if (dest.kind === 'trash') return '.trash';
+        return qualifiedFromFolder(dest);
+      }
+
+      /**
+       * Carry out a clicked notification's destination inside the explorer:
+       * reveal the row, then open the app screen the notice asked for.
+       *
+       * ⚠⚠ The app screen used to be DROPPED here. The main process
+       * resolves the whole destination — `{storage, folder, select, open}` —
+       * through the shared resolver and sends all of it, and this page read
+       * `.select` and nothing else. So "please sign this" opened the signing
+       * screen in a browser and a FOLDER in the desktop app: one notification,
+       * two behaviours, which is exactly what one shared resolver exists to
+       * prevent.
+       */
+      async function carryOutReveal(dest) {
+        if (!dest) return;
+        if (dest.select) await revealRow(dest.select);
+        if (dest.kind === 'trash' || !dest.open || !dest.open.plugin) return;
+        const el = explorer;
+        if (!el || typeof el.openAppTarget !== 'function') return;
+        const path = dest.select || qualifiedFromFolder(dest);
+        if (!path) return;
+        try {
+          await el.openAppTarget({
+            plugin: dest.open.plugin,
+            action: dest.open.action,
+            view: dest.open.view,
+            path,
+          });
+        } catch (err) {
+          // A refusal is the explorer's to report (it toasts); this only makes
+          // sure a thrown one does not take the mount with it.
+          console.warn('[notify] openAppTarget failed', err);
+        }
+      }
+
+      /**
+       * The server refused this account's token (revoked or expired). The
+       * main process has already stopped its sync and its bell; this surface
+       * says so and offers the two things that can help. Reconnect is the
+       * browser sign-in again for the same server — it keeps the account's
+       * synced folders, which signing out and back in would not.
+       */
+      function showSignedOut(account) {
+        const slot = $('#explorer-host');
+        slot.innerHTML = '';
+        explorer = null;
+        mountedFor = 'signedout:' + account.id;
+        adoptExplorerTheme(null);
+        showBoot(
+          `<div class="boot__title">${esc(T('boot.signed_out', { host: host(account.serverUrl) }))}</div>` +
+          `<div class="boot__sub">${esc(account.email)}</div>` +
+          `<div class="boot__sub">${esc(T('boot.signed_out_sub'))}</div>` +
+          `<div class="boot__actions">` +
+          `<button class="primary" id="boot-reconnect">${esc(T('boot.reconnect'))}</button>` +
+          `<button id="boot-signout">${esc(T('set.signout'))}</button>` +
+          `</div>`,
+        );
+        $('#boot-reconnect').addEventListener('click', () => { void window.filexApp.reconnect(account.id); });
+        $('#boot-signout').addEventListener('click', async () => {
+          state = await window.filexApp.signOut(account.id);
+          mountedFor = null;
+          render();
+        });
       }
 
       async function mountExplorer(account) {
@@ -1245,6 +1446,13 @@
             `<div class="boot__actions"><button class="primary" id="boot-add">${esc(T('boot.add'))}</button></div>`,
           );
           $('#boot-add').addEventListener('click', () => window.filexApp.addAccount());
+          return;
+        }
+        // ⚠ Before the "already mounted" check: an explorer that is on screen
+        // when the server refuses its token has to be taken down, not left
+        // answering every click with an error.
+        if (account.signedOut) {
+          if (mountedFor !== 'signedout:' + account.id) showSignedOut(account);
           return;
         }
         if (mountedFor === account.id) return;
@@ -1265,6 +1473,13 @@
           storages = await window.filexApp.storages(account.id);
         } catch (e) {
           if (mountedFor !== account.id) return;
+          // A 401 is not "unreachable": the main process has marked the
+          // account, and Try again could never work. Ask it rather than
+          // parsing the message.
+          try { state = await window.filexApp.getState(); } catch { /* keep what we had */ }
+          if (mountedFor !== account.id) return;
+          const now = (state.accounts || []).find((a) => a.id === account.id);
+          if (now && now.signedOut) { renderRail(); showSignedOut(now); return; }
           showBoot(
             `<div class="boot__title">${esc(T('boot.unreachable', { host: host(account.serverUrl) }))}</div>` +
             `<div class="boot__sub">${esc(T('boot.unreachable_sub'))}</div>` +
@@ -1302,7 +1517,7 @@
           // which is why openNotification() below remounts rather than poking
           // a live component.
           initialPath: pendingReveal
-            ? `${pendingReveal.storage}://${pendingReveal.folder ?? ''}`
+            ? startPathOf(pendingReveal)
             : storages.length === 1 ? `${storages[0].name}://` : undefined,
           // ⚠ Deliberately not persisted. The stored path is a single global
           // key, so remembering it would try to open account A's folder after a
@@ -1366,9 +1581,9 @@
         // is no longer in the document.
         adoptExplorerTheme(explorer);
         if (pendingReveal) {
-          const want = pendingReveal.select;
+          const want = pendingReveal;
           pendingReveal = null;
-          if (want) void revealRow(want);
+          void carryOutReveal(want);
         }
       }
 
@@ -1380,7 +1595,9 @@
        */
       async function openNotification(payload) {
         const dest = payload && payload.dest;
-        if (!dest || dest.kind !== 'folder') return;
+        // A folder, or the Trash view (a `file.trashed` notice) — the same two
+        // kinds main.ts forwards (src/notifications.ts `opensInWindow`).
+        if (!dest || (dest.kind !== 'folder' && dest.kind !== 'trash')) return;
         const active = (state.accounts || []).find((a) => a.id === state.activeId);
         // The account may have been switched between the toast and the click.
         if (!active || (payload.accountId && payload.accountId !== active.id)) return;
@@ -1460,9 +1677,13 @@
             b.title = `${a.email}\n${host(a.serverUrl)}`;
             b.appendChild(document.createTextNode(initials(a.email)));
           }
-          if (st) {
+          if (st || a.signedOut) {
             const dot = document.createElement('span');
-            dot.className = `dot ${st.lastError ? 'err' : st.running ? 'ok' : ''}`;
+            // Red while anything of this account is failing NOW — the server
+            // signed it out, or the account itself or any of its folders is
+            // failing (per-pair state: src/syncstatus.ts).
+            const failing = a.signedOut || (st && (st.lastError || Object.values(st.pairs || {}).some((h) => h.error)));
+            dot.className = `dot ${failing ? 'err' : st && st.running ? 'ok' : ''}`;
             b.appendChild(dot);
           }
           b.addEventListener('click', async () => {
@@ -1508,9 +1729,57 @@
       // native menu built in the main process, and nothing in the file list can
       // tell it what language to speak. One control, in the one place that can
       // reach all three surfaces (this window, the tray, the explorer).
+      /** The engine's size ('1.2 GiB') with this window's decimal mark. */
+      function localSize(s) {
+        return LANG === 'tr' ? String(s).replace(/(\d)\.(\d)/, '$1,$2') : String(s);
+      }
+
+      /** The engine's estimate in this window's words; its own text when it
+       *  said something this window cannot read. */
+      function localEta(v) {
+        const t = v.etaSeconds;
+        if (typeof t !== 'number') return v.eta || '';
+        if (t >= 3600) return T('sync.eta_h', { h: String(Math.floor(t / 3600)), m: String(Math.floor((t % 3600) / 60)) });
+        if (t >= 60) return T('sync.eta_m', { m: String(Math.round(t / 60)) });
+        return T('sync.eta_s', { s: String(t) });
+      }
+
+      /** One of the engine's phases, in words, for the folder line — with the
+       *  bytes and the time left once the engine reports them. */
+      function activityLine(v) {
+        if (v.phase === 'transfer' && v.total > 0) {
+          let line = T('sync.phase_transfer', { done: String(v.done), total: String(v.total) });
+          if (v.bytesDone && v.bytesTotal) {
+            line += ', ' + T('sync.phase_bytes', { bytes: localSize(v.bytesDone), size: localSize(v.bytesTotal) });
+          }
+          if (v.eta) line += ' — ' + T('sync.eta', { eta: localEta(v) });
+          return line;
+        }
+        if (v.phase === 'plan') return T('sync.phase_plan');
+        if (v.phase === 'settling') return T('sync.phase_settling');
+        return T('sync.phase_inventory');
+      }
+
+      /** A bandwidth limit: the presets the main process offers, KiB/s. A
+       *  stored value that is not one of them is named rather than hidden. */
+      function limitRow(id, current, label, sub) {
+        const presets = state.limitPresets || [0];
+        const now = Number(current) || 0;
+        const custom = !presets.includes(now);
+        return `<div class="card"><div class="between">
+            <div><div class="label">${esc(label)}</div>
+              <div class="muted">${esc(sub)}</div>
+              ${custom ? `<div class="muted">${esc(T('set.limit_custom', { n: String(now) }))}</div>` : ''}</div>
+            <div class="segmented">${
+              presets.map((kib) => `<button data-${id}="${kib}"${
+                now === kib ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"'
+              }>${esc(kib === 0 ? T('set.limit_none') : T('set.limit_mb', { n: String(kib / 1024) }))}</button>`).join('')
+            }</div>
+          </div></div>`;
+      }
+
       function settingsHtml() {
         const active = state.accounts.find((a) => a.id === state.activeId);
-        const statusOf = Object.fromEntries((state.syncStatuses || []).map((s) => [s.accountId, s]));
 
         /** A yes/no row: the label, what it means, and a switch that shows the
          *  state instead of a button whose text is the state. */
@@ -1528,9 +1797,11 @@
             <div style="min-width:0">
               <div class="label">${esc(a.email)}</div>
               <div class="muted" style="overflow-wrap:anywhere">${esc(a.serverUrl)}</div>
+              ${a.signedOut ? `<div class="muted err">${esc(T('set.signed_out'))}</div>` : ''}
             </div>
             <div class="row">
               <button class="link" data-admin="${a.id}">${esc(T('set.admin'))}</button>
+              ${a.signedOut ? `<button class="primary" data-reconnect="${a.id}">${esc(T('set.reconnect'))}</button>` : ''}
               <button class="danger" data-signout="${a.id}">${esc(T('set.signout'))}</button>
             </div>
           </div></div>`).join('') : `<div class="empty">${esc(T('set.no_accounts'))}</div>`;
@@ -1538,23 +1809,52 @@
         const pairs = state.syncFolders.length ? state.syncFolders.map((f) => {
           const acc = state.accounts.find((a) => a.id === f.accountId);
           const st = statusOf[f.accountId];
+          // ⚠ THIS folder's state, not the account's (per-pair state:
+          // src/syncstatus.ts). What the line leads with is decided in the
+          // main process (src/sync-policy.ts folderView); this only puts it
+          // into words.
+          const h = (st && st.pairs && st.pairs[f.id]) || {};
+          const v = f.view || { kind: 'starting' };
           let line = T('sync.waiting'), cls = 'muted';
-          if (st && st.lastError) { line = st.lastError; cls = 'err'; }
-          else if (st && st.running) { line = st.lastLine || T('sync.watching'); cls = 'ok'; }
-          else if (st) { line = T('sync.stopped'); cls = 'err'; }
+          switch (v.kind) {
+            case 'paused': line = T('sync.paused'); break;
+            case 'signed-out': line = T('sync.signed_out'); cls = 'err'; break;
+            case 'active': line = activityLine(v); cls = 'ok'; break;
+            case 'window': line = T('sync.window_wait', { window: v.window.replace('-', '–') }); break;
+            case 'error': line = v.message; cls = 'err'; break;
+            case 'watching': line = T('sync.watching'); cls = 'ok'; break;
+            case 'stopped': line = T('sync.stopped'); cls = 'err'; break;
+          }
+          const syncing = st && st.running && v.kind !== 'paused' && v.kind !== 'signed-out';
+          const live = syncing && st.live ? T('sync.live.' + st.live) : '';
+          // How changes made on THIS computer reach the engine — only said
+          // when they cannot be watched and wait for the 30-second check.
+          const localNote = syncing && h.local
+            ? T('sync.local.' + h.local.code) + (h.local.code === 'unavailable' && h.local.detail ? `: ${h.local.detail}` : '')
+            : '';
           return `
-          <div class="card"><div class="between">
+          <div class="card" data-pair="${esc(f.id)}"><div class="between">
             <div style="min-width:0">
               <div><code>${esc(f.remotePath)}</code></div>
               <div class="muted" style="overflow-wrap:anywhere">↔ ${esc(f.localPath)}</div>
               <div class="muted">${esc(acc ? acc.email : T('set.unknown_account'))}</div>
-              <div class="muted ${cls}">${esc(line)}</div>
+              <div class="muted ${cls}" data-line>${esc(line)}</div>
+              ${live ? `<div class="muted" data-live="${esc(st.live)}">${esc(live)}</div>` : ''}
+              ${localNote ? `<div class="muted" data-local="${esc(h.local.code)}" title="${esc(h.local.detail || '')}">${esc(localNote)}</div>` : ''}
             </div>
             <div class="row">
               <button data-openlocal="${esc(f.localPath)}">${esc(T('set.open_folder'))}</button>
               <button class="danger" data-rmsync="${f.id}">${esc(T('set.stop_sync'))}</button>
             </div>
-          </div></div>`;
+          </div>${f.held > 0 ? `
+            <div class="hold" role="status">
+              <div class="label">${esc(f.held === 1 ? T('sync.held_one') : T('sync.held_many', { n: String(f.held) }))}</div>
+              <div class="muted">${esc(T('sync.held_sub'))}</div>
+              <div class="row">
+                <button class="primary" data-hold-upload="${esc(f.id)}">${esc(T('sync.held_upload'))}</button>
+                <button data-hold-discard="${esc(f.id)}">${esc(T('sync.held_discard'))}</button>
+              </div>
+            </div>` : ''}</div>`;
         }).join('') : `<div class="empty">${esc(T('set.no_folders'))}</div>`;
 
         const engineWarning = state.syncEngine === 'missing'
@@ -1581,13 +1881,15 @@
           <p class="muted">${esc(T('set.add_hint'))}</p>
 
           <h2>${esc(T('set.connections'))}</h2>
-          <!-- ⚠ ONE button, not two. "How to connect" used to sit beside it and
-               open the same shared panel on its other tab — and the file list's
-               own sidebar already has a "How to connect" entry that opens that
-               exact component (packages/core SideNav → open-connections). The
-               sidebar entry is always on screen and belongs to the shared
-               package, so it keeps the job; this button keeps the half the
-               sidebar does not name. -->
+          <!-- ⚠ ONE button, and since v0.43.0 it is the "How to connect" one:
+               the shared panel lost its Storages tab, so "Manage storages" no
+               longer described anything it does. Storages are created and
+               edited in the admin panel — the per-account "Admin panel ↗" link
+               in the Accounts list above is that door.
+               ⚠ Not a duplicate of the file list's own sidebar entry, which
+               opens the same component: `syncOverlays()` HIDES the explorer
+               while Settings is open, so from this screen the sidebar cannot
+               be reached and this is the only door. -->
           <div class="card"><div class="between">
             <div><div class="label">${esc(T('set.connections'))}</div>
               <div class="muted">${esc(T('set.connections_sub'))}</div></div>
@@ -1596,6 +1898,18 @@
 
           <h2>${esc(T('set.folders'))}</h2>
           ${engineWarning}
+          ${toggle('sync-pause', state.syncPaused === true, T('set.pause'), T('set.pause_sub'))}
+          ${limitRow('limit-down', state.limitDownKiB, T('set.limit_down'), T('set.limit_down_sub'))}
+          ${limitRow('limit-up', state.limitUpKiB, T('set.limit_up'), T('set.limit_up_sub'))}
+          <div class="card"><div class="between">
+            <div><div class="label">${esc(T('set.window'))}</div>
+              <div class="muted">${esc(T('set.window_sub'))}</div></div>
+            <div class="segmented">${
+              (state.windowPresets || ['']).map((w) => `<button data-sync-window="${esc(w)}"${
+                (state.syncWindow || '') === w ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"'
+              }${w ? ` title="${esc(w.replace('-', '–'))}"` : ''}>${esc(w ? T('set.window_' + w) : T('set.window_any'))}</button>`).join('')
+            }</div>
+          </div></div>
           ${active ? `<div class="card"><div class="between">
             <div style="min-width:0">
               <div class="label">${esc(T('set.sync_root'))}</div>
@@ -1782,6 +2096,9 @@
         }));
         el.querySelectorAll('[data-admin]').forEach((b) => b.addEventListener('click', () =>
           window.filexApp.openAdmin(b.dataset.admin)));
+        el.querySelectorAll('[data-reconnect]').forEach((b) => b.addEventListener('click', () => {
+          void window.filexApp.reconnect(b.dataset.reconnect);
+        }));
         el.querySelectorAll('[data-openlocal]').forEach((b) => b.addEventListener('click', () =>
           window.filexApp.openLocal(b.dataset.openlocal)));
         el.querySelectorAll('[data-rmsync]').forEach((b) => b.addEventListener('click', async () => {
@@ -1790,7 +2107,7 @@
           render(); renderSettings();
         }));
         const connOpen = $('#conn-open', el);
-        if (connOpen) connOpen.addEventListener('click', () => openConnections('storages'));
+        if (connOpen) connOpen.addEventListener('click', () => openConnections());
         const addSync = $('#add-sync', el);
         if (addSync) addSync.addEventListener('click', () => openPicker());
         const rootChange = $('#sync-root-change', el);
@@ -1807,6 +2124,35 @@
           state = await window.filexApp.setSettings({ notifications: state.notifications === false });
           renderSettings();
         });
+        // Held items: the engine's own confirm / discard; the main process
+        // asks before discarding and restarts the folder's watcher after.
+        el.querySelectorAll('[data-hold-upload]').forEach((b) => b.addEventListener('click', async () => {
+          b.disabled = true;
+          state = await window.filexApp.syncHoldUpload(b.dataset.holdUpload);
+          render(); renderSettings();
+        }));
+        el.querySelectorAll('[data-hold-discard]').forEach((b) => b.addEventListener('click', async () => {
+          b.disabled = true;
+          state = await window.filexApp.syncHoldDiscard(b.dataset.holdDiscard);
+          render(); renderSettings();
+        }));
+        $('#sync-pause', el).addEventListener('click', async () => {
+          state = await window.filexApp.setSettings({ syncPaused: state.syncPaused !== true });
+          render(); renderSettings();
+        });
+        // Limits and the window restart the watchers in the main process.
+        el.querySelectorAll('[data-limit-down]').forEach((b) => b.addEventListener('click', async () => {
+          state = await window.filexApp.setSettings({ limitDownKiB: Number(b.dataset.limitDown) });
+          renderSettings();
+        }));
+        el.querySelectorAll('[data-limit-up]').forEach((b) => b.addEventListener('click', async () => {
+          state = await window.filexApp.setSettings({ limitUpKiB: Number(b.dataset.limitUp) });
+          renderSettings();
+        }));
+        el.querySelectorAll('[data-sync-window]').forEach((b) => b.addEventListener('click', async () => {
+          state = await window.filexApp.setSettings({ syncWindow: b.dataset.syncWindow || '' });
+          renderSettings();
+        }));
         el.querySelectorAll('[data-locale]').forEach((b) => b.addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ locale: b.dataset.locale });
           // The main process resolves 'system'; taking its answer keeps this
@@ -1868,19 +2214,17 @@
       // The only genuinely desktop-specific parts stay here: which server
       // is active, and where the bearer token comes from.
       let connFor = null;
-      let connTab = null;
 
-      function openConnections(tab) {
+      function openConnections() {
         const active = state.accounts.find((a) => a.id === state.activeId);
         if (!active) return;
         const slot = $('#conn-host');
-        // Recreated when the account OR the requested half changes: the
-        // panel picks its opening tab once, at setup.
-        if (connFor !== active.id || connTab !== tab) {
+        // Recreated when the ACCOUNT changes. It used to be recreated when the
+        // requested half changed too; there is only one half since v0.43.0.
+        if (connFor !== active.id) {
           slot.innerHTML = '';
           const el = document.createElement('filex-connections');
           el.setAttribute('closable', '');
-          el.initialTab = tab;
           el.config = {
             apiBase: active.serverUrl,
             // The same function-token the explorer gets: the credential is
@@ -1891,16 +2235,9 @@
             theme: 'auto',
           };
           el.addEventListener('close', () => toggleConnections(false));
-          // A storage that was just added has to show up in the file list,
-          // otherwise the user adds it and nothing happens.
-          el.addEventListener('changed', () => {
-            mountedFor = null;
-            void mountExplorer(active);
-          });
           el.addEventListener('error', (e) => console.error('[connections]', e.detail));
           slot.appendChild(el);
           connFor = active.id;
-          connTab = tab;
         }
         toggleConnections(true);
       }
@@ -2019,9 +2356,9 @@
         renderRail();
         void mountExplorer(active);
         // The rail stays clickable while the connections surface is open, so
-        // a switch there must re-point it — otherwise it would keep showing
-        // the previous server's storages under the new server's name.
-        if ($('#conn').classList.contains('open')) openConnections(connTab || 'storages');
+        // a switch there must re-point it — otherwise it would keep printing
+        // the previous server's instructions under the new server's name.
+        if ($('#conn').classList.contains('open')) openConnections();
       }
 
       async function refresh() {

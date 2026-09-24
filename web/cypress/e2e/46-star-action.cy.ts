@@ -41,7 +41,13 @@ const FIXTURE = 'cypress-star-fixture.txt';
 /** Force English + a known explorer state before the app boots. The suite
  *  flips the account's locale to `tr` in 17-theme-locale, and every string
  *  asserted below is a product string — so the locale has to be pinned here
- *  rather than assumed. `filex.locale` is the product's own key (web/src/i18n). */
+ *  rather than assumed. `filex.locale` is the product's own key (web/src/i18n).
+ *
+ *  ⚠⚠ The view-mode line below does NOT decide the view any more. Since
+ *  v0.43.0 a folder remembers its own view on the SERVER (lib/viewPrefs,
+ *  migration 00039); this key is only the first-paint cache of the default,
+ *  overruled the moment the account's document lands. The view is set in
+ *  openStorage() instead, through the product's own switcher. */
 function pin(win: Window) {
   win.localStorage.setItem('filex.locale', 'en');
   win.localStorage.setItem('brf-file-explorer:view-mode', 'list');
@@ -62,18 +68,32 @@ function asAppToken() {
   }).as('caps');
 }
 
-/** Open the explorer on the seeded storage, list view, fixture row on screen. */
+/** Open the explorer on the seeded storage, list view, fixture row on screen.
+ *
+ *  ⚠⚠ LIST VIEW IS SET HERE, through the toolbar's own switcher — not
+ *  assumed from pin(). Measured on the v0.43.0 release run: the FIRST test in
+ *  this file walks list → grid → gallery on the storage root, the server
+ *  remembered "gallery" for that folder, and every later openStorage() opened
+ *  in gallery whatever pin() said. Gallery cards carry `data-fe-path` since
+ *  6c69235c, so `[data-fe-path$=fixture] .fe-list__check` quietly resolved to
+ *  the GALLERY card's checkbox — hidden until the card is hovered or focused
+ *  (issue #26) — and four tests failed on `pointer-events: none` with the
+ *  product behaving exactly as designed. Each test now starts where it says
+ *  it starts. */
 function openStorage() {
   cy.visit('/drive/explore', { onBeforeLoad: pin });
   cy.get('[data-testid="sidenav"]', { timeout: 20000 }).should('be.visible');
   cy.get(`[data-testid="sidenav-storage-${STORAGE()}"]`).click();
   cy.get(`[data-fe-path$="${FIXTURE}"]`, { timeout: 20000 }).should('exist');
+  switchTo('list');
 }
 
 /** Switch the explorer to a view mode through the toolbar's own switcher, and
  *  wait until that view has painted the fixture.
- *  ⚠ GalleryView carries no `data-fe-path` (only ListView and GridView do), so
- *  the gallery card is found by its label — reported as a separate nit. */
+ *  ⚠ The gallery card is found by its label. GalleryView has carried
+ *  `data-fe-path` too since 6c69235c, which is exactly why a selector written
+ *  for the LIST can land on a gallery card when the folder remembers gallery
+ *  (see openStorage). */
 function switchTo(mode: 'list' | 'grid' | 'gallery') {
   const label = { list: 'List', grid: 'Grid', gallery: 'Gallery' }[mode];
   // The switcher is a `role="tablist"` of three icon buttons whose only text
@@ -160,6 +180,38 @@ describe('star action', () => {
         .should('exist')
         .and('have.attr', 'aria-pressed');
     }
+  });
+
+  // ⚠ The design these specs used to fight, pinned instead (issue #26): on a
+  // grid or gallery card the checkbox is HIDDEN, and hidden means untouchable
+  // (`pointer-events: none`) — an invisible box would take the tap meant to
+  // open the card under it. It appears when the card is hovered or focused, or
+  // once anything is selected. Driven by FOCUS, which is real in Cypress (a
+  // keyboard reaches the card with Tab); synthetic events do not set CSS
+  // `:hover`, so a hover here would prove nothing.
+  it('a card checkbox waits for its card: untouchable until the card is focused, then it selects', () => {
+    openStorage();
+    for (const mode of ['grid', 'gallery'] as const) {
+      switchTo(mode);
+      const card = () => fixtureCard(mode);
+      // Before: the box is there, and a pointer cannot reach it.
+      card()
+        .find('.fe-item-check')
+        .should('have.css', 'pointer-events', 'none')
+        .and('have.css', 'opacity', '0');
+      // The way a keyboard gets there: focus the card.
+      card().focus();
+      card().find('.fe-item-check').should('have.css', 'pointer-events', 'auto');
+      card().find('.fe-list__check').click();
+      card().find('.fe-list__check').should('have.attr', 'aria-checked', 'true');
+      // Leave nothing selected for the next mode. ⚠ Not with Esc: in the
+      // explorer Esc closes dialogs, menus and drawers and leaves a selection
+      // alone. With something selected every box is reachable (`.has-selection`),
+      // so the same box takes the tick back — the way a person undoes it.
+      card().find('.fe-list__check').click();
+      card().find('.fe-list__check').should('have.attr', 'aria-checked', 'false');
+    }
+    switchTo('list');
   });
 
   it('offers Star in the context menu, and starring writes it through', () => {

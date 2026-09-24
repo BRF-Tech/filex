@@ -59,6 +59,7 @@ import { iconTile, iconFamilyFor, typeLabelFor } from '../lib/fileIcons';
 import { crumbsOfWire, permAllowsWrite, splitWire } from '../lib/destinationTree';
 import Modal from './Modal.vue';
 import DestinationPickerModal from './DestinationPickerModal.vue';
+import { inlineKeyStep } from '../lib/direction';
 
 const props = defineProps<{
   open: boolean;
@@ -79,6 +80,9 @@ const props = defineProps<{
   /** Resolved by the host: is there a usable OnlyOffice / drawio? */
   onlyOfficeReady?: boolean;
   drawioReady?: boolean;
+  /** Could this person set a missing service up (`capabilities.caller_admin`)?
+   *  Adds WHERE to the line that says which families are missing. */
+  canConfigure?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -87,7 +91,7 @@ const emit = defineEmits<{
   (e: 'error', payload: { message: string }): void;
 }>();
 
-const { t } = useLocale(() => props.locale);
+const { t, dir } = useLocale(() => props.locale);
 
 /* ================================================================== types */
 
@@ -117,9 +121,13 @@ const withheld = computed(() => {
  * ("...here.Diagrams need...") — measured in a browser, invisible in a unit
  * test that asserts on textContent.
  */
-const withheldText = computed(() =>
-  withheld.value.map((svc) => t('newdoc.withheld.' + svc)).join(' '),
-);
+const withheldText = computed(() => {
+  const parts = withheld.value.map((svc) => t('newdoc.withheld.' + svc));
+  /* Someone who can fix it is told where (the owner's rule for a missing
+     service, lib/serviceGate); everybody else reads only what is missing. */
+  if (parts.length && props.canConfigure) parts.push(t('newdoc.withheld_admin'));
+  return parts.join(' ');
+});
 
 /** Sections, in the order the server listed them. */
 const groups = computed(() => {
@@ -313,8 +321,10 @@ function onTileKey(e: KeyboardEvent, ext: string) {
   const list = offered.value.map((ty) => ty.ext);
   const i = list.indexOf(ext);
   let next = -1;
-  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % list.length;
-  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + list.length) % list.length;
+  // ⚠ RTL: ← / → move the way they point — in a right-to-left grid the next
+  // tile is to the LEFT (lib/direction).
+  const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : inlineKeyStep(e.key, dir.value);
+  if (step) next = (i + step + list.length) % list.length;
   else if (e.key === 'Home') next = 0;
   else if (e.key === 'End') next = list.length - 1;
   if (next < 0) return;

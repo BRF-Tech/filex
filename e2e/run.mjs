@@ -42,6 +42,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { unknownOptions, unknownOptionMessage } from './lib/args.mjs';
 
 const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(E2E_DIR, '..');
@@ -69,6 +70,7 @@ if (!PROFILES.includes(profile)) {
   console.error('    --port <n>        server port (default: a free one)');
   console.error('    --keep            leave the server (and data dir) running afterwards');
   console.error('    --grep <pattern>  pass through to playwright');
+  console.error('    --grep-invert <p> pass through to playwright (leave these OUT)');
   console.error('');
   console.error('  cypress     hermetic Cypress run against the same kind of instance');
   console.error('    --binary / --build / --port / --keep as above');
@@ -78,6 +80,16 @@ if (!PROFILES.includes(profile)) {
   console.error('');
   console.error('  deployment  read-only smoke against a live URL');
   console.error('    --url <url>       required, e.g. https://fm.example.com');
+  process.exit(2);
+}
+
+// ⚠⚠ An option this script does not know is an ERROR, not a no-op. See
+// lib/args.mjs: a release gate once asked for three specs to be left out with
+// an option that did not exist, got the whole suite instead, and the three it
+// meant to exclude are what turned it red.
+const strays = unknownOptions(argv.slice(1));
+if (strays.length) {
+  console.error(unknownOptionMessage(strays));
   process.exit(2);
 }
 
@@ -182,6 +194,8 @@ function playwright(specs, env) {
   const args = ['test', ...specs, '--reporter=list'];
   const grep = value('grep');
   if (grep) args.push('--grep', grep);
+  const grepInvert = value('grep-invert');
+  if (grepInvert) args.push('--grep-invert', grepInvert);
 
   // Windows needs a shell to run playwright.cmd, and a shell re-parses the
   // argument list. `--grep "a|b"` then loses its quotes and the `|` becomes a

@@ -95,6 +95,33 @@ func TestSSOFirstCookieDomainEnv(t *testing.T) {
 	}
 }
 
+// TestOIDCLogoutEnv — signing out ends the IdP's session too (RP-initiated
+// logout) unless the operator keeps it local; nonsense keeps the default.
+func TestOIDCLogoutEnv(t *testing.T) {
+	cases := []struct {
+		env, legacy string
+		local       bool
+	}{
+		{"", "", false},
+		{"local", "", true},
+		{"LOCAL", "", true},
+		{"idp", "", false},
+		{"sometimes", "", false},
+		{"", "local", true},
+	}
+	for _, c := range cases {
+		t.Setenv("FILEX_OIDC_LOGOUT", c.env)
+		t.Setenv("FILEX_AUTH_OIDC_LOGOUT", c.legacy)
+		cfg, err := Load("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.Auth.OIDC.LocalLogout(); got != c.local {
+			t.Fatalf("FILEX_OIDC_LOGOUT=%q FILEX_AUTH_OIDC_LOGOUT=%q: local logout %v, want %v", c.env, c.legacy, got, c.local)
+		}
+	}
+}
+
 // TestSeedAndAuthEnv — the new seed + LDAP env vars land on the config.
 func TestSeedAndAuthEnv(t *testing.T) {
 	t.Setenv("FILEX_ADMIN_EMAIL", "boss@example.com")

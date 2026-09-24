@@ -146,12 +146,17 @@ export const EMPTY_FILTERS: DriveFilters = {
 /** Case- and accent-folded, so "İstanbul" answers to "ist" and "Ödev" to "od".
  *  ⚠ `toLowerCase()` alone maps `İ` to `i` + a combining dot, which then
  *  matches nothing the user typed; stripping the marks is what makes the two
- *  sides comparable. */
+ *  sides comparable.
+ *  ⚠ And the four Latin i's are one letter, as they are to the server's search
+ *  and to tags (internal/namefold, `tagKey`): `ı` has no mark to strip, so
+ *  without the last step "ışık" did not answer to "IŞIK" — nor "IŞIK" to
+ *  "ışık", since `toLowerCase` lowers `I` to `i`. */
 function fold(s: string): string {
   return s
     .normalize('NFD')
     .replace(/\p{M}+/gu, '')
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/ı/g, 'i');
 }
 
 /** The trimmed needle, or '' when the input is empty/whitespace. */

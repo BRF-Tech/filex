@@ -12,6 +12,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
 // Listing a bucket. This is the operation every client runs first and most
@@ -368,32 +369,18 @@ func (l *lister) truncate(_ string) {
 	}
 }
 
-// hiddenNames are filex's own bookkeeping trees. /dav, /sftp, /ftp and /nfs
-// each already hide exactly this set (dav/fs.go, sftpsrv/handlers.go,
-// ftpsrv/fs.go, nfssrv/fs.go) and so does the browser listing (manager.go);
-// the S3 gateway had no such filter on any verb, which made it the one
-// surface where .versions/42/1 was both listed and readable.
+// ⚠ filex's own directories (trash, version history, thumbnails, the desktop
+// app's open-with working area) are judged by syspath.InDir, the one list
+// every surface shares. This file used to carry its own three-name copy that
+// did not know `.filex-open`, so an S3 client was shown the desktop's
+// working copies beside the person's own files (2026-09-21).
 //
-// That matters much more now than it did: with the pre-write overwrite guard
-// wired, .versions/ stops being a handful of text-editor snapshots and becomes
-// a copy of every file any surface has ever replaced. Leaving it reachable
-// would hand any S3-key holder the prior contents of files whose folders they
+// ⚠ It is applied on EVERY verb (list, get/head, put, delete), not only here.
+// The S3 gateway once had no such filter at all, which made it the one surface
+// where `.versions/42/1` was both listed and readable — and with the pre-write
+// overwrite guard wired, `.versions/` is a copy of every file any surface has
+// ever replaced: the prior contents of files whose folders an S3-key holder
 // may since have lost access to.
-var hiddenNames = map[string]bool{
-	".filex-trash": true,
-	".versions":    true,
-	".thumbs":      true,
-}
-
-// hiddenPath reports whether any segment of rel is an internal bucket.
-func hiddenPath(rel string) bool {
-	for _, seg := range strings.Split(rel, "/") {
-		if hiddenNames[seg] {
-			return true
-		}
-	}
-	return false
-}
 
 // visible reports whether a KEY may appear in Contents: not one of filex's own
 // internal trees, strictly inside the confinement, and granted.
@@ -402,7 +389,7 @@ func hiddenPath(rel string) bool {
 // different restrictions — either one alone leaves the other open — and an
 // internal tree is off limits regardless of both.
 func (l *lister) visible(rel string) bool {
-	return !hiddenPath(rel) && l.inConfine(rel) && l.set.CanSee(rel)
+	return !syspath.InDir(rel) && l.inConfine(rel) && l.set.CanSee(rel)
 }
 
 // descendable reports whether a DIRECTORY may be entered or named.
@@ -415,7 +402,7 @@ func (l *lister) visible(rel string) bool {
 // a leak: the ancestor's name is part of the caller's own confinement path,
 // so it tells them nothing they did not supply.
 func (l *lister) descendable(rel string) bool {
-	if hiddenPath(rel) {
+	if syspath.InDir(rel) {
 		return false
 	}
 	if !l.inConfine(rel) && !l.isConfineAncestor(rel) {

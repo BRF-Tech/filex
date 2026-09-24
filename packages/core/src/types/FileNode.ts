@@ -4,6 +4,8 @@
  * Backend `?q=index` (or `GET /api/files/manager?action=index`) returns:
  *   { adapter, storages, dirname, files: FileNode[] }
  */
+import type { AppLock } from './Plugins';
+
 export interface FileNode {
   /** DB node ID — needed by the per-user meta routes (starred, tags,
    *  recently-opened). Backend's projectFileNodes() emits it for every
@@ -53,6 +55,38 @@ export interface FileNode {
   /* wiring:e2 — dir rows: true when the folder is E2E-encrypted (carries a
    * `.filex-e2e.json` marker). Drives the 🔒 badge in the listings. */
   e2e?: boolean;
+  /** An app plugin holds this file read-only (docs/APP-PLUGINS-API.md →
+   *  "File locks"). `perm` already arrives capped at `viewer` for everyone,
+   *  administrators included — the flag is what the badge and the details
+   *  panel say out loud, and what turns the server's 423 into words. */
+  locked?: boolean;
+  lock?: AppLock;
+  /** The state keys apps keep on this file, `<plugin>:<key>`. Read by the
+   *  menu's state-aware rows (`applies.state` / `no_state`). */
+  app_state?: string[];
+  /** Issue #34 — this row is a symlink the SERVER WILL NOT FOLLOW. A link
+   *  whose target is inside the storage root IS followed and arrives as that
+   *  target (a linked directory is a `dir` and opens normally), so this flag
+   *  always means "cannot be opened", never merely "is a link".
+   *
+   *  ⚠ Additive, and `type` stays the closed `'file' | 'dir'` union it has
+   *  always been: widening it would be a breaking change for every embedder
+   *  of `@brftech/filex`, so the backend reports such a row as a file and
+   *  flags it here (`handlers/manager.go`). A client that does not know the
+   *  flag renders exactly the row it rendered before — which is precisely the
+   *  0-byte-file-that-will-not-open the issue was filed about, and why
+   *  `lib/symlink` exists. */
+  symlink?: boolean;
+  /** Why it will not open — `outside_root` | `broken` | `unresolved`.
+   *
+   *  ⚠⚠ Absent far more often than present: only the cold-cache driver
+   *  listing carries it. The normal DB-backed listing sends `symlink: true`
+   *  alone, because `model.Node` has no column for a fact that belongs to the
+   *  link as it is RIGHT NOW rather than as it was at scan time. Read it
+   *  through `lib/symlink.linkStateOf`, which answers `'unknown'` for that
+   *  case — and for a state a newer server invents — instead of dropping the
+   *  row back into silence. */
+  link_state?: string;
   /** Generic — any additional fields the backend wants to inline. */
   [k: string]: unknown;
 }
@@ -126,6 +160,15 @@ export interface Capabilities {
    *  ExplorerConfig.callerKind. Absent on a server older than the app/user
    *  token split, which is why every reader treats "missing" as a person. */
   caller_kind?: 'user' | 'app';
+  /** Could this caller set up a missing optional service (ONLYOFFICE,
+   *  draw.io, the converter…)? An administrator who can reach the instance
+   *  settings — not a tenant admin, not an API token. Decides between "greyed
+   *  with where to fix it" and "not offered" (lib/serviceGate). Absent on an
+   *  older server, which reads as "no". */
+  caller_admin?: boolean;
+  /** App plugins (docs/APP-PLUGINS-API.md). Absent or `enabled: false` → the
+   *  explorer makes no plugin request at all. */
+  app_plugins?: { enabled: boolean };
   /** The address this deployment is reached at — only when it is real (the
    *  operator configured it, or the request came in on a tenant's host).
    *  Read by the connection guides; see `connectionsOrigin`. */
@@ -134,7 +177,14 @@ export interface Capabilities {
     onlyoffice?: ExternalServiceStatus;
     drawio?: ExternalServiceStatus;
     mermaid?: ExternalServiceStatus;
+    /** The file converter. ⚠ `convert_url` is filled whenever the service is
+     *  ENABLED, healthy or not — the menu reads this for health. */
+    convert?: ExternalServiceStatus;
   };
+  /** Can outgoing mail be sent right now (SMTP configured AND verified)?
+   *  Absent on an older server or one with no mailer wired — read as "yes",
+   *  i.e. keep offering mail the way it always was. */
+  mail?: { ready: boolean };
   /* wiring:e2 */
   /** Whether this installation holds an escrow key for E2E-encrypted folders,
    *  and the public half the browser wraps new folders' master keys to.

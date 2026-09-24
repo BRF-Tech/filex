@@ -31,6 +31,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { loginAs, apiLogin } from '../helpers/auth';
 import { seedLocalStorage, dropStorageByName } from '../helpers/seed';
+import { setAccountViewMode, VIEW_MODE_LS_KEY } from '../helpers/prefs';
 
 const STORAGE = `e2e-tap-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;
@@ -38,8 +39,9 @@ const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==',
   'base64',
 );
-/** FileExplorer's persisted view mode. */
-const VIEW_MODE_KEY = 'brf-file-explorer:view-mode';
+/** FileExplorer's FIRST-PAINT cache of the view mode. ⚠ Not the preference —
+ *  that is on the account, see `helpers/prefs`. */
+const VIEW_MODE_KEY = VIEW_MODE_LS_KEY;
 
 async function upload(request: import('@playwright/test').APIRequestContext, dir: string, name: string, mimeType: string, buffer: Buffer) {
   const up = await request.post('/api/files/manager?action=upload', {
@@ -113,6 +115,19 @@ test.afterAll(async ({ request }) => {
   await dropStorageByName(request, STORAGE);
 });
 
+/**
+ * Open the explorer in `view`.
+ *
+ * ⚠⚠ The view mode is set in TWO places, and both are needed for different
+ * reasons. `localStorage` is the first-paint cache, so the listing paints in
+ * the right mode instead of flashing the other one; the ACCOUNT is the
+ * preference, and it is what the explorer settles on a moment after boot
+ * (`packages/core/src/lib/viewPrefs.ts`). Seeding only the browser key is what
+ * made both grid cases here red on 2026-09-20: the page opened as a grid, the
+ * account's document landed saying "list", and `.fe-grid__card` was gone
+ * before the assertion ran. The browser key is a cache of the account's
+ * answer — never the answer.
+ */
 async function openExplorer(page: Page, view: 'list' | 'grid' = 'list') {
   await page.addInitScript(
     ([key, mode]) => {
@@ -122,6 +137,9 @@ async function openExplorer(page: Page, view: 'list' | 'grid' = 'list') {
     [VIEW_MODE_KEY, view] as const,
   );
   await loginAs(page);
+  // `page.request` rides the browser context's own cookie jar, so this is the
+  // signed-in account and not a second session.
+  await setAccountViewMode(page.request, view);
   await page.goto(`/admin/explore?storage=${encodeURIComponent(STORAGE)}`);
   await expect(row(page, 'photos')).toBeVisible({ timeout: 15_000 });
   if (view === 'grid') await expect(page.locator('.fe-grid__card').first()).toBeVisible();

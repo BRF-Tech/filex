@@ -89,6 +89,25 @@ func (h *Audit) List(w http.ResponseWriter, r *http.Request) {
 		entries = kept
 		total = int64(len(entries))
 	}
+	// Who acted, as every screen names a person (model.PersonLabel), and
+	// WHICH thing the row is about, in words (handlers/audit_targets.go).
+	namer := newAuditNamer(ctx, h.Store)
+	ids := make([]int64, 0, len(entries))
+	for _, e := range entries {
+		if e != nil && e.Entry != nil && e.Entry.UserID != nil {
+			ids = append(ids, *e.Entry.UserID)
+		}
+	}
+	names := personNames(ctx, h.Store, ids)
+	for _, e := range entries {
+		if e == nil {
+			continue
+		}
+		e.TargetName = namer.name(e.Entry)
+		if e.Entry != nil && e.Entry.UserID != nil {
+			e.UserName = names[*e.Entry.UserID]
+		}
+	}
 	if h.DemoMode {
 		maskAuditEntries(entries)
 	}

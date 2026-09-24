@@ -34,7 +34,8 @@ export function App() {
         locale: 'tr',
         theme: 'auto',
         // The navigation panel (the "+ New" menu · Home / Shared with me /
-        // Recent / Starred / Trash · tags · storages) and how much of the
+        // My shares / Recent / Starred / Trash · your tags, personal and team ·
+        // an Apps section · storages) and how much of the
         // explorer to draw. Both are ordinary config keys — there is no
         // React-specific switch for either.
         sideNav: true,
@@ -92,7 +93,10 @@ component — `:root`, a wrapper `div` — and the explorer follows:
 
 Light/dark follows `config.theme` (`'light'` / `'dark'` / `'auto'`, and `auto`
 reads the host's `prefers-color-scheme`). The shipped palettes are in
-[`docs/INTEGRATION.md`](https://github.com/BRF-Tech/filex/blob/main/docs/INTEGRATION.md#themes).
+[`docs/INTEGRATION.md`](https://github.com/BRF-Tech/filex/blob/main/docs/INTEGRATION.md#themes)
+— and an operator's own themes, composed on the admin **Appearance** screen,
+arrive through the same `--fe-*` tokens, so an embed wears the instance's
+colours without being told about them.
 
 > ⚠ The product mark in the top bar comes from `config.brand`
 > (`{ name, markUrl }`), not from a slot. A host that mounts a custom element

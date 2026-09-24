@@ -49,8 +49,13 @@ func (h *SearchAdmin) Stats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled":          true,
 		"document_count":   stats.DocCount,
+		"file_count":       stats.Files,
+		"folder_count":     stats.Folders,
 		"index_size_bytes": stats.SizeBytes,
 		"last_updated_at":  stats.LastUpdated,
+		// last_built_at is the name the admin page reads (it always asked
+		// for this one; nothing sent it, so "Last built" said "—").
+		"last_built_at": stats.LastUpdated,
 		// needs_rebuild is how an operator finds out that an upgrade
 		// added indexed fields their documents do not have yet. Search
 		// keeps working without it (the pre-upgrade sub-queries are

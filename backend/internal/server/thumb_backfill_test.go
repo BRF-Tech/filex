@@ -74,6 +74,17 @@ func TestCatalogueGap(t *testing.T) {
 		assert.Contains(t, reason, "2026-09-14 03:30:00")
 	})
 
+	// A run the server stopped in the middle of (closed as `aborted` when it
+	// next started) left exactly the catalogue a running one does: the rows it
+	// had not reached yet do not exist. Nothing is running to finish them.
+	t.Run("the last sync was interrupted: refused, and told to sync again", func(t *testing.T) {
+		run := &model.SyncRun{Status: "aborted", StartedAt: time.Date(2026, 8, 20, 22, 5, 0, 0, time.UTC)}
+		reason := catalogueGap(ctx, fakeCatalogue{run: run, files: 22}, done, fakeBackend{root: []string{"Photos"}})
+		assert.Contains(t, reason, "interrupted")
+		assert.Contains(t, reason, "2026-08-20 22:05:00")
+		assert.Contains(t, reason, "/api/admin/storages/8/sync", "the way out has to be in the message")
+	})
+
 	t.Run("synced and finished: allowed", func(t *testing.T) {
 		run := &model.SyncRun{Status: "ok"}
 		assert.Empty(t, catalogueGap(ctx, fakeCatalogue{run: run, files: 3}, done, fakeBackend{root: []string{"Photos"}}))

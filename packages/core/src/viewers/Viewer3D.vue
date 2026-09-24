@@ -55,7 +55,7 @@ async function load(): Promise<void> {
   } catch {
     error.value = props.t
       ? props.t('viewer.peer_not_installed')
-      : '3D viewer requires `@google/model-viewer` — install or use download.';
+      : 'This kind of file cannot be shown here. Download it to open it on your device.';
   }
 }
 

@@ -2,9 +2,12 @@ package sftp
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
 // The admin form sent "base_path" and the replication dialog "username";
@@ -88,5 +91,36 @@ func TestInit_Defaults(t *testing.T) {
 	// demanded a sub-folder keep mounting where they always did.
 	if d.root != "/" {
 		t.Errorf("root = %q, want /", d.root)
+	}
+}
+
+// A remote DIRECTORY symlink used to be reported as storage.KindFile, because
+// List asked IsDir and called everything else a file. SFTP READDIR hands back
+// LSTAT attributes, so the link bit is right there and was simply never read.
+//
+// ⚠ The consequence was not a cosmetic mislabel: the explorer offered the
+// entry as a downloadable file, the download opened a directory and failed,
+// and the catalogue walk minted a file row for an object with no bytes.
+func TestKindOf_ADirectorySymlinkIsNotAFile(t *testing.T) {
+	cases := []struct {
+		name string
+		mode fs.FileMode
+		want storage.ObjectKind
+	}{
+		{"plain file", 0o644, storage.KindFile},
+		{"directory", fs.ModeDir | 0o755, storage.KindDirectory},
+		{"symlink to a file", fs.ModeSymlink | 0o777, storage.KindSymlink},
+		// ⚠ The reported case. READDIR sets BOTH bits for a link to a
+		// directory on some servers, and the symlink bit has to win — asking
+		// IsDir first would call it a directory and make the catalogue walk
+		// descend through it, off the configured root, with nothing to stop it.
+		{"symlink to a directory", fs.ModeSymlink | fs.ModeDir | 0o777, storage.KindSymlink},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := kindOf(c.mode); got != c.want {
+				t.Errorf("kindOf(%v) = %q, want %q", c.mode, got, c.want)
+			}
+		})
 	}
 }

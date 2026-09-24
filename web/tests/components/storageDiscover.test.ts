@@ -104,14 +104,21 @@ describe('StorageNew — mount several folders at once', () => {
     expect(posts[0]?.url).toBe('/admin/storages/discover');
     expect(posts[0]?.body.driver).toBe('s3');
 
-    const rows = wrapper.findAll('[data-testid="discover-folders"] li');
-    expect(rows.map((r) => r.attributes('data-folder'))).toEqual(['arsiv', 'belgeler', 'fotograf']);
+    const rows = wrapper.findAll('[data-testid="discover-folders"] .fe-list__row');
+    // ⚠ `.fe-list__row` + `data-testid`: the discovered folders were a
+    // `<ul class="divide-y divide-zinc-200 …">`, then a row of the imitation
+    // admin table, and are the explorer's table (DataTable) now, whose
+    // per-row hook is `rowAttrs`.
+    expect(rows.map((r) => r.attributes('data-testid'))).toEqual(['arsiv', 'belgeler', 'fotograf']);
     expect(wrapper.find('[data-testid="discover-create"]').text()).toContain('3');
 
     // Untick one: it is not created. Rename another: the sidebar name is the
     // typed one, the root stays the folder.
-    await rows[2].find('input[type="checkbox"]').setValue(false);
-    const nameInputs = rows[0].findAll('input').filter((i) => i.attributes('type') !== 'checkbox');
+    // ⚠ The tick is the TABLE's tick column now (the explorer's ItemCheck, a
+    // role="checkbox" button), not an <input> inside the first cell, so it is
+    // clicked — the cell is its whole target, as on an explorer row.
+    await rows[2].find('.fe-list__col--check').trigger('click');
+    const nameInputs = rows[0].findAll('input');
     await nameInputs[0].setValue('Arşiv');
 
     await wrapper.find('[data-testid="discover-create"]').trigger('click');
@@ -125,8 +132,8 @@ describe('StorageNew — mount several folders at once', () => {
     // "belgeler" failed on the fake server: no navigation, and only the one
     // that failed stays ticked for a retry.
     expect(pushSpy).not.toHaveBeenCalledWith({ name: 'storages' });
-    const after = wrapper.findAll('[data-testid="discover-folders"] li');
-    const checked = after.map((r) => (r.find('input[type="checkbox"]').element as HTMLInputElement).checked);
+    const after = wrapper.findAll('[data-testid="discover-folders"] .fe-list__row');
+    const checked = after.map((r) => r.find('.fe-list__check').attributes('aria-checked') === 'true');
     expect(checked).toEqual([false, true, false]);
   });
 
@@ -135,8 +142,8 @@ describe('StorageNew — mount several folders at once', () => {
     await flushPromises();
     await wrapper.find('[data-testid="discover-list"]').trigger('click');
     await flushPromises();
-    const rows = wrapper.findAll('[data-testid="discover-folders"] li');
-    await rows[1].find('input[type="checkbox"]').setValue(false); // the one the fake server refuses
+    const rows = wrapper.findAll('[data-testid="discover-folders"] .fe-list__row');
+    await rows[1].find('.fe-list__col--check').trigger('click'); // the one the fake server refuses
     await wrapper.find('[data-testid="discover-create"]').trigger('click');
     await flushPromises();
 

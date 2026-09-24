@@ -19,7 +19,7 @@ import { Menu, MenuButton, MenuItems } from '@headlessui/vue';
 import { Database, RefreshCcw } from 'lucide-vue-next';
 
 import { useQuotaStore } from '@/stores/quota';
-import { formatBytes } from '@/lib/format';
+import { formatBytes, formatPercent } from '@/lib/format';
 
 const POLL_MS = 60_000;
 
@@ -78,7 +78,7 @@ const limitLabel = computed(() => formatBytes(quota.limit, locale.value));
 const percentLabel = computed(() => {
   if (quota.unlimited) return null;
   if (!Number.isFinite(quota.percent)) return null;
-  return `${quota.percent.toFixed(quota.percent < 10 ? 1 : 0)}%`;
+  return formatPercent(quota.percent, locale.value);
 });
 
 const tooltip = computed(() => {
@@ -112,7 +112,7 @@ async function refresh() {
         aria-hidden="true"
       >
         <span
-          class="absolute inset-y-0 left-0 transition-all duration-300"
+          class="absolute inset-y-0 start-0 transition-all duration-300"
           :class="fillBgClass"
           :style="{ width: `${quota.percent}%` }"
         />
@@ -126,7 +126,8 @@ async function refresh() {
           {{ usedLabel }}
         </template>
         <template v-else>
-          {{ usedLabel }} / {{ limitLabel }}
+          <!-- ⚠ RTL: a pair reads left to right — isolated, or "5 GB / 1 GB". -->
+          <bdi dir="ltr">{{ usedLabel }} / {{ limitLabel }}</bdi>
         </template>
       </span>
     </MenuButton>
@@ -140,7 +141,7 @@ async function refresh() {
       leave-to-class="transform opacity-0 scale-95"
     >
       <MenuItems
-        class="absolute right-0 z-50 mt-2 w-72 origin-top-right rounded-md border border-zinc-200 bg-white shadow-lg focus:outline-none dark:border-zinc-800 dark:bg-zinc-950"
+        class="absolute end-0 z-50 mt-2 w-72 origin-top-right rtl:origin-top-left rounded-md border border-zinc-200 bg-white shadow-lg focus:outline-none dark:border-zinc-800 dark:bg-zinc-950"
       >
         <div class="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
           <div class="flex items-center gap-2">
@@ -150,7 +151,7 @@ async function refresh() {
             </span>
             <button
               type="button"
-              class="ml-auto rounded p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+              class="ms-auto rounded p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
               :title="t('common.refresh')"
               :aria-label="t('common.refresh')"
               @click.stop="refresh"
@@ -175,7 +176,7 @@ async function refresh() {
               aria-hidden="true"
             >
               <span
-                class="absolute inset-y-0 left-0 transition-all duration-300"
+                class="absolute inset-y-0 start-0 transition-all duration-300"
                 :class="fillBgClass"
                 :style="{ width: `${quota.percent}%` }"
               />
@@ -183,15 +184,15 @@ async function refresh() {
 
             <dl class="mt-3 grid grid-cols-2 gap-y-2 text-xs">
               <dt class="text-zinc-500 dark:text-zinc-400">{{ t('quota.used') }}</dt>
-              <dd class="text-right tabular-nums font-medium text-zinc-900 dark:text-zinc-100">
+              <dd class="text-end tabular-nums font-medium text-zinc-900 dark:text-zinc-100">
                 {{ usedLabel }}
               </dd>
               <dt class="text-zinc-500 dark:text-zinc-400">{{ t('quota.limit') }}</dt>
-              <dd class="text-right tabular-nums font-medium text-zinc-900 dark:text-zinc-100">
+              <dd class="text-end tabular-nums font-medium text-zinc-900 dark:text-zinc-100">
                 {{ limitLabel }}
               </dd>
               <dt class="text-zinc-500 dark:text-zinc-400">{{ t('quota.percent') }}</dt>
-              <dd :class="['text-right tabular-nums font-medium', textTone]">
+              <dd :class="['text-end tabular-nums font-medium', textTone]">
                 {{ percentLabel ?? '—' }}
               </dd>
             </dl>

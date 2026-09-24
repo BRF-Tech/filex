@@ -12,6 +12,8 @@ require (
 	github.com/blevesearch/bleve_index_api v1.1.10
 	github.com/coder/websocket v1.8.15
 	github.com/coreos/go-oidc/v3 v3.11.0
+	github.com/extism/go-pdk v1.1.3
+	github.com/extism/go-sdk v1.7.1
 	github.com/fatih/color v1.17.0
 	github.com/fclairamb/ftpserverlib v0.32.3
 	github.com/fsnotify/fsnotify v1.7.0
@@ -38,6 +40,7 @@ require (
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.8.1
 	github.com/stretchr/testify v1.11.1
+	github.com/tetratelabs/wazero v1.9.0
 	github.com/willscott/go-nfs v0.0.4
 	github.com/willscott/go-nfs-client v0.0.0-20240104095149-b44639837b00
 	github.com/winfsp/cgofuse v1.6.0
@@ -47,6 +50,7 @@ require (
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
+	golang.org/x/text v0.40.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.58.0
 )
@@ -90,16 +94,19 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/dylibso/observe-sdk/go v0.0.0-20240819160327-2d926c5d788a // indirect
 	github.com/geoffgarside/ber v1.1.0 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.5 // indirect
 	github.com/go-jose/go-jose/v4 v4.0.2 // indirect
+	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/golang/geo v0.0.0-20210211234256-740aa86cb551 // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.1 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
+	github.com/ianlancetaylor/demangle v0.0.0-20240805132620-81f5be970eca // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
@@ -125,12 +132,13 @@ require (
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/sethvargo/go-retry v0.2.4 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/tetratelabs/wabin v0.0.0-20230304001439-f6f874872834 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.etcd.io/bbolt v1.3.7 // indirect
+	go.opentelemetry.io/proto/otlp v1.3.1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.75.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

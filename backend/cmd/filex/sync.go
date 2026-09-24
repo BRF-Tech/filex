@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -44,13 +46,59 @@ func (a apiAdapter) List(ctx context.Context, remote string) (*filesync.Listing,
 	return out, nil
 }
 
-func (a apiAdapter) Download(ctx context.Context, remote string, w io.Writer) (int64, error) {
-	return a.c.Download(ctx, remote, w)
+func (a apiAdapter) Download(ctx context.Context, remote string, size int64, w io.Writer) (int64, error) {
+	return a.c.DownloadSized(ctx, remote, w, size)
 }
 
-func (a apiAdapter) Upload(ctx context.Context, localPath, remote string) error {
-	_, _, err := a.c.Upload(ctx, localPath, remote)
-	return err
+// Upload sends one file with the engine's precondition and reports the file as
+// the server listed it afterwards.
+//
+// The multipart upload answers with a listing of the folder it wrote into —
+// the same shape as `index` — so the new server-side signature normally
+// costs nothing. The staged path (large files) answers with a commit receipt
+// instead; then the folder is listed once, right here, so the engine records
+// the result of ITS write and not whatever the folder holds a whole pass
+// later.
+func (a apiAdapter) Upload(ctx context.Context, localPath, remote, expect string) (*filesync.ListedFile, error) {
+	rp, err := cliclient.ParseRemotePath(remote)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := a.c.UploadTo(ctx, localPath, rp.Dir(), rp.Base(), expect)
+	if err != nil {
+		if errors.Is(err, cliclient.ErrPreconditionFailed) {
+			return nil, fmt.Errorf("%w (%v)", filesync.ErrRemoteChanged, err)
+		}
+		return nil, err
+	}
+	if f := listedIn(raw, rp.Base()); f != nil {
+		return f, nil
+	}
+	l, err := a.List(ctx, rp.Dir().String())
+	if err != nil {
+		return nil, nil // the engine lists the folder again at the end of the pass
+	}
+	for _, f := range l.Files {
+		if f.Basename == rp.Base() && !f.IsDir {
+			f := f
+			return &f, nil
+		}
+	}
+	return nil, nil
+}
+
+// listedIn finds name in an upload answer that carries a folder listing.
+func listedIn(raw []byte, name string) *filesync.ListedFile {
+	var res cliclient.ListResult
+	if json.Unmarshal(raw, &res) != nil {
+		return nil
+	}
+	for _, f := range res.Files {
+		if f.Basename == name && f.Type != "dir" {
+			return &filesync.ListedFile{Basename: f.Basename, Size: f.Size, LastModified: f.LastModified}
+		}
+	}
+	return nil
 }
 
 func (a apiAdapter) Mkdir(ctx context.Context, remote string) error {
@@ -97,6 +145,8 @@ func syncCmd() *cobra.Command {
 		syncRemoveCmd(),
 		syncRunCmd(opts),
 		syncTrashCmd(),
+		syncConfirmCmd(),
+		syncDiscardCmd(),
 	)
 	return c
 }
@@ -165,6 +215,9 @@ func syncListCmd() *cobra.Command {
 				if p.Paused {
 					state = "paused"
 				}
+				if p.HoldNew {
+					state = fmt.Sprintf("holding %d item(s)", p.Held)
+				}
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", p.ID, p.Local, p.Remote, state)
 			}
 			return w.Flush()
@@ -214,6 +267,9 @@ func syncRemoveCmd() *cobra.Command {
 	})
 }
 
+// nowFunc is the sync window's clock; tests move it.
+var nowFunc = time.Now
+
 func syncRunCmd(opts *clientOpts) *cobra.Command {
 	var (
 		pairID    string
@@ -222,12 +278,39 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 		watch     time.Duration
 		quietOut  bool
 		transfers int
+		live      bool
+		limitDown int64
+		limitUp   int64
+		windowArg string
+		watchMax  time.Duration
+		fullEvery time.Duration
 	)
 	c := &cobra.Command{
 		Use:   "run",
 		Short: "Sync every pair once, or keep syncing with --watch",
-		Args:  cobra.NoArgs,
+		Long: "Sync every pair once. With --watch, keep running: changes on either\n" +
+			"side are synced as they happen — the server announces its changes over\n" +
+			"the same live stream the web explorer uses, and the local folders are\n" +
+			"watched by the file system. The --watch interval is the safety net: it\n" +
+			"asks the server's change log what changed while the stream was down,\n" +
+			"walks a pair whose local tree changed unseen, retries what failed, and\n" +
+			"walks every pair at least every --full-every.\n\n" +
+			"The live state is printed as `live: connected|polling|offline — …`.\n" +
+			"A token the server refuses stops the command with exit status 3.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// A stop request (Ctrl-C, SIGTERM) cancels the pass in flight, which
+			// still writes its ledger; a plain kill lands between two
+			// checkpoints.
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			win, err := parseSyncWindow(windowArg)
+			if err != nil {
+				return err
+			}
+			if limitDown < 0 || limitUp < 0 {
+				return errors.New("--limit-down and --limit-up are KiB/s and cannot be negative")
+			}
 			st, err := syncStore()
 			if err != nil {
 				return err
@@ -236,6 +319,23 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 			if err != nil {
 				return authHint(err)
 			}
+			api.DownLimit = cliclient.NewRateLimiter(kibPerSecond(limitDown))
+			api.UpLimit = cliclient.NewRateLimiter(kibPerSecond(limitUp))
+			// ⚠ One token cannot speak for two servers. The desktop app runs
+			// one process per signed-in account and filters here; without
+			// that, pairs belonging to account B would be synced with account
+			// A's credentials and fail — or worse, hit a different server's
+			// folder of the same name.
+			selected := func(all []filesync.Pair) []filesync.Pair {
+				var out []filesync.Pair
+				for _, p := range all {
+					if p.Paused || (pairID != "" && p.ID != pairID) || (account != "" && p.Account != account) {
+						continue
+					}
+					out = append(out, p)
+				}
+				return out
+			}
 			pairs, err := st.LoadPairs()
 			if err != nil {
 				return err
@@ -243,84 +343,188 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 			if len(pairs) == 0 {
 				return fmt.Errorf("no folders are paired; add one with `filex sync add`")
 			}
-
-			run := func(pairs []filesync.Pair) error {
-				for _, p := range pairs {
-					// ⚠ One token cannot speak for two servers. The desktop app
-					// runs one process per signed-in account and filters here;
-					// without that, pairs belonging to account B would be
-					// synced with account A's credentials and fail — or worse,
-					// hit a different server's folder of the same name.
-					if p.Paused || (pairID != "" && p.ID != pairID) || (account != "" && p.Account != account) {
-						continue
-					}
-					if dryRun {
-						if err := printPlan(cmd, api, st, p); err != nil {
-							fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", p.ID, err)
-						}
-						continue
-					}
-					eng := &filesync.Engine{Pair: p, API: apiAdapter{api}, Store: st, Transfers: transfers}
-					// Progress prints even with --quiet. The desktop app starts
-					// this command with --quiet and mirrors the LAST stdout line
-					// into its panel; without these lines a big first sync spent
-					// its whole inventory phase looking dead.
-					eng.Progress = func(s string) { fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", p.ID, s) }
-					if !quietOut {
-						eng.Log = func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
-					}
-					res, err := eng.Run(cmd.Context())
-					if err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", p.ID, err)
-						continue
-					}
-					printResult(cmd, p, res)
+			// ⚠ A 401 is not a bad pass, it is the end: the token was revoked
+			// or has expired, and retrying it only fills the server's log while
+			// the person is told nothing. Every pair of this process shares the
+			// token, so the whole command stops, with a status the desktop app
+			// acts on (exitSignedOut).
+			signedOut := func(err error) error {
+				if cliclient.IsUnauthorized(err) {
+					return &exitError{code: exitSignedOut, err: errSignedOut}
 				}
 				return nil
 			}
 
+			engineFor := func(p filesync.Pair) *filesync.Engine {
+				eng := &filesync.Engine{Pair: p, API: apiAdapter{api}, Store: st, Transfers: transfers,
+					StopOn: cliclient.IsUnauthorized}
+				// Progress prints even with --quiet. The desktop app starts
+				// this command with --quiet and mirrors the LAST stdout line
+				// into its panel; without these lines a big first sync spent
+				// its whole inventory phase looking dead.
+				eng.Progress = func(s string) { fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", p.ID, s) }
+				if !quietOut {
+					eng.Log = func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
+				}
+				return eng
+			}
+			// runPass is one engine pass; dirs == nil is a full pass.
+			reporter := newPassReporter(cmd.OutOrStdout(), cmd.ErrOrStderr())
+			runPass := func(ctx context.Context, p filesync.Pair, dirs []string) (filesync.Result, error) {
+				eng := engineFor(p)
+				var res filesync.Result
+				var err error
+				if dirs == nil {
+					res, err = eng.Run(ctx)
+				} else {
+					res, err = eng.RunDirs(ctx, dirs)
+				}
+				if err != nil && ctx.Err() != nil && !cliclient.IsUnauthorized(err) {
+					// A stop request or a closing sync window is not a failure
+					// of the pair; the pass wrote its ledger and says so.
+					reporter.pass(p, dirs != nil, res, nil)
+					return res, err
+				}
+				reporter.pass(p, dirs != nil, res, err)
+				return res, err
+			}
+
+			if dryRun {
+				for _, p := range selected(pairs) {
+					if err := printPlan(ctx, cmd, api, st, p); err != nil {
+						if so := signedOut(err); so != nil {
+							return so
+						}
+						fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", p.ID, err)
+					}
+				}
+				return nil
+			}
 			if watch <= 0 {
-				return run(pairs)
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Watching %d pair(s); checking every %s. Ctrl-C to stop.\n", len(pairs), watch)
-			for {
-				if err := run(pairs); err != nil {
-					return err
-				}
-				select {
-				case <-cmd.Context().Done():
+				if win != nil && !win.contains(nowFunc()) {
+					fmt.Fprintf(cmd.OutOrStdout(), "sync: outside the sync window %s; nothing was done\n", win)
 					return nil
-				case <-time.After(watch):
 				}
-				// Re-read between rounds. pairs.json is edited by OTHER
-				// processes — the desktop app writes it while this watcher
-				// runs — and the old one-time load meant a pair added after
-				// start was silently never synced until the next restart,
-				// while a removed one kept going. The file is tiny; the
-				// re-read costs nothing.
-				if pairs, err = st.LoadPairs(); err != nil {
-					return fmt.Errorf("re-read pairs: %w", err)
+				rctx, cancel := context.WithCancel(ctx)
+				if win != nil {
+					rctx, cancel = context.WithDeadline(ctx, win.closesAfter(nowFunc()))
 				}
+				defer cancel()
+				for _, p := range selected(pairs) {
+					if _, err := runPass(rctx, p, nil); err != nil {
+						if so := signedOut(err); so != nil {
+							return so
+						}
+					}
+					if rctx.Err() != nil {
+						break
+					}
+				}
+				if win != nil && ctx.Err() == nil && rctx.Err() != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "sync: the sync window %s closed; the rest continues when it opens\n", win)
+				}
+				return nil
 			}
+			return runLive(ctx, cmd, st, api, selected, runPass, watchSettings{
+				interval: watch, watchMax: watchMax, fullEvery: fullEvery, window: win, live: live,
+			})
 		},
 	}
 	c.Flags().StringVar(&pairID, "pair", "", "sync only this pair")
 	c.Flags().StringVar(&account, "account", "", "sync only pairs recorded against this account")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "show what would happen without changing anything")
-	c.Flags().DurationVar(&watch, "watch", 0, "keep running, re-checking at this interval (e.g. 30s)")
+	c.Flags().DurationVar(&watch, "watch", 0, "keep running; the safety-net check of every pair runs at this interval (e.g. 30s)")
+	c.Flags().BoolVar(&live, "live", true, "with --watch: sync changes as they happen (server change stream + local file-system events); false = interval checks only")
 	c.Flags().BoolVar(&quietOut, "quiet", false, "print only the summary line per pair (progress lines still print)")
 	c.Flags().IntVar(&transfers, "transfers", 0, "concurrent uploads/downloads per pair (0 = default 4, 1 = fully serial)")
+	c.Flags().Int64Var(&limitDown, "limit-down", 0, "cap downloads at this many KiB/s, all transfers together (0 = no limit)")
+	c.Flags().Int64Var(&limitUp, "limit-up", 0, "cap uploads at this many KiB/s, all transfers together (0 = no limit)")
+	c.Flags().StringVar(&windowArg, "window", "", "only sync between these local times, e.g. 22:00-07:00 (may wrap midnight)")
+	c.Flags().DurationVar(&watchMax, "watch-max", 5*time.Minute, "with --watch, the longest wait between walks of a quiet pair on a server that cannot report changes")
+	c.Flags().DurationVar(&fullEvery, "full-every", 30*time.Minute, "with --watch, walk every pair at least this often even when nothing seems to change (0 = never)")
 	return quiet(c)
+}
+
+// maxKiBPerSecond keeps a --limit-* value from overflowing when it is turned
+// into bytes: anything above it (≈ 8 EiB/s) is no limit anyway.
+const maxKiBPerSecond = int64(1) << 53
+
+// kibPerSecond is a --limit-* value in bytes per second (0 = no limit).
+func kibPerSecond(kib int64) int64 {
+	if kib <= 0 || kib > maxKiBPerSecond {
+		return 0
+	}
+	return kib * 1024
+}
+
+// watchSettings is what `sync run --watch` was asked for.
+type watchSettings struct {
+	interval, watchMax, fullEvery time.Duration
+	window                        *syncWindow
+	// live switches the change stream and the file-system watcher on; off,
+	// only the interval's checks find changes.
+	live bool
+}
+
+// runLive is `sync run --watch` (synclive.go).
+func runLive(ctx context.Context, cmd *cobra.Command, st *filesync.Store, api *cliclient.Client,
+	selected func([]filesync.Pair) []filesync.Pair,
+	runPass func(context.Context, filesync.Pair, []string) (filesync.Result, error),
+	ws watchSettings) error {
+	out := cmd.OutOrStdout()
+	loop := &liveLoop{
+		loadPairs: func() ([]filesync.Pair, error) {
+			all, err := st.LoadPairs()
+			if err != nil {
+				return nil, err
+			}
+			return selected(all), nil
+		},
+		runPass: runPass,
+		localChanged: func(p filesync.Pair, dir string) bool {
+			changed, err := (&filesync.Engine{Pair: p, Store: st}).LocalDirChanged(dir)
+			return err != nil || changed
+		},
+		changes: func(ctx context.Context, p filesync.Pair, since string) (string, bool, error) {
+			return api.Changes(ctx, p.WatchRoot(), since)
+		},
+		localFP:  filesync.LocalFingerprint,
+		planner:  newWatchPlanner(ws.interval, ws.watchMax, ws.fullEvery),
+		window:   ws.window,
+		clock:    nowFunc,
+		interval: ws.interval,
+		out:      out,
+	}
+	if ws.live {
+		loop.stream = &cliclient.ChangeStream{
+			Client:         api,
+			OnChange:       loop.noteRemote,
+			OnState:        loop.streamState,
+			OnConnected:    loop.checkAll,
+			OnUnauthorized: func(err error) { loop.signedOut(err) },
+		}
+		applyWatchBudgetEnv(os.Getenv)
+		if lw, err := newLocalWatcher(st.Dir, loop.noteLocal, loop.notePairsFile, loop.localState); err == nil {
+			loop.local = lw
+		} else {
+			// No watcher at all: every pair says so, under its own folder.
+			loop.localDown = err
+		}
+		fmt.Fprintf(out, "Watching: changes on either side are synced as they happen; a safety-net check every %s. Ctrl-C to stop.\n", ws.interval)
+	} else {
+		fmt.Fprintf(out, "Watching; checking every %s. Ctrl-C to stop.\n", ws.interval)
+	}
+	return loop.Run(ctx)
 }
 
 // printPlan is --dry-run. It answers the question people actually ask before
 // letting a sync tool near their files: what are you about to do?
-func printPlan(cmd *cobra.Command, api *cliclient.Client, st *filesync.Store, p filesync.Pair) error {
+func printPlan(ctx context.Context, cmd *cobra.Command, api *cliclient.Client, st *filesync.Store, p filesync.Pair) error {
 	local, _, err := filesync.WalkLocal(p.Local)
 	if err != nil {
 		return err
 	}
-	remote, err := filesync.WalkRemote(cmd.Context(), apiAdapter{api}, p.Remote, nil)
+	remote, err := filesync.WalkRemote(ctx, apiAdapter{api}, p.Remote, nil)
 	if err != nil {
 		return err
 	}
@@ -344,29 +548,172 @@ func printPlan(cmd *cobra.Command, api *cliclient.Client, st *filesync.Store, p 
 	return nil
 }
 
-func printResult(cmd *cobra.Command, p filesync.Pair, res filesync.Result) {
-	out := cmd.OutOrStdout()
-	if res.Planned == 0 {
-		fmt.Fprintf(out, "%s: already in step\n", p.ID)
+// passReporter prints what each pass did. Every line names its pair: the
+// desktop app keeps one status per pair (desktop/src/syncstatus.ts), and a
+// terminal running several pairs is easier to read that way too.
+//
+// failing remembers which pairs' LAST pass failed. A targeted (live) pass that
+// found nothing to do — typically the echo of this engine's own upload — stays
+// silent, because "already in step" for every echo would bury the lines that
+// matter; EXCEPT right after a failure: that clean summary is what tells the
+// desktop the failure is over. Without it the stale error stood under the
+// folder until the next full check.
+type passReporter struct {
+	out, errOut io.Writer
+	failing     map[string]bool
+}
+
+func newPassReporter(out, errOut io.Writer) *passReporter {
+	return &passReporter{out: out, errOut: errOut, failing: map[string]bool{}}
+}
+
+func (r *passReporter) pass(p filesync.Pair, targeted bool, res filesync.Result, err error) {
+	if err != nil {
+		r.failing[p.ID] = true
+		fmt.Fprintf(r.errOut, "%s: %v\n", p.ID, err)
 		return
 	}
-	fmt.Fprintf(out, "%s: %d/%d done — %d up, %d down, %d removed here, %d removed on the server",
-		p.ID, res.Applied, res.Planned, res.Uploaded, res.Downloaded, res.DeletedLocal, res.DeletedRemot)
-	if res.Conflicts > 0 {
-		fmt.Fprintf(out, ", %d kept as both versions", res.Conflicts)
+	failed := len(res.Errors) > 0
+	quiet := targeted && res.Planned == 0 && !failed && !r.failing[p.ID]
+	r.failing[p.ID] = failed
+	if !quiet {
+		writeResult(r.out, r.errOut, p, res)
 	}
-	fmt.Fprintf(out, "  (%s)\n", res.Duration.Round(time.Millisecond))
+}
+
+// printResult is writeResult on a command's own streams.
+func printResult(cmd *cobra.Command, p filesync.Pair, res filesync.Result) {
+	writeResult(cmd.OutOrStdout(), cmd.ErrOrStderr(), p, res)
+}
+
+// writeResult reports one pass.
+//
+// ⚠ The summary says ", N failed" when the pass had errors. The desktop clears
+// a pair's error on its next clean summary, and the error TEXT arrives on
+// stderr — a different pipe, read in no guaranteed order against stdout. Only
+// a summary that carries the verdict itself cannot clear the error it came
+// with.
+func writeResult(out, errOut io.Writer, p filesync.Pair, res filesync.Result) {
+	if res.Planned == 0 && len(res.Errors) == 0 && res.Held == 0 {
+		fmt.Fprintf(out, "%s: already in step\n", p.ID)
+	} else {
+		fmt.Fprintf(out, "%s: %d/%d done — %d up, %d down, %d removed here, %d removed on the server",
+			p.ID, res.Applied, res.Planned, res.Uploaded, res.Downloaded, res.DeletedLocal, res.DeletedRemot)
+		if res.Conflicts > 0 {
+			fmt.Fprintf(out, ", %d kept as both versions", res.Conflicts)
+		}
+		if res.Identical > 0 {
+			fmt.Fprintf(out, ", %d already identical", res.Identical)
+		}
+		if res.Held > 0 {
+			fmt.Fprintf(out, ", %d held for a decision", res.Held)
+		}
+		if n := len(res.Errors); n > 0 {
+			fmt.Fprintf(out, ", %d failed", n)
+		}
+		fmt.Fprintf(out, "  (%s)\n", res.Duration.Round(time.Millisecond))
+	}
 	// Report what was NOT done rather than letting a summary imply full coverage.
 	for _, e := range res.Errors {
-		fmt.Fprintf(cmd.ErrOrStderr(), "  ! %s\n", e)
+		fmt.Fprintf(errOut, "%s: ! %s\n", p.ID, e)
 	}
+	// Not errors: the other side moved while this pass ran, nothing was
+	// overwritten, and the next pass keeps both versions.
+	for _, rc := range res.Raced {
+		fmt.Fprintf(out, "%s: ~ %s — both versions are kept on the next pass\n", p.ID, rc)
+	}
+	// Worth reading, not a failure: a symlink in a synced folder is reported
+	// on every full check for as long as it is there.
 	if n := len(res.Skipped); n > 0 {
-		fmt.Fprintf(cmd.ErrOrStderr(), "  ! skipped %d unreadable or non-regular item(s), e.g. %s\n", n, res.Skipped[0])
+		fmt.Fprintf(errOut, "%s: note: skipped %d unreadable or non-regular item(s), e.g. %s\n", p.ID, n, res.Skipped[0])
 	}
 	if res.DeletedLocal > 0 {
-		fmt.Fprintf(out, "  %d file(s) moved to the local trash — recover with `filex sync trash --pair %s`\n",
-			res.DeletedLocal, p.ID)
+		fmt.Fprintf(out, "%s: %d file(s) moved to the local trash — recover with `filex sync trash --pair %s`\n",
+			p.ID, res.DeletedLocal, p.ID)
 	}
+}
+
+// findPair returns the stored pair with this id.
+func findPair(st *filesync.Store, id string) (filesync.Pair, error) {
+	pairs, err := st.LoadPairs()
+	if err != nil {
+		return filesync.Pair{}, err
+	}
+	for _, p := range pairs {
+		if p.ID == id {
+			return p, nil
+		}
+	}
+	return filesync.Pair{}, fmt.Errorf("no such pair: %s", id)
+}
+
+func syncConfirmCmd() *cobra.Command {
+	return quiet(&cobra.Command{
+		Use:   "confirm <pair-id>",
+		Short: "Send the items a pair is holding for a decision to the server",
+		Long: "A first run that would upload many files the server does not have, into a\n" +
+			"server folder that already has content, holds them instead: with no sync\n" +
+			"history, a file that is new here and a file that was deleted on the server\n" +
+			"look the same. `confirm` says they are wanted: the next run uploads them.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, err := syncStore()
+			if err != nil {
+				return err
+			}
+			p, err := findPair(st, args[0])
+			if err != nil {
+				return err
+			}
+			if !p.HoldNew {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s is not holding anything.\n", p.ID)
+				return nil
+			}
+			n, err := st.ConfirmHeld(p.ID)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: %d held item(s) go to the server on the next run.\n", p.ID, n)
+			return nil
+		},
+	})
+}
+
+func syncDiscardCmd() *cobra.Command {
+	return quiet(&cobra.Command{
+		Use:   "discard <pair-id>",
+		Short: "Move the items a pair is holding into the local sync trash",
+		Long: "The other answer to a hold: the files are not wanted on the server (typically\n" +
+			"they were cleaned up there, and this machine's copy is stale). They move into\n" +
+			"the pair's local sync trash — recoverable with `filex sync trash` for 30 days —\n" +
+			"and the next run makes this folder match the server. A file edited after it\n" +
+			"was held is left where it is.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, err := syncStore()
+			if err != nil {
+				return err
+			}
+			p, err := findPair(st, args[0])
+			if err != nil {
+				return err
+			}
+			if !p.HoldNew {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s is not holding anything.\n", p.ID)
+				return nil
+			}
+			moved, kept, err := st.DiscardHeld(p, time.Now())
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: moved %d held file(s) to the local sync trash", p.ID, moved)
+			if kept > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "; %d changed since and were left in place", kept)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), ".")
+			return nil
+		},
+	})
 }
 
 func syncTrashCmd() *cobra.Command {

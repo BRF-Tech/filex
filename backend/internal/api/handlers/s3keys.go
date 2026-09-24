@@ -134,6 +134,16 @@ func (h *S3Keys) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		tok = t
 	}
+	// A narrower token caller mints a key that inherits from ITSELF — its
+	// scopes, its folder, its expiry (token_ceiling.go) — never an
+	// unparented one, and never one parented to a wider sibling token.
+	if c := ceilingOf(r); c != nil && c.narrowerThanOwner(u) {
+		if tok != nil && tok.ID != c.tok.ID {
+			refuseWider(w, "a key may only inherit from the token that creates it")
+			return
+		}
+		tok = c.tok
+	}
 
 	issued, err := h.Auth.Issue(r.Context(), protocolauth.IssueRequest{
 		User: u, Token: tok, Label: req.Label,
@@ -141,10 +151,20 @@ func (h *S3Keys) Create(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, protocolauth.ErrNoSecretBox):
-		// 503, not 500: the install is missing configuration, and the message
-		// says which — an operator reading a generic 500 would go looking for
-		// a bug that is not there.
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		// 503, not 500: the install is missing configuration.
+		//
+		// ⚠⚠ A CODE, and the fix only for an administrator. The message used
+		// to be the whole answer — "protocolauth: no secret key configured;
+		// set FILEX_SECRET_KEY to issue S3 access keys" — and the connections
+		// panel printed it to every regular user who pressed "Create key"
+		// (QA, 2026-09-21): an environment variable is the operator's
+		// business. The client says `no_secret_key` in the person's language
+		// (lib/errorWords); `admin_hint` is added for a caller who can act.
+		body := map[string]string{"error": "no_secret_key"}
+		if callerMayConfigureInstance(r) {
+			body["admin_hint"] = "Set FILEX_SECRET_KEY on the server and restart filex to issue access keys."
+		}
+		writeJSON(w, http.StatusServiceUnavailable, body)
 		return
 	case errors.Is(err, protocolauth.ErrWidensParent):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

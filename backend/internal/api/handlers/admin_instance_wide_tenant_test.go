@@ -37,6 +37,13 @@ var instanceWideRoutes = []struct {
 	// version retention — one global row each.
 	{"protection read", http.MethodGet, "/api/admin/protection", nil},
 	{"protection disable antivirus", http.MethodPatch, "/api/admin/protection", map[string]any{"av_enabled": false}},
+	// What a folder opens as for every account with no view of its own — one
+	// global row, so a customer's admin must not choose it for everybody else
+	// (the boundary ui.default_theme has; settings.go allowSettingWrite).
+	{"instance default folder view", http.MethodPut, "/api/admin/settings/ui.default_folder_view",
+		map[string]any{"value": `{"v":"grid"}`}},
+	{"instance default folder view (batch)", http.MethodPatch, "/api/admin/settings",
+		map[string]any{"ui.default_folder_view": `{"v":"grid"}`}},
 	// The shared document server + converter, and the JWT secret behind them.
 	{"external services read", http.MethodGet, "/api/admin/external", nil},
 	{"external services repoint", http.MethodPatch, "/api/admin/external/onlyoffice",
@@ -52,6 +59,7 @@ var instanceWideRoutes = []struct {
 	// class and not just the part that moved.
 	{"tenant lifecycle", http.MethodGet, "/api/admin/providers", nil},
 	{"storage plugins", http.MethodGet, "/api/admin/plugins", nil},
+	{"app plugins", http.MethodGet, "/api/admin/app-plugins", nil},
 }
 
 // TestInstanceWideAdmin_TenantAdminIsRefused is the red proof: on the pre-fix

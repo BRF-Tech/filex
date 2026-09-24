@@ -8,9 +8,10 @@ import { Trash2, ShieldCheck } from 'lucide-vue-next';
 import { AdminGrantsApi, type AdminGrant } from '@/api/grants';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
-import Spinner from '@/components/ui/Spinner.vue';
 import Badge from '@/components/ui/Badge.vue';
-import TableScroll from '@/components/ui/TableScroll.vue';
+import Button from '@/components/ui/Button.vue';
+import Input from '@/components/ui/Input.vue';
+import { DataTable, personName, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
 const { t } = useI18n();
 const toast = useToastStore();
@@ -33,15 +34,50 @@ onMounted(load);
 
 const filtered = computed(() => {
   const term = q.value.trim().toLowerCase();
-  if (!term) return grants.value;
-  return grants.value.filter(
-    (g) =>
-      g.user_email.toLowerCase().includes(term) ||
-      g.path.toLowerCase().includes(term) ||
-      g.storage_name.toLowerCase().includes(term) ||
-      g.level.includes(term),
-  );
+  const rows = !term
+    ? [...grants.value]
+    : grants.value.filter(
+        (g) =>
+          g.user_email.toLowerCase().includes(term) ||
+          (g.user_name ?? '').toLowerCase().includes(term) ||
+          g.path.toLowerCase().includes(term) ||
+          g.storage_name.toLowerCase().includes(term) ||
+          g.level.includes(term),
+      );
+  /* The order the table opens in before anybody picks a column: by person.
+     A header click re-sorts on top of it (DataTable sorts itself — the
+     endpoint answers with every grant at once, so a client sort is honest
+     here) and is remembered under `admin.grants`. */
+  return rows.sort((a, b) => userOf(a).localeCompare(userOf(b)));
 });
+
+function userOf(g: AdminGrant): string {
+  return personName({ name: g.user_name, email: g.user_email }) || `#${g.user_id}`;
+}
+
+/** owner → editor → viewer, so "Level ↑" reads from the most to the least. */
+const LEVEL_RANK: Record<string, number> = { owner: 0, editor: 1, viewer: 2 };
+
+/* The explorer's table (DataTable): every column resizes, hides, moves and
+ * sorts, and the arrangement is remembered on the account. */
+const columns = computed<DataColumn<AdminGrant>[]>(() => [
+  { id: 'user', label: t('grants.user'), sortable: true, width: 220, sortValue: userOf },
+  { id: 'storage_name', label: t('grants.storage'), sortable: true, width: 150 },
+  {
+    id: 'path',
+    label: t('grants.path'),
+    sortable: true,
+    width: 240,
+    sortValue: (g) => g.path_prefix || '/',
+  },
+  {
+    id: 'level',
+    label: t('grants.level'),
+    sortable: true,
+    width: 110,
+    sortValue: (g) => LEVEL_RANK[g.level] ?? 9,
+  },
+]);
 
 function levelTone(l: string): 'rose' | 'amber' | 'zinc' {
   if (l === 'owner') return 'rose';
@@ -59,6 +95,15 @@ async function revoke(g: AdminGrant) {
     toast.error(extractError(e, t('errors.generic')));
   }
 }
+
+/** The row's one verb, behind its one pinned `Actions` control. */
+function rowActions(row: AdminGrant): ContextAction[] {
+  return [{ key: 'revoke', label: t('grants.revoke'), icon: 'delete', danger: true }];
+}
+
+function onRowAction(key: string, row: AdminGrant) {
+  if (key === 'revoke') revoke(row);
+}
 </script>
 
 <template>
@@ -70,50 +115,40 @@ async function revoke(g: AdminGrant) {
         </h1>
         <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('grants.subtitle') }}</p>
       </div>
-      <input
-        v-model="q"
-        type="search"
-        :placeholder="t('grants.search')"
-        class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm w-64 max-w-full"
-      />
     </div>
 
-    <div v-if="loading" class="card card-body text-center text-zinc-500"><Spinner /></div>
-    <TableScroll v-else class="card">
-      <table class="w-full text-sm">
-        <thead class="text-left text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
-          <tr>
-            <th class="px-4 py-2 font-medium">{{ t('grants.user') }}</th>
-            <th class="px-4 py-2 font-medium">{{ t('grants.storage') }}</th>
-            <th class="px-4 py-2 font-medium">{{ t('grants.path') }}</th>
-            <th class="px-4 py-2 font-medium">{{ t('grants.level') }}</th>
-            <th class="px-4 py-2 font-medium text-right tbl-actions">{{ t('common.actions') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="g in filtered"
-            :key="g.id"
-            class="border-b border-zinc-100 dark:border-zinc-800/60"
-          >
-            <td class="px-4 py-2">{{ g.user_email || '#' + g.user_id }}</td>
-            <td class="px-4 py-2">{{ g.storage_name }}</td>
-            <td class="px-4 py-2 font-mono text-xs">{{ g.path_prefix || '/' }}<span v-if="g.is_dir && g.path_prefix" class="text-zinc-400">/…</span></td>
-            <td class="px-4 py-2"><Badge :tone="levelTone(g.level)">{{ g.level }}</Badge></td>
-            <td class="px-4 py-2 text-right tbl-actions">
-              <button
-                class="inline-flex items-center gap-1 text-rose-600 hover:text-rose-500 text-xs"
-                @click="revoke(g)"
-              >
-                <Trash2 class="h-3.5 w-3.5" /> {{ t('grants.revoke') }}
-              </button>
-            </td>
-          </tr>
-          <tr v-if="!filtered.length">
-            <td colspan="5" class="px-4 py-6 text-center text-zinc-500">{{ t('grants.empty') }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </TableScroll>
+    <DataTable
+      table-id="admin.grants"
+      :columns="columns"
+      :rows="filtered"
+      :loading="loading"
+      :empty="t('grants.empty')"
+      row-key="id"
+      :row-actions="(row: AdminGrant) => rowActions(row)"
+      :row-actions-test-id="(row: AdminGrant) => `grant-actions-${row.id}`"
+      @row-action="(key: string, row: AdminGrant) => onRowAction(key, row)"
+    >
+      <template #toolbar>
+        <Input v-model="q" type="search" :placeholder="t('grants.search')" size="sm" class="w-64 max-w-full" />
+      </template>
+
+      <template #cell-user="{ row }">
+        <div>
+          {{ userOf(row as AdminGrant) }}
+          <span v-if="(row as AdminGrant).user_name && (row as AdminGrant).user_email" class="tbl-sub">{{ (row as AdminGrant).user_email }}</span>
+        </div>
+      </template>
+
+      <template #cell-path="{ row }">
+        <span class="tbl-mono">
+          {{ (row as AdminGrant).path_prefix || '/'
+          }}<span v-if="(row as AdminGrant).is_dir && (row as AdminGrant).path_prefix">/…</span>
+        </span>
+      </template>
+
+      <template #cell-level="{ row }">
+        <Badge :tone="levelTone((row as AdminGrant).level)">{{ (row as AdminGrant).level }}</Badge>
+      </template>
+    </DataTable>
   </div>
 </template>

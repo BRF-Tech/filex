@@ -45,7 +45,9 @@
 //     NO fallback to the driver in that case — on an overwrite the driver holds
 //     the previous version of the same path at plausibly the same size, and
 //     serving that as the new file is a silent wrong answer, which is worse
-//     than an error a human can read.
+//     than an error a human can read. A node whose bytes DID land is settled
+//     to "stored" by the storage sync and the staged-upload boot pass, on
+//     complete evidence (model.TransferLanded) — never guessed at here.
 //
 //   - Whether a locally prepared copy should answer instead of the backend.
 //     internal/filecache keeps big files from slow storages on local disk;

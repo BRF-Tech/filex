@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -65,7 +66,7 @@ func (a *Archive) AttachThumbs(p *thumb.Pipeline) { a.Thumbs = p }
 // manager's own Extract/Compress, reached from the SPA under a user session;
 // they are not a new protocol.
 func (a *Archive) sync() *protocolsync.Syncer {
-	return protocolsync.New(a.Store, a.Index, a.Thumbs, writehook.OriginManager)
+	return protocolsync.New(a.Store, a.Index, a.Thumbs, writehook.OriginManager).WithResolver(a.StorageResolver)
 }
 
 // storageRow fetches the storage record the bookkeeper needs. A miss returns
@@ -223,6 +224,11 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 	}
 	dest = "/" + strings.TrimLeft(path.Clean("/"+dest), "/")
 
+	// The archive is read and the destination gains files: both named, not
+	// changed. Each member is judged where it lands, below.
+	if gate(w, r, a.ACL, req.StorageID, writegate.Names(req.Path), writegate.Names(dest)) {
+		return
+	}
 	// RBAC: reading the archive needs ≥viewer; extracting writes into dest → ≥editor.
 	if !aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(req.Path, "/"), acl.LevelViewer) ||
 		!aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(dest, "/"), acl.LevelEditor) {
@@ -232,6 +238,10 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 
 	mkdirer, _ := drv.(storage.Mkdirer)
 	st := a.storageRow(r.Context(), req.StorageID)
+	locks := liveLocks(r, a.ACL, req.StorageID)
+	// locked counts members that would have landed on a document an app has
+	// frozen (writegate) — skipped, and said, rather than written over it.
+	locked := 0
 	sy := a.sync()
 	keys := make([]string, 0)
 	// refused counts members the pre-write snapshot guard turned away, kept
@@ -252,6 +262,20 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		target := path.Join(dest, safeRel)
+		// A member under one of filex's own names (`.versions/…`, `.thumbs/`,
+		// a `.keepdir`) is skipped like a zip-slip entry: the destination is
+		// fine, this one member is not — and extracting it would put files
+		// where nobody can ever see them. So is a member that would land on a
+		// document an app has frozen (measured before writegate: an archive
+		// holding `Sozlesmeler/NDA.docx` replaced the document under
+		// signature).
+		if gerr := writegate.Check(locks, 0, writegate.Writes(target)); gerr != nil {
+			slog.Warn("archive: skipped member", slog.String("name", f.Name), slog.String("why", gerr.Error()))
+			if errors.Is(gerr, writegate.ErrLocked) {
+				locked++
+			}
+			continue
+		}
 		// Defense in depth: ensure the joined target stays under dest.
 		if !strings.HasPrefix(target+"/", strings.TrimRight(dest, "/")+"/") {
 			slog.Warn("archive: target escapes dest after join", slog.String("target", target))
@@ -319,6 +343,7 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 		"keys":    keys,
 		"count":   len(keys),
 		"refused": refused,
+		"locked":  locked,
 	})
 }
 
@@ -349,6 +374,14 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 		_, srcRel := splitAdapterPath(req.Files[i].Source)
 		if srcRel != "" {
 			req.Files[i].Source = srcRel
+		}
+	}
+	if gate(w, r, a.ACL, req.StorageID, writegate.Writes(req.Path)) {
+		return
+	}
+	for _, f := range req.Files {
+		if gate(w, r, a.ACL, req.StorageID, writegate.Names(f.Source)) {
+			return
 		}
 	}
 	// RBAC: writing the archive needs ≥editor on the target; each source ≥viewer.

@@ -39,7 +39,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/storage"
-	"github.com/brf-tech/filex/backend/internal/versioning"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/zipstream"
 )
 
@@ -352,7 +352,7 @@ func CollectFiles(ctx context.Context, drv storage.Driver, root string) ([]File,
 // rather than one of the user's files.
 //
 // ⚠ `.versions` was missing here, and it is the one that matters. Version
-// history lives at the STORAGE ROOT (versioning.VersionsPrefix,
+// history lives at the STORAGE ROOT (syspath.Versions,
 // `.versions/<node id>/<n>`), so it never showed up while this walk was only
 // ever used on a folder — and then it showed up the moment somebody archived
 // the root. Measured 2026-09-13 on a live local storage: downloading a
@@ -361,16 +361,11 @@ func CollectFiles(ctx context.Context, drv storage.Driver, root string) ([]File,
 // show you. That is every archive this walk feeds: the folder-share ZIP, its
 // on-disk cache, and the selection download.
 //
-// The listing projectors (projectFileNodes / projectDriverObjects) have always
-// hidden all four. Two lists of "what is ours" is how they drift, and this one
-// had already drifted.
-func internalName(name string) bool {
-	switch name {
-	case ".filex-trash", ".thumbs", ".keepdir", versioning.VersionsPrefix:
-		return true
-	}
-	return false
-}
+// Two lists of "what is ours" is how they drift, and this one had already
+// drifted — and then drifted again: it never learned `.filex-open`, so
+// archiving a storage root packed the desktop app's working copies. It now
+// asks syspath.IsName, the one list, and keeps no names of its own.
+func internalName(name string) bool { return syspath.IsName(name) }
 
 // signature is a content hash over the file set (sorted rel path + size +
 // mtime). Any add/delete/replace changes it, which invalidates the cache.

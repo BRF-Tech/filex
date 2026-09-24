@@ -43,7 +43,14 @@ export type AuthConfig =
   | { type: 'csrf'; csrf: string };
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
-export type LocaleCode = 'tr' | 'en';
+/**
+ * A language code. `tr` and `en` are the two this package ships a catalogue
+ * for; ANY other tag may arrive too — a language pack (an app whose manifest
+ * carries `ui_locales`) adds languages at run time, see `lib/uiLocales`.
+ * `(string & {})` keeps the two named ones in autocompletion without
+ * pretending they are the only ones.
+ */
+export type LocaleCode = 'tr' | 'en' | (string & {});
 
 /**
  * Resolved endpoint map. `useFileApi` derives this once on construction
@@ -84,6 +91,16 @@ export interface EndpointMap {
   /* wiring:e2 */
   e2eEscrowChallenge: string | null;
   e2eEscrowUsed: string | null;
+  /* App plugins (docs/APP-PLUGINS-API.md). Templates carry `{plugin}`,
+   * `{action}`, `{view}` and `{id}` placeholders, filled at call time. */
+  pluginActions: string | null;
+  pluginActionRun: string | null;
+  pluginView: string | null;
+  pluginViewEvent: string | null;
+  /** `?plugin=<name>&q=` — the people-picker's user lookup (M2). */
+  pluginUsers: string | null;
+  /** `POST` cancel of a queued/running ops row — `{id}` placeholder. */
+  opsCancel: string | null;
 }
 
 export interface ExplorerConfig {
@@ -131,6 +148,59 @@ export interface ExplorerConfig {
 
   /** Single op show endpoint — `{id}` placeholder. */
   opsShow?: string;
+
+  /** Cancel a queued/running op — `{id}` placeholder (plugin jobs). */
+  opsCancel?: string;
+
+  /** App plugins: the actions list, the run template (`{plugin}`/`{action}`),
+   *  the view template (`{plugin}`/`{view}`) and its `/event` sibling. */
+  pluginActions?: string;
+  pluginActionRun?: string;
+  pluginView?: string;
+  pluginViewEvent?: string;
+  pluginUsers?: string;
+
+  /**
+   * App plugins (file-menu rows drawn from WebAssembly plugins).
+   *
+   * Absent: follow the server — `capabilities.app_plugins.enabled`. `false`
+   * switches the feature off for this instance whatever the server says, and
+   * the explorer then makes no plugin request at all. `true` asks even when
+   * the capabilities answer is missing (a host that knows its backend).
+   */
+  plugins?: boolean;
+
+  /**
+   * Where this host serves the SPA, for an app plugin's `page` view
+   * (`${pluginPageBase}apps/{plugin}/{view}?path=…`, lib/pluginPage).
+   *
+   * ⚠ A mount BASE, not the site root: the same bundle is served from
+   * `/admin/` and `/drive/`, and only those prefixes fall back to index.html
+   * for an `apps/…` address, so a bare `/apps/…` is a 404 on the server. The
+   * host passes the prefix it was itself served from.
+   *
+   * Absent: a `page` action falls back to the modal — the same conversation
+   * in a dialog. A degraded frame, never a missing feature.
+   */
+  pluginPageBase?: string;
+
+  /**
+   * How this host opens a plugin page. Return `true` when the host handled
+   * it; anything else lets the explorer open a browser tab itself.
+   *
+   * ⚠ The hook exists for shells that have no tabs to open: the desktop app
+   * wants its own window (and a `window.open` there lands in the system
+   * browser with no session), an embed inside another product may want a
+   * panel. The RULE — which actions open a page, and what the address is —
+   * stays in the package for all of them (lib/pluginPage).
+   */
+  openPluginPage?: (target: {
+    plugin: string;
+    view: string;
+    path?: string;
+    /** The address the explorer would open, already built from `pluginPageBase`. */
+    url: string;
+  }) => boolean | void;
 
   /**
    * OnlyOffice config endpoint. Backend POST returns
@@ -185,6 +255,52 @@ export interface ExplorerConfig {
 
   /** Show the virtual `.trash/` entry in the root listing. */
   trashVisible?: boolean;
+
+  /**
+   * paylas:m1 — show the navigation panel's **My shares** row: the public
+   * links THIS person handed out, directly under its mirror "Shared with me".
+   *
+   * Default: OFF, and it is the only row in that group whose default is off
+   * for a reason that has nothing to do with taste. Every other entry either
+   * opens a listing this component owns (Home, Recent, Starred, Trash, a tag,
+   * a storage) or a panel it draws itself ("How to connect", "API keys") —
+   * this one opens a page of the HOST. The explorer can announce the intent
+   * (`open-my-shares`) and nothing more; a host that does not listen is left
+   * with a row that draws, takes a click and does nothing at all. Off by
+   * default is therefore the honest default: `<filex-explorer>` on
+   * work.example.com, in the fishapp and on fm.example.com has no such page, and a dead
+   * row is worse than a missing one.
+   *
+   * ⚠ Opting in is a promise, not a preference: set it to `true` only if you
+   * handle `@open-my-shares`. The SPA does (`web/src/views/Explore.vue` pushes
+   * its `my-shares` route), which is why it is the one host that asks for it.
+   * Only the Vue component emits it: `<filex-explorer>` and the React
+   * `<FileManager>` do not forward `open-my-shares`, so there it cannot be
+   * handled and the flag must stay off.
+   *
+   * ⚠ ANDed with `callerKind`, never ORed: an app token is not a person and
+   * has shared nothing, so the row goes with its mirror even for a host that
+   * asked for it. See `callerKind`.
+   */
+  mySharesVisible?: boolean;
+
+  /**
+   * The host draws an app plugin's `home` view as a page of ITS OWN, in the
+   * same tab (the SPA's `app-home` route), and handles `@open-app-home`.
+   *
+   * ⚠⚠ The owner, 2026-09-21: the Signatures screen opened as a dialog over
+   * the file list, and it should be "its own page" — the way My shares is,
+   * with its sections in a menu, the Back button working, and a
+   * notification landing on the right section. The explorer cannot give a
+   * host a page; it can only say which one was asked for, so the navigation
+   * panel's "Apps" row emits `open-app-home` when this is on.
+   *
+   * Default: OFF, for the reason `mySharesVisible` is off — only the Vue
+   * component emits the event, and a host that does not listen would be
+   * left with a row that does nothing. Off, an "Apps" row keeps opening the
+   * view in a dialog, which is a smaller frame but a working one.
+   */
+  appHomePage?: boolean;
 
   /** UI dil kodu */
   locale?: LocaleCode;

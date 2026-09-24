@@ -11,6 +11,40 @@ const (
 	KindSymlink   ObjectKind = "symlink"
 )
 
+// Metadata key and values a driver uses to say WHY an entry came back as
+// KindSymlink instead of as the thing it points at.
+//
+// A driver that can follow a link reports the TARGET's kind, so an entry left
+// as KindSymlink is always one the caller cannot open. Without a reason
+// attached, the UI has a row it must refuse to act on and nothing to tell
+// anyone — which is exactly how issue #34 was experienced: a 0-byte file that
+// would not open and gave no explanation.
+const (
+	MetaLinkState = "link_state"
+	// MetaLinkTarget carries the driver's own resolved identity for a FOLLOWED
+	// directory link — the thing CycleGuard keys on. Only directory links need
+	// it, because only a directory link can send a walk round in a circle, and
+	// resolving one is the expensive call (measured 1.1 ms on Windows), so it
+	// is not paid for file links or for links that were not followed.
+	MetaLinkTarget = "link_target"
+
+	// LinkFollowed — the link resolved inside the root and the Object
+	// describes its TARGET. Carried so a surface can still badge the row as a
+	// link; the Kind, size and mtime are the target's.
+	LinkFollowed = "followed"
+	// LinkOutsideRoot — the target is outside the storage root and the
+	// storage's follow_symlinks option is off.
+	LinkOutsideRoot = "outside_root"
+	// LinkBroken — the link resolves to nothing at all.
+	LinkBroken = "broken"
+	// LinkUnresolved — the driver knows this is a link and deliberately did
+	// not follow it, because it has no way to tell an in-root target from an
+	// out-of-root one. Remote backends say this: filex's boundary there is the
+	// account's own permissions, so following a link would leave the
+	// configured root with nothing to stop the walk.
+	LinkUnresolved = "unresolved"
+)
+
 // Object is a backend-agnostic representation of a single FS entry.
 type Object struct {
 	Path     string            `json:"path"` // logical path within storage (POSIX-style)

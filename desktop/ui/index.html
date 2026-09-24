@@ -154,7 +154,12 @@
                             'Tarayıcı uygulamaya dönemedi mi? Sana gösterdiği kodu yapıştır'],
         'wait.code_ph':    ['Paste the code here', 'Kodu buraya yapıştır'],
         'wait.signin':     ['Sign in', 'Giriş yap'],
+        'wait.retry':      ['Start again in the browser', 'Tarayıcıda yeniden başlat'],
         'wait.cancel':     ['Cancel', 'Vazgeç'],
+        'fail.stale':      ['That sign-in link was from an earlier attempt. Finish this one in your browser, or paste the code it shows you.',
+                            'Bu giriş bağlantısı önceki bir denemeye aitti. Bu denemeyi tarayıcında tamamla ya da sana gösterdiği kodu yapıştır.'],
+        'fail.spent':      ['Sign-in did not finish ({detail}). That code cannot be used again — start again in the browser.',
+                            'Giriş tamamlanmadı ({detail}). O kod bir daha kullanılamaz — tarayıcıda yeniden başlat.'],
       };
       function T(key, vars) {
         const entry = STRINGS[key];
@@ -163,7 +168,13 @@
         return s;
       }
       let state = null;
-      let waiting = null; // { authUrl, serverUrl } once a sign-in is in flight
+      // ⚠⚠ Nothing about the sign-in lives in this page (issue #36). The main
+      // process says what to draw (`state.signIn`, src/signin-flow.ts): the
+      // waiting screen of the attempt in flight, or the server form when none
+      // is. This page used to keep the attempt in a variable and take it back
+      // only on #/reconnect, so every reload — a failed sign-in link, the tray,
+      // the Dock, a second launch — came up on the server form while the
+      // attempt was still pending, with no code box to finish it in.
 
 
       // ⚠ No navigation here any more. Settings and Sync folders live in the
@@ -174,7 +185,6 @@
       // ── Connect: the ONLY thing asked for is where the server is. Credentials
       //    are typed into the server's own login page, in the real browser.
       function connectView() {
-        if (waiting) return waitingView();
         return `
           <h1>${esc(T('connect.title'))}</h1>
           <p class="sub">${esc(T('connect.sub'))}</p>
@@ -191,7 +201,7 @@
       // ordinary ways: no browser installed, a portable browser the OS has no
       // handler for, a locked-down machine, or finishing sign-in on a phone.
       // The link is copyable and the code can be typed in by hand.
-      function waitingView() {
+      function waitingView(waiting) {
         return `
           <h1>${esc(T('wait.title'))}</h1>
           <p class="sub">${esc(T('wait.sub', { server: waiting.serverUrl }))}</p>
@@ -210,8 +220,15 @@
 
           <div class="err" id="err"></div>
           <div class="row" style="margin-top:18px">
+            <button class="ghost" id="retry">${esc(T('wait.retry'))}</button>
             <button class="ghost" id="cancel">${esc(T('wait.cancel'))}</button>
           </div>`;
+      }
+
+      /** The last failed hand-back, in words that say what to do next. */
+      function failureText(f) {
+        if (!f) return '';
+        return f.kind === 'stale' ? T('fail.stale') : T('fail.spent', { detail: f.detail });
       }
 
       // The product's logo (web/src/components/LogoMark.vue), verbatim —
@@ -234,12 +251,15 @@
 
       async function render() {
         state = await window.filexShell.getState();
+        const signIn = (state && state.signIn) || { view: 'connect', failure: null };
         root.innerHTML = '';
-        root.appendChild($(`<div>${MARK}${connectView()}</div>`));
-        wire();
+        root.appendChild($(`<div>${MARK}${signIn.view === 'waiting' ? waitingView(signIn) : connectView()}</div>`));
+        wire(signIn);
+        const err = root.querySelector('#err');
+        if (err && signIn.failure) err.textContent = failureText(signIn.failure);
       }
 
-      function wire() {
+      function wire(signIn) {
         root.querySelectorAll('[data-go]').forEach((b) =>
           b.addEventListener('click', () => { location.hash = '#' + b.dataset.go; }));
 
@@ -249,8 +269,7 @@
             const err = root.querySelector('#err');
             err.textContent = '';
             try {
-              const r = await window.filexShell.beginAuth(root.querySelector('#server').value);
-              waiting = { serverUrl: r.serverUrl, authUrl: r.authUrl || r.serverUrl + '/admin/login' };
+              await window.filexShell.beginAuth(root.querySelector('#server').value);
               render();
             } catch (e) {
               err.textContent = String(e && e.message ? e.message : e);
@@ -279,7 +298,14 @@
               await window.filexShell.completeManual(root.querySelector('#code').value);
               // On success the main process closes this window.
             } catch (e) {
-              err.textContent = String(e && e.message ? e.message : e);
+              // A refused code used the attempt up; the main process recorded
+              // why, and the redraw says what to do next. An empty box never
+              // reached the server — its own message is the whole story.
+              const msg = String(e && e.message ? e.message : e);
+              const after = await window.filexShell.getState();
+              const f = after && after.signIn && after.signIn.failure;
+              if (f && msg.includes(f.detail)) return render();
+              err.textContent = msg;
             } finally {
               usecode.disabled = false;
             }
@@ -288,8 +314,23 @@
           root.querySelector('#code').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitCode(); });
         }
 
+        const retry = root.querySelector('#retry');
+        if (retry) retry.addEventListener('click', async () => {
+          const err = root.querySelector('#err');
+          err.textContent = '';
+          try {
+            await window.filexShell.beginAuth(signIn.serverUrl);
+            render();
+          } catch (e) {
+            err.textContent = String(e && e.message ? e.message : e);
+          }
+        });
+
         const cancel = root.querySelector('#cancel');
-        if (cancel) cancel.addEventListener('click', () => { waiting = null; render(); });
+        if (cancel) cancel.addEventListener('click', async () => {
+          await window.filexShell.cancelAuth();
+          render();
+        });
 
       }
 

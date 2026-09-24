@@ -33,9 +33,9 @@ the MCP server use).
    **API / MCP**, at `/admin/api-mcp`).
 2. Click **New token**, give it a label (e.g. `ShareX`), and select the
    **`write`** scope. That is the only scope the uploader needs — `write` covers
-   both storing the file and minting its share link. (Leaving *all* scopes
-   unchecked also works: an empty scope set grants everything, but a
-   `write`‑only token is the least‑privilege choice.)
+   both storing the file and minting its share link. At least one scope has
+   to be ticked — a token is never issued with none — and `write` alone is
+   the least‑privilege choice.
 3. Optionally bind the token to a **root folder** (confinement) so every ShareX
    upload is restricted to that subtree.
 4. Copy the **plaintext token** — it is shown **once**. Only its hash is stored;

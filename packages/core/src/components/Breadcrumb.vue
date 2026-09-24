@@ -386,7 +386,7 @@ function cancelEdit() {
 </script>
 
 <template>
-  <nav class="fe-breadcrumb" aria-label="Breadcrumb">
+  <nav class="fe-breadcrumb" :aria-label="t('breadcrumb.aria')">
     <template v-if="!editing">
       <!-- gorunum:v2-topbar — the root crumb. It IS `crumbs[0]` (see the
            script), drawn as a house instead of a "/" nobody reads as a
@@ -447,7 +447,7 @@ function cancelEdit() {
         @dragover="onCrumbDragOver"
         @drop="onCrumbDrop($event, c)"
       >
-        <span>{{ c.label }}</span>
+        <span><bdi>{{ c.label }}</bdi></span>
         <span v-if="collapsed || i < leadCrumbs.length - 1" class="fe-breadcrumb__sep" aria-hidden="true">›</span>
       </button>
       <span v-if="middleCrumbs.length" ref="moreWrapEl" class="fe-breadcrumb__more-wrap">
@@ -469,7 +469,7 @@ function cancelEdit() {
             class="fe-breadcrumb__menu-item"
             role="menuitem"
             @click="onOverflowPick(c)"
-          >{{ c.label }}</button>
+          ><bdi>{{ c.label }}</bdi></button>
         </div>
       </span>
       <button
@@ -484,7 +484,7 @@ function cancelEdit() {
         @dragover="onCrumbDragOver"
         @drop="onCrumbDrop($event, c)"
       >
-        <span>{{ c.label }}</span>
+        <span><bdi>{{ c.label }}</bdi></span>
         <span v-if="i < tailCrumbs.length - 1" class="fe-breadcrumb__sep" aria-hidden="true">›</span>
       </button>
       <!-- gorunum:v2-topbar — "Subfolders": the chevron the reference shell
@@ -513,7 +513,7 @@ function cancelEdit() {
             class="fe-breadcrumb__menu-item"
             role="menuitem"
             @click="onOverflowPick(c)"
-          >{{ c.label }}</button>
+          ><bdi>{{ c.label }}</bdi></button>
           <p v-if="!subfolders.length" class="fe-breadcrumb__menu-empty">
             {{ t('breadcrumb.subfolders.empty') }}
           </p>

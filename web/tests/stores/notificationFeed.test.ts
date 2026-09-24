@@ -100,8 +100,12 @@ beforeEach(() => {
   countCalls.mockClear();
   toasts.length = 0;
   rows = [row(2, 'two.txt'), row(1, 'one.txt')];
-  const ctor = function (this: Record<string, unknown>, title: string) {
-    toasts.push(title);
+  // ⚠ The BODY, not the title. Since the branding fix the title is the
+  // instance's name (so the toast says who is notifying instead of printing
+  // the bare origin) and the event's sentence is the body — see
+  // `lib/browserNotify.brandedNotification`.
+  const ctor = function (this: Record<string, unknown>, title: string, options?: NotificationOptions) {
+    toasts.push(String(options?.body ?? title));
     this.close = () => {};
   } as unknown as { permission: string };
   ctor.permission = 'granted';
@@ -143,13 +147,13 @@ describe('the one notification feed', () => {
     expect(notif.unreadCount).toBe(3);
     expect(notif.feed.map((n) => n.id)).toEqual([3, 2, 1]);
     expect(listCalls).toHaveBeenCalledTimes(1);
-    expect(toasts).toEqual(['New file: arrived.txt']);
+    expect(toasts).toEqual(['New file: arrived.txt — /arrived.txt']);
 
     // The next quiet tick is quiet again.
     listCalls.mockClear();
     await tick();
     expect(listCalls).not.toHaveBeenCalled();
-    expect(toasts).toEqual(['New file: arrived.txt']);
+    expect(toasts).toEqual(['New file: arrived.txt — /arrived.txt']);
   });
 
   it('reading a row here does not make the next tick refetch or announce', async () => {

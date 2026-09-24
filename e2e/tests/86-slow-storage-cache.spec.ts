@@ -8,8 +8,10 @@
  *
  * The sequence under test is the product promise, in order:
  *
- *   1. the first download is answered 202 with a percentage — filex says it is
- *      preparing rather than dribbling at the backend's speed;
+ *   1. the first download of a client that opted in (`X-Filex-Accept-Prepare`)
+ *      is answered 202 with a percentage — filex says it is preparing rather
+ *      than dribbling at the backend's speed — while every other caller is
+ *      served the file;
  *   2. a poll reports progress and then readiness;
  *   3. the download that follows returns the file, byte for byte (digest), and
  *      a Range request returns exactly its window.
@@ -92,6 +94,13 @@ function downloadURL(name: string, extra = ''): string {
 }
 
 const asJSON = { Accept: 'application/json' };
+/**
+ * ⚠⚠ A `202 {"state":"preparing"}` is only ever sent to a client that ASKED
+ * for it. Every other caller — including every filex client already installed
+ * — gets the file, because taking any 2xx for the bytes is what wrote the JSON
+ * to disk under the file's own name on a real deployment (#35).
+ */
+const asPreparingClient = { ...asJSON, 'X-Filex-Accept-Prepare': '1' };
 
 test.describe('slow storage: a prepared copy for big files', () => {
   test.beforeAll(async ({ request }) => {
@@ -122,8 +131,14 @@ test.describe('slow storage: a prepared copy for big files', () => {
     const name = 'prepared.bin';
     await upload(request, name, data);
 
-    // 1 — the first download is announced, not served.
-    const first = await request.get(downloadURL(name), { headers: asJSON });
+    // 0 — a client that did not opt in is never announced at: it gets the
+    // file, whatever the storage costs to read.
+    const plain = await request.get(downloadURL(name), { headers: asJSON });
+    expect(plain.status(), 'a client that did not opt in must get the bytes').toBe(200);
+    expect(sha256(await plain.body())).toBe(sha256(data));
+
+    // 1 — the first download OF A CLIENT THAT ASKED is announced, not served.
+    const first = await request.get(downloadURL(name), { headers: asPreparingClient });
     expect(first.status(), await first.text()).toBe(202);
     const announced = await first.json();
     expect(announced.state).toBe('preparing');
@@ -139,7 +154,7 @@ test.describe('slow storage: a prepared copy for big files', () => {
     // so the wait page's fetch().json() cannot choke on a file.
     let ready = false;
     for (let i = 0; i < 200 && !ready; i++) {
-      const poll = await request.get(downloadURL(name, '&cache=status'), { headers: asJSON });
+      const poll = await request.get(downloadURL(name, '&cache=status'), { headers: asPreparingClient });
       expect(poll.status()).toBe(200);
       const j = await poll.json();
       expect(typeof j.percent).toBe('number');
@@ -149,7 +164,7 @@ test.describe('slow storage: a prepared copy for big files', () => {
     expect(ready, 'the prepared copy never became ready').toBeTruthy();
 
     // 3 — and now the actual file.
-    const served = await request.get(downloadURL(name), { headers: asJSON });
+    const served = await request.get(downloadURL(name), { headers: asPreparingClient });
     expect(served.status()).toBe(200);
     const body = await served.body();
     expect(body.length).toBe(TOTAL);
@@ -162,10 +177,10 @@ test.describe('slow storage: a prepared copy for big files', () => {
     await upload(request, name, data);
 
     // Warm it, then wait.
-    await request.get(downloadURL(name), { headers: asJSON });
+    await request.get(downloadURL(name), { headers: asPreparingClient });
     let ready = false;
     for (let i = 0; i < 200 && !ready; i++) {
-      const poll = await request.get(downloadURL(name, '&cache=status'), { headers: asJSON });
+      const poll = await request.get(downloadURL(name, '&cache=status'), { headers: asPreparingClient });
       ready = (await poll.json()).ready === true;
       if (!ready) await new Promise((r) => setTimeout(r, 50));
     }
@@ -174,7 +189,7 @@ test.describe('slow storage: a prepared copy for big files', () => {
     const start = 1_000_000;
     const end = 1_000_999;
     const res = await request.get(downloadURL(name), {
-      headers: { ...asJSON, Range: `bytes=${start}-${end}` },
+      headers: { ...asPreparingClient, Range: `bytes=${start}-${end}` },
     });
     expect(res.status()).toBe(206);
     expect(res.headers()['content-range']).toBe(`bytes ${start}-${end}/${TOTAL}`);

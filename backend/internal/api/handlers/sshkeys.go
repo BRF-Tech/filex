@@ -118,6 +118,13 @@ func (h *SSHKeys) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
 		return
 	}
+	// An SSH key signs in as the person with everything they can do — it
+	// carries no scopes, folder or expiry to inherit — so a narrower token
+	// cannot add one (token_ceiling.go).
+	if c := ceilingOf(r); c != nil && c.narrowerThanOwner(u) {
+		refuseWider(w, "an SSH key signs in with everything the account can do")
+		return
+	}
 	var req sshKeyReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})

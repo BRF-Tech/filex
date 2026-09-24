@@ -65,6 +65,11 @@ const KIND_ICONS: Record<Operation['kind'], string> = {
   delete: 'M5 7h14M9 7V5h6v2M8 7l1 13h6l1-13',
   convert: 'M20 8A8 8 0 0 0 6 6L4 8M4 16a8 8 0 0 0 14 2l2-2M20 3v5h-5M4 21v-5h5',
   archive: 'M4 8V5h16v3zM5 8h14v12H5zM10 12h4',
+  /* "Empty the trash" — the bin, with the lines of what is going. */
+  trash: 'M5 7h14M9 7V5h6v2M8 7l1 13h6l1-13M10.5 11v5M13.5 11v5',
+  /* An app-plugin job — the puzzle piece its menu row wears (lib/actionIcons). */
+  plugin:
+    'M9.5 4.5a2 2 0 1 1 4 0h3a1.5 1.5 0 0 1 1.5 1.5v3a2 2 0 1 1 0 4v3a1.5 1.5 0 0 1-1.5 1.5h-3a2 2 0 1 1-4 0h-3A1.5 1.5 0 0 1 5 16v-3a2 2 0 1 1 0-4V6a1.5 1.5 0 0 1 1.5-1.5z',
 };
 
 function kindLabel(o: Operation): string {
@@ -75,9 +80,30 @@ function rowTitle(o: Operation): string {
   return o.name || kindLabel(o);
 }
 
+/**
+ * The words for an app job's output mode, or `''`. ⚠ Only the two WRITING
+ * modes get a chip: `none` is the normal case for a job that reports rather
+ * than produces (a probe, a notification), and labelling it "no output"
+ * would put a badge on almost every row for no information.
+ */
+function outputModeLabel(o: Operation): string {
+  if (o.outputMode === 'sibling') return t('plugin.output.sibling');
+  if (o.outputMode === 'version') return t('plugin.output.version');
+  return '';
+}
+
+function outputModeTitle(o: Operation): string {
+  if (o.outputMode === 'sibling') return t('plugin.output.sibling_title');
+  if (o.outputMode === 'version') return t('plugin.output.version_title');
+  return '';
+}
+
 function statusText(o: Operation): string {
   if (o.status === 'running') {
     if (o.queued) return t('opc.queued');
+    // A plugin job says what it is doing in its own words (`job_progress`
+    // message); that beats a bare count.
+    if (o.message) return o.message;
     if (o.totalBytes && o.totalBytes > 0) {
       return `${formatSize(o.uploadedBytes ?? 0)} / ${formatSize(o.totalBytes)}`;
     }
@@ -86,9 +112,14 @@ function statusText(o: Operation): string {
     }
     return t('opc.status.running');
   }
-  if (o.status === 'done') return t('opc.status.done');
+  if (o.status === 'done') return o.message || t('opc.status.done');
   if (o.status === 'aborted') return t('opc.status.aborted');
   return o.error || t('opc.status.error');
+}
+
+/** A finished job that produced files can be opened from its row. */
+function canOpen(o: Operation): boolean {
+  return o.status === 'done' && o.outputs.length > 0;
 }
 
 function chipText(o: Operation): string {
@@ -159,8 +190,23 @@ onBeforeUnmount(() => {
                   <div class="fe-opc__name" :title="rowTitle(o)">{{ rowTitle(o) }}</div>
                   <div class="fe-opc__sub">
                     <span class="fe-opc__kind">{{ kindLabel(o) }}</span>
+                    <template v-if="outputModeLabel(o)">
+                      <span class="fe-opc__dot" aria-hidden="true">·</span>
+                      <span class="fe-opc__outmode" :title="outputModeTitle(o)" data-testid="opc-output-mode">
+                        {{ outputModeLabel(o) }}
+                      </span>
+                    </template>
                     <span class="fe-opc__dot" aria-hidden="true">·</span>
                     <span class="fe-opc__state">{{ statusText(o) }}</span>
+                  </div>
+                  <!-- An administrator's second line (lib/errorWords): the raw
+                       words behind the sentence above. Nobody else gets them. -->
+                  <div
+                    v-if="o.status === 'error' && o.errorDetail"
+                    class="fe-opc__sub fe-opc__sub--detail"
+                    data-testid="opc-error-detail"
+                  >
+                    {{ o.errorDetail }}
                   </div>
                   <div
                     v-if="o.status === 'running' && o.percent !== null"
@@ -185,6 +231,13 @@ onBeforeUnmount(() => {
                     class="fe-opc__act"
                     @click="center.cancel(o.key)"
                   >{{ t('opc.cancel') }}</button>
+                  <button
+                    v-if="canOpen(o)"
+                    type="button"
+                    class="fe-opc__act"
+                    data-testid="opc-open"
+                    @click="center.open(o.key)"
+                  >{{ t('opc.open') }}</button>
                   <button
                     v-if="o.status === 'error' && o.retryable"
                     type="button"
@@ -232,10 +285,33 @@ onBeforeUnmount(() => {
                 </svg>
                 <div class="fe-opc__mid">
                   <div class="fe-opc__name" :title="rowTitle(o)">{{ rowTitle(o) }}</div>
+                  <!-- ⚠ The history row keeps the chip: in `version` mode
+                       "Open" lands on the file the job started from, and
+                       without these words that reads as "it did nothing". -->
+                  <div v-if="outputModeLabel(o)" class="fe-opc__sub">
+                    <span class="fe-opc__outmode" :title="outputModeTitle(o)" data-testid="opc-output-mode">
+                      {{ outputModeLabel(o) }}
+                    </span>
+                  </div>
                   <div v-if="o.status === 'error' && o.error" class="fe-opc__sub fe-opc__sub--err">
                     {{ o.error }}
                   </div>
+                  <!-- An administrator's second line: the raw words behind the
+                       sentence (lib/errorWords). Nobody else is given them. -->
+                  <div
+                    v-if="o.status === 'error' && o.errorDetail"
+                    class="fe-opc__sub fe-opc__sub--detail"
+                    data-testid="opc-error-detail"
+                  >
+                    {{ o.errorDetail }}
+                  </div>
                 </div>
+                <button
+                  v-if="canOpen(o)"
+                  type="button"
+                  class="fe-opc__act"
+                  @click="center.open(o.key)"
+                >{{ t('opc.open') }}</button>
                 <span class="fe-opc__chip" :class="`is-${o.status}`">{{ chipText(o) }}</span>
               </li>
             </ul>

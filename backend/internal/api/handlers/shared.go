@@ -23,6 +23,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
@@ -122,6 +123,14 @@ func (h *Shared) SharedWithMe(w http.ResponseWriter, r *http.Request) {
 				continue // (3) whole-storage grant — reported via `storages`
 			}
 			if confined && !root.Within(st.Name, rel) {
+				continue
+			}
+			// A grant naming a path inside filex's own directories is not an
+			// item anybody can have been shared. ⚠ It has to be dropped HERE,
+			// not left to the projector: project() builds a synthetic row from
+			// the grant when the node does not project, so a filtered node
+			// would come back as a bare `.filex-open` row anyway.
+			if syspath.Hidden(rel) {
 				continue
 			}
 			entry := h.project(r.Context(), st, g, rel)

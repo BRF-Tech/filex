@@ -56,6 +56,8 @@ type Client struct {
 	room string // current room key ("" = not subscribed)
 	path string // display path the client subscribed to ("<adapter>://<dir>")
 	file string // currently focused file name ("" = none)
+	// watches are this connection's recursive subscriptions (watch.go).
+	watches []*watch
 }
 
 // Identity is the presence identity this client is de-duplicated and

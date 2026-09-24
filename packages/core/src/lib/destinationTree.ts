@@ -157,14 +157,19 @@ export function blockedReason(
 
 /** One row in the picker's list. */
 export interface DestinationRow {
-  /** Wire path of the folder. */
+  /** Wire path of the folder (or, in a file pick, the file). */
   path: string;
-  /** What to show — the folder's own name. */
+  /** What to show — the entry's own name. */
   label: string;
   /** May the caller write into it? Drives the disabled Choose button. */
   writable: boolean;
   /** Set when this row is one of the folders being moved, or inside one. */
   blocked: 'self' | 'descendant' | null;
+  /**
+   * Folders are walked into; a file (offered only when the picker is asked
+   * for one — an app plugin's `file-chooser`) is the answer itself.
+   */
+  kind: 'dir' | 'file';
 }
 
 /**
@@ -184,15 +189,25 @@ export interface DestinationRow {
 export function destinationRows(
   files: FileNode[] | undefined,
   moving?: string[],
+  opts: { files?: boolean } = {},
 ): DestinationRow[] {
   const out: DestinationRow[] = [];
   for (const f of files ?? []) {
-    if (f.type !== 'dir') continue;
+    if (f.type !== 'dir') {
+      // A file row is a choice, not a place: it needs no write check (the
+      // chooser READS it) and cannot be "inside" a moving folder in any way
+      // that matters, so it carries neither.
+      if (opts.files && f.type === 'file') {
+        out.push({ path: f.path, label: f.basename, writable: true, blocked: null, kind: 'file' });
+      }
+      continue;
+    }
     out.push({
       path: f.path,
       label: f.basename,
       writable: permAllowsWrite(f.perm as string | undefined),
       blocked: blockedReason(f.path, moving),
+      kind: 'dir',
     });
   }
   return out;
@@ -211,6 +226,7 @@ export function driveRows(storages: string[] | undefined, moving?: string[]): De
       // order — the alternative greys out every drive until each is opened.
       writable: true,
       blocked: blockedReason(path, moving),
+      kind: 'dir',
     };
   });
 }

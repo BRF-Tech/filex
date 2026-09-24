@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "name": "lang-es-e2e",
+  "version": "1.0.0",
+  "label": { "en": "Spanish (e2e)", "tr": "İspanyolca (e2e)" },
+  "description": { "en": "A handful of Spanish strings the e2e suite reads back.", "tr": "E2E paketinin geri okuduğu birkaç İspanyolca metin." },
+  "languages": ["en", "tr"],
+  "permissions": [],
+  "ui_locales": {
+    "es": {
+      "nav.dashboard": "Panel principal",
+      "nav.plugins": "Complementos",
+      "appPlugins.title": "Aplicaciones",
+      "profile.locale": "Idioma",
+      "col.name": "Nombre",
+      "col.size": "Tamaño",
+      "sidenav.home": "Inicio",
+      "ctx.download": "Descargar"
+    },
+    "ar": {
+      "ctx.download": "تحميل"
+    }
+  }
+}

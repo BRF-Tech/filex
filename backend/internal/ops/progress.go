@@ -67,7 +67,7 @@ func measureSources(ctx context.Context, drv storage.Driver, srcs []string) (int
 			total += stat.Size
 			continue
 		}
-		n, ok := measureDir(ctx, drv, src, &budget)
+		n, ok := measureDir(ctx, drv, src, &budget, storage.NewCycleGuard(), 0)
 		if !ok {
 			return 0, false
 		}
@@ -76,7 +76,11 @@ func measureSources(ctx context.Context, drv storage.Driver, srcs []string) (int
 	return total, true
 }
 
-func measureDir(ctx context.Context, drv storage.Driver, dir string, budget *int) (int64, bool) {
+// ⚠ The guard is not belt-and-braces here the way the budget is. The budget
+// bounds a cyclic walk at 200 000 listings and then reports ok=false, so the
+// operator loses the progress bar and the transfer runs blind; the guard stops
+// the loop at the link instead, and the total stays real.
+func measureDir(ctx context.Context, drv storage.Driver, dir string, budget *int, guard *storage.CycleGuard, depth int) (int64, bool) {
 	objs, err := drv.List(ctx, dir)
 	if err != nil {
 		return 0, false
@@ -90,11 +94,14 @@ func measureDir(ctx context.Context, drv storage.Driver, dir string, budget *int
 		if *budget < 0 {
 			return 0, false
 		}
-		if skipNames[o.Name] {
+		if skipName(o.Name) {
 			continue
 		}
 		if o.Kind == storage.KindDirectory {
-			n, ok := measureDir(ctx, drv, path.Join(dir, o.Name), budget)
+			if !guard.Enter(o, depth+1) {
+				continue
+			}
+			n, ok := measureDir(ctx, drv, path.Join(dir, o.Name), budget, guard, depth+1)
 			if !ok {
 				return 0, false
 			}

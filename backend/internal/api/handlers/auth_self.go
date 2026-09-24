@@ -88,27 +88,59 @@ func (h *AuthSelf) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	if req.Email != nil && *req.Email != "" {
-		_ = h.Store.UpdateUserEmail(r.Context(), u.ID, strings.ToLower(strings.TrimSpace(*req.Email)))
-	}
-	if req.Username != nil {
-		name := identity.Normalize(*req.Username)
-		if err := identity.Validate(name); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
+	// ⚠⚠ Everything is CHECKED before anything is written. The e-mail used to
+	// be written first and its error thrown away (`_ = UpdateUserEmail`):
+	// "bu-bir-eposta-degil" was saved and answered "Profil kaydedildi" (and
+	// e-mail login then failed with 401), another account's address answered
+	// 200 and changed nothing, and a username refused afterwards left the
+	// e-mail half-saved. account_rules.go says why, and in which words.
+	var email, name string
+	emailChanges, nameChanges := false, false
+	if req.Email != nil {
+		email = strings.ToLower(strings.TrimSpace(*req.Email))
+		// An account that has no address (some SSO ones) may keep having
+		// none; one that has an address cannot be emptied from here.
+		if email != "" || u.Email != "" {
+			if p := emailProblem(r.Context(), h.Store, email, u.ID); p != nil {
+				p.write(w, r)
+				return
+			}
+			emailChanges = email != u.Email
 		}
+	}
+	// ⚠ Keeping the name you already hold is not claiming it. The first
+	// administrator holds the RESERVED "admin" (identity.ClaimBootstrap), and
+	// the settings form sends the username with every save — checking an
+	// unchanged name refused that account's every profile save.
+	if req.Username != nil && identity.Normalize(*req.Username) != u.Username {
+		name = identity.Normalize(*req.Username)
 		// Check before writing so the common case gets a clear 409 instead of
 		// a driver-specific unique-constraint string. The index is still the
 		// real guard: a racing claim fails the UPDATE below and is reported.
-		if other, err := h.Store.GetUserByUsername(r.Context(), name); err == nil && other != nil && other.ID != u.ID {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "that username is taken"})
+		if p := usernameProblem(r.Context(), h.Store, name, u.ID); p != nil {
+			p.write(w, r)
 			return
 		}
-		if name != u.Username {
-			if err := h.Store.SetUserUsername(r.Context(), u.ID, name); err != nil {
-				writeJSON(w, http.StatusConflict, map[string]string{"error": "that username is taken"})
+		nameChanges = true
+	}
+	if emailChanges {
+		if err := h.Store.UpdateUserEmail(r.Context(), u.ID, email); err != nil {
+			if isUniqueViolation(err) {
+				emailTaken(email).write(w, r)
 				return
 			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if nameChanges {
+		if err := h.Store.SetUserUsername(r.Context(), u.ID, name); err != nil {
+			if isUniqueViolation(err) {
+				usernameTaken(name).write(w, r)
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
 		}
 	}
 	if req.DisplayName != nil {

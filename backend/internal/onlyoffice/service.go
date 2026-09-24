@@ -39,10 +39,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -100,11 +103,24 @@ func (s *Service) AttachSync(sy *protocolsync.Syncer) { s.Sync = sy }
 // (there is none to carry) but keeps the other three side effects, because a
 // missing wire must not be the difference between a document being scanned and
 // not being scanned.
+//
+// ⚠ It always carries a way back to the backend. The callback stores the etag
+// of the saved document (read with Stat) BEFORE it announces the save, and the
+// gate records what landed on an overwrite; a gate that could not ask would
+// record an empty etag over the correct one it was handed. So a syncer
+// attached without a Resolver is given this service's own, on a copy — the
+// attached one is left as it was.
 func (s *Service) syncer() *protocolsync.Syncer {
-	if s.Sync != nil {
-		return s.Sync
+	sy := s.Sync
+	if sy == nil {
+		sy = protocolsync.New(s.Store, nil, nil, writehook.OriginOnlyOffice)
 	}
-	return protocolsync.New(s.Store, nil, nil, writehook.OriginOnlyOffice)
+	if sy.Resolver == nil && s.StorageResolver != nil {
+		c := *sy
+		c.Resolver = s.StorageResolver
+		sy = &c
+	}
+	return sy
 }
 
 // settings resolves the configuration in force RIGHT NOW.
@@ -362,6 +378,18 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 		if _, err := verifyHS256(tok, secret); err != nil {
 			return nil, fmt.Errorf("token: %w", err)
 		}
+	} else if secret != "" {
+		// ⚠⚠ With a secret configured, an UNSIGNED callback is refused. It
+		// used to be accepted — the check above ran only when a token was
+		// there — and this route is public: anybody who could reach it could
+		// POST {"status":2,"url":<their file>} with any node id and have filex
+		// overwrite that file with bytes of their choosing, the one thing the
+		// JWT exists to prevent (found 2026-09-21 while adding the reserved-
+		// path guard to the handler in front of this). A document server with
+		// JWT enabled always signs its callbacks (body `token`, or the
+		// Authorization header); one without JWT cannot open filex's signed
+		// config in the first place, so no working setup sends these.
+		return nil, errors.New("token: the callback is not signed")
 	}
 
 	// Status 1 (being edited) and 4 (closed no change) are no-ops.
@@ -375,6 +403,29 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 	node, err := s.Store.GetNode(r.Context(), nodeID)
 	if err != nil {
 		return map[string]any{"error": 1, "message": "node not found"}, nil
+	}
+	// writegate, before a byte is fetched: a save is a write like any other.
+	//
+	// ⚠⚠ A document opened before an app froze it (the signing app locks it
+	// while signatures are collected) and saved after used to overwrite it —
+	// measured {"error":0}, and the request died later as "the document
+	// changed". The desktop's open-with working copy is the one reserved path
+	// saved here (syspath.PutWorkCopy); anything else among filex's own (moved
+	// to the trash mid-edit, say) is not written either.
+	//
+	// The message is a constant plus the app's name, never the path: see the
+	// guard below for why this route does not echo paths.
+	if gerr := writegate.Check(acl.New(s.Store).Locks(r.Context(), node.StorageID), 0,
+		writegate.Writes(node.Path).As(syspath.PutWorkCopy)); gerr != nil {
+		slog.Warn("onlyoffice callback refused",
+			slog.Int64("storage", node.StorageID),
+			slog.String("path", node.Path),
+			slog.String("why", gerr.Error()))
+		var le *writegate.LockedError
+		if errors.As(gerr, &le) {
+			return map[string]any{"error": 1, "message": "locked by app " + le.Lock.PluginName}, nil
+		}
+		return map[string]any{"error": 1, "message": syspath.ErrReserved.Error()}, nil
 	}
 	drv, err := s.StorageResolver(node.StorageID)
 	if err != nil {

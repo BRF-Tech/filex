@@ -26,6 +26,7 @@ package dav
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -46,8 +47,10 @@ import (
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -149,7 +152,7 @@ func NewHandler(cfg Config) *Handler {
 		cfg:   cfg,
 		locks: locks,
 		auth:  pa,
-		sync:  protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginDAV),
+		sync:  protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginDAV).WithResolver(cfg.Resolver),
 	}
 }
 
@@ -297,7 +300,7 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 	if err != nil || st == nil || !st.Enabled || !scopeOf(ctx).CanAccessStorage(st.ID) {
 		return http.StatusNotFound, "storage not found"
 	}
-	if status, msg := h.gateWrite(ctx, p, st, rel, r.Method); status != 0 {
+	if status, msg := h.gateWrite(ctx, p, st, rel, r.Method, false); status != 0 {
 		return status, msg
 	}
 
@@ -364,7 +367,7 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 				return http.StatusConflict, "destination storage not found"
 			}
 		}
-		if status, msg := h.gateWrite(ctx, p, dst, drel, r.Method); status != 0 {
+		if status, msg := h.gateWrite(ctx, p, dst, drel, r.Method, true); status != 0 {
 			return status, msg
 		}
 	}
@@ -374,7 +377,7 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 // gateWrite enforces the write-side policy on one (storage, rel) target:
 // read-only flag → 403, missing driver capability → 403, ACL level below
 // editor → 403.
-func (h *Handler) gateWrite(ctx context.Context, p *principal, st *model.Storage, rel, method string) (int, string) {
+func (h *Handler) gateWrite(ctx context.Context, p *principal, st *model.Storage, rel, method string, dest bool) (int, string) {
 	if st.ReadOnly {
 		return http.StatusForbidden, "storage is read-only"
 	}
@@ -408,6 +411,27 @@ func (h *Handler) gateWrite(ctx context.Context, p *principal, st *model.Storage
 	set, err := h.cfg.ACL.LoadSet(ctx, p.User, st)
 	if err != nil {
 		return http.StatusInternalServerError, "acl load failed"
+	}
+	// writegate — filex's own names and app locks, the question every write
+	// door asks — before the level check, which would read a lock's viewer cap
+	// as a plain 403. A COPY only reads its source; everything else changes
+	// the path it names (a DELETE or MOVE of a folder takes what is in it).
+	//
+	// ⚠ Measured before this line: with the signing app's freeze on
+	// imza/NDA.docx, `DELETE /dav/depo/imza` answered 204 and the document
+	// under signature went to the trash (Word or Explorer on a mapped drive
+	// does exactly that). A lock is read with the set, per request, so a
+	// freeze taken a second ago counts.
+	target := writegate.Writes(rel).As(syspath.Mounted)
+	if method == "COPY" && !dest {
+		target = writegate.Names(rel).As(syspath.Mounted)
+	}
+	if err := writegate.Check(set, 0, target); err != nil {
+		var le *writegate.LockedError
+		if errors.As(err, &le) {
+			return http.StatusLocked, "locked by app " + le.Lock.PluginName + ": " + le.Rel
+		}
+		return http.StatusForbidden, err.Error()
 	}
 	if set.Effective(rel) < acl.LevelEditor {
 		return http.StatusForbidden, "insufficient permissions"

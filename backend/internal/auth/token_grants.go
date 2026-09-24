@@ -20,8 +20,9 @@ const (
 //
 // A request authenticated by an API token is limited to what THAT TOKEN
 // grants, whatever the account behind it could do. For the account-wide
-// operator surfaces the grant is: the `admin` scope (an empty scope list grants
-// every scope, so it counts), and no `root:` confinement. A token confined to
+// operator surfaces the grant is: the `admin` scope — named in the list; an
+// empty list grants nothing (model.APIToken.HasScope) — and no `root:`
+// confinement. A token confined to
 // one folder is a folder credential; it is never an operator credential, even
 // when it also names `admin`.
 //

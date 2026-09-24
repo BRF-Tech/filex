@@ -17,8 +17,10 @@ import (
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 )
 
 // AI is the token-authenticated REST surface consumed by AI agents and the
@@ -393,11 +395,24 @@ func aiStatus(err error) int {
 	if errors.Is(err, errAINoStorage) {
 		return http.StatusServiceUnavailable
 	}
+	// writegate: an app has frozen the path (423, the message names the app),
+	// or it is one of filex's own names (403).
+	if errors.Is(err, writegate.ErrLocked) {
+		return http.StatusLocked
+	}
+	if errors.Is(err, syspath.ErrReserved) {
+		return http.StatusForbidden
+	}
 	// A transient, system-caused refusal: the snapshot guard could not
 	// preserve a file this write would have replaced. 503, not mapDriverErr's
 	// default 500 and not the 404/409 its substring match on the error text
 	// would otherwise produce.
 	if errors.Is(err, errAISnapshotRefused) {
+		return http.StatusServiceUnavailable
+	}
+	// Same shape: the backend could not say whether a move's destination is
+	// free, so the move was refused. Transient, not a conflict.
+	if errors.Is(err, errNameCheckFailed) {
 		return http.StatusServiceUnavailable
 	}
 	// Permanent refusals, not server faults: a confined token reaching outside

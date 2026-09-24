@@ -159,7 +159,7 @@ func New(cfg Config) (*Server, error) {
 
 	s := &Server{
 		cfg:      cfg,
-		syncer:   protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginSFTP),
+		syncer:   protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginSFTP).WithResolver(cfg.Resolver),
 		closed:   make(chan struct{}),
 		bans:     newBanList(),
 		sessions: newSessionStore(),

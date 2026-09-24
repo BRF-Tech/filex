@@ -1,0 +1,11 @@
+{
+  "error": "fetch_failed",
+  "message": "filex-app.json not found in BRF-Tech/yok-boyle-bir-depo: http 404 from raw.githubusercontent.com",
+  "reason": "manifest_not_found",
+  "refs": [
+    "main",
+    "master"
+  ],
+  "status": 404,
+  "where": "BRF-Tech/yok-boyle-bir-depo"
+}

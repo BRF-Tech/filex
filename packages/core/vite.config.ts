@@ -2,6 +2,10 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import dts from 'vite-plugin-dts';
 import { resolve } from 'path';
+// The signing faces stay FILES instead of base64 in style.css — see the
+// plugin's own note for why library mode forces the question, and why the
+// web-component build has to use the very same plugin.
+import { fontsAsFiles } from '../../scripts/vite-fonts-as-files.mjs';
 
 /**
  * Vite library build for @brftech/filex-core.
@@ -19,6 +23,7 @@ import { resolve } from 'path';
  */
 export default defineConfig({
   plugins: [
+    fontsAsFiles(resolve(__dirname, 'src/assets/fonts'), resolve(__dirname, 'dist')),
     vue({ customElement: false }),
     dts({
       entryRoot: 'src',

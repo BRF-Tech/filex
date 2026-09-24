@@ -86,11 +86,15 @@ plain JS, no problem.
 
 The package registers a **second** element. filex can be spoken to as **S3**,
 **SFTP**, **FTPS**, **NFSv3** and **WebDAV**, and mounted with `filex mount`;
-this is where a user manages storages, mints the credential each protocol
-takes, and reads instructions built from *that* deployment rather than a
-template with angle brackets in it. It is the same component the filex admin
-panel and the filex desktop app render — there is no second form and no second
-set of instructions anywhere.
+this is where a user mints the credential each protocol takes and reads
+instructions built from *that* deployment rather than a template with angle
+brackets in it. It is the same component the filex admin panel and the filex
+desktop app render — there is no second set of instructions anywhere.
+
+> Since **v0.43.0** this element is the "how to connect" surface only. The
+> `initial-tab` attribute and the `changed` event are gone with the Storages
+> tab: it does not create, edit or delete a storage. Storages are managed in
+> the filex admin panel.
 
 ```html
 <filex-connections></filex-connections>
@@ -98,14 +102,13 @@ set of instructions anywhere.
 <script type="module">
   import '@brftech/filex';
   const el = document.querySelector('filex-connections');
-  el.initialTab = 'connect';           // 'storages' | 'connect'
   el.setAttribute('closable', '');     // show a close button, emits `close`
   el.config = {
     apiBase: 'https://files.example.com',
     auth: { kind: 'bearer', token: '<jwt>' },
     locale: 'tr',
   };
-  el.addEventListener('changed', () => refreshMyFileList());
+  el.addEventListener('error', (e) => console.error(e.detail));
 </script>
 ```
 
@@ -126,10 +129,10 @@ Simple attributes are auto-parsed into the underlying `config` prop:
 |---|---|
 | `api-base` | `config.apiBase` |
 | `endpoint` | `config.endpoint` (legacy Vuefinder-compat) |
-| `locale` | `config.locale` (`tr` / `en`) |
+| `locale` | `config.locale` — `en`, `tr`, or any language the server has a language pack for (`pt-br`, `es`, `ar`, …). A right-to-left language lays **this element** out right to left, from its own locale rather than the host page's. |
 | `theme` | `config.theme` (`light` / `dark` / `auto`) |
 | `trash-visible` | `config.trashVisible` |
-| `sidenav` | `config.sideNav` — the navigation panel (the "+ New" menu · Home / Shared with me / Recent / Starred / Trash · the tags in use · the storages this caller can reach). Present or `="true"` is on, `="false"` off; absent keeps the default, which is on. |
+| `sidenav` | `config.sideNav` — the navigation panel (the "+ New" menu · Home / Shared with me / My shares / Recent / Starred / Trash · your tags in two groups, personal and team · an Apps section, one row per installed app's own page · the storages this caller can reach). Present or `="true"` is on, `="false"` off; absent keeps the default, which is on. |
 | `connections` | `config.connections` — the panel's "How to connect" and "API keys" entries. Default on, except under `ui-profile="simple"` where it is off. ⚠ "API keys" is additionally dropped when the caller is an **app** token — see `config.callerKind` below. |
 | `ui-profile` | `config.uiProfile` — `"standard"` (default) or `"simple"` (one pane, list/grid only, no tab strip, no split pane, "How to connect"/"API keys" off). Two values, no third: any other string resolves to `"standard"` and logs one console line naming it, so the `"drive"` profile that was **removed** after v0.40.0 no longer reduces anything — pass `"simple"` instead. ⚠⚠ It does **not** decide the look: the "+ New" menu, the one wide header search field with its ⌘K chip, the Type/People/Modified/Size filter row, the Folders/Files sections in grid (replaced by date headings while sorted by Modified), Details/Activity in the info panel and the storage line are what every embed draws now, with no string passed. |
 

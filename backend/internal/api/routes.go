@@ -23,6 +23,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/api/handlers"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	cloudpkg "github.com/brf-tech/filex/backend/internal/cloud" /* kimlik:e3 cloud */
 	"github.com/brf-tech/filex/backend/internal/config"
@@ -60,6 +61,8 @@ import (
 	"github.com/brf-tech/filex/backend/internal/update"
 	"github.com/brf-tech/filex/backend/internal/usage"
 	"github.com/brf-tech/filex/backend/internal/versioning"
+	"github.com/brf-tech/filex/backend/internal/wasmplugin"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -95,10 +98,20 @@ type Deps struct {
 	ForgetStorage func(int64)
 	// Plugins manages out-of-process storage drivers (internal/plugin). Nil
 	// when FILEX_PLUGINS_DISABLED — the admin routes then answer 503.
-	Plugins   *plugin.Manager
-	Embed     embed.FS // web/dist + admin
-	LocalAuth auth.LoginDriver
-	OIDCAuth  auth.OIDCDriver
+	Plugins *plugin.Manager
+	// AppPlugins runs in-process WebAssembly app plugins (internal/wasmplugin).
+	// Nil when FILEX_APP_PLUGINS_DISABLED or the CPU architecture has no
+	// wazero compiler — the user routes then answer 404, the admin ones 503
+	// with AppPluginsDisabledReason.
+	AppPlugins               *wasmplugin.Registry
+	AppPluginsDisabledReason string
+	Embed                    embed.FS // web/dist + admin
+	LocalAuth                auth.LoginDriver
+	OIDCAuth                 auth.OIDCDriver
+	// AuthLive is the running set of sign-in providers (internal/authsetup):
+	// the Identity providers page changes it, and LocalAuth / OIDCAuth /
+	// Directory are its proxies, so a change applies without a restart.
+	AuthLive *authsetup.Live
 	// Directory is the external password authority the FILE PROTOCOLS consult
 	// (the LDAP driver, when configured and not switched off with
 	// auth.ldap.protocol_login). Nil = local passwords only.
@@ -252,11 +265,18 @@ func BuildRouter(d *Deps) http.Handler {
 
 	r.Use(Logger)
 	r.Use(Recoverer)
+	// Per-user answers stay out of shared caches — see APINoStore. ⚠ Above
+	// CORS and the demo guard, so an answer those write themselves (a
+	// preflight, a demo refusal) carries the default as well: "every /api
+	// answer" has no exceptions but the ones a handler names.
+	r.Use(APINoStore)
+	// Exposed Retry-After: a caller that opted in to the "preparing" answer
+	// (X-Filex-Accept-Prepare) has to be able to read how long to wait.
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   d.Cfg.CORS.AllowedOrigins,
 		AllowedMethods:   d.Cfg.CORS.AllowedMethods,
 		AllowedHeaders:   d.Cfg.CORS.AllowedHeaders,
-		ExposedHeaders:   []string{"Content-Length", "Content-Disposition"},
+		ExposedHeaders:   []string{"Content-Length", "Content-Disposition", "Content-Range", "Retry-After"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -374,6 +394,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// cache the app uses. Unwired, those tiles fall back to the full-size
 	// originals — which is what made a shared photo folder crawl on open.
 	sh.AttachThumbs(d.Thumbs)
+	sh.AttachIndex(d.Index)
 	// Fallback language for the public pages when the visitor's browser asks
 	// for neither of the two we ship (see publicLocale).
 	sh.AttachLocale(d.Cfg.DefaultLocale)
@@ -399,6 +420,29 @@ func BuildRouter(d *Deps) http.Handler {
 	dh.AttachLocale(d.Cfg.DefaultLocale)
 	oh := handlers.NewOps(d.Ops, d.Store)
 	oh.AttachACL(d.ACL)
+	apH := handlers.NewAppPlugins(d.AppPlugins, d.Store, d.ACL, d.Ops, d.StorageResolver, d.Index, d.Thumbs)
+	// A plugin job runs on the queue with no browser in scope, so the origin
+	// of the link it mints comes from the DATA (the share's storage), not from
+	// the process-wide public URL — which in a multi-tenant install is the
+	// OPERATOR's hostname (internal/tenanturl).
+	if d.AppPlugins != nil {
+		d.AppPlugins.SetOrigins(func(ctx context.Context, storageID int64) string {
+			return tenants.ForStorage(ctx, storageID)
+		})
+	}
+	// The one public surface: /api/public/* (handlers/public_api.go).
+	pubAPI := handlers.NewPublicAPI(d.Store, d.Share)
+	pubAPI.AttachApps(apH)
+	pubAPI.AttachDrop(dh)
+	pubAPI.AttachLocale(d.Cfg.DefaultLocale)
+	// The SPA shell for /s/ and /d/ when a JavaScript browser asks for HTML;
+	// the Go pages below stay as the no-JS answer. See handlers.PublicShell.
+	publicShell := publicShellHandler(d.Embed)
+	sh.AttachShell(publicShell)
+	dh.AttachShell(publicShell)
+	// …and the no-JS body of an app link: the copies the app exposed, as
+	// plain download links (handlers/share_app_page.go).
+	sh.AttachApps(apH)
 	if d.Ops != nil {
 		// The async ops worker must mirror its filesystem moves/deletes/copies
 		// into the DB node index (listings read the DB). The manager handler
@@ -409,6 +453,13 @@ func BuildRouter(d *Deps) http.Handler {
 		// in the worker, but the node/index/thumb/writehook side of a write
 		// lives in the handler layer.
 		d.Ops.SetUploadCommitter(suh)
+		// …and the app-lock table, so a queued move or delete of a document
+		// an app has frozen is refused at submit time — by the queue itself,
+		// whichever door queued it (writegate, ops.Targets).
+		aclR := d.ACL
+		d.Ops.SetLocks(func(ctx context.Context, storageID int64) writegate.Locks {
+			return aclR.Locks(ctx, storageID)
+		})
 	}
 	ooh := handlers.NewOnlyOffice(d.OnlyOffice, d.Store, d.StorageResolver)
 	ooh.AttachACL(d.ACL)
@@ -419,13 +470,19 @@ func BuildRouter(d *Deps) http.Handler {
 	// its pre-edit text in content search and is the one write ClamAV never
 	// sees (docs/ONLYOFFICE.md, "What a save does").
 	if d.OnlyOffice != nil {
-		d.OnlyOffice.AttachSync(protocolsync.New(d.Store, d.Index, d.Thumbs, writehook.OriginOnlyOffice))
+		d.OnlyOffice.AttachSync(protocolsync.New(d.Store, d.Index, d.Thumbs, writehook.OriginOnlyOffice).WithResolver(d.StorageResolver))
 	}
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	th.AttachACL(d.ACL)
 	th.AttachSigner(thumbSigner)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
 	ch.E2EEscrow = d.E2EEscrow /* wiring:e2 */
+	// ⚠ Only a non-nil mailer: a nil *mailer.Service stored in the interface
+	// would make the field say "not ready" on a build that never had mail
+	// wired, which is a different fact from "the operator has not set it up".
+	if d.Mailer != nil {
+		ch.Mail = d.Mailer
+	}
 	// The address the connection guides print — see Capabilities.Get.
 	ch.Tenants, ch.PublicURLSet = tenants, d.Cfg.PublicURLSet
 	stg := handlers.NewStorages(d.Store, d.Worker)
@@ -438,13 +495,14 @@ func BuildRouter(d *Deps) http.Handler {
 	seth := handlers.NewSettings(d.Store)
 	seth.AttachMailer(d.Mailer)
 	authh := handlers.NewAuth(d.Store, d.LocalAuth, d.OIDCAuth, d.Cfg.PublicURL, d.Cfg.MultiTenant, d.Cfg.CookieDomain)
+	authh.OIDCLocalLogout = d.Cfg.Auth.OIDC.LocalLogout()
 	provH := handlers.NewProviders(d.Store, d.Cfg.MultiTenant)
 	sxh := handlers.NewSearch(d.Index, d.Store)
 	sxh.AttachACL(d.ACL)
 
 	// New self-service + admin handlers.
 	authSelf := handlers.NewAuthSelf(d.Store)
-	dashH := handlers.NewDashboard(d.Store, d.Caps, d.Worker)
+	dashH := handlers.NewDashboard(d.Store, d.Caps, d.Queue)
 	dashH.DemoMode = d.Cfg.Demo.Mode
 	auditH := handlers.NewAudit(d.Store)
 	// A demo's audit page is a public page. Hide the addresses of the people
@@ -453,6 +511,13 @@ func BuildRouter(d *Deps) http.Handler {
 	syncAdmH := handlers.NewSyncAdmin(d.Store)
 	sharesAdmH := handlers.NewSharesAdmin(d.Store)
 	sharesAdmH.AttachTenants(tenants)
+	sharesAdmH.AttachApps(d.AppPlugins)
+	// "Paylaştıklarım" / "My shares" — the USER-scoped half of the same
+	// surface, plus the one audited door to a link's PIN. Not an admin route:
+	// a plain account could not see its own links at all before this.
+	sharesMineH := handlers.NewSharesMine(d.Store, d.Share)
+	sharesMineH.AttachTenants(tenants)
+	sharesMineH.AttachApps(d.AppPlugins)
 	// Storage usage + cost (issue #20). The report bucket is an ordinary
 	// storage, looked up by name, so the credentials and the encryption are
 	// the ones the operator already configured rather than a second copy.
@@ -473,7 +538,7 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.OnlyOffice != nil {
 		externalH.ReversePath = d.OnlyOffice.VerifyReversePath
 	}
-	authProvH := handlers.NewAuthProviders(d.Store)
+	authProvH := handlers.NewAuthProviders(d.Store, d.AuthLive)
 	authProvH.DemoMode = d.Cfg.Demo.Mode
 	storagesAdmH := handlers.NewStoragesAdmin(d.Store)
 	// Test probes a plugin driver properly (handlers/storages_admin.go).
@@ -481,15 +546,23 @@ func BuildRouter(d *Deps) http.Handler {
 	usersAdmH := handlers.NewUsersAdmin(d.Store)
 	searchAdmH := handlers.NewSearchAdmin(d.Index, d.Store)
 	queueH := handlers.NewQueue(d.Queue)
-	notifH := handlers.NewNotifications(d.Notify)
+	queueH.AttachStore(d.Store)
+	notifH := handlers.NewNotifications(d.Notify, d.Store, d.ACL)
 	replicaH := handlers.NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader)
 	trashH := handlers.NewTrash(d.Trash, d.Store)
 	trashH.AttachSearchIndex(d.Index)
 	trashH.AttachACL(d.ACL)
+	// "Empty the trash now" is an ops job (ops/trash_empty.go): the queue runs
+	// the trash service's purge.
+	if d.Ops != nil && d.Trash != nil {
+		d.Ops.SetTrashEmptier(d.Trash)
+		trashH.AttachOps(d.Ops)
+	}
 	metaH := handlers.NewMeta(d.Store)
 	// Starred / recent / tag rows carry the caller's `perm` like a folder
 	// listing does — the explorer's context menu is the same in every view.
 	metaH.AttachACL(d.ACL)
+	metaH.AttachThumbSigner(thumbSigner)
 	sharedH := handlers.NewShared(d.Store)
 	sharedH.AttachThumbSigner(thumbSigner)
 	quotaH := handlers.NewQuota(d.Quota, d.Store)
@@ -557,6 +630,37 @@ func BuildRouter(d *Deps) http.Handler {
 
 	// ────── public viewer ──────
 	r.Get("/api/files/share/{token}", sh.HandleMetadata)
+
+	/* ────── the one public surface (v3) ──────
+	   A download share, a file request and an app plugin's page are all
+	   answered as JSON under /api/public/*, so the SPA renders the three with
+	   one shell, one PIN gate and one expiry story. See
+	   handlers/public_api.go. No session, no account.
+
+	   ⚠ /api/p/* and /p/* are RETIRED. An app page is a share now, so its
+	   link is /s/<token>; the old prefix answers a 301 so a link already in
+	   somebody's inbox lands somewhere that can explain itself. */
+	r.Get("/api/public/branding", pubAPI.Branding)
+	// One added language's strings, fetched when somebody picks it (the
+	// branding answer only LISTS the languages apps add).
+	r.Get("/api/public/ui-locales/{code}", pubAPI.UILocale)
+	r.Route("/api/public/s/{token}", func(r chi.Router) {
+		r.Get("/", pubAPI.Share)
+		r.Post("/pin", pubAPI.PIN)
+		r.Post("/event", pubAPI.Event)
+		r.Get("/file/{ref}", pubAPI.File)
+		r.Get("/entries", pubAPI.Entries)
+	})
+	r.Route("/api/public/d/{token}", func(r chi.Router) {
+		r.Get("/", pubAPI.DropState)
+		r.Post("/pin", pubAPI.PIN)
+		r.Post("/upload", pubAPI.DropUpload)
+	})
+	r.Handle("/p/{token}", handlers.RetiredPagePrefix())
+	r.Handle("/p/{token}/*", handlers.RetiredPagePrefix())
+	r.Handle("/api/p/{token}", handlers.RetiredPageAPI())
+	r.Handle("/api/p/{token}/*", handlers.RetiredPageAPI())
+
 	r.Get("/s/{token}", sh.HandleDownload)
 	r.Post("/s/{token}", sh.HandleDownload)      // PIN form posts to same URL
 	r.Get("/s/{token}/f/*", sh.HandleBrowseFile) /* wiring:d2 — folder-share sub-file (gallery/list page) */
@@ -657,8 +761,27 @@ func BuildRouter(d *Deps) http.Handler {
 	sh.AttachBranding(brandingSrc)
 	dh.AttachBranding(brandingSrc)
 	seth.AttachBranding(brandingSrc)
+	pubAPI.AttachBranding(brandingSrc)
 	r.Get("/api/branding", handlers.NewBranding(brandingSrc).Get)
 	/* ────── /wiring:e1 ────── */
+
+	/* ────── tema:v1 — operator-defined themes ──────
+	   One shared source, the same pattern branding uses: the admin handler
+	   invalidates it on every write, the public pages render through it, and
+	   GET /api/appearance is public because the login page and every share
+	   page need the palette before a session exists.
+
+	   ⚠ The source is attached to brandingSrc as well, because the
+	   server-rendered public pages (share / PIN / drop / signing) build their
+	   chrome through publicChromeFor and that is where the instance theme has
+	   to reach them. Without this line those pages keep the stock palette and
+	   the feature is silently half-present — the admin panel themed, the page
+	   a customer actually sees not. */
+	appearanceSrc := handlers.NewAppearanceSource(d.Store)
+	brandingSrc.AttachAppearance(appearanceSrc)
+	seth.AttachAppearance(appearanceSrc)
+	r.Get("/api/appearance", handlers.NewAppearance(appearanceSrc).Get)
+	/* ────── /tema:v1 ────── */
 
 	/* kimlik:e3 cloud */
 	// Cloud self-signup PREPARATION (v0.7 "Kimlik", docs/CLOUD.md). Master-
@@ -685,7 +808,14 @@ func BuildRouter(d *Deps) http.Handler {
 	sizes := syncpkg.NewSizeRefresher(func(ctx context.Context, storageID int64) error {
 		return syncpkg.RecomputeFolderSizes(ctx, d.Store, storageID)
 	}, hub, 2*time.Second, 15*time.Second)
-	emitter := sizes.Wrap(hub)
+	// H10: the change log sits in front of the chain, so it records exactly
+	// what the hub and the size refresher are told, and a sync client can ask
+	// "anything new under my folder?" (action=changes) instead of re-listing
+	// its whole tree every round. The refresher's own listing refreshes go
+	// straight to the hub and are, correctly, not changes.
+	changes := realtime.NewChangeLog(realtime.DefaultChangeLogCapacity)
+	mh.AttachChangeLog(changes)
+	emitter := changes.Wrap(sizes.Wrap(hub))
 	handlers.SetChangeEmitter(emitter)
 	// The protocol servers (WebDAV, S3, SFTP, FTPS, NFS) reach the catalogue
 	// through internal/protocolsync rather than through these handlers, so the
@@ -757,6 +887,11 @@ func BuildRouter(d *Deps) http.Handler {
 		// re-mounting an already-mounted path (the public /api/auth Route
 		// above owns it). We declare each leaf path inline instead.
 		r.Get("/api/auth/me", authSelf.Me)
+		// tema:v1 — the operator stylesheet, for signed-in browsers only.
+		// ⚠ Deliberately NOT on the public /api/branding payload any more:
+		// that is the fetch the LOGIN PAGE makes, and a sheet delivered there
+		// is a sheet that can hide the sign-in form. See custom_css.go.
+		r.Get("/api/me/custom-css", handlers.NewCustomCSS(d.Store).Get)
 		r.Patch("/api/auth/profile", authSelf.UpdateProfile)
 		r.Post("/api/auth/password", authSelf.ChangePassword)
 		r.Post("/api/auth/totp/enroll", authSelf.TotpEnroll)
@@ -823,10 +958,55 @@ func BuildRouter(d *Deps) http.Handler {
 		// calls this AFTER the user signed in however this install does it
 		// (local, OIDC, passkey), which is the whole point — a native form in
 		// the desktop app could never reach an SSO identity.
+		//
+		// ⚠ This group lets API tokens in; the handler turns every one of them
+		// away (403 `session_required`), because it MINTS a credential and a
+		// token must not be able to mint a wider one for its owner.
 		r.Post("/api/auth/desktop/complete", desktopAuthH.Complete)
 
+		// gorunum:v3 — what this person chose about the interface itself
+		// (theme, palette, density, language), one document per SURFACE
+		// (`web` | `desktop`). In the database and not in localStorage,
+		// because a theme picked in one browser was not there in the other.
+		// See handlers/userprefs.go and migration 00047.
+		upH := handlers.NewUserPrefs(d.Store)
+		r.Route("/api/me/prefs", func(r chi.Router) {
+			r.Get("/", upH.Get)
+			r.Put("/", upH.Put)
+		})
+
+		// ────── the caller's OWN public links ──────
+		//
+		// "Paylaştıklarım" / "My shares". /api/admin/shares stays what it is
+		// (everybody's links, admin only); this is the half an ordinary person
+		// has, and it is scoped in the STORE by `created_by = me`.
+		//
+		// ⚠ `confine.Middleware`, because a listed row carries the share TOKEN:
+		// without it a root-confined token would be handed working public links
+		// to files outside its folder (the same fault Share.HandleList already
+		// fixes for the per-node listing).
+		r.Route("/api/shares", func(r chi.Router) {
+			r.Use(confine.Middleware)
+			r.Get("/", sharesMineH.List)
+			// ⚠⚠ RequirePersonalCaller: a share's PIN is a credential, and this
+			// is the group's rule ("a new credential surface joins by being
+			// registered inside it"). An APP token has no person behind it, so
+			// it cannot read its owner's PINs — what it CAN still do is list,
+			// above, which carries no secret. The owner's words were about two
+			// people, not two machines: *"paylaşımın sahibi ve admin"*.
+			r.With(handlers.RequirePersonalCaller).Get("/{id}/pin", sharesMineH.Pin)
+		})
+
 		// Per-user notifications (bell + history + read/unread).
+		//
+		// ⚠ confine.Middleware, as on /api/files and /api/shares: a notice names
+		// files, so a token confined to one folder (`root:`, narrowed by
+		// X-Filex-Root) reads — and marks read — only the notices about that
+		// folder (handlers/notifications.go → bellJudge.inRoot). Without it the
+		// same token that cannot list a folder could read its owner's bell
+		// about everything in it.
 		r.Route("/api/notifications", func(r chi.Router) {
+			r.Use(confine.Middleware)
 			r.Get("/", notifH.List)
 			r.Get("/unread-count", notifH.UnreadCount)
 			r.Post("/{id}/read", notifH.MarkRead)
@@ -866,6 +1046,17 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Get("/ops", oh.List)
 			r.Post("/ops", oh.Submit)
 			r.Get("/ops/{id}", oh.Status)
+			r.Post("/ops/{id}/cancel", oh.Cancel)
+
+			// App plugins — the file-menu actions and views installed
+			// plugins offer (handlers/app_plugins.go, docs/APP-PLUGINS.md).
+			r.Route("/plugins", func(r chi.Router) {
+				r.Get("/actions", apH.Actions)
+				r.Get("/users", apH.Users)
+				r.Post("/actions/{plugin}/{action}/run", apH.Run)
+				r.Get("/views/{plugin}/{view}", apH.View)
+				r.Post("/views/{plugin}/{view}/event", apH.ViewEvent)
+			})
 
 			// SFC's per-verb async endpoints — translate to ops.Submit.
 			r.Post("/copy", oh.SubmitCopy)
@@ -921,11 +1112,16 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Post("/permissions/invite", grantsH.Invite)
 			r.Post("/permissions/share-mail", grantsH.ShareMail)
 
-			// Per-user metadata: tags, starred flag, recently-opened.
+			// Per-user metadata: starred flag, recently-opened — and tags,
+			// which since v0.43.0 are PERSONAL (the caller's own, like a
+			// star) or TEAM (the tenant's, edit permission to change); see
+			// handlers/tags.go. This comment used to say "Per-user metadata:
+			// tags" while every tag was shared by the whole instance — the
+			// tester's finding of 2026-09-22.
 			r.Route("/manager/tags", func(r chi.Router) {
 				r.Get("/", metaH.GetTags)
 				r.Post("/", metaH.SetTags)
-				// All distinct tags across every storage (Tagged files page).
+				// Every tag the caller can see, both kinds (Tags panel, Tagged files page).
 				r.Get("/all", metaH.ListAllTags)
 			})
 			// Nodes carrying a given tag (?tag=…&limit=…).
@@ -1056,6 +1252,40 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Delete("/{id}", pluginsH.Delete)
 			})
 
+			// App plugins — in-process wasm modules the admin installs
+			// (handlers/app_plugins_admin.go, docs/APP-PLUGINS.md).
+			apAdm := handlers.NewAppPluginsAdmin(d.AppPlugins, d.AppPluginsDisabledReason)
+			apAdm.Audit = func(ctx context.Context, userID *int64, action string, storageID int64, rel, ip string) error {
+				return d.Store.InsertAuditEntry(ctx, &model.AuditEntry{
+					UserID: userID, Action: action, TargetType: "file", TargetID: rel,
+					Metadata: map[string]any{"storage_id": storageID, "path": rel}, IP: ip,
+				})
+			}
+			r.Route("/app-plugins", func(r chi.Router) {
+				r.Get("/", apAdm.List)
+				r.Post("/", apAdm.Install)
+				r.Get("/{id}", apAdm.Get)
+				r.Patch("/{id}", apAdm.Patch)
+				r.Post("/{id}/upgrade", apAdm.Upgrade)
+				r.Delete("/{id}", apAdm.Delete)
+				r.Get("/{id}/settings", apAdm.GetSettings)
+				r.Put("/{id}/settings", apAdm.PutSettings)
+				r.Get("/{id}/overrides", apAdm.GetOverrides)
+				r.Put("/{id}/overrides", apAdm.PutOverrides)
+				r.Get("/{id}/logs", apAdm.Logs)
+				r.Get("/signing/ca.pem", apAdm.SigningCA)
+				r.Get("/signing/cas", apAdm.SigningCAs)
+				r.Post("/signing/ca/import", apAdm.ImportSigningCA)
+				r.Post("/signing/ca/rotate", apAdm.RotateSigningCA)
+				r.Get("/locks", apAdm.Locks)
+				r.Delete("/locks", apAdm.Unlock)
+				// The links apps opened (?plugin=sign&active=true). An app's
+				// public page is a share, so these rows are also in
+				// /api/admin/shares with a `plugin_name` on them; this is the
+				// same rows filtered, for a panel that wants one app's table.
+				r.Get("/shares", sharesAdmH.ListAppPluginShares)
+			})
+
 			r.Route("/storages", func(r chi.Router) {
 				r.Get("/", stg.List)
 				r.Post("/", stg.Create)
@@ -1103,6 +1333,19 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Patch("/", seth.Update)
 				r.Post("/smtp-test", seth.SMTPTest)
 				r.Put("/{key}", seth.Set)
+			})
+
+			/* tema:v1 — operator-defined themes (handlers/themes.go).
+			   ⚠ Every method calls requireSupertenant ITSELF rather than
+			   sitting behind a middleware here, because this is not the only
+			   door: /api/ai/admin mounts the same handler instances for the
+			   MCP admin tools, and a route-level gate would guard one of two
+			   (the reasoning in handlers/supertenant.go). */
+			themesH := handlers.NewThemes(d.Store, appearanceSrc)
+			r.Route("/themes", func(r chi.Router) {
+				r.Get("/", themesH.List)
+				r.Put("/{key}", themesH.Put)
+				r.Delete("/{key}", themesH.Delete)
 			})
 
 			// Protection settings ("Koru" v0.4): trash retention + version
@@ -1161,6 +1404,9 @@ func BuildRouter(d *Deps) http.Handler {
 
 			r.Route("/trash", func(r chi.Router) {
 				r.Post("/empty", trashH.AdminEmpty)
+				// The progress of the empty POST started: a large trash is
+				// purged in the background and the page polls this.
+				r.Get("/empty", trashH.EmptyStatus)
 				r.Delete("/{id}", trashH.Purge)
 			})
 
@@ -1245,8 +1491,9 @@ func BuildRouter(d *Deps) http.Handler {
 	// Token-only namespace consumed by AI agents, the work.example.com
 	// FilexClient, and MCP clients. auth.APITokenMiddleware validates
 	// X-Filex-Token / Bearer and attaches the bound principal + token;
-	// RequireScope gates verbs (read/write/delete/mcp). A token with no
-	// scopes set grants everything.
+	// RequireScope gates verbs (read/write/delete/mcp). A token grants only
+	// the scopes its list names — an empty list grants nothing (v0.43.0;
+	// apitoken.ParseIssued, migration 00054).
 	convertURL := func(ctx context.Context) string { return d.External.URL(ctx, external.Convert) }
 	aiH := handlers.NewAI(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL, convertURL)
 	aiH.AttachTenants(tenants)
@@ -1265,6 +1512,7 @@ func BuildRouter(d *Deps) http.Handler {
 		Queue:           d.Queue,
 		Notify:          d.Notify,
 		Trash:           d.Trash,
+		Ops:             d.Ops,
 		Index:           d.Index,
 		ReplicaService:  d.ReplicaService,
 		ReplicaCron:     d.ReplicaCron,
@@ -1275,6 +1523,7 @@ func BuildRouter(d *Deps) http.Handler {
 		DemoMode:           d.Cfg.Demo.Mode,
 		PublicURL:          d.Cfg.PublicURL,
 		PublicURLSet:       d.Cfg.PublicURLSet,
+		AuthLive:           d.AuthLive,
 	})
 	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL, convertURL)
 	aiMCP.AttachTenants(tenants)
@@ -1303,6 +1552,8 @@ func BuildRouter(d *Deps) http.Handler {
 		r.With(auth.RequireScope("read")).Get("/info", aiH.Info)
 		r.With(auth.RequireScope("read")).Get("/download", aiH.Download)
 		r.With(auth.RequireScope("read")).Get("/search", aiH.Search)
+		// A file's tags as the token's user sees them — personal + team (v0.43).
+		r.With(auth.RequireScope("read")).Get("/tags", aiH.TagsGet)
 
 		// Write surface.
 		r.With(auth.RequireScope("write")).Post("/upload", aiH.Upload)
@@ -1311,6 +1562,8 @@ func BuildRouter(d *Deps) http.Handler {
 		r.With(auth.RequireScope("write")).Post("/upload/ticket", aiH.UploadTicket)
 		r.With(auth.RequireScope("write")).Post("/mkdir", aiH.Mkdir)
 		r.With(auth.RequireScope("write")).Post("/move", aiH.Move)
+		// Set a file's tags; every item names its kind (ai_tags.go).
+		r.With(auth.RequireScope("write")).Post("/tags", aiH.TagsSet)
 		r.With(auth.RequireScope("delete")).Post("/delete", aiH.Delete)
 
 		// Share surface — public /s/<token> links (folders zip on download).
@@ -1414,6 +1667,9 @@ func wireStatic(r chi.Router, fs embed.FS) {
 		})
 	} else {
 		spa := spaHandler{root: adminFS, urlPrefix: "/admin"}
+		// The translator's catalogue context names THIS binary's version
+		// (catalogue_version.go), not the one the web build guessed.
+		r.Get("/admin/"+catalogueContextPath, catalogueContext(adminFS.ReadFile))
 		r.Handle("/admin", http.RedirectHandler("/admin/", http.StatusMovedPermanently))
 		r.Handle("/admin/", spa)
 		r.Handle("/admin/*", spa)
@@ -1520,6 +1776,34 @@ func wireStatic(r chi.Router, fs embed.FS) {
 			w.Header().Set("Content-Type", ct)
 		}
 		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(data)
+	})
+}
+
+// publicShellHandler serves the SPA document at a public link (/s/, /d/) when
+// a JavaScript browser asks for HTML. It always answers index.html: the
+// address is a TOKEN, not a file, and vue-router reads the path.
+//
+// nil when the frontend is not bundled — a development build, or a binary
+// built without `pnpm build:web`. The Go pages below then answer every
+// visitor, which is exactly the no-JS fallback, so nothing is unreachable.
+func publicShellHandler(fs embed.FS) http.Handler {
+	adminFS, err := stripPrefix(fs, "admin")
+	if err != nil {
+		return nil
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := adminFS.ReadFile("index.html")
+		if err != nil {
+			http.Error(w, "admin SPA missing index.html", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		// ⚠ no-store, not no-cache: this document is served at a public link,
+		// and a shared or intermediate cache holding it would hand the next
+		// visitor a page that has already been through somebody's PIN gate.
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 		_, _ = w.Write(data)
 	})
 }

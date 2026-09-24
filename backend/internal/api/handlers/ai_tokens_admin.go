@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -18,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 // AITokens is the admin handler for issuing / listing / revoking API tokens
@@ -66,7 +68,9 @@ func (h *AITokens) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // createTokenBody is the POST body. user_id defaults to the calling admin;
-// scopes is a comma-separated allow-list (empty == all). expires_in_days,
+// scopes is a comma-separated allow-list and must name at least one verb —
+// an empty one is refused, never "all" (apitoken.ParseIssued); `admin` is
+// granted only when it is in the list. expires_in_days,
 // when > 0, sets an expiry. usernames is the identity allow-list the caller
 // may act under per request (first = default; empty → the label).
 type createTokenBody struct {
@@ -122,7 +126,7 @@ func (h *AITokens) Create(w http.ResponseWriter, r *http.Request) {
 
 	scopes, serr := normalizeScopes(body.Scopes)
 	if serr != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": serr.Error()})
+		writeScopeRefusal(w, r, serr)
 		return
 	}
 	usernames, uerr := normalizeUsernames(body.Usernames)
@@ -309,22 +313,28 @@ func normalizeTokenKind(raw, def string) (string, error) {
 // empties, and rejects any scope outside the canonical apitoken.ValidScopes
 // allow-list. An empty/blank input stays empty (== all scopes).
 func normalizeScopes(raw string) (string, error) {
-	if strings.TrimSpace(raw) == "" {
-		return "", nil
+	verbs, roots, err := apitoken.ParseIssued(raw)
+	if err != nil {
+		return "", err
 	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		if !apitoken.IsValidScope(p) {
-			return "", fmt.Errorf("unknown scope %q (valid: %s)", p, strings.Join(apitoken.ValidScopes, ", "))
-		}
-		out = append(out, p)
+	return apitoken.JoinScopes(verbs, roots), nil
+}
+
+// writeScopeRefusal answers a refused scope list in the reader's language:
+// every door that mints a token says it the same way.
+func writeScopeRefusal(w http.ResponseWriter, r *http.Request, err error) {
+	lang := langOf(r)
+	var unknown *apitoken.UnknownScopeError
+	switch {
+	case errors.Is(err, apitoken.ErrScopesRequired):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scopes_required",
+			"message": srvtext.Text(lang, "server.token.scopes_required", nil)})
+	case errors.As(err, &unknown):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope_unknown",
+			"message": srvtext.Text(lang, "server.token.scope_unknown", srvtext.Vars{"scope": unknown.Scope})})
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
-	return strings.Join(out, ","), nil
 }
 
 // ownsToken resolves a token to its bound user and asks whether that user is

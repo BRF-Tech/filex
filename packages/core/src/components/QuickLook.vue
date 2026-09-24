@@ -26,6 +26,7 @@ import { computed, onBeforeUnmount, watch } from 'vue';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { inlineKeyStep } from '../lib/direction';
 import { eventMatchesShortcut, shortcutHint } from '../composables/useKeyboardShortcuts';
 import PreviewModal from '../modals/PreviewModal.vue';
 
@@ -70,7 +71,9 @@ const emit = defineEmits<{
   (e: 'starred', value: boolean): void;
 }>();
 
-const { t } = useLocale(() => props.locale);
+// ⚠ RTL: `dir` on the teleported hint, and ← is "next" in a right-to-left
+// interface (the next file's chevron is on the left there).
+const { t, dir } = useLocale(() => props.locale);
 
 function inFormControl(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -114,19 +117,11 @@ function onKeydown(e: KeyboardEvent) {
   }
 
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  switch (e.key) {
-    case 'ArrowRight':
-    case 'ArrowDown':
-      e.preventDefault();
-      e.stopPropagation();
-      emit('nav', 1);
-      break;
-    case 'ArrowLeft':
-    case 'ArrowUp':
-      e.preventDefault();
-      e.stopPropagation();
-      emit('nav', -1);
-      break;
+  const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : inlineKeyStep(e.key, dir.value);
+  if (step) {
+    e.preventDefault();
+    e.stopPropagation();
+    emit('nav', step);
   }
 }
 
@@ -200,6 +195,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
       <div
         v-if="open"
         class="fe fe-ql-hint"
+        :dir="dir"
         :class="{
           'fe--theme-light': theme === 'light',
           'fe--theme-dark': theme === 'dark',

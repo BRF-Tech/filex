@@ -7,9 +7,32 @@ recipient:
 - **File requests** (`/d/{token}`) — let someone **upload** files *into* a
   folder without ever seeing its contents ("file‑drop" / "Request files").
 
-Both are created from the explorer's **Share / Permissions** dialog on any item
-(a share link needs ≥editor on the item); a file request can also be started
-for the folder you are in from the navigation panel's **+ New → Request files**.
+Both are created from the explorer's **Share** dialog on any item (a share
+link needs ≥editor on the item); a file request can also be started for the
+folder you are in from the navigation panel's **+ New → Request files**.
+
+The same dialog carries **People with access** — the per-item grants — for the
+item's **owner** only: an editor cannot read the grant list, so the section is
+not offered to them (and the details panel's **Manage permissions** is an
+owner's button). On a storage with RBAC switched off a grant changes nothing;
+an administrator then sees the section greyed with where to switch RBAC on
+(Admin → **Storages** → the storage → *Per-item access control*), and nobody
+else is offered it.
+
+An [app plugin](APP-PLUGINS.md) opens the third kind on the same machinery: the
+link it sends an outside signer is an ordinary share carrying that app's
+screen, so it appears in **Shares** with everything else and you revoke it the
+same way.
+
+**What the visitor sees is one shell**, whichever of the three they were sent:
+your instance's name, logo, colours and footer (Admin → **Branding**, and the
+default theme picked under **Appearance**), the PIN gate, the expiry, the visit
+counter, the language picker and the wording for a link that is over. A
+signature request from a renamed instance does not say "filex". Behind it the
+plain server-rendered pages are kept for a browser with no JavaScript — a share
+link is opened by strangers on whatever browser they have — and anything that
+is not a browser navigating
+(`curl -O`, wget, a backup script) still gets the **bytes**, not a page.
 
 - [Share links (download)](#share-links-download)
 - [File requests (upload / file-drop)](#file-requests-upload--file-drop)
@@ -20,18 +43,26 @@ for the folder you are in from the navigation panel's **+ New → Request files*
 
 ## Share links (download)
 
-**Create.** Explorer → **Share / Permissions**, section **Link options**, or
+**Create.** Explorer → **Share**: the **Link sharing** switch at the top makes
+the link, with the settings under **Link options** (PIN, expiry, download limit).
+⚠ **One link per item from this dialog.** With a link already on, the button
+under the options reads **Replace the link with these settings**: it revokes the
+link and makes a new one — a new address, the old one stops working — rather
+than leaving a second live link beside the first. (Until v0.43.0 it quietly
+made a second one, and the header's link was also listed again underneath.) Or
 `POST /api/files/share`:
 
 ```jsonc
 { "path": "s3://reports/q3.pdf",
-  "password": true,          // generate an 8-digit PIN (returned once)
+  "password": true,          // generate an 8-digit PIN (returned in the response)
   "expires_at": "2026-08-01T00:00:00Z",
   "max_downloads": 50 }
 ```
 
 The response includes the public URL (`https://files.example.com/s/<token>`) and,
-if requested, the one‑time PIN.
+if requested, the generated PIN. The PIN is not lost after that: the link's
+creator and an administrator can read it back — see
+[Your own links, and their PINs](#your-own-links-and-their-pins).
 
 **Open** `/s/{token}`:
 - **A file** streams as a download through filex. (An S3 storage with
@@ -41,13 +72,22 @@ if requested, the one‑time PIN.
 - **A folder** streams **every file under it as a ZIP** (internal folders like
   `.filex-trash` are skipped).
 - **PIN‑protected** links show a PIN form first; a correct PIN unlocks the
-  download. The PIN can also be passed as `?pin=` or the `X-Filex-Pin` header.
+  download for twelve hours (an HttpOnly cookie that carries no PIN and opens
+  only that one link). The PIN can also be passed as `?pin=` or the
+  `X-Filex-Pin` header.
+  ⚠ **Five wrong answers shut the gate for ten minutes.** The count lives on
+  the link itself, so it survives a restart and holds across two instances
+  behind one address, and the *correct* PIN is refused while the lock is on —
+  a lock the right answer lifts is no lock at all. A shut gate is not a dead
+  link: it opens by itself. (Until this release the lock only ever guarded an
+  app plugin's page; a PIN on a `/s/` link could be walked through at the
+  speed of HTTP.)
 
 **Options.**
 
 | Option | Meaning |
 |---|---|
-| `password` | Generate a random PIN (shown once). |
+| `password` | Generate a random 8-digit PIN, returned in the response and readable again later ([below](#your-own-links-and-their-pins)). |
 | `expires_at` | Absolute expiry (RFC3339). Capped by the server's **maximum link life** (below). |
 | `max_downloads` | Auto‑expire after N downloads. |
 
@@ -59,6 +99,12 @@ gets `now + max`; one asking for more is shortened to it. The response says so
 request the server changed — and the dialogs only offer choices the server will
 keep (a 7-day server shows *1 day / 7 days*, not *30 days* or *Never*), with the
 real expiry printed under the fresh link.
+
+Apps obey the same ceiling, and are told it: every call an app gets carries
+`share_max_ttl_days`, read from the same setting the clamp reads, so an app's
+screen can offer only what its links will keep (the e-Signature app's Time
+step says "at most 7" on a 7-day server instead of offering 14 and quietly
+getting 7).
 
 ⚠ **Links that already exist are never touched.** Lowering the ceiling changes
 what new links get, not what old ones have: a customer's link minted last month
@@ -137,9 +183,45 @@ that directory into the cache directory on first start, so exclude
 `requires_pin, expires_at, download_count, max_downloads, downloads_remaining,
 filename, size, mime, is_directory`.
 
-**Revoke.** `DELETE /api/files/share/{id}` (owner or admin) soft‑revokes the
-link (sets expiry to now, keeps the audit trail). Expired links show a styled
-404 page.
+**Revoke.** From **My shares** (your own links) or, for an administrator,
+**Shares** (everybody's): the link's **Actions** menu → **Revoke**. Underneath,
+`DELETE /api/files/share/{id}` (owner or admin; what **My shares** calls) and
+`POST /api/admin/shares/{id}/revoke` (the admin page) soft‑revoke the link:
+its expiry is set to now **and the revoke is recorded** (`shares.revoked_at`,
+migration 00053), so both **My shares** and **Shares** say *Revoked* rather
+than *Expired*. ⚠ Links revoked **before v0.43.0** carry no such record and
+still read as expired. Either way the link shows a styled 404 page — and to a
+visitor `expired`, `revoked` and a shut PIN gate are three different answers
+([BACKEND.md](BACKEND.md)).
+
+Revoking (or deleting) a link an **app** opened — a signing link, say — also
+wakes that app within seconds, and the app finds the link gone and acts on it:
+the e-Signature app closes the signature request the link belonged to, tells
+the requester whose link it was, and releases the document. Nothing is sent to
+the app; it is woken and asks (see APP-PLUGINS-API.md → `share_state`).
+
+### Your own links, and their PINs
+
+**My shares** lists the links you created, for everybody — not only for
+administrators. In the web app it sits in the explorer's navigation panel
+directly under **Shared with me** (`/drive/my-shares`), and each row's
+**Actions** menu offers **Copy link**, **Copy PIN** and **Revoke**.
+Administrators keep **Shares** for everybody's links, with the same **Copy
+PIN** entry. The listing is `GET /api/shares`.
+
+**A PIN can be read back.** A PIN is stored twice: as a bcrypt hash, which is
+still the only thing the PIN gate checks, and sealed with AES-256-GCM under
+`FILEX_SECRET_KEY`, so the link's creator — or an administrator — can copy it
+again later (`GET /api/shares/{id}/pin`). Every read writes an audit row
+(`share.pin_revealed`), the PIN goes to the clipboard and nowhere else, and an
+`app` token cannot read one: a PIN is a credential, and an app token has no
+person behind it. **Copy PIN** is not offered when there is nothing to show:
+
+- the link has no PIN;
+- the link was created before v0.43.0, or while the server had no key — only
+  the hash was kept, so make a new link if you need a PIN you can see again;
+- the server has no `FILEX_SECRET_KEY`, so there is nothing to seal a PIN
+  with. The link works exactly the same; only reading its PIN back does not.
 
 ---
 
@@ -151,9 +233,9 @@ folder** — collecting documents, photos, submissions — without an account an
 folder is resolved server‑side from the token; the uploader can never influence
 the destination.
 
-**Create.** On a **folder**, Explorer → **Share / Permissions**, section
-**Request files** — or **+ New → Request files** for the folder you are in — or
-`POST /api/files/share` with `kind: "drop"`:
+**Create.** On a **folder**, Explorer → **Share**, section **Request files** —
+or **+ New → Request files** for the folder you are in — or `POST
+/api/files/share` with `kind: "drop"`:
 
 ```jsonc
 { "path": "s3://inbox",
@@ -177,16 +259,30 @@ subfolder** named `YYYY-MM-DD_HHMMSS_<name|anon>` (so submissions never collide
 and you can see who sent what); an optional note is saved as `NOT.txt` beside
 the files. The owner is notified (in‑app + email, best‑effort).
 
+On the page a JavaScript browser gets:
+
+- the limits (size, types, how many files are left) are stated **before**
+  anything is picked, and the **name** field — when the link asks for one — sits
+  above the drop area, because dropping sends;
+- a file the link does not take (its type, its size, one file too many) is
+  **not sent**: its row says why, and the rest of the drop still goes;
+- everything one drop carries goes up in **one** request — one drop, one
+  submission folder (it used to be one request, and one folder, per file);
+- a refusal the server makes is shown in the server's own words (below).
+
 **Limits & safety** (enforced server‑side): per‑submission file count and
 per‑file size, an optional extension allowlist, an optional PIN, an expiry, a
 lifetime `max_uploads` cap, and **per‑IP rate limiting** on the anonymous upload
 endpoint. Read‑only storages reject drops.
 
 **Language.** Every public page — the PIN gate, the uploader, the error pages
-and the download-share pages — renders in ONE language per visitor, resolved
-from `?lang=` (`tr` / `en`), then `Accept-Language`, then the server's
-`default_locale`. Add `?lang=en` to a link you are sending to somebody whose
-browser is set to neither.
+and the download-share pages — renders in ONE language per visitor. In the
+shell that a JavaScript browser gets, that is the browser's own language, and
+a **picker** in the header changes it (remembered in that browser, and nowhere
+else: there is no account behind a share link). The plain server-rendered
+pages resolve `?lang=` (`tr` / `en`), then `Accept-Language`, then the
+server's `default_locale`; add `?lang=en` to a link you are sending to
+somebody whose browser is set to neither.
 
 **Options.**
 
@@ -216,10 +312,19 @@ admin settings.)
 ## Failure modes & troubleshooting
 
 - **Link shows a 404 page** — expired, past its download/upload cap, or revoked.
+- **An app's link says it is gone, although nobody revoked it** — the account
+  that created it was switched off or deleted (re-enabling the account brings
+  every one of its links back), or the app that answers it was stopped or
+  removed. A link whose creator has since lost access to the document still
+  opens, but the step that would start the app's work is refused and the
+  visitor is asked to get a new link from the person who sent it.
 - **"Request files" not offered** — you're on a file, not a folder (drop links
   are folder‑only), or you lack ≥editor on it.
 - **Drop rejected** — hit `max_files`, `max_file_size_mb`, a disallowed
-  extension, the per‑IP rate limit, or a read‑only storage. The page shows which.
+  extension, the per‑IP rate limit, or a read‑only storage. The page shows which:
+  every refusal of `POST /d/{token}` and `POST /api/public/d/{token}/upload`
+  carries the code a script branches on (`error`, e.g. `ext_not_allowed`) **and**
+  the sentence a person reads (`message`, in the visitor's language).
 - **"The file storage is unreachable right now"** — the link, the PIN and the
   files are all fine; the storage behind the folder refused the write. The
   endpoint answers **`503` `{"error":"storage_unavailable"}`** (not a 500) and

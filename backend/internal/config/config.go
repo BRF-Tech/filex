@@ -87,6 +87,22 @@ type Config struct {
 	// refuses new work rather than queueing it, which is what stops one slow
 	// plugin from becoming one slow filex.
 	PluginMaxInFlight int `yaml:"plugin_max_in_flight"`
+	// AppPluginsDisabled (FILEX_APP_PLUGINS_DISABLED=1) turns the in-process
+	// WebAssembly app-plugin runtime off (internal/wasmplugin): nothing under
+	// <data-dir>/app-plugins is loaded, the user routes answer 404 and the
+	// admin routes 503. Demo mode flips the default to ON for the same
+	// reason storage plugins are off there: the demo's admin account is
+	// public, and an installed plugin runs code — sandboxed, but still code
+	// somebody else chose — for every visitor. Set the variable to 0 to
+	// override that deliberately. See docs/APP-PLUGINS.md.
+	AppPluginsDisabled bool `yaml:"app_plugins_disabled"`
+	// AppPluginMaxInputMB / AppPluginMaxOutputMB / AppPluginMaxWasmMB cap,
+	// per file, what a plugin job may read, what it may produce, and how big
+	// an installed module may be (FILEX_APP_PLUGIN_MAX_INPUT_MB etc.). Zero
+	// takes the defaults 256 / 512 / 64.
+	AppPluginMaxInputMB  int `yaml:"app_plugin_max_input_mb"`
+	AppPluginMaxOutputMB int `yaml:"app_plugin_max_output_mb"`
+	AppPluginMaxWasmMB   int `yaml:"app_plugin_max_wasm_mb"`
 	// SecretKey (FILEX_SECRET_KEY) encrypts the secrets filex has to be able to
 	// read back rather than merely compare — today the S3 access keys, because
 	// SigV4 derives an HMAC chain from the secret and so cannot work off a
@@ -105,6 +121,7 @@ type Config struct {
 	Search           SearchConfig `yaml:"search"`
 	CORS             CORSConfig   `yaml:"cors"`
 	Queue            QueueConfig  `yaml:"queue"`
+	Ops              OpsConfig    `yaml:"ops"`
 	Notify           NotifyConfig `yaml:"notify"`
 	Demo             DemoConfig   `yaml:"demo"`
 	Sentry           SentryConfig `yaml:"sentry"`
@@ -447,6 +464,20 @@ type QueueConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
 
+// OpsConfig — the copy/move/delete queue (internal/ops).
+type OpsConfig struct {
+	// DeleteWorkers is how many items of ONE delete job are put in the trash
+	// at the same time. FILEX_OPS_DELETE_WORKERS, default 4; anything below 1
+	// means the default.
+	//
+	// Jobs still run one after another, in the order they were queued — only
+	// the items inside a delete job overlap. On an object store every trashed
+	// file is several round trips, so a large delete is almost all waiting,
+	// and one item at a time made a delete of tens of thousands of files run
+	// for hours while every other queued job waited behind it.
+	DeleteWorkers int `yaml:"delete_workers"`
+}
+
 // LogConfig — slog level + format.
 type LogConfig struct {
 	Level  string `yaml:"level"`  // debug, info, warn, error
@@ -462,6 +493,12 @@ type DBConfig struct {
 // AuthConfig — enabled drivers and per-driver options.
 type AuthConfig struct {
 	Drivers []string `yaml:"drivers"`
+	// DriversFrom says where Drivers came from: "FILEX_AUTH_DRIVERS",
+	// "file:<path>" or "default". The Identity providers page shows it, in
+	// the reader's words (authsetup.FromWords), beside every provider the
+	// environment defines, so an operator knows where to change one the page
+	// cannot (Load sets it).
+	DriversFrom string `yaml:"-"`
 	// RecoveryLogin keeps password sign-in open for the bootstrap
 	// administrator — and nobody else — when no `local` driver is enabled, so
 	// an SSO-only installation whose identity provider is down can still be
@@ -485,7 +522,19 @@ type OIDCConfig struct {
 	// (SSO-first installs). The password form stays reachable via ?local=1
 	// for break-glass/admin logins. OFF by default — unchanged behavior.
 	AutoRedirect bool `yaml:"auto_redirect"`
+	// Logout picks what signing out of an OIDC session ends (FILEX_OIDC_LOGOUT):
+	//   "idp" (default) — filex's session AND the IdP's, when the IdP
+	//                     advertises an end_session_endpoint (RP-initiated
+	//                     logout; the IdP must allow the post-logout redirect,
+	//                     docs/SSO.md);
+	//   "local"         — filex's session only; the person stays signed in at
+	//                     the IdP (the behavior before this option existed).
+	// Anything else means the default.
+	Logout string `yaml:"logout"`
 }
+
+// LocalLogout reports whether signing out leaves the IdP's session alone.
+func (o OIDCConfig) LocalLogout() bool { return strings.EqualFold(o.Logout, "local") }
 
 // LDAPConfig — directory bind.
 type LDAPConfig struct {
@@ -690,6 +739,9 @@ func Default() Config {
 			Workers: 4,
 			Enabled: true,
 		},
+		Ops: OpsConfig{
+			DeleteWorkers: 4,
+		},
 		Notify: NotifyConfig{
 			Enabled: true,
 		},
@@ -725,7 +777,10 @@ func Default() Config {
 			// Every header the explorer itself sends. ⚠ Content-Range rides on
 			// each chunk of an upload past one chunk (8 MiB); without it the
 			// preflight fails and only LARGE cross-origin uploads break.
-			AllowedHeaders: []string{"Authorization", "Content-Type", "X-Filex-Pin", "Content-Range"},
+			// X-Filex-Accept-Prepare is how an embedding page opts in to the
+			// "preparing" answer for a big file on a slow storage; Range is how
+			// a download client makes sure it never gets one.
+			AllowedHeaders: []string{"Authorization", "Content-Type", "X-Filex-Pin", "Content-Range", "Range", "X-Filex-Accept-Prepare"},
 		},
 	}
 }
@@ -761,17 +816,29 @@ const DefaultPublicURL = "http://localhost:5212"
 // path for defaults + env only.
 func Load(path string) (Config, error) {
 	cfg := Default()
+	cfg.Auth.DriversFrom = "default"
 	if path != "" {
 		expanded := expandHome(path)
 		if data, err := os.ReadFile(expanded); err == nil {
 			if err := yaml.Unmarshal(data, &cfg); err != nil {
 				return Config{}, fmt.Errorf("config: yaml: %w", err)
 			}
+			var probe struct {
+				Auth struct {
+					Drivers []string `yaml:"drivers"`
+				} `yaml:"auth"`
+			}
+			if yaml.Unmarshal(data, &probe) == nil && probe.Auth.Drivers != nil {
+				cfg.Auth.DriversFrom = "file:" + expanded
+			}
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return Config{}, fmt.Errorf("config: read %s: %w", expanded, err)
 		}
 	}
 	applyEnv(&cfg)
+	if os.Getenv("FILEX_AUTH_DRIVERS") != "" {
+		cfg.Auth.DriversFrom = "FILEX_AUTH_DRIVERS"
+	}
 	// Set by either source -- a YAML `public_url` counts as much as the env
 	// var. Comparing against the default rather than tracking each writer
 	// keeps this true no matter how many ways there are to set it; an operator
@@ -883,6 +950,25 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_PLUGIN_MAX_INFLIGHT"); v != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
 			c.PluginMaxInFlight = n
+		}
+	}
+	appPluginsSpoken := false
+	if v, ok := os.LookupEnv("FILEX_APP_PLUGINS_DISABLED"); ok && v != "" {
+		appPluginsSpoken = true
+		c.AppPluginsDisabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	for _, kv := range []struct {
+		env string
+		dst *int
+	}{
+		{"FILEX_APP_PLUGIN_MAX_INPUT_MB", &c.AppPluginMaxInputMB},
+		{"FILEX_APP_PLUGIN_MAX_OUTPUT_MB", &c.AppPluginMaxOutputMB},
+		{"FILEX_APP_PLUGIN_MAX_WASM_MB", &c.AppPluginMaxWasmMB},
+	} {
+		if v := os.Getenv(kv.env); v != "" {
+			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+				*kv.dst = n
+			}
 		}
 	}
 	if v := os.Getenv("FILEX_COOKIE_DOMAIN"); v != "" {
@@ -1019,6 +1105,9 @@ func applyEnv(c *Config) {
 	if v := getenvFirst("FILEX_OIDC_AUTO_REDIRECT", "FILEX_AUTH_OIDC_AUTO_REDIRECT"); v != "" {
 		c.Auth.OIDC.AutoRedirect = v == "1" || strings.EqualFold(v, "true")
 	}
+	if v := getenvFirst("FILEX_OIDC_LOGOUT", "FILEX_AUTH_OIDC_LOGOUT"); v != "" {
+		c.Auth.OIDC.Logout = v
+	}
 	if v := os.Getenv("FILEX_ONLYOFFICE_URL"); v != "" {
 		c.ExternalServices.OnlyOffice.URL = v
 	}
@@ -1090,6 +1179,11 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_QUEUE_WORKERS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			c.Queue.Workers = n
+		}
+	}
+	if v := os.Getenv("FILEX_OPS_DELETE_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.Ops.DeleteWorkers = n
 		}
 	}
 	if v := os.Getenv("FILEX_QUEUE_ENABLED"); v != "" {
@@ -1209,6 +1303,9 @@ func applyEnv(c *Config) {
 	// the operator noticing this is not a default.
 	if c.Demo.Mode && !pluginsSpoken {
 		c.PluginsDisabled = true
+	}
+	if c.Demo.Mode && !appPluginsSpoken {
+		c.AppPluginsDisabled = true
 	}
 	if v := os.Getenv("FILEX_DEMO_USER"); v != "" {
 		c.Demo.User = v

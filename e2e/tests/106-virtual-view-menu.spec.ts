@@ -25,6 +25,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { loginAs, apiLogin } from '../helpers/auth';
 import { seedLocalStorage, dropStorageByName, findNodeIdByBasename } from '../helpers/seed';
+import { settled } from '../helpers/stable';
 
 const STORAGE = `e2e-vmenu-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;
@@ -37,7 +38,8 @@ const FILE_NAME = 'everywhere.txt';
 const QUALIFIED = `${STORAGE}://${FILE_NAME}`;
 
 // The verbs a writable file's menu must offer, wherever the file is listed.
-const WRITE_VERBS = [/^rename$/i, /^delete$/i, /^share \/ permissions$/i, /^move to…?$/i];
+// The verb is "Share" since v0.43.0 (#21: it promised permissions a non-owner cannot have).
+const WRITE_VERBS = [/^rename$/i, /^delete$/i, /^share$/i, /^move to…?$/i];
 // What a virtual view must NOT offer: there is no folder to create in / paste into.
 const FOLDER_ONLY = [/^new folder$/i, /^paste$/i, /^upload$/i];
 
@@ -48,11 +50,91 @@ async function openExplorer(page: Page) {
   await expect(page.getByTestId(`sidenav-storage-${STORAGE}`)).toBeVisible();
 }
 
+/**
+ * Open a virtual view and wait until the listing on screen IS that view.
+ *
+ * ⚠ The same file is on Starred and on Recent, so the row locator below
+ * matches the OUTGOING view's row for the ~80 ms the new list is in flight —
+ * and Recent draws a "Today" group label exactly where Starred's first row
+ * was. Measured 2026-09-21 (full suite): the right-click was aimed at
+ * Starred's row, landed on Recent's group label, and the menu that opened was
+ * the background one ("Show hidden files"). Waiting for the view's own answer
+ * makes the click hit the row of the view the assertion is about.
+ */
+async function openView(page: Page, view: 'starred' | 'recent', answers: RegExp) {
+  const button = page.getByTestId(`sidenav-view-${view}`);
+  await Promise.all([
+    page.waitForResponse((r) => answers.test(r.url()) && r.ok()),
+    button.click(),
+  ]);
+  // ⚠⚠ The answer above is not proof enough on its own. The explorer's mount
+  // also asks `star/list` (loadStarred, `?limit=500`, for the inline stars),
+  // and on a busy machine THAT answer can land after the click and satisfy
+  // the wait before the view has even started loading — "not busy" is then
+  // true of the OUTGOING folder, the right-click hits the folder's row, and
+  // the menu carries the folder-only Paste (measured on the merged v0.43.0
+  // tree, full suite, 1 run in 3). The view marks its panel row
+  // `aria-current="page"` in the same tick it sets `loading` (loadNavView),
+  // so once the row says so, "not busy" can only mean the view's own rows.
+  await expect(button).toHaveAttribute('aria-current', 'page');
+  // The listing is `aria-busy` from the click until the rows of the answer
+  // are drawn (FileExplorer `loading`, DataTable / GridView).
+  await expect(page.locator('.fe__body [aria-busy="true"]')).toHaveCount(0);
+}
+
+/**
+ * Open Home and wait for ITS OWN answers — recent (`?limit=50`) and starred
+ * (`star/list?limit=200`) — before anything on it is aimed at.
+ *
+ * ⚠ Home draws each card's grid as soon as it has ANY list, even while a
+ * fresh load is still in flight (HomeView: `v-if="shownRecent.length"` comes
+ * before the loading line), and swaps the fresh rows in when they land. So a
+ * card can be on screen from earlier data and be redrawn a moment later. The
+ * limits are matched exactly because the explorer also asks
+ * `star/list?limit=500` for its inline stars, which would satisfy a looser
+ * wait without saying anything about Home (the trap openView's note names).
+ */
+async function openHome(page: Page) {
+  await Promise.all([
+    page.waitForResponse((r) => /\/api\/files\/manager\/recent\?limit=50\b/.test(r.url()) && r.ok()),
+    page.waitForResponse((r) => /\/api\/files\/manager\/star\/list\?limit=200\b/.test(r.url()) && r.ok()),
+    page.getByTestId('sidenav-view-home').click(),
+  ]);
+  await expect(page.getByTestId('home-view')).toBeVisible();
+  // Nothing on Home still says it is loading.
+  await expect(page.locator('[data-testid="home-view"] .fe-home__loading')).toHaveCount(0);
+}
+
 /** Right-click the file's row/card inside `scope` and return the menu's verbs. */
 async function menuVerbsOn(page: Page, scope: ReturnType<Page['locator']>) {
   const row = scope.locator(`[data-fe-path="${QUALIFIED}"]`).first();
   await expect(row).toBeVisible();
-  await row.click({ button: 'right' });
+  /*
+   * ⚠⚠ The row must have STOPPED MOVING before the pointer lands on it, and
+   * "visible" does not say that. A virtual view re-renders when the inline
+   * star list (`star/list?limit=500`, the request openView's note above
+   * already names) answers AFTER the view's own rows are drawn: the row slides
+   * out from under the click, the contextmenu handler finds nothing selected,
+   * and the EMPTY-BACKGROUND menu opens instead — in Starred that menu is one
+   * item, so the failure reads "menu lacks /^rename$/i — got [Show hidden
+   * files]" and looks like a missing verb rather than a missed row. Measured
+   * on the full suite, 2026-09-23.
+   *
+   * Two identical boxes a frame apart is the whole guard; Playwright's own
+   * stability check inside `click()` looks at the element it already resolved
+   * and cannot see the list reflow that replaces it.
+   */
+  //
+  // ⚠⚠ …and two identical boxes were NOT enough: this spec kept flaking on
+  // the Home card after that guard (v0.43.0, the pr47 round). A list that
+  // redraws when a late answer lands can put a NEW node exactly where the old
+  // one was — same box, different element. `settled` (e2e/helpers/stable.ts)
+  // requires the SAME node, still attached, with an unchanged box across
+  // several reads, and hands that node back: the right-click goes to exactly
+  // the element that was measured.
+  const target = await settled(row);
+  await target.click({ button: 'right' });
+  await target.dispose();
   const menu = page.getByRole('menu').first();
   await expect(menu).toBeVisible();
   // The label span alone: a menuitem's innerText also carries its
@@ -118,20 +200,19 @@ test.describe('Virtual views — the context menu is the same everywhere', () =>
     // must travel with the row.
     const expected = inFolder.filter((n) => !/^paste$/i.test(n)).sort();
 
-    await page.getByTestId('sidenav-view-starred').click();
+    await openView(page, 'starred', /\/api\/files\/manager\/star\/list/);
     const onStarred = await menuVerbsOn(page, pane);
     expectWriteVerbs(onStarred, 'starred');
     expectNoFolderVerbs(onStarred, 'starred');
     expect([...onStarred].sort(), 'Starred menu differs from the folder menu').toEqual(expected);
 
-    await page.getByTestId('sidenav-view-recent').click();
+    await openView(page, 'recent', /\/api\/files\/manager\/recent\b/);
     const onRecent = await menuVerbsOn(page, pane);
     expectWriteVerbs(onRecent, 'recent');
     expectNoFolderVerbs(onRecent, 'recent');
     expect([...onRecent].sort(), 'Recent menu differs from the folder menu').toEqual(expected);
 
-    await page.getByTestId('sidenav-view-home').click();
-    await expect(page.getByTestId('home-view')).toBeVisible();
+    await openHome(page);
     const onHomeStarred = await menuVerbsOn(page, page.getByTestId('home-starred'));
     expectWriteVerbs(onHomeStarred, 'home/starred card');
     expectNoFolderVerbs(onHomeStarred, 'home/starred card');
@@ -150,8 +231,7 @@ test.describe('Virtual views — the context menu is the same everywhere', () =>
     await loginAs(page);
     await page.goto('/admin/explore');
     await expect(page.getByTestId('sidenav-view-home')).toBeVisible();
-    await page.getByTestId('sidenav-view-home').click();
-    await expect(page.getByTestId('home-view')).toBeVisible();
+    await openHome(page);
     const names = await menuVerbsOn(page, page.getByTestId('home-recent'));
     expectWriteVerbs(names, 'home/first screen');
     expectNoFolderVerbs(names, 'home/first screen');

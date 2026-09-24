@@ -52,6 +52,15 @@ export function nodeRowToFileNode(
   if (ctx.multiStorageRoot && !storageName) return null;
   const name = String(row.name ?? rel.split('/').pop() ?? '');
   const isDir = row.type === 'dir';
+  /* issue #34 — these endpoints answer with the raw node row, so `type` here
+     is `model.NodeType`: 'file', 'dir' OR 'symlink'. The listing projector
+     collapses that third value to 'file' and sets a `symlink` flag beside it;
+     `handlers/meta.go` does not, because it ships the node struct as it is.
+     Without this line a link the server will not follow appears on Recent,
+     Starred, a tag view or the Home tray as a plain file with no badge and no
+     explanation — the same fix reaching the folder listing and stopping at
+     the view beside it, which is the split lesson #174 was written about. */
+  const isSymlink = row.type === 'symlink';
   const size = typeof row.size === 'number' ? row.size : 0;
   const id = typeof row.id === 'number' ? row.id : undefined;
   /* ⚠⚠ THE CONTEXT MENU MUST BE THE SAME EVERYWHERE (owner, 2026-09-19). The
@@ -98,9 +107,15 @@ export function nodeRowToFileNode(
     mime_type: typeof row.mime === 'string' ? row.mime : '',
     ...(perm ? { perm } : {}),
     read_only: readOnly,
-    // Keyed by node id. A file with no rendered thumbnail 404s here and the
-    // view falls back to its icon — the contract the ordinary listing has too.
-    thumb_url: !isDir && id !== undefined ? `/api/files/thumb/${id}` : undefined,
+    ...(isSymlink ? { symlink: true } : {}),
+    // ⚠⚠ The SERVER's `thumb_url`, never one built here. It used to be
+    // `/api/files/thumb/<id>` for every file, and the endpoint answers
+    // `404 "not ready"` for everything it has not rendered — a docx, a
+    // markdown note, a diagram: opening Recent with ten such files fired ten
+    // requests and all ten 404'd (2026-09-21). The rows now carry the URL
+    // exactly when there is an image behind it (handlers/meta.go, the folder
+    // listing's rule), so a file with none is never asked about.
+    thumb_url: !isDir && typeof row.thumb_url === 'string' && row.thumb_url ? row.thumb_url : undefined,
     extra_metadata: {},
   } as unknown as FileNode;
 }

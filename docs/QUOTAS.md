@@ -41,6 +41,7 @@ from that identity:
 | **Move between storages** | **nothing** if the row moves; a copy-then-delete nets to zero | the account stores it once either way |
 | **Copy** | counted **again** | a copy really is a second set of bytes on the disk |
 | **Purge / permanent delete** | subtracted | the bytes are gone |
+| **A symlink the storage may not follow** | **not counted** | since v0.43.0 an out-of-root link is typed `symlink` rather than catalogued as a file, so it is not indexed, scanned, versioned or counted; switching *Follow symlinks that leave this folder* on for that storage brings its target's bytes back into the count ([STORAGE.md](STORAGE.md#symlinks)) |
 
 The purge is the **only** release point. That is what makes "delete does not
 free space" true rather than aspirational, and it is why a user cannot get
@@ -53,7 +54,7 @@ Migration `00038` split it in two: `nodes.owner_id` is **who put the thing
 here**, `nodes.last_actor_id` is **who touched it last**, and they move
 independently — an edit, an overwrite, a move or a restore changes the actor and
 leaves the owner alone. The listing's **Owner** column and the filter row's
-**People** chip read the first one; quota reads it too.
+**Owner** chip read the first one; quota reads it too.
 
 ⚠ That changed a quota behaviour, deliberately. An overwrite by another user
 used to *move* the bytes to the writer; a file that already has an owner now
@@ -89,7 +90,7 @@ The acting identity is resolved in this order:
 3. **nobody** — SYSTEM. A file the storage scanner discovered was not put there
    by anyone, so it stays unowned and uncounted until a user writes it, at which
    point they adopt it. ⚠ That holds however the scan was *started*: the admin
-   **Scan now** button hands its own request context to the walk, and until the
+   **Sync now** button hands its own request context to the walk, and until the
    identity was stripped inside the scan, one click stamped every object in the
    bucket as that admin's — and billed the lot to them. Finding a file is not
    putting it there.

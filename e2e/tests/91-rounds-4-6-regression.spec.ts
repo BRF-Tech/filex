@@ -465,7 +465,7 @@ test.describe('Round 4-6 — Browser UI regression', () => {
     // and watching for the upstream config POST to come back 200.
     await page.goto('/admin/login');
     await page.getByLabel(/e-?mail|kullanıcı adı/i).fill(ADMIN_EMAIL);
-    await page.getByLabel(/password|şifre/i).fill(ADMIN_PASSWORD);
+    await page.getByLabel(/password|parola/i).fill(ADMIN_PASSWORD);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.waitForURL(/\/admin\/dashboard/, { timeout: 10_000 });
 
@@ -499,7 +499,7 @@ test.describe('Round 4-6 — Browser UI regression', () => {
     // action set is a v-bound array assembled at runtime.
     await page.goto('/admin/login');
     await page.getByLabel(/e-?mail|kullanıcı adı/i).fill(ADMIN_EMAIL);
-    await page.getByLabel(/password|şifre/i).fill(ADMIN_PASSWORD);
+    await page.getByLabel(/password|parola/i).fill(ADMIN_PASSWORD);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.waitForURL(/\/admin\/dashboard/);
 

@@ -14,7 +14,7 @@ describe('login', () => {
     cy.visit('/admin/login');
     cy.get('input[name="email"]').first().clear().type('admin@local');
     cy.get('input[name="password"]').first().clear().type('definitely-wrong-password');
-    cy.contains('button', /sign in|giriş|giris|login/i).filter(':visible').first().click();
+    cy.submitLogin();
     cy.url().should('include', '/admin/login');
     // The backend's own words ("invalid credentials"), surfaced by the store.
     cy.contains(/geçersiz|invalid|incorrect|hatalı/i, { timeout: 8000 }).should('be.visible');

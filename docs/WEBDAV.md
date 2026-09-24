@@ -50,7 +50,7 @@ Every request needs **HTTP Basic** credentials:
 
 | Field | Value |
 |-------|-------|
-| Username | your filex account **e-mail** |
+| Username | your filex **username** or account **email** |
 | Password | your **account password**, *or* a filex **API token** |
 
 Both secrets are accepted in the same password field — filex first tries the
@@ -74,7 +74,8 @@ Notes:
   this is also the recommended setup for any always-on mount.
 - API tokens are honored with their **verb scopes**: `read` covers browsing
   and downloads, `write` covers uploads/mkdir/move/copy/locks, `delete`
-  covers deletes. A token with no scopes grants everything its user may do.
+  covers deletes. A token grants only the scopes it names (an empty list,
+  which no door issues any more, grants nothing).
 - Tokens carrying a **`root:` confinement scope are rejected** on `/dav` —
   the WebDAV tree has no confinement middleware, so accepting a
   subtree-limited token would widen its reach. Use an unconfined token (or
@@ -102,7 +103,7 @@ Notes:
    `https://fm.example.com/dav/` (or a single storage:
    `https://fm.example.com/dav/depo/`)
 3. Check **Connect using different credentials**, then sign in with your
-   e-mail + password/token as above.
+   email + password/token as above.
 
 Command-line equivalent:
 
@@ -156,7 +157,7 @@ you do not know about them. All three live under
 
 1. Finder → **Go → Connect to Server…** (⌘K)
 2. Enter `https://fm.example.com/dav/` and connect.
-3. Authenticate with your e-mail + password/token.
+3. Authenticate with your email + password/token.
 
 The drive appears under **Locations**; each storage is a top-level folder.
 
@@ -236,8 +237,9 @@ WebDAV enforces exactly the same authorization model as the web UI:
   in-memory behaviour rather than refusing to serve `/dav`. They exist to
   satisfy class-2 clients (Windows, Office); filex itself does not arbitrate
   concurrent edits beyond them.
-- The filex-internal buckets (`.filex-trash`, `.versions`, `.thumbs`) are
-  hidden and unreachable over WebDAV.
+- The filex-internal buckets (`.filex-trash`, `.versions`, `.thumbs` and the
+  desktop app's open-with working area `.filex-open`) are hidden and
+  unreachable over WebDAV.
 - Changes made over WebDAV are indexed **best-effort right away** (node
   cache, search, thumbnails); if anything hiccups, the storage's scheduled
   sync run reconciles later.

@@ -498,7 +498,7 @@ onBeforeUnmount(() => {
           >
             <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons + lib/fileIcons -->
             <span class="fe-cmdp__icon" aria-hidden="true" v-html="iconHtml(it)"></span>
-            <span class="fe-cmdp__label">{{ it.label }}</span>
+            <span class="fe-cmdp__label"><bdi>{{ it.label }}</bdi></span>
           </button>
 
           <template v-if="fileItems.length">
@@ -516,7 +516,7 @@ onBeforeUnmount(() => {
             >
               <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons + lib/fileIcons -->
               <span class="fe-cmdp__icon" aria-hidden="true" v-html="iconHtml(it)"></span>
-              <span class="fe-cmdp__label">{{ it.label }}</span>
+              <span class="fe-cmdp__label"><bdi>{{ it.label }}</bdi></span>
             </button>
           </template>
 
@@ -541,7 +541,7 @@ onBeforeUnmount(() => {
               <span class="fe-cmdp__icon" aria-hidden="true" v-html="iconHtml(it)"></span>
               <span class="fe-cmdp__hitbody">
                 <span class="fe-cmdp__hitline">
-                  <span class="fe-cmdp__label">{{ it.label }}</span>
+                  <span class="fe-cmdp__label"><bdi>{{ it.label }}</bdi></span>
                   <span v-if="it.inContent" class="fe-cmdp__badge">{{ t('search.in_content') }}</span>
                 </span>
                 <span v-if="it.crumb" class="fe-cmdp__crumb" :title="it.crumb">{{ it.crumb }}</span>
@@ -573,7 +573,7 @@ onBeforeUnmount(() => {
             >
               <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons + lib/fileIcons -->
               <span class="fe-cmdp__icon" aria-hidden="true" v-html="iconHtml(it)"></span>
-              <span class="fe-cmdp__label">{{ it.label }}</span>
+              <span class="fe-cmdp__label"><bdi>{{ it.label }}</bdi></span>
               <button
                 v-if="it.kind === 'saved'"
                 type="button"
@@ -600,7 +600,7 @@ onBeforeUnmount(() => {
             >
               <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons + lib/fileIcons -->
               <span class="fe-cmdp__icon" aria-hidden="true" v-html="iconHtml(it)"></span>
-              <span class="fe-cmdp__label">{{ it.label }}</span>
+              <span class="fe-cmdp__label"><bdi>{{ it.label }}</bdi></span>
             </button>
           </template>
 

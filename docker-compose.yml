@@ -6,7 +6,7 @@
 #
 #   docker compose up                                            # filex slim only
 #   docker compose --profile full up                             # filex + thumbnail tools
-#   docker compose --profile onlyoffice up                       # filex + OnlyOffice editor
+#   docker compose --profile onlyoffice up                       # filex + ONLYOFFICE editor
 #   docker compose --profile postgres --profile minio up         # full self-hosted stack
 #   docker compose --profile full --profile onlyoffice --profile postgres up
 #
@@ -121,7 +121,7 @@ services:
       - filex-net
 
   # ---------------------------------------------------------------------
-  # OnlyOffice Document Server (profile: onlyoffice)
+  # ONLYOFFICE Document Server (profile: onlyoffice)
   # Required only if you want office-doc editing in the file manager.
   # ---------------------------------------------------------------------
   onlyoffice:

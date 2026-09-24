@@ -46,6 +46,11 @@ export const useStorageDriversStore = defineStore('storageDrivers', () => {
     return descriptor(driver)?.fields ?? [];
   }
 
+  /** The scan settings a storage on this driver has (`scan_fields`). */
+  function scanFields(driver: StorageDriver | undefined): StorageField[] {
+    return descriptor(driver)?.scan_fields ?? [];
+  }
+
   /**
    * Fresh config for a driver: every declared field seeded with its
    * default (or an empty value of the right type). Switching drivers
@@ -73,5 +78,5 @@ export const useStorageDriversStore = defineStore('storageDrivers', () => {
     return out;
   }
 
-  return { items, loading, loaded, error, names, fetch, descriptor, fields, defaults };
+  return { items, loading, loaded, error, names, fetch, descriptor, fields, scanFields, defaults };
 });

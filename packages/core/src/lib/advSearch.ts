@@ -46,6 +46,7 @@
  */
 import type { DriveFilters, PeopleOption } from './fileFilters';
 import { EMPTY_FILTERS } from './fileFilters';
+import { splitList } from './listInput';
 
 /** Which fields the backend consults. Mirrors `search.ParseScope`. */
 export type AdvScope = 'name' | 'content' | 'all';
@@ -143,20 +144,26 @@ export function advSearchEmpty(req: AdvSearchRequest): boolean {
  * empty set by design, so the mistake would look like "there is nothing here".
  */
 export function parseTagList(raw: string): string[] {
-  return raw
-    .split(/[,\n]/)
-    .map((s) => s.trim())
-    .filter((s) => s !== '');
+  // ⚠ lib/listInput: "،" and "，" are commas too (an Arabic or Chinese keyboard).
+  return splitList(raw, { newlines: true });
 }
 
 /**
- * True when the hit list came back at the cap, so the client-side filters ran
- * over a window rather than over everything that matches.
+ * True when the hit list was cut, so the client-side filters ran over a window
+ * rather than over everything that matches.
  *
  * The dialog and the count line say this out loud. A count that silently
  * describes "the first 50 hits, then filtered" as "N matching items" is the
  * exact shape of a number that looks measured and is not.
+ *
+ * `serverSaid` is the response's own `truncated` flag, and when the server
+ * sends one it is the answer. Only the server knows: without the index the
+ * manager reads a window of names several times the page size, so 400 rows can
+ * be a complete answer and 12 a cut one (the window was full and only 12 of
+ * its rows matched every word). A server too old to say leaves the guess this
+ * function always made — a full page is a cut page.
  */
-export function advSearchTruncated(returned: number, limit: number): boolean {
+export function advSearchTruncated(returned: number, limit: number, serverSaid?: boolean): boolean {
+  if (typeof serverSaid === 'boolean') return serverSaid;
   return returned >= limit;
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/version"
@@ -209,6 +210,13 @@ type mcpSearchIn struct {
 	Content *bool `json:"content,omitempty" jsonschema:"also match inside extracted file contents and return snippets (default true)"`
 }
 
+// mcpTagsIn is the file_tags input. `Set` is a pointer so "not given" (read)
+// and "given, empty" (clear every tag you can see) are different calls.
+type mcpTagsIn struct {
+	Path string     `json:"path" jsonschema:"adapter://path of the file or folder"`
+	Set  *[]tagItem `json:"set,omitempty" jsonschema:"omit to only read. When given, the file's tags that YOU can see become exactly this list ([] clears them). Every item is {name, kind}: kind personal = only you see it; kind team = everyone in your tenant who can see the file, and adding or removing one needs edit permission on it. Names keep their capitals; matching ignores case (Turkish I/ı/İ/i count as one letter)."`
+}
+
 // mcpSearchEntry is one file_search hit: the classic entry plus the v0.2
 // content-search fields.
 type mcpSearchEntry struct {
@@ -375,8 +383,15 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "file_move",
-		Description: "Move or rename a file/folder within the same storage.",
+		Name: "file_move",
+		// ⚠⚠ "Never overwrites" is here, in the text the model actually reads,
+		// and not only in docs/MCP.md. An agent that believes a move replaces
+		// the destination reports the path it asked for, and after a
+		// de-collision that path holds somebody else's file — it would tell its
+		// user the file is somewhere it is not. The stale "within the same
+		// storage" this line used to say was the same kind of lie in the other
+		// direction: cross-storage moves have worked since v0.27.0.
+		Description: "Move or rename a file/folder, within a storage or across two (the bytes are copied and verified, then the source is removed). Never overwrites: if dst is taken the item lands on a free name beside it (rapor-copy.txt), so use the returned entry.path — it may differ from what you asked for. entry.type says what moved: \"dir\" for a folder, \"file\" for a file. Moving an item onto its own path does nothing. A folder moved across storages that holds links filex cannot follow is copied WITHOUT them and its source is KEPT: then entry.source_kept is true and entry.left_behind names each one — a success, do not retry.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpMoveIn) (*mcp.CallToolResult, mcpEntryOut, error) {
 		e, err := ops.Move(ctx, in.Src, in.Dst)
 		if err != nil {
@@ -398,7 +413,7 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "file_search",
-		Description: "Search file/folder names AND (by default) inside extracted file contents within a storage. Name matching is forgiving: `.`, `-`, `_` and a space are interchangeable (`invoice 2026` finds `invoice_2026.pdf`), every word must match, and one typo is tolerated. A query may carry `tag:<name>` / `-tag:<name>` filters, which narrow to (or exclude) files carrying that tag; a tag that does not exist returns nothing. Results are ranked: exact filename, prefix, name, path, fuzzy, then content-only. Content hits include a plain-text snippet with matches wrapped in « ». Pass content=false for the old name-only behavior.",
+		Description: "Search file/folder names AND (by default) inside extracted file contents within a storage. Name matching is forgiving: `.`, `-`, `_` and a space are interchangeable (`invoice 2026` finds `invoice_2026.pdf`), every word must match, and one typo is tolerated. A query may carry `tag:<name>` / `-tag:<name>` filters, which narrow to (or exclude) files carrying that tag — your personal tag of that name or your team's, both count; a tag that does not exist returns nothing. Results are ranked: exact filename, prefix, name, path, fuzzy, then content-only. Content hits include a plain-text snippet with matches wrapped in « ». Pass content=false for the old name-only behavior.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpSearchIn) (*mcp.CallToolResult, mcpSearchOut, error) {
 		withContent := in.Content == nil || *in.Content
 		entries, err := mcpSearch(ctx, ops, idx, in.Path, in.Query, withContent)
@@ -406,6 +421,17 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 			return toolErr[mcpSearchOut](err)
 		}
 		return nil, mcpSearchOut{Entries: entries}, nil
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "file_tags",
+		Description: "Read or set a file's tags. Tags come in two kinds and every tag says which: `personal` (only you — the token's user — see it, like a star) and `team` (shared with everyone in your tenant who can see the file; adding or removing one needs edit permission, see can_edit_team). Without `set` it only reads. With `set` the tags you can see become exactly that list — always name the kind of each; there is no default. Other people's personal tags and other tenants' tags are never shown or touched.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpTagsIn) (*mcp.CallToolResult, aiTagsResult, error) {
+		res, err := ops.Tags(ctx, in.Path, in.Set)
+		if err != nil {
+			return toolErr[aiTagsResult](err)
+		}
+		return nil, *res, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -493,20 +519,21 @@ func mcpSearch(ctx context.Context, ops *aiOps, idx *search.Index, p, query stri
 		if gerr != nil || n == nil || n.DeletedAt != nil || n.StorageID != s.ID {
 			continue
 		}
+		// The index holds filex's own rows too (version snapshots, the
+		// desktop's open-with working copies); they are never a result.
+		if syspath.Hidden(n.Path) {
+			continue
+		}
 		if confined && !root.Within(s.Name, n.Path) {
 			continue
 		}
 		if set != nil && !set.CanSee(n.Path) {
 			continue
 		}
-		typ := "file"
-		if n.Type == model.NodeTypeDirectory {
-			typ = "dir"
-		}
 		e := aiEntry{
 			Path: joinAdapterPath(s.Name, n.Path),
 			Name: n.Name,
-			Type: typ,
+			Type: aiTypeOfNode(n.Type),
 			Size: n.Size,
 			Mime: n.Mime,
 		}
@@ -541,20 +568,14 @@ func toolErr[T any](err error) (*mcp.CallToolResult, T, error) {
 var _ http.Handler = (*AIMCP)(nil)
 
 // aiTagFilterSet is a resolved `tag:` filter in the two shapes the AI
-// surface needs it: as node IDs for the index, and as adapter paths for
-// aiOps.Search, whose entries carry no node ID.
+// surface needs it: the filter itself (node IDs to keep and to drop), for the
+// index and for the database rows alike, and the tagged nodes a bare `tag:x`
+// lists.
 type aiTagFilterSet struct {
 	index *search.Filter
-	// allow is nil when no inclusive tag was given.
-	allow map[string]bool
-}
-
-// accepts applies the path-shaped half.
-func (f aiTagFilterSet) accepts(entryPath string) bool {
-	if f.allow == nil {
-		return true
-	}
-	return f.allow[entryPath]
+	// tagged is every node carrying the inclusive tags; nil when no
+	// inclusive tag was given.
+	tagged []*model.Node
 }
 
 // aiTagFilter resolves the parsed tags against the database.
@@ -563,14 +584,7 @@ func aiTagFilter(ctx context.Context, ops *aiOps, storageName string, parsed sea
 	if err != nil {
 		return aiTagFilterSet{}, err
 	}
-	out := aiTagFilterSet{index: f}
-	if f != nil && f.Restrict {
-		out.allow = make(map[string]bool, len(tagged))
-		for _, n := range tagged {
-			out.allow[joinAdapterPath(storageName, n.Path)] = true
-		}
-	}
-	return out, nil
+	return aiTagFilterSet{index: f, tagged: tagged}, nil
 }
 
 // aiNameSearch is the name half of every AI-surface search: GET
@@ -582,21 +596,31 @@ func aiTagFilter(ctx context.Context, ops *aiOps, storageName string, parsed sea
 // the same question differently depending on which door an agent came
 // through.
 //
-// aiOps.Search wraps its argument in its own %…%, so it gets the anchor
-// WORD and the remaining words are re-checked here: the same two-step
-// the index-less HTTP path uses.
+// aiOps.Search fetches the plan's candidate rows — every word of the query
+// is a condition in the database query — and the whole query is re-checked
+// here by the scorer: the same two steps the index-less HTTP path takes. The
+// tag filter is applied to the rows by node, include and exclude alike, the
+// way tagFilterAccepts applies it on the HTTP fallback.
+//
+// ⚠ A bare `tag:x` is a listing, not a search: the tagged nodes ARE the
+// answer, as on /api/files/search and the toolbar. It used to be the first
+// 200 rows of the storage by name, filtered by the tag afterwards, so a
+// tagged file that sorted past row 200 was never found. And a `-tag:x` was
+// never applied here at all: entries carried no node id to test.
 func aiNameSearch(ctx context.Context, ops *aiOps, p string, parsed search.Parsed, tags aiTagFilterSet) ([]aiEntry, error) {
+	if parsed.Text == "" {
+		return ops.Listed(ctx, p, tags.tagged, tags.index)
+	}
 	plan := search.PlanFallback(parsed.Text)
-	entries, err := ops.Search(ctx, p, plan.Anchor)
+	entries, err := ops.Search(ctx, p, plan, tags.index)
 	if err != nil {
 		return nil, err
 	}
 	kept := entries[:0]
 	for _, e := range entries {
-		if !plan.Accepts(e.Name, e.Path) || !tags.accepts(e.Path) {
-			continue
+		if plan.Accepts(e.Name, e.Path) {
+			kept = append(kept, e)
 		}
-		kept = append(kept, e)
 	}
 	return kept, nil
 }

@@ -25,7 +25,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/identitystore"
 	"github.com/brf-tech/filex/backend/internal/model"
-	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/dbtest"
 )
 
 // initDriverWithStore is initDriver, returning the store so the test can look
@@ -36,7 +36,7 @@ import (
 // "unnamed" is exactly the account that cannot log in over SFTP or FTPS.
 func initDriverWithStore(t *testing.T, cfg map[string]any) (*Driver, db.Store) {
 	t.Helper()
-	_, raw := testutil.NewTestDB(t)
+	_, raw := dbtest.NewTestDB(t)
 	store := identitystore.New(raw)
 	d := New(store)
 	if cfg == nil {

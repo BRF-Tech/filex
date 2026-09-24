@@ -13,6 +13,7 @@ vi.mock('@/api/auth', () => ({
 }));
 
 import { useAuthStore } from '@/stores/auth';
+import en from '@/locales/en.json';
 import { AuthApi } from '@/api/auth';
 
 describe('stores/auth', () => {
@@ -68,11 +69,11 @@ describe('stores/auth', () => {
     const store = useAuthStore();
     const ok = await store.login({ email: 'x', password: 'y' });
     expect(ok).toBe(false);
-    // extractError() falls back to 'Login failed' for plain rejection objects
+    // extractError() falls back to the catalogue's login.errGeneric for plain rejection objects
     // because they aren't axios.isAxiosError(err) → true. Real axios errors
     // would surface 'invalid credentials' from response.data.error, but the
     // test mock doesn't carry the isAxiosError flag.
-    expect(store.error).toBe('Login failed');
+    expect(store.error).toBe(en.login.errGeneric);
     expect(store.user).toBeNull();
   });
 
@@ -110,6 +111,30 @@ describe('stores/auth', () => {
     expect(store.user).toBeNull();
     expect(store.permissions).toEqual([]);
     expect(sessionStorage.getItem('filex.bearer')).toBeNull();
+  });
+
+  // An SSO session has an IdP half too: the server hands back where to end it.
+  it('logout resolves to the IdP end-session URL when the server returns one', async () => {
+    (AuthApi.logout as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      logout_url: 'https://idp.example.test/logout?id_token_hint=x',
+    });
+    const store = useAuthStore();
+    store.$patch({
+      user: { id: 1, email: 'x@x', display_name: 'x', role: 'user', created_at: '', updated_at: '' },
+    });
+
+    const next = await store.logout('/drive/login');
+
+    expect(next).toBe('https://idp.example.test/logout?id_token_hint=x');
+    expect(AuthApi.logout).toHaveBeenCalledWith('/drive/login');
+    expect(store.user).toBeNull();
+  });
+
+  it('logout resolves to null when signing out is local only', async () => {
+    (AuthApi.logout as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+    const store = useAuthStore();
+    expect(await store.logout()).toBeNull();
   });
 
   it('logout swallows API errors and still clears local state', async () => {

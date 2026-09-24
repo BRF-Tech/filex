@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/local"
+	"github.com/brf-tech/filex/backend/internal/identitystore"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/testutil"
 )
@@ -149,4 +150,36 @@ func TestFirstRun_PresetAdminFromEnv(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, model.RoleAdmin, user.Role)
 	require.NoError(t, bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte("s3cret-preset-pw")))
+}
+
+// TestFirstRun_TheFirstAdministratorIsAdmin — the owner's decision
+// (2026-09-22): a new install's first administrator is "admin", not "admin2".
+// "admin" is reserved so nobody ELSE takes it; the account first run creates is
+// the one it is reserved for. Every screen names it "admin" (the Owner
+// column's lookup, model.PersonLabel), and a later admin@… account still gets
+// "admin2". The store is wrapped the way server.go wraps it — identitystore
+// names every account as it is created, which is how "admin2" came about.
+func TestFirstRun_TheFirstAdministratorIsAdmin(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct{ email, password string }{
+		{"", ""},                                 // admin@local, a generated password
+		{"boss@example.com", "s3cret-preset-pw"}, // FILEX_ADMIN_EMAIL / FILEX_ADMIN_PASSWORD
+	} {
+		_, raw := testutil.NewTestDB(t)
+		store := identitystore.New(raw)
+		creds, err := FirstRun(ctx, store, t.TempDir(), tc.email, tc.password)
+		require.NoError(t, err)
+
+		admin, err := store.GetUserByEmail(ctx, creds.AdminEmail)
+		require.NoError(t, err)
+		assert.Equal(t, "admin", admin.Username, "first administrator (%s)", creds.AdminEmail)
+		assert.Equal(t, "admin", admin.Label(), "every screen names it by the one rule")
+		names, err := store.GetUserDisplayNames(ctx, []int64{admin.ID})
+		require.NoError(t, err)
+		assert.Equal(t, "admin", names[admin.ID], "the Owner column's lookup")
+
+		later, err := store.CreateUser(ctx, "admin@elsewhere.example", "", model.RoleAdmin, "en", model.TimezoneUnset)
+		require.NoError(t, err)
+		assert.Equal(t, "admin2", later.Username, "a later admin@ account keeps the reservation's suffix")
+	}
 }

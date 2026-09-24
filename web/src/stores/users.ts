@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import { UsersApi, type UserCreateRequest, type UserListParams, type UserUpdateRequest } from '@/api/users';
 import type { PaginatedResponse, User } from '@/api/types';
 import { extractError } from '@/api/client';
+import { t } from '@/i18n';
 
 const EMPTY: PaginatedResponse<User> = { items: [], total: 0, page: 1, page_size: 25 };
 
@@ -17,7 +18,7 @@ export const useUsersStore = defineStore('users', () => {
     try {
       page.value = await UsersApi.list(params);
     } catch (e: unknown) {
-      error.value = extractError(e, 'Failed to load users');
+      error.value = extractError(e, t('errors.loadFailed'));
     } finally {
       loading.value = false;
     }

@@ -9,7 +9,7 @@
 ## 1. What this is
 
 The groundwork for a future self-serve hosted filex ("filex cloud"): plan
-catalog, tenant self-signup, e-mail verification, and a Stripe billing
+catalog, tenant self-signup, email verification, and a Stripe billing
 skeleton. It deliberately builds on the **native multi-tenancy foundation
 (v0.1.61, `docs/MULTI-TENANCY.md`)** instead of inventing anything new:
 
@@ -20,7 +20,7 @@ skeleton. It deliberately builds on the **native multi-tenancy foundation
 - plan metadata rides on the existing `providers` table (migration
   `00021_provider_cloud_plan.sql`, all three DB dialects): three **nullable,
   passive** columns — `plan`, `limits_json`, `billing_ref`.
-- e-mail delivery reuses the existing settings-table SMTP mailer
+- email delivery reuses the existing settings-table SMTP mailer
   (`internal/mailer`), with the same "not verified → show the
   token/link on-screen" fallback the share/invite mail uses.
 
@@ -124,7 +124,7 @@ Prep in order; nothing below is required today.
    S3 bucket/prefix provisioning + `LinkProviderStorage` at signup (the
    skeleton deliberately provisions **no storage**); `FILEX_MULTI_TENANT=1`;
    wildcard DNS + TLS for `*.<base_host>`.
-3. **Durability**: move pending e-mail verifications from the in-memory map
+3. **Durability**: move pending email verifications from the in-memory map
    to a table (they currently die on restart — acceptable for a skeleton,
    not for production).
 4. **Mail**: production SMTP (settings table) so `verify_token` stops

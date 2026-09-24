@@ -233,6 +233,20 @@ func TestStore_Shares_CRUD(t *testing.T) {
 	got2, _ := store.GetShareByID(ctx, sh.ID)
 	assert.Equal(t, 1, got2.DownloadCount)
 
+	// IncrementShareVisit — an app page's openings, a counter of their own
+	// (00052), read back by every share reader.
+	require.NoError(t, store.IncrementShareVisit(ctx, sh.ID))
+	require.NoError(t, store.IncrementShareVisit(ctx, sh.ID))
+	gotV, _ := store.GetShareByID(ctx, sh.ID)
+	assert.Equal(t, 2, gotV.VisitCount)
+	assert.Equal(t, 1, gotV.DownloadCount, "a visit is not a download")
+	byTok, _ := store.GetShareByToken(ctx, sh.Token)
+	assert.Equal(t, 2, byTok.VisitCount)
+	metas, _, err := store.ListAllShares(ctx, nil, false, 50, 0)
+	require.NoError(t, err)
+	require.NotEmpty(t, metas)
+	assert.Equal(t, 2, metas[0].Share.VisitCount, "the listing projection carries it too")
+
 	// ListSharesByNode
 	list, err := store.ListSharesByNode(ctx, n.ID)
 	require.NoError(t, err)
@@ -313,7 +327,7 @@ func TestStore_Nodes_Search(t *testing.T) {
 		})
 		require.NoError(t, err)
 	}
-	results, err := store.SearchNodes(ctx, stg.ID, "holiday%", 50)
+	results, err := store.SearchNodes(ctx, stg.ID, model.NameMatch{Words: []string{"holiday"}}, 50)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 }
@@ -533,23 +547,34 @@ func TestStore_Tags_AllAndByTag(t *testing.T) {
 	n3 := mk(stgA.ID, "f3.txt", "h-tag-3") // tags: archive
 	nDel := mk(stgA.ID, "del.txt", "h-tag-4")
 
-	require.NoError(t, store.SetNodeTags(ctx, n1, []string{"report", "draft"}))
-	require.NoError(t, store.SetNodeTags(ctx, n2, []string{"report"}))
-	require.NoError(t, store.SetNodeTags(ctx, n3, []string{"archive"}))
-	require.NoError(t, store.SetNodeTags(ctx, nDel, []string{"report"}))
+	testutil.TagNode(t, store, n1, 0, "report", "draft")
+	testutil.TagNode(t, store, n2, 0, "report")
+	testutil.TagNode(t, store, n3, 0, "archive")
+	testutil.TagNode(t, store, nDel, 0, "report")
 
 	// Soft-deleted nodes/tags must not surface.
 	require.NoError(t, store.SoftDeleteNode(ctx, nDel))
 
-	// ListAllTags → distinct across both storages, alphabetical, no dupes,
-	// excludes the soft-deleted node's tags (here "report" still exists via
-	// live nodes, so it stays; the deleted-only case is covered below).
-	all, err := store.ListAllTags(ctx)
+	team := model.TagQuery{Team: true}
+	vocab, err := store.ListTags(ctx, team)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"archive", "draft", "report"}, all)
+	byName := map[string]int64{}
+	for _, tg := range vocab {
+		byName[tg.Name] = tg.ID
+	}
+	require.Len(t, byName, 3, "one vocabulary row per name, however many files carry it")
 
-	// ListNodesByTag("report") → n1 (storage A) + n2 (storage B), not nDel.
-	rep, err := store.ListNodesByTag(ctx, "report", 100)
+	// Placements → the live files only; the soft-deleted node's link is not one.
+	places, err := store.ListTagPlacements(ctx, team)
+	require.NoError(t, err)
+	var nodes []int64
+	for _, p := range places {
+		nodes = append(nodes, p.NodeID)
+	}
+	assert.ElementsMatch(t, []int64{n1, n1, n2, n3}, nodes)
+
+	// ListNodesByTagIDs("report") → n1 (storage A) + n2 (storage B), not nDel.
+	rep, err := store.ListNodesByTagIDs(ctx, []int64{byName["report"]}, 100)
 	require.NoError(t, err)
 	require.Len(t, rep, 2)
 	ids := map[int64]bool{}
@@ -559,14 +584,14 @@ func TestStore_Tags_AllAndByTag(t *testing.T) {
 	assert.True(t, ids[n1] && ids[n2])
 	assert.False(t, ids[nDel], "soft-deleted node must be excluded")
 
-	// A tag that exists only on a soft-deleted node disappears from ListAllTags.
-	require.NoError(t, store.SetNodeTags(ctx, n3, []string{}))
-	all2, err := store.ListAllTags(ctx)
+	// Removing the last link of a tag deletes the tag.
+	require.NoError(t, store.LinkNodeTags(ctx, n3, nil, []int64{byName["archive"]}))
+	vocab, err = store.ListTags(ctx, team)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"draft", "report"}, all2)
+	assert.Len(t, vocab, 2)
 
-	// Unknown tag → empty slice, no error.
-	none, err := store.ListNodesByTag(ctx, "no-such-tag", 100)
+	// No ids → empty slice, no error.
+	none, err := store.ListNodesByTagIDs(ctx, nil, 100)
 	require.NoError(t, err)
 	assert.Empty(t, none)
 }

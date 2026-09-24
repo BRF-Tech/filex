@@ -10,7 +10,7 @@
 //	go build -o memfs ./examples/plugin-memfs
 //	# Admin → Plugins → Install → upload `memfs`
 //
-// Then Connections → Add a storage → "In-memory (example)".
+// Then Admin → Storages → Add storage → "In-memory (example)".
 //
 // A real plugin differs from this one only in what the methods do: swap the
 // map for your API, your appliance, your database — the shape stays.

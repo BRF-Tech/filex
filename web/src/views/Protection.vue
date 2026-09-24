@@ -468,14 +468,14 @@ async function saveVersions() {
 
         <div v-if="antivirus?.enabled" class="space-y-1 text-sm">
           <div>
-            <span class="text-zinc-500 dark:text-zinc-400">{{ t('protection.av.binary') }}:</span>
-            <code class="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs dark:bg-zinc-800">
+            <span class="text-zinc-500 dark:text-zinc-400">{{ t('protection.av.binary') }}</span>
+            <code class="ms-2 rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs dark:bg-zinc-800">
               {{ antivirus.binary || '—' }}
             </code>
           </div>
           <div v-if="antivirus.address">
-            <span class="text-zinc-500 dark:text-zinc-400">{{ t('protection.av.address') }}:</span>
-            <code class="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs dark:bg-zinc-800">
+            <span class="text-zinc-500 dark:text-zinc-400">{{ t('protection.av.address') }}</span>
+            <code class="ms-2 rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs dark:bg-zinc-800">
               {{ antivirus.address }}
             </code>
           </div>

@@ -26,6 +26,8 @@
 // CONTENT and never a credential. The strings here come from the server's
 // `title`/`body` fields, which are the same strings the bell shows.
 
+import { BRAND_BADGE_URL, BRAND_ICON_URL, brandName } from './brand';
+
 const ENABLED_KEY = 'filex.notify.browser';
 const ASKED_KEY = 'filex.notify.browserAsked';
 
@@ -136,7 +138,74 @@ export interface BrowserNotifyOptions {
    * poll cannot produce two toasts for one event.
    */
   tag?: string;
+  /**
+   * Where a click goes, as an ADDRESS. Needed only by the service-worker
+   * path, which has no page to call back into; the in-page path uses
+   * `onClick` and this is ignored.
+   */
+  url?: string;
   onClick?: () => void;
+}
+
+/**
+ * The toast's own fields, brand included — one definition for both paths.
+ *
+ * ⚠⚠ Three of them were wrong or missing, and each cost something the
+ * owner could see:
+ *
+ *   • TITLE carried the event's sentence and nothing else, so a toast said
+ *     "New file: report.pdf" with the bare ORIGIN printed under it. The second
+ *     line is the app's identity and the browser only fills it in for an
+ *     INSTALLED app — everywhere else the name has to be in the text. So the
+ *     instance's name (the operator's own, when they set one on the Branding
+ *     page) is the title and the event becomes the body.
+ *   • ICON pointed at an SVG. Chromium decodes a notification's icon through
+ *     its image decoders and SVG is not among them, so that was not a small
+ *     logo or a blurry one — it was NO logo, and the toast fell back to a
+ *     generic bell. Firefox draws SVG fine, which is exactly why it lasted.
+ *   • BADGE did not exist. On Android the status bar shows the badge and
+ *     nothing else, so every filex notification was a grey dot there.
+ */
+export function brandedNotification(opts: BrowserNotifyOptions): {
+  title: string;
+  options: NotificationOptions;
+} {
+  // ⚠ The name is READ here, not fetched: `lib/documentTitle` asks for it on
+  // every route change, so by the time a notification arrives the answer is
+  // already in. A fetch from here would put a network call behind a toast —
+  // and behind every test that raises one.
+  // ⚠ The event sentence is never dropped to make room for the name: the two
+  // are joined, because "New file: report.pdf" and "2.4 MB, in Documents" are
+  // different facts and the toast has room for both.
+  const body = opts.body ? `${opts.title} — ${opts.body}` : opts.title;
+  const options: NotificationOptions = {
+    body,
+    icon: BRAND_ICON_URL,
+    badge: BRAND_BADGE_URL,
+    tag: opts.tag,
+    data: { url: opts.url ?? '' },
+  };
+  // Android replaces a same-tag notification SILENTLY unless this is set, so
+  // a second event carrying the same id would arrive with no alert at all.
+  if (opts.tag) (options as NotificationOptions & { renotify?: boolean }).renotify = true;
+  return { title: brandName(), options };
+}
+
+/**
+ * The service worker that owns this page, when there is one.
+ *
+ * ⚠ It is scoped to `/admin/` (vite.config.ts), so a page served from
+ * `/drive/` legitimately has none — that is a narrower frame, never a missing
+ * notification, because the constructor path still works there.
+ */
+async function swRegistration(): Promise<ServiceWorkerRegistration | null> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    return reg && typeof reg.showNotification === 'function' ? reg : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -149,12 +218,9 @@ export function showBrowserNotification(
   userId?: number | null,
 ): Notification | null {
   if (!canShowBrowserNotification(userId)) return null;
+  const { title, options } = brandedNotification(opts);
   try {
-    const n = new window.Notification(opts.title, {
-      body: opts.body,
-      tag: opts.tag,
-      icon: '/admin/icons/icon.svg',
-    });
+    const n = new window.Notification(title, options);
     if (opts.onClick) {
       n.onclick = () => {
         try {
@@ -169,7 +235,40 @@ export function showBrowserNotification(
     return n;
   } catch {
     // Android Chrome throws "Illegal constructor" — only a service worker may
-    // notify there. Nothing to do and nothing worth telling the user.
+    // notify there. `raiseBrowserNotification` is the path that covers those
+    // devices; this one answers null so the tests can read the degraded case,
+    // which a real OS toast never lets them read.
     return null;
+  }
+}
+
+/**
+ * Raise a notification by whichever route this browser actually has.
+ *
+ * ⚠⚠ The window path is tried FIRST on purpose, even though the worker's
+ * looks better when the app is installed: a toast constructed here keeps its
+ * `onClick`, and that callback is what marks the row read and navigates
+ * INSIDE the running SPA. The worker's click can only open an address, which
+ * means a full page load and a row that stays unread. So the worker is the
+ * fallback, and the case it covers is real rather than theoretical: on
+ * Android Chrome the constructor throws and without this every filex
+ * notification on every phone was silently dropped.
+ *
+ * Returns which route ran, for the tests and for nobody else.
+ */
+export async function raiseBrowserNotification(
+  opts: BrowserNotifyOptions,
+  userId?: number | null,
+): Promise<'window' | 'sw' | 'none'> {
+  if (!canShowBrowserNotification(userId)) return 'none';
+  if (showBrowserNotification(opts, userId)) return 'window';
+  const reg = await swRegistration();
+  if (!reg) return 'none';
+  const { title, options } = brandedNotification(opts);
+  try {
+    await reg.showNotification(title, options);
+    return 'sw';
+  } catch {
+    return 'none';
   }
 }

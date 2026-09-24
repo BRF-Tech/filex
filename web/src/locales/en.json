@@ -2,7 +2,8 @@
   "app": {
     "name": "filex",
     "tagline": "Self-hosted file manager",
-    "admin": "Admin"
+    "admin": "Admin",
+    "footer": "filex · self-hosted file manager"
   },
   "title": {
     "admin": "{name} Admin"
@@ -34,6 +35,7 @@
     }
   },
   "common": {
+    "dismiss": "Cancel",
     "save": "Save",
     "cancel": "Cancel",
     "delete": "Delete",
@@ -60,6 +62,7 @@
     "all": "All",
     "none": "None",
     "name": "Name",
+    "sampleFileName": "report-2026.pdf",
     "email": "Email",
     "password": "Password",
     "currentPassword": "Current password",
@@ -69,6 +72,16 @@
     "created": "Created",
     "updated": "Updated",
     "actions": "Actions",
+    "path": "Path",
+    "storage": "Storage",
+    "score": "Score",
+    "match": "Match",
+    "when": "When",
+    "changes": "Changes",
+    "folder": "Folder",
+    "root": "Root",
+    "notes": "Notes",
+    "flags": "Flags",
     "test": "Test",
     "testNow": "Test now",
     "enabled": "Enabled",
@@ -130,12 +143,14 @@
     "updates": "Updates",
     "connections": "Connections",
     "plugins": "Plugins",
-    "usage": "Usage & cost"
+    "usage": "Usage & cost",
+    "apps": "Apps",
+    "appearance": "Appearance"
   },
   "login": {
     "title": "Sign in",
     "subtitle": "Sign in with your account on this server",
-    "identifier": "E-mail or username",
+    "identifier": "Email or username",
     "remember": "Stay signed in",
     "submit": "Sign in",
     "or": "or",
@@ -150,10 +165,12 @@
     "totpLabel": "2FA code",
     "showChars": "Show typed characters",
     "hideChars": "Hide typed characters",
-    "errInvalid": "E-mail, username or password is wrong",
+    "errInvalid": "Email, username or password is wrong",
     "errLocked": "Account is locked. Contact your administrator.",
     "errGeneric": "Something went wrong. Try again.",
-    "errOidc": "SSO sign-in failed. Try again, or sign in with password."
+    "errOidc": "SSO sign-in failed. Try again, or sign in with password.",
+    "noProviders": "No auth providers enabled. Set {env} in your environment.",
+    "signedOut": "You are signed out."
   },
   "dashboard": {
     "title": "Dashboard",
@@ -175,12 +192,13 @@
     "fileCount": "{n} file | {n} files",
     "added": "Added",
     "deleted": "Deleted",
-    "updatedFiles": "Updated"
+    "updatedFiles": "Updated",
+    "lastSyncAt": "Last sync: {when}"
   },
   "storages": {
     "title": "Storages",
     "subtitle": "Mount points used as top-level folders",
-    "filesUnit": "files",
+    "fileCount": "{n} file | {n} files",
     "notYetSynced": "Sync has not run yet",
     "modeLabel": {
       "fsnotify": "Live watch",
@@ -211,6 +229,8 @@
       "rbac": "Per-item access control (RBAC)",
       "rbacHint": "When on, non-admins see only files/folders explicitly granted to them via the permissions panel. When off, the storage is open to all users (capability by role).",
       "path": "Filesystem path",
+      "followSymlinks": "Follow symlinks that leave this folder",
+      "scanExclude": "Paths to exclude from scanning",
       "endpoint": "Endpoint",
       "region": "Region",
       "bucket": "Bucket",
@@ -218,7 +238,7 @@
       "accessKey": "Access key",
       "secretKey": "Secret key",
       "pathStyle": "Use path-style URLs (Hetzner, MinIO)",
-      "disablePresign": "Disable presigned URLs",
+      "disablePresign": "Stream transfers through filex",
       "host": "Host",
       "port": "Port",
       "user": "User",
@@ -242,6 +262,8 @@
     },
     "fieldHelp": {
       "path": "Directory on the server. It is created if missing; filex never mounts /.",
+      "followSymlinks": "A symlink pointing INSIDE this folder is always followed. This governs only links pointing outside it: off, they are listed with a badge saying why they will not open, and cannot be opened, written to or deleted through; on, filex treats the linked files as part of the storage — including for indexing, virus scanning, quota and deletion.",
+      "scanExclude": "One pattern per line, relative to the storage root: * matches within a name, ** any number of folders, and a pattern without a / matches that name at any depth (.* skips every hidden file and folder). The scan does not go into a matching folder, and matching files are not catalogued, indexed, thumbnailed or virus-scanned. This saves work; it is not access control — the files stay on the storage, reachable by path, over WebDAV/SFTP and through the AI tools. Anything catalogued before you add a pattern stays as it is.",
       "prefix": "Sub-folder inside the bucket. Required: filex never takes ownership of the bucket root.",
       "root": "Sub-folder on the backend. Required: filex never mounts the account root.",
       "region": "Defaults to \"auto\" when left empty.",
@@ -255,7 +277,7 @@
       "insecureSkipHostKey": "Accepts any host key. Only for throwaway hosts.",
       "tls": "Plain FTP sends credentials in the clear — turn this on whenever the server supports it.",
       "passive": "Off switches to active mode, which needs the server to dial back into this host.",
-      "smbShare": "The share name alone, without the server: `media`, not `\\nas\\media`.",
+      "smbShare": "The share name alone, without the server: `media`, not `\\\\nas\\media`.",
       "smbDomain": "Only for a Windows domain account. Leave empty for a NAS.",
       "smbRoot": "Sub-folder inside the share. Leave empty for the whole share."
     },
@@ -273,11 +295,11 @@
       "list": "List folders under this root",
       "listing": "Listing…",
       "none": "No folders under this root.",
-      "found": "One folder found — tick it to mount it. The name is what the sidebar shows; the root is where the storage points. | {count} folders found — tick the ones to mount. The name is what the sidebar shows; the root is where the storage points.",
+      "found": "{count} folder found — tick it to mount it. The name is what the sidebar shows; the root is where the storage points. | {count} folders found — tick the ones to mount. The name is what the sidebar shows; the root is where the storage points.",
       "nameLabel": "Storage name",
-      "create": "Create 1 storage | Create {count} storages",
+      "create": "Create {count} storage | Create {count} storages",
       "creating": "Creating…",
-      "createdOk": "1 storage created | {count} storages created",
+      "createdOk": "{count} storage created | {count} storages created",
       "createdPartial": "{ok} of {total} created — {failed} failed: {names}",
       "selectAll": "Select all",
       "selectNone": "Select none"
@@ -286,7 +308,13 @@
     "deletedOk": "Storage deleted",
     "createdOk": "Storage created",
     "updatedOk": "Storage updated",
-    "syncStarted": "Sync started"
+    "syncStarted": "Sync started",
+    "drift": {
+      "missingInDb": "Missing in DB",
+      "missingInStorage": "Missing in storage",
+      "sizeMismatch": "Size mismatch",
+      "hashMismatch": "Hash mismatch"
+    }
   },
   "users": {
     "title": "Users",
@@ -296,7 +324,7 @@
     "editTitle": "Edit user",
     "fields": {
       "displayName": "Display name",
-      "lastLogin": "Last login",
+      "lastLogin": "Last sign-in",
       "sendInvite": "Send invitation email"
     },
     "roles": {
@@ -310,7 +338,7 @@
     "resetPasswordOk": "Password reset",
     "resetPassword": "Reset password",
     "resetPasswordConfirm": "Give \"{email}\" a new password? The current one stops working and every session of this account is signed out.",
-    "passwordOptionalHint": "Optional — an account without a password signs in through SSO or with an API token",
+    "passwordOptionalHint": "Optional — an account without a password signs in through SSO or with an API key",
     "createdOk": "User created",
     "updatedOk": "User updated",
     "deletedOk": "User deleted",
@@ -342,7 +370,7 @@
     "locale": "Language",
     "username": {
       "label": "Username",
-      "help": "Your short login name. You can sign in with this or your e-mail — and connection clients (SFTP, FTP) need it, because an {'@'} in a login has to be escaped in their config files."
+      "help": "Your username. You can sign in with it or with your email — and connection clients (SFTP, FTP) need it, because an {'@'} in the name they sign in with has to be escaped in their config files."
     },
     "avatar": {
       "label": "Profile picture",
@@ -359,7 +387,41 @@
     "siteName": "Site name",
     "envOnlyNote": "The public URL, sync interval, log level and default language are set by environment variables (FILEX_PUBLIC_URL, FILEX_SYNC_INTERVAL, FILEX_LOG_LEVEL, FILEX_DEFAULT_LOCALE), not from this page — see docs/CONFIGURATION.md.",
     "savedOk": "Settings saved",
+    "folderView": {
+      "title": "Default folder view",
+      "help": "How a folder opens for someone who has never changed it and has not chosen a default of their own (their account's Settings → Preferences). Folders people have changed keep their own view, and a person's own default wins over this one.",
+      "view": "View",
+      "sort": "Sort by",
+      "dir": "Direction",
+      "builtin": "filex default ({value})",
+      "view_list": "List",
+      "view_grid": "Grid",
+      "view_gallery": "Gallery",
+      "sort_name": "Name",
+      "sort_type": "Type",
+      "sort_modified": "Modified",
+      "sort_size": "Size",
+      "dir_asc": "Ascending",
+      "dir_desc": "Descending",
+      "hiddenTitle": "Columns hidden by default in the list",
+      "col_type": "Type",
+      "col_location": "Location",
+      "col_owner": "Owner",
+      "col_modified": "Modified",
+      "col_size": "Size"
+    },
     "smtp": {
+      "reason": {
+        "not_configured": "Mail is not set up yet — enter the server, port and sender above and save first.",
+        "host": "The mail server name could not be found. Check the host name.",
+        "connect": "Nothing answered at that server and port. Check the host, the port and whether a firewall blocks the connection.",
+        "tls": "The secure connection to the mail server failed. Check the encryption setting (TLS / STARTTLS) and the server’s certificate.",
+        "starttls": "The server does not offer STARTTLS. Choose TLS or no encryption, or use the port that supports it.",
+        "auth": "The mail server rejected the username or password.",
+        "recipient": "The mail server refused this address. Check it and try again.",
+        "rejected": "The mail server refused the message.",
+        "other": "The mail could not be sent."
+      },
       "title": "Email (SMTP)",
       "help": "Used to send invite / share notices. When unverified, links are shown on-screen instead.",
       "host": "Host",
@@ -375,21 +437,17 @@
       "verified": "Verified",
       "unverified": "Not verified",
       "testOk": "SMTP OK",
-      "testFail": "SMTP failed",
       "testTo": "Send test email to",
       "send": "Send",
-      "enterEmail": "Enter a valid email address."
-    },
-    "customCss": {
-      "title": "Custom CSS",
-      "help": "Paste your own stylesheet to restyle filex on top of the selected theme. The supported surface is the --fe-* custom properties, as in the example below; class names are internal and change between releases.",
-      "scope": "This stylesheet applies to everyone using this installation, on every page — including the login screen.",
-      "hint": "Injected as the last stylesheet on the page, so your rules win ties. Leave the box empty to remove it.",
-      "count": "{used} / {max} bytes",
-      "tooBig": "The stylesheet is capped at 64 KB."
+      "enterEmail": "Enter a valid email address.",
+      "encryptionNone": "None (plain text)"
     }
   },
   "external": {
+    "convertLegacy": "Legacy — being retired. The Convert app (Plugins → Apps) replaces it; while the app is installed, the file menu does not offer this converter.",
+    "names": {
+      "convert": "Converter"
+    },
     "title": "External services",
     "subtitle": "Optional editors and renderers — mounted only when reachable",
     "fields": {
@@ -442,7 +500,7 @@
       "disagree": "filex reaches this address and your browser does not. That is what a container-internal name looks like: the editor loads in the browser, so it will fail there.",
       "callbackOk": "reached filex — the document server downloaded a test file from it",
       "callbackBad": "did NOT reach filex. The document opens and the save never comes back.",
-      "callbackUnknown": "not measured yet — press Test",
+      "callbackUnknown": "not measured yet — press “Test now”",
       "callbackUnchecked": "could not be measured; the warnings below are the shapes that certainly cannot work."
     },
     "browserStates": {
@@ -458,19 +516,24 @@
       "browser_bare_host": "“{host}” is a single-label host name. filex can reach it from inside the container network, but your browser loads this service directly and cannot resolve it. Use an address a browser can open.",
       "browser_loopback_host": "This is a loopback address, but filex is published at {publicUrl} — the people who open it are not on this host, and to their browser “{host}” means their own machine.",
       "public_url_loopback": "The document server fetches the document from filex and posts the save back to {publicUrl}. Inside its own container that address is the document server, not filex.",
-      "public_url_bare_host": "filex's public URL ({publicUrl}) is a container-network name. The document server can reach it, but share links and e-mails built from it will not open in a browser outside that network.",
+      "public_url_bare_host": "filex's public URL ({publicUrl}) is a container-network name. The document server can reach it, but share links and emails built from it will not open in a browser outside that network.",
       "public_url_unresolved": "filex itself cannot resolve “{host}”. That is expected if your document server uses a different DNS view; otherwise the public URL points at a name nothing can look up."
+    },
+    "noSecret": {
+      "title": "ONLYOFFICE has no JWT secret",
+      "body": "Without a secret, filex cannot tell a genuine save from a forged one: anyone who can reach its save address could overwrite your files. That is why filex does not open or save documents with ONLYOFFICE until a secret is set. Enter the same secret as the document server's {env}.",
+      "action": "Set it under “External services”"
     }
   },
   "authProviders": {
     "title": "Auth providers",
-    "subtitle": "Configure how users sign in",
+    "subtitle": "Who can sign in to this instance, and how. Changes here take effect as soon as they are saved.",
     "providers": {
       "local": "Local (email + password)",
       "oidc": "OIDC (Keycloak, Auth0, Authentik…)",
       "ldap": "LDAP / Active Directory",
       "proxy-header": "Reverse-proxy header",
-      "api-token": "API token"
+      "api-token": "API key"
     },
     "fields": {
       "issuer": "Issuer URL",
@@ -493,14 +556,121 @@
       "header_name": "Name header",
       "header_roles": "Roles header",
       "admin_role": "Admin role",
-      "auto_provision": "Auto-provision users"
+      "auto_provision": "Auto-provision users",
+      "ca_file": "CA certificate file",
+      "protocol_login": "Accept directory passwords on WebDAV, SFTP, FTPS, S3 and NFS"
     },
-    "secretSet": "Set — enter a new value to change, leave blank to keep",
-    "noConfig": "This provider has no extra configuration; just toggle it on/off.",
-    "required": "required",
-    "savedOk": "Provider updated",
-    "testOk": "Provider OK",
-    "testFail": "Provider check failed"
+    "secretSet": "Set — type a new one to replace it; leave it empty to keep it.",
+    "testOk": "Every step that can be checked from here passed",
+    "testFail": "The test stopped at a step that failed",
+    "status": {
+      "ok": "Active",
+      "disabled": "Off",
+      "misconfigured": "Misconfigured"
+    },
+    "reasons": {
+      "refused": "the connection was refused (the address or the port may be wrong)",
+      "timeout": "no answer (a firewall or the network)",
+      "dns": "the server name could not be resolved",
+      "tls": "the TLS certificate could not be verified",
+      "other": "an unexpected error",
+      "credentials": "the name or the password was not accepted",
+      "no_such_object": "there is no such entry in the directory",
+      "access": "this account is not allowed to read it",
+      "bad_url": "the address is not valid",
+      "status": "the server answered {status}",
+      "not_json": "the answer is not a discovery document",
+      "public": "a client without a secret can only be checked when somebody signs in",
+      "unclear": "the provider’s answer ({status}) does not say either way"
+    },
+    "checks": {
+      "required": {
+        "ok": "The required fields are filled in.",
+        "fail": "Required and empty: {fields}."
+      },
+      "address": {
+        "fail": "“{url}” is not an LDAP address: it must start with ldap:// or ldaps://."
+      },
+      "connect": {
+        "ok": "The directory at {host} answered.",
+        "fail": "Could not connect to {host}: {reason}."
+      },
+      "starttls": {
+        "ok": "StartTLS switched the connection to TLS.",
+        "fail": "StartTLS failed at {host}: {reason}."
+      },
+      "bind": {
+        "ok": "The service account ({dn}) signed in with its password.",
+        "fail": "The service account ({dn}) could not sign in: {reason}."
+      },
+      "bind_anonymous": {
+        "ok": "No service account: the directory was reached anonymously."
+      },
+      "base": {
+        "ok": "The base DN ({dn}) exists and can be read.",
+        "fail": "The base DN ({dn}) could not be read: {reason}."
+      },
+      "discovery": {
+        "ok": "The discovery document was fetched: {url}",
+        "fail": "The discovery document could not be fetched ({url}): {reason}."
+      },
+      "issuer": {
+        "ok": "The provider names the same issuer.",
+        "fail": "The issuer does not match: {configured} here, {announced} announced by the provider."
+      },
+      "endpoints": {
+        "ok": "The sign-in, token and key endpoints are there.",
+        "fail": "The discovery document lacks: {missing}."
+      },
+      "client": {
+        "ok": "The client ID ({client}) and its secret were accepted.",
+        "fail": "The client ({client}) was refused: {reason}.",
+        "unchecked": "The client ({client}) cannot be checked from here: {reason}."
+      },
+      "redirect": {
+        "unchecked": "The redirect URL ({url}) is only checked by the provider during a real sign-in."
+      },
+      "trusted_proxies": {
+        "ok": "The trusted proxy addresses are valid.",
+        "fail": "The trusted proxy list has an entry that is not an address or a range."
+      },
+      "via_proxy": {
+        "ok": "This request came through a trusted proxy ({peer}).",
+        "unchecked": "This request came straight from {peer}, not through the proxy, so the header sign-in cannot be seen from here."
+      },
+      "header": {
+        "ok": "The proxy sends {header}: {user}.",
+        "fail": "The proxy does not send the {header} header."
+      },
+      "secret": {
+        "fail": "A secret stored for this provider cannot be opened — {env} may have changed. Type it again."
+      }
+    },
+    "lockoutNote": "Password sign-in and the installation administrator’s recovery sign-in are set by the environment, not on this page — so nothing here can lock you out. Providers switched on here are added after the environment’s and apply the moment they are saved.",
+    "passwordOn": "Password sign-in is on ({from}).",
+    "passwordOff": "Password sign-in is off on this server. Only the environment can turn it on ({env}).",
+    "recoveryOn": "The installation administrator can still sign in with a password, for recovery ({env}).",
+    "recoveryOff": "Recovery sign-in for the installation administrator is off ({env} is false).",
+    "apiTokenAlways": "API keys are always accepted; they are issued on the API / MCP page.",
+    "noSecretKey": "{env} is not set on this server, so a client secret or bind password cannot be stored here: secrets are only ever kept sealed.",
+    "envReadOnly": "Configured by the environment: {from}. Change it there and restart filex — this page cannot override it.",
+    "shadowed": "A configuration saved on this page under the same name is kept, but not used while the environment defines this provider.",
+    "legacy": "Saved on this page before v0.43.0, when the page applied nothing — it has never been used, and it was imported switched off. Review every field, then switch it on.",
+    "failedReason": "Switched on, but it could not start: {reason}",
+    "secretSetShort": "set",
+    "redirectDefault": "Leave empty for this server’s own address + /api/auth/oidc/callback.",
+    "saveApply": "Save and apply",
+    "savedApplied": "Saved and applied — no restart needed.",
+    "confirmTitle": "Switch it on although the test failed?",
+    "confirmBody": "The test of {provider} failed at these steps:",
+    "confirmNote": "Switched on like this, it may not let anyone sign in until the problem is fixed. Password sign-in and the recovery sign-in keep working either way.",
+    "confirmEnable": "Switch on anyway",
+    "origin": {
+      "environment": "Set by the environment",
+      "page": "Set on this page",
+      "builtin": "Built in"
+    },
+    "technicalDetailIs": "Technical detail: {detail}"
   },
   "grants": {
     "title": "Permissions",
@@ -517,53 +687,60 @@
   },
   "apiMcp": {
     "title": "API / MCP",
-    "subtitle": "Access tokens for AI agents + MCP connection",
-    "newToken": "New token",
+    "subtitle": "API keys for AI agents, and the MCP connection",
+    "newToken": "New API key",
     "connectTitle": "MCP connection",
-    "connectHint": "Send your token to the endpoints below via the X-Filex-Token (or Authorization: Bearer) header.",
+    "connectHint": "Send your API key to the endpoints below in the X-Filex-Token (or Authorization: Bearer) header.",
     "mcpEndpoint": "MCP endpoint (streamable HTTP)",
     "restBase": "REST base URL",
     "addToClaude": "Add to Claude",
-    "tokenCreated": "Token created",
-    "tokenOnce": "This token is shown only once — copy it and store it safely.",
-    "createdOk": "Token created",
-    "updatedOk": "Token updated",
-    "editToken": "Edit token",
-    "deletedOk": "Token deleted",
-    "deleteConfirm": "Delete token \"{label}\"? Integrations using it will lose access.",
-    "empty": "No tokens yet. Create one for AI/MCP access.",
+    "tokenOnce": "This API key is shown only once — copy it and store it safely.",
+    "createdOk": "API key created",
+    "updatedOk": "API key updated",
+    "editToken": "Edit API key",
+    "deletedOk": "API key deleted",
+    "deleteConfirm": "Delete API key \"{label}\"? Integrations using it will lose access.",
+    "empty": "No API keys yet. Create one for AI/MCP access.",
     "never": "never",
-    "fullDisk": "full disk",
+    "fullDisk": "every storage",
     "cols": {
-      "label": "Label",
+      "label": "Name",
       "usernames": "Usernames",
-      "scopes": "Scopes",
+      "scopes": "Permissions",
       "root": "Root",
       "lastUsed": "Last used",
       "expires": "Expires",
       "created": "Created"
     },
     "fields": {
-      "label": "Label",
+      "label": "Name",
       "labelPlaceholder": "e.g. claude-agent",
-      "scopes": "Scopes",
-      "scopesHint": "If none are selected, all scopes are granted. File MCP needs 'mcp'; admin panel needs 'admin'.",
+      "scopes": "Permissions",
+      "scopesHint": "Choose at least one permission — an API key is never issued with none. “admin” grants the whole admin panel and is never included unless you choose it; File MCP needs “mcp”.",
       "root": "Root confinement (optional)",
-      "rootNone": "— Full disk —",
+      "rootNone": "— Every storage —",
       "rootPathPlaceholder": "sub/folder (empty = storage root)",
-      "rootHint": "Pick a storage + path to lock the token to that subtree — it can't escape upward. Empty = full disk access.",
+      "rootHint": "Pick a storage and a path to confine the API key to that subtree — it cannot reach above it. Empty = every storage.",
       "expiry": "Validity (days)",
       "expiryHint": "0 or empty = never",
       "usernames": "Usernames (optional)",
       "usernamesPlaceholder": "work, fishapp",
-      "usernamesHint": "Identities this key may act as (comma-separated; the FIRST is the default). Callers pick one via X-Filex-Token-User; empty = the label."
+      "usernamesHint": "Identities this API key may act as (comma-separated; the FIRST is the default). Callers pick one with the X-Filex-Token-User header; empty = the key's name."
     },
     "scopeDesc": {
       "read": "List/read/search/download files",
       "write": "Upload/create/move files",
       "delete": "Delete files",
       "mcp": "Connect to the MCP endpoint (file tools)",
-      "admin": "Admin panel API + admin MCP tools"
+      "admin": "The whole admin panel: users, storages, settings, the queue… (the admin API and the admin MCP tools). Never included unless ticked."
+    },
+    "scopeAll": "All",
+    "scopeName": {
+      "read": "Read",
+      "write": "Write",
+      "delete": "Delete",
+      "mcp": "MCP",
+      "admin": "Administration"
     }
   },
   "audit": {
@@ -582,7 +759,7 @@
     "resource": {
       "ai_file": "File (AI)",
       "ai_share": "Share link (AI)",
-      "ai_tokens": "AI token",
+      "ai_tokens": "API key",
       "audit": "Audit log",
       "auth_provider": "Sign-in provider",
       "duplicates": "Duplicates",
@@ -617,7 +794,12 @@
       "version": "File version",
       "versions": "File version",
       "webhook_config": "Webhook settings",
-      "webhooks": "Webhook"
+      "webhooks": "Webhook",
+      "app_plugins": "App",
+      "app_plugin": "App",
+      "auth_providers": "Sign-in provider",
+      "quota": "Quota",
+      "themes": "Theme"
     },
     "verb": {
       "action": "changed",
@@ -646,7 +828,15 @@
       "upload": "uploaded",
       "upload_abort": "upload cancelled",
       "verify": "verified",
-      "zip": "compressed"
+      "zip": "compressed",
+      "action_run": "action run",
+      "page_job": "job started from its link",
+      "share_create": "link created",
+      "unlock": "unlocked",
+      "signing_ca_import": "signing certificate imported",
+      "pin_locked": "PIN attempts locked",
+      "pin_revealed": "PIN shown",
+      "tags": "tags changed"
     },
     "target": {
       "auth_provider": "Sign-in provider",
@@ -661,8 +851,13 @@
       "trash": "Trash",
       "upload": "Upload",
       "user": "User",
-      "version": "Version"
-    }
+      "version": "Version",
+      "app_plugin": "App",
+      "file": "File"
+    },
+    "viaAi": "{resource} (AI)",
+    "filterResource": "What",
+    "rawRecord": "Raw record"
   },
   "sync": {
     "title": "Sync runs",
@@ -678,13 +873,23 @@
       "deleted": "Deleted",
       "duration": "Duration"
     },
-    "noResults": "No sync runs recorded"
+    "noResults": "No sync runs recorded",
+    "state": {
+      "ok": "OK",
+      "error": "Error",
+      "running": "Running",
+      "aborted": "Aborted",
+      "pending": "Pending"
+    }
   },
   "shares": {
+    "revokedOn": "Revoked {date}",
+    "revokeDo": "Revoke share",
+    "revokeTitle": "Revoke this share?",
     "title": "Shares",
     "subtitle": "Public links your users have generated",
     "fields": {
-      "token": "Token",
+      "token": "Link ID",
       "storage": "Storage",
       "path": "Path",
       "created": "Created",
@@ -693,30 +898,77 @@
       "creator": "Created by",
       "pin": "PIN"
     },
-    "copyLink": "Copy share URL",
-    "copyToken": "Copy token only",
+    "copyLink": "Copy share link",
+    "copyPin": "Copy PIN",
+    "revoke": "Revoke",
+    "pinProtected": "PIN required",
+    "pinHintRecoverable": "The visitor must enter a PIN. You can copy it from this row; every read is recorded in the audit log.",
+    "pinHint": "The visitor must enter a PIN. PINs are stored hashed, so filex cannot show this one again — it was shown once, when the link was created.",
+    "pinHintApp": "The visitor must enter a PIN. PINs are stored hashed, so filex cannot show this one again — {app} showed it once, when it created the link.",
+    "pinForbidden": "Only the person who created this link, or an administrator, can read its PIN.",
     "neverExpires": "Never",
-    "revokeConfirm": "Revoke this share? Existing links will stop working.",
+    "revokeConfirm": "Anyone holding the link will no longer be able to open it. The row stays in this list.",
     "deleteConfirm": "Permanently delete this share?",
     "revokedOk": "Share revoked",
     "deletedOk": "Share deleted",
     "noResults": "No active shares",
-    "linkCopied": "Share link copied to clipboard"
+    "linkCopied": "Share link copied to clipboard",
+    "pinCopied": "PIN copied to clipboard",
+    "copyFailed": "The browser would not let this page use the clipboard"
+  },
+  "appScreen": {
+    "back": "Back to files"
+  },
+  "myShares": {
+    "revoked": "Revoked",
+    "revokeDo": "Revoke link",
+    "revokeTitle": "Revoke this link?",
+    "title": "My shares",
+    "subtitle": "The public links you created. Nobody else sees this page.",
+    "noResults": "You have not shared anything yet",
+    "back": "Back to files",
+    "fields": {
+      "item": "Shared item",
+      "storage": "Storage",
+      "pin": "PIN",
+      "expires": "Expires",
+      "downloads": "Downloads"
+    },
+    "copyLink": "Copy link",
+    "linkCopied": "Link copied to clipboard",
+    "copyPin": "Copy PIN",
+    "pinCopied": "PIN copied to clipboard",
+    "pinProtected": "PIN required",
+    "noPin": "No PIN",
+    "pinHidden": "Cannot be shown",
+    "revoke": "Revoke",
+    "revokeConfirm": "Anyone holding it will no longer be able to open it.",
+    "revokedOk": "Link revoked",
+    "neverExpires": "Never",
+    "expired": "Expired",
+    "copyFailed": "The browser would not let this page use the clipboard",
+    "pinReason": {
+      "no_pin": "This link has no PIN.",
+      "not_recoverable": "This link was created before filex could keep a PIN, so it can no longer be shown. Create a new link to set a PIN you can see.",
+      "no_secret_key": "This server has no encryption key (FILEX_SECRET_KEY), so PINs cannot be kept or shown. Ask an administrator to configure one."
+    }
   },
   "search": {
     "title": "Search index",
     "subtitle": "Inspect and rebuild the embedded Bleve index",
     "stats": {
-      "documents": "Indexed documents",
       "size": "Index size",
-      "lastBuilt": "Last built"
+      "lastBuilt": "Last built",
+      "files": "Indexed files",
+      "foldersToo": "and {n} folder | and {n} folders"
     },
     "rebuild": "Rebuild index",
     "rebuildHint": "This walks every storage and re-indexes file metadata. Takes a few minutes per million files. Run it after an upgrade that reports a rebuild is recommended.",
     "rebuildStarted": "Rebuild started",
     "queryPlaceholder": "Search files… by name, or tag:label",
     "noResults": "No matches",
-    "scope": "Search scope",
+    "resultCount": "{n} result | {n} results",
+    "scope": "Look in",
     "scopeAll": "All",
     "scopeName": "Name",
     "scopeContent": "Content",
@@ -729,7 +981,12 @@
     "noTagsHint": "Tag files from the explorer to see them grouped here.",
     "selectTag": "Pick a tag to list its files",
     "resultsFor": "Files tagged \"{tag}\"",
-    "noResults": "No files with this tag"
+    "resultsForKind": "Files with the {kind} tag \"{tag}\"",
+    "noResults": "No files with this tag",
+    "personal": "Personal",
+    "team": "Team",
+    "personalHelp": "Only you see these",
+    "teamHelp": "Everyone on your team who can see the file sees these"
   },
   "about": {
     "title": "About",
@@ -744,12 +1001,21 @@
     "links": "Links",
     "documentation": "Documentation",
     "source": "Source code",
-    "license": "License",
-    "donate": "Support development"
+    "donate": "Support development",
+    "search": "Search index",
+    "toolFound": "Found",
+    "toolMissing": "Not found",
+    "licenseIs": "License: {license}"
   },
   "errors": {
     "generic": "Something went wrong",
-    "network": "Network error — is the backend running?",
+    "loadFailed": "This could not be loaded. Try again.",
+    "saveFailed": "Your changes could not be saved. Try again.",
+    "deleteFailed": "This could not be deleted. Try again.",
+    "updateFailed": "This could not be updated. Try again.",
+    "installFailed": "The installation did not finish. Try again.",
+    "actionFailed": "That did not work. Try again.",
+    "network": "The server could not be reached. Check your connection and try again.",
     "forbidden": "You don’t have permission for this action",
     "notFound": "Not found",
     "validationFailed": "Please check the highlighted fields"
@@ -766,7 +1032,6 @@
     "col_size": "Size",
     "col_deleted_at": "Deleted",
     "col_ttl": "TTL",
-    "days_left": "days",
     "restore": "Restore",
     "purge": "Purge",
     "restored": "{name} restored",
@@ -778,12 +1043,23 @@
     "older_than_days": "Older than (days)",
     "all_ages": "any age (leave blank)",
     "empty_done": "{count} item purged | {count} items purged",
+    "older_than_days_invalid": "A whole number of days, or blank for any age.",
+    "empty_running": "Emptying the trash…",
+    "emptying_progress": "{done} of {total}",
+    "emptying_freed": "{size} freed so far",
+    "emptying_note": "It carries on if you leave this page.",
+    "empty_busy": "The trash is already being emptied.",
+    "empty_failed": "{count} item could not be purged — see the server log | {count} items could not be purged — see the server log",
+    "empty_stopped": "Emptying the trash stopped: {error}",
+    "emptying_queued": "Emptying the trash… waiting for another purge to finish",
+    "empty_stop": "Stop",
+    "stopped_after": "Stopped after {count} item; the rest is still in the trash. | Stopped after {count} items; the rest is still in the trash.",
     "total_count": "Total: {n}"
   },
   "home": {
     "title": "Home",
     "allFiles": "All files",
-    "storagesEmpty": "No drives yet"
+    "storagesEmpty": "No storages yet"
   },
   "explore": {
     "tagline": "file manager",
@@ -804,47 +1080,35 @@
     },
     "myAccount": "My account",
     "apiKeys": "API keys",
-    "logout": "Log out"
-  },
-  "selfTokens": {
-    "title": "My API keys",
-    "viewerNote": "Your account is read-only — keys can only read.",
-    "label": "Label (e.g. my laptop)",
-    "rootPath": "Confine to path (optional, e.g. main://projects/acme)",
-    "expiry": "Expires (days)",
-    "create": "Create key",
-    "copyOnce": "Copy this token now — it is shown only once.",
-    "copy": "Copy",
-    "empty": "No keys yet.",
-    "keyword": "key"
+    "logout": "Sign out"
   },
   "instance": {
-    "publicUrlUnset": "FILEX_PUBLIC_URL is not set. Share links, file-request links and every link in an e-mail are built on http://localhost:5212 until you set it to the address people open this instance at.",
+    "publicUrlUnset": "FILEX_PUBLIC_URL is not set. Share links, file-request links and every link in an email are built on http://localhost:5212 until you set it to the address people open this instance at.",
     "publicUrlDocs": "How to set it"
   },
   "demo": {
     "badge": "Live demo",
     "readOnly": "Public demo — the admin panel is read-only. Browsing, uploads, shares and tags all work; anything that would change the instance or the shared demo account is refused, and everything resets nightly.",
     "title": "filex — self-hosted file manager that embeds anywhere",
-    "subtitle": "One Go binary with a full web UI, pluggable storage/auth/DB drivers, real-time collaboration, an embeddable web component, a desktop app with background folder sync, and a built-in MCP server so AI agents can drive it natively.",
+    "subtitle": "One Go binary with a full web UI, pluggable storage/auth/DB drivers, live updates and presence, an embeddable web component, a desktop app whose folder sync is live, apps that add new things to do with a file, and a built-in MCP server so AI agents can drive it natively.",
     "openCta": "Open the demo",
     "showSignIn": "Admin sign-in",
     "hideSignIn": "Hide admin sign-in",
     "creds": "Demo account: {email} · password: {password}",
-    "sandbox": "Shared sandbox — everything resets nightly, and adding storages or plugins is disabled here.",
+    "sandbox": "Shared sandbox — everything resets nightly; storages, plugins and apps are switched off here.",
     "adminHint": "Sign in with a non-demo account for full admin.",
-    "alsoIncluded": "Also included: RBAC with per-file and per-folder grants · multi-tenancy · OIDC SSO and LDAP / Active Directory · in-place viewers and editors, Office through OnlyOffice · creating a document from + New — Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever OnlyOffice is connected · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
+    "alsoIncluded": "Also included: apps — sandboxed WebAssembly add-ons installed through a permission review, with e-Signature and Convert shipping alongside · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · personal and team tags · symlinked folders · a view and sort remembered per folder · RBAC with per-file and per-folder grants · multi-tenancy · OIDC SSO and LDAP / Active Directory · in-place viewers and editors, Office through ONLYOFFICE · creating a document from + New — Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
     "features": {
       "storageTitle": "6 storage drivers, both directions",
       "storageBody": "Mount local disks, S3, SFTP, WebDAV, FTP/FTPS and SMB/NAS side by side as one tree — then reach that same tree back as S3, SFTP, FTPS, NFSv3 or WebDAV.",
       "searchTitle": "Search that forgives",
-      "searchBody": "Permission-aware full-text search across every storage. Try “budget 2026” for Documents/Budget-2026.csv, or “mian.go” — one typo forgiven — for Code/main.go. Tag a file and tag:yourlabel filters by it.",
+      "searchBody": "Permission-aware full-text search across every storage. Try “budget 2026” for Documents/Budget-2026.csv, or “mian.go” — one typo forgiven — for Code/main.go. Tag a file, yours alone or shared with the team, and tag:yourlabel filters by it.",
       "shareTitle": "Sharing, file requests · E2EE",
       "shareBody": "Public links with a PIN, an expiry and a download limit, inbound drop links that collect files from other people — plus end-to-end encrypted folders the server cannot read.",
       "desktopTitle": "Desktop app + folder sync",
-      "desktopBody": "The same explorer as a Windows, Linux or macOS app: several accounts at once, two-way background sync from the tray, a portable build on every platform for machines you may not install software on, and “filex mount” to attach a remote server as a Linux folder or a Windows drive.",
+      "desktopBody": "The same explorer as a Windows, Linux or macOS app: several accounts at once, live two-way sync from the tray — an edit on either side arrives in about a second — a portable build on every platform for machines you may not install software on, and “filex mount” to attach a remote server as a Linux folder or a Windows drive.",
       "embedTitle": "Embeddable · MCP for agents",
-      "embedBody": "Drop the real file manager into your product as a Vue 3, React or framework-free web component, and hand AI agents a token-scoped REST surface and a native MCP server.",
+      "embedBody": "Drop the real file manager into your product as a Vue 3, React or framework-free web component, and hand AI agents a REST surface scoped by API key and a native MCP server.",
       "openTitle": "Open source · MIT",
       "openBody": "MIT licensed — code, docs & releases:"
     }
@@ -859,7 +1123,7 @@
       "type": "Type",
       "status": "Status",
       "attempts": "Attempts",
-      "payload": "Payload",
+      "payload": "Subject",
       "lastError": "Last error",
       "enqueued": "Enqueued"
     },
@@ -867,14 +1131,32 @@
       "pending": "Pending",
       "running": "Running",
       "failed": "Failed",
-      "done24h": "Done 24h",
+      "done24h": "Done (last 24 h)",
       "cancelled": "Cancelled"
     },
     "retry": "Retry",
     "cancel": "Cancel",
     "retried": "Re-queued",
     "cancelled": "Cancelled",
-    "empty": "Queue is empty"
+    "empty": "Queue is empty",
+    "status": {
+      "pending": "Pending",
+      "running": "Running",
+      "failed": "Failed",
+      "done": "Done",
+      "cancelled": "Cancelled"
+    },
+    "type": {
+      "content_index": "Content indexing",
+      "antivirus_scan": "Virus scan",
+      "thumb": "Thumbnail",
+      "copy": "Copy",
+      "move": "Move",
+      "delete": "Delete",
+      "replica_retry": "Replica retry",
+      "replica_report": "Replica report",
+      "reconcile": "Replica reconcile"
+    }
   },
   "notifications": {
     "title": "Notifications",
@@ -892,13 +1174,18 @@
       "permDefault": "Permission not asked yet",
       "permUnsupported": "This browser cannot show notifications",
       "desktopHandled": "The desktop app shows these itself",
-      "saved": "Preference saved"
+      "saved": "Preference saved",
+      "movedToSettings": "Your own notification settings — the bell, browser pop-ups, which events — are in your user settings.",
+      "openSettings": "Open my notification settings"
     },
     "adminTitle": "Notifications admin",
     "bell": "Notifications",
     "empty": "No notifications yet",
     "viewAll": "View all",
+    "manageAdmin": "Manage notifications",
     "markAllRead": "Mark all read",
+    "markRead": "Mark read",
+    "pageOf": "Page {page} of {pages} · {total} in total",
     "unreadOnly": "Unread only",
     "unreadCount": "{n} unread",
     "sendTest": "Send test",
@@ -917,7 +1204,7 @@
       "severity": "Severity",
       "title": "Title",
       "body": "Body",
-      "scope": "Scope",
+      "scope": "Recipient",
       "webhook": "Webhook",
       "createdAt": "Created"
     },
@@ -926,7 +1213,49 @@
       "warning": "Warning",
       "error": "Error",
       "critical": "Critical"
-    }
+    },
+    "kinds": {
+      "file_uploaded": "New file",
+      "file_updated": "File changed",
+      "file_upload_failed": "Upload failed",
+      "file_infected": "Virus found",
+      "file_deleted": "File deleted",
+      "file_trashed": "Moved to trash",
+      "file_moved": "File moved",
+      "share_created": "Share link created",
+      "drop_received": "Files received",
+      "comment_added": "New comment",
+      "e2e_escrow_used": "Escrow key used",
+      "plugin_notice": "App notification",
+      "update_available": "Update available",
+      "update_applied": "Update applied",
+      "replica_fail": "Replica write failed",
+      "replica_fail_spike": "Replica failures rising",
+      "replica_reconcile_done": "Replica retries queued",
+      "replica_status_report": "Replica report",
+      "primary_read_fail": "Served from the replica",
+      "quota_near_full": "Storage nearly full",
+      "quota_full": "Storage full",
+      "queue_stuck": "Queue stuck",
+      "auth_fail_spike": "Failed sign-ins rising",
+      "disk_full": "Disk full",
+      "admin_test": "Test notification",
+      "webhook_test": "Webhook test"
+    },
+    "scopeEveryone": "Everyone",
+    "webhookStatus": {
+      "sent": "Sent",
+      "failed": "Failed",
+      "skipped": "Not sent",
+      "pending": "Pending"
+    },
+    "webhookNone": "no webhook is set up",
+    "webhooksMoved": "Where events are delivered — the default webhook and every target — is set up on the Webhooks page.",
+    "webhooksLink": "Open Webhooks",
+    "unreadHere": "{n} unread in this list",
+    "scopeAdmins": "Administrators",
+    "scopeViewers": "Those who can see the file",
+    "scopeNobody": "No one (history only)"
   },
   "replica": {
     "title": "Replication",
@@ -940,12 +1269,12 @@
       "title": "Pairings",
       "primary": "Primary storage (source)",
       "replica": "Replica storage (target)",
-      "targetLabel": "Replica target",
       "current": "Current pair",
       "none": "No pair configured yet.",
       "save": "Save pairing",
       "savedOk": "Pairing saved.",
-      "noStorages": "Add a storage first (Storages page)."
+      "noStorages": "Add a storage first (Storages page).",
+      "targetIs": "Replica target: {name}"
     },
     "targets": {
       "title": "Replication targets",
@@ -955,8 +1284,8 @@
       "deleted": "Replication target deleted.",
       "createdOk": "Replication target added.",
       "confirmDelete": "Delete the {name} replication target?",
-      "modeAsync": "Async (ack on primary write, queue replica)",
-      "modeSync": "Sync (don't ack until replica write commits)",
+      "modeAsync": "Asynchronous (acknowledge on the primary write, queue the replica)",
+      "modeSync": "Synchronous (don't acknowledge until the replica write commits)",
       "fields": {
         "name": "Target name",
         "driver": "Driver",
@@ -1042,26 +1371,24 @@
     "percent": "Used %",
     "unlimited": "Unlimited",
     "tooltip": "{used} of {limit} used ({percent})",
-    "unlimitedTooltip": "{used} used · unlimited"
+    "unlimitedTooltip": "{used} used · unlimited",
+    "usedIs": "Used: {used}",
+    "usedOf": "Used: {used} of {quota} ({percent})"
   },
   "adminFiles": {
     "title": "File history",
-    "subtitle": "Look up version history for a file by its node ID.",
-    "nodeIdLabel": "Node ID",
-    "nodeIdPlaceholder": "e.g. 1024",
-    "viewVersions": "View versions",
-    "invalidId": "Enter a valid positive integer node ID.",
-    "hint": "Tip: the node ID is shown in the file info panel of the explorer.",
-    "helperTitle": "How to find a node ID",
-    "helperDescription": "Open the explorer, select a file, then read its ID from the info panel or from the manager API response."
+    "subtitle": "Find a file by name to open its version history.",
+    "hint": "Pick a file from the results to see its versions, restore one or remove one.",
+    "searchLabel": "File name",
+    "searchPlaceholder": "Part of the file name, e.g. invoice",
+    "needTerm": "Type part of a file name to search for.",
+    "noMatch": "No file matches “{q}”."
   },
   "versions": {
     "title": "Version history",
     "subtitle": "Snapshots are taken automatically before destructive writes.",
     "backToFiles": "Back to file lookup",
-    "nodeLabel": "Node #{id}",
     "loadFailed": "Failed to load versions",
-    "badNodeId": "Invalid node ID in URL.",
     "newest": "(newest)",
     "empty": "No versions recorded yet",
     "emptyDescription": "Versions appear here once a file has been edited or overwritten.",
@@ -1085,14 +1412,16 @@
       "size": "Size",
       "createdAt": "Created at",
       "etag": "ETag"
-    }
+    },
+    "notFound": "This file could not be found."
   },
   "pendingOps": {
     "title": "Active operations",
     "verb": {
       "copy": "Copying",
       "move": "Moving",
-      "delete": "Deleting"
+      "delete": "Deleting",
+      "trash": "Emptying the trash"
     },
     "progress": "{done} / {total} files · {percent}%",
     "progressBytes": "{done} of {total} · {percent}%",
@@ -1126,7 +1455,7 @@
     "subtitle": "POST file events (uploads, edits, deletes, shares, drops) to external endpoints. Each delivery carries X-Filex-Event and X-Filex-Delivery headers; targets with a secret are signed with X-Filex-Signature (HMAC-SHA256).",
     "add": "New webhook",
     "edit": "Edit webhook",
-    "empty": "No webhook targets yet. The legacy single webhook on the Notifications page keeps working.",
+    "empty": "No webhook targets yet. The default webhook above still receives every event.",
     "namePlaceholder": "e.g. ops-alerts",
     "allEvents": "All events",
     "eventsHint": "Leave everything unchecked to receive every event.",
@@ -1141,7 +1470,8 @@
       "share_created": "Share link created",
       "drop_received": "File received through a public request link",
       "comment_added": "Comment added to a file or folder",
-      "e2e_escrow_used": "Encrypted folder opened with the escrow key instead of its password"
+      "e2e_escrow_used": "Encrypted folder opened with the escrow key instead of its password",
+      "plugin_notice": "App notification — an installed app sent a message (signature request, finished job, …)"
     },
     "secretSet": "Secret set",
     "secretUnset": "No secret",
@@ -1158,13 +1488,24 @@
     "saved": "Webhook saved",
     "deleted": "Webhook deleted",
     "deleteConfirm": "Delete webhook \"{name}\"?",
-    "errNameUrl": "Name and URL are required",
     "fields": {
       "events": "Events",
       "secret": "Secret",
       "lastStatus": "Last delivery",
       "enabled": "Enabled",
       "actions": "Actions"
+    },
+    "global": {
+      "title": "Default webhook",
+      "hint": "Receives every event, with a bearer token if you set one. The targets below can each pick their events and sign deliveries with a secret."
+    },
+    "errName": "Give the webhook a name.",
+    "errUrl": "Enter the address to send the events to.",
+    "errUrlScheme": "The address must start with http:// or https://.",
+    "offReason": {
+      "antivirus": "Virus scanning is off (Protection).",
+      "escrow": "No escrow key is set up for encrypted folders.",
+      "appPlugins": "Apps are switched off on this server."
     }
   },
   "protection": {
@@ -1263,23 +1604,21 @@
     "reset": "Reset",
     "resetOk": "Branding reset to defaults",
     "preview": "Live preview",
-    "previewFile": "Shared file",
-    "previewDownload": "Download",
-    "poweredByLine": "Shared with filex",
-    "previewHelp": "Approximate rendering of a public share page with the current values. Save to apply."
+    "previewHelp": "The public share page as a visitor sees it, with the values above. Save to apply them.",
+    "logoPlaceholder": "https://… or data:image/…",
+    "previewFileName": "report-2026.pdf"
   },
   "updates": {
+    "applyFailedWords": "The upgrade could not be completed; the running version was kept.",
+    "checkFailedWords": "The update server could not be reached to check for a new version. filex will try again on its own.",
     "title": "Updates",
     "subtitle": "Tracks published releases and applies what the policy allows",
     "current": "Running version",
     "available": "New version",
     "upToDate": "Up to date — nothing to do",
     "checkNow": "Check now",
-    "checkedAt": "Last checked",
-    "checkFailed": "Check failed",
     "applyNow": "Upgrade now",
     "applied": "{version} installed",
-    "applyFailed": "Upgrade failed",
     "willAutoApply": "Will be applied automatically (inside the maintenance window)",
     "restartRequired": "{version} is installed on disk, but this process is still the old build — restart filex to activate it.",
     "howTo": "How to upgrade",
@@ -1287,7 +1626,6 @@
     "includes": "This upgrade also includes",
     "security": "security",
     "migrations": "schema change",
-    "policyLabel": "policy",
     "disabled": "Update checking is off",
     "unsupported": "This server does not support the update API yet. The page activates after a backend upgrade.",
     "step": {
@@ -1299,7 +1637,15 @@
     "mode": {
       "binary": "binary install",
       "docker": "container install"
-    }
+    },
+    "policyName": {
+      "off": "off",
+      "manual": "announce only",
+      "patch": "install patches",
+      "minor": "install minor releases"
+    },
+    "policyIs": "Policy: {policy}",
+    "checkedAtWhen": "Last checked: {when}"
   },
   "desktop": {
     "handoff": "You can return to the desktop app — authorization complete.",
@@ -1309,8 +1655,8 @@
     "copied": "Copied"
   },
   "connections": {
-    "subtitle": "Connect this server to a storage backend, and see how to reach it from your own computer.",
-    "advanced": "Advanced storage settings"
+    "subtitle": "How to reach this server from your own computer — mount it, or connect with an S3 client, over SFTP, or with the filex app.",
+    "advanced": "Manage storages"
   },
   "plugins": {
     "title": "Plugins",
@@ -1375,6 +1721,7 @@
       "unverified": "Unverified — probes owed",
       "failed": "{count} probe failed | {count} probes failed",
       "unverifiedHint": "No report: the plugin offers no self-test endpoint, or verification is off on this instance. Nothing failed — nothing was checked.",
+      "view": "Conformance report",
       "reportTitle": "Conformance report — {name}",
       "summary": "{pass} passed, {fail} failed, {skip} skipped",
       "ranAt": "Probed {when}",
@@ -1410,11 +1757,249 @@
       "errFile": "Choose the new plugin binary",
       "done": "{name} upgraded",
       "rollback": "The upgrade failed. The previous binary was put back, so nothing was lost.",
-      "restored": "Running now: {state}, from {binary}."
+      "restored": "Back on the previous version: {state}, {binary}."
     },
     "signature": {
       "label": "Signature",
       "required": "This instance only accepts signed plugins: paste the detached signature over the binary's SHA-256, hex or base64, made with a key the operator trusts. Without it the install is refused."
+    }
+  },
+  "account": {
+    "errors": {
+      "emailRequired": "Enter an email address.",
+      "emailInvalid": "This is not an email address. Write it as name{'@'}example.com.",
+      "usernameEmpty": "Enter a username.",
+      "usernameAt": "A username cannot contain {'@'} — that belongs to an email address.",
+      "usernameShort": "A username needs at least {min} characters.",
+      "usernameLong": "A username can be at most {max} characters.",
+      "usernameDigit": "A username cannot start with a digit.",
+      "usernameChar": "“{char}” cannot be used in a username. Use a–z, 0–9, dot, dash or underscore.",
+      "usernameSpace": "A username cannot contain spaces. Use a–z, 0–9, dot, dash or underscore.",
+      "usernameReserved": "“{name}” is reserved; choose another username."
+    }
+  },
+  "appPlugins": {
+    "title": "Apps",
+    "tabs": {
+      "storage": "Storage plugins",
+      "apps": "Apps"
+    },
+    "subtitle": "WebAssembly apps that add rows to the file menu and run as jobs — signing, conversion, anything a manifest describes. An app runs inside filex with only the permissions it asked for and you granted.",
+    "install": "Install an app",
+    "supertenantOnly": "Apps are managed by the platform operator.",
+    "installed": "{name} installed",
+    "upgraded": "{name} upgraded",
+    "deleted": "{name} removed",
+    "deleteConfirm": "Remove the app “{name}”? Its module, settings and action overrides are deleted from the server.",
+    "permissionsCount": "{count} permission | {count} permissions",
+    "scheduledBadge": "Wakes hourly",
+    "runtime": {
+      "on": "Apps are on",
+      "off": "Apps are off on this instance",
+      "archBad": "This server's processor cannot run the WebAssembly engine, so no app can start here.",
+      "signature": "Only signed apps are accepted on this instance.",
+      "engines": "Engines"
+    },
+    "fields": {
+      "name": "Name",
+      "label": "Label",
+      "version": "Version",
+      "state": "State",
+      "schedule": "Schedule",
+      "permissions": "Permissions",
+      "enabled": "Enabled",
+      "actions": "Actions"
+    },
+    "state": {
+      "running": "Running",
+      "disabled": "Off",
+      "refused": "Refused",
+      "failed": "Failed"
+    },
+    "source": {
+      "upload": "Uploaded",
+      "url": "From a URL",
+      "github": "GitHub",
+      "bundle": "Bundled"
+    },
+    "actions": {
+      "details": "Details",
+      "upgrade": "Upgrade",
+      "remove": "Remove"
+    },
+    "empty": {
+      "title": "No apps installed",
+      "description": "Install one from a GitHub repository: enter owner/name, filex reads its filex-app.json, fetches the module it names and shows every permission the app asks for before anything is installed."
+    },
+    "wizard": {
+      "title": "Install an app",
+      "upgradeTitle": "Upgrade {name}",
+      "steps": {
+        "source": "Source",
+        "review": "Review",
+        "done": "Install"
+      },
+      "source": {
+        "github": "GitHub repository",
+        "file": "Upload files",
+        "url": "From a URL"
+      },
+      "repo": "Repository",
+      "repoHint": "owner/name. filex reads filex-app.json from the repository at the ref (the default branch when empty) and fetches the module the manifest names, checking its SHA-256.",
+      "ref": "Ref (tag, branch or commit)",
+      "wasm": "Module (.wasm) — leave empty for a language pack",
+      "manifest": "Manifest (filex-app.json)",
+      "signature": "Signature",
+      "signatureHint": "Optional: an ed25519 signature over the module's SHA-256, hex or base64.",
+      "signatureRequired": "This instance only accepts signed apps: paste the ed25519 signature over the module's SHA-256, hex or base64, made with a key the operator trusts.",
+      "url": "Module URL — empty for a language pack",
+      "manifestUrl": "Manifest URL",
+      "sha256": "SHA-256",
+      "shaHint": "Required with a module URL: a URL is not a promise about bytes. filex checks the module after downloading it and refuses a mismatch. For a language pack it is optional and pins the manifest.",
+      "next": "Review permissions",
+      "back": "Back",
+      "install": "Install",
+      "upgrade": "Upgrade",
+      "permissions": "Permissions this app asks for",
+      "noPermissions": "This app asks for no permission.",
+      "noReason": "The app gives no reason.",
+      "understand": "I understand what this app can do and want to install it",
+      "doneInstall": "The app is installed and running.",
+      "doneUpgrade": "The app is upgraded and running.",
+      "facts": {
+        "actions": "Menu actions",
+        "views": "Views",
+        "publicPages": "Public pages",
+        "sha256": "Module SHA-256",
+        "homepage": "Homepage",
+        "manifestSha256": "Manifest SHA-256"
+      },
+      "errRepo": "Enter the repository as owner/name.",
+      "errFiles": "Choose the manifest (filex-app.json) — and the module (.wasm), unless the app is a language pack.",
+      "errUrl": "Enter the manifest URL — and, for an app with a module, the module URL and its 64-character SHA-256.",
+      "errors": {
+        "permissions_incomplete": "Every permission in the manifest has to be granted; missing: {missing}. Review the list again and retry.",
+        "permissions_changed": "The new version asks for permissions the installed one was not granted: {missing}. Review them and confirm again.",
+        "sha256_mismatch": "The module's SHA-256 does not match the one given. Check the hash and the URL.",
+        "manifest_invalid": "The manifest is not a valid filex-app.json: {message}",
+        "signature_required": "This instance only accepts signed apps. Add the signature and try again.",
+        "signature_invalid": "The signature does not verify against any trusted key.",
+        "name_taken": "An app with this name is already installed. Go back to the review and choose the upgrade offered there, or use Upgrade on its row.",
+        "describe_mismatch": "The module describes itself differently from its manifest — the build and the manifest do not belong together.",
+        "sha256_required": "The module is not pinned by a SHA-256, and a downloaded module must be. Enter the hash, or ask the app’s author to put it in the manifest.",
+        "too_large": "The module is larger than this server accepts.",
+        "demo_refused": "Apps cannot be installed on the demo instance.",
+        "not_found": "That app is no longer installed.",
+        "fetch": {
+          "bad_repo": "Write the repository as owner/name, for example BRF-Tech/filex-convert.",
+          "manifest_not_found": "No filex-app.json was found in {where} (tried: {refs}). Check that the repository exists and is public, that filex-app.json is at its root, and — if you entered a ref — that the tag or branch exists.",
+          "module_not_found": "The manifest was found, but the module it names is not there: {where}. The release may not have its plugin.wasm attached yet — check the release, or enter a different ref.",
+          "unreachable": "The server could not reach {where}. Check that it can reach the internet (or that host), then try again.",
+          "http_status": "{where} answered with HTTP {status}. Try again later, or check the address.",
+          "bad_url": "“{where}” is not an address filex can download from: use https:// (plain http:// only for this machine).",
+          "missing_url": "Enter both the module URL and the manifest URL.",
+          "too_large": "What {where} sent is larger than this server accepts."
+        }
+      },
+      "languagePackNote": "Only languages for filex itself — no module, nothing runs.",
+      "alreadyInstalled": "“{name}” is already installed here (version {version}). Installing it a second time is not possible — upgrade the installed one to {next} from this same source instead.",
+      "upgradeInstead": "Upgrade it to {version} instead",
+      "enginesMissing": "This server does not have {engines}. The app installs, but what it does with them will not work until they are installed and filex is restarted."
+    },
+    "detail": {
+      "source": "Source",
+      "signature": "Signature",
+      "signed": "Signed",
+      "unsigned": "Unsigned",
+      "sha256": "SHA-256",
+      "installed": "Installed",
+      "updated": "Updated",
+      "homepage": "Homepage",
+      "settings": "Settings",
+      "noSettings": "This app has no settings.",
+      "settingsSaved": "Settings saved",
+      "secretHint": "A secret shown as *** stays as it is unless you type a new value.",
+      "overrides": {
+        "title": "Menu actions",
+        "empty": "This app adds no menu action.",
+        "action": "Action",
+        "enabled": "Enabled",
+        "adminOnly": "Admins only",
+        "applies": "Applies to",
+        "kind": "Kind",
+        "ext": "Extensions",
+        "engineOnly": "Only while {engine} is on this server: {exts}",
+        "mime": "MIME types",
+        "multi": "Multiple selection",
+        "min": "Min",
+        "max": "Max",
+        "manifestDefault": "As the manifest says",
+        "customize": "Customize",
+        "reset": "Reset to manifest",
+        "saved": "Menu actions saved",
+        "kinds": {
+          "file": "Files",
+          "dir": "Folders",
+          "any": "Files and folders"
+        }
+      },
+      "locks": {
+        "title": "File locks",
+        "hint": "A locked file is read-only for everyone, this account included",
+        "empty": "This app is not holding any file.",
+        "path": "File",
+        "storage": "Storage #{id}",
+        "reason": "Reason",
+        "until": "Until",
+        "noEnd": "Until the app lifts it",
+        "unlock": "Lift the lock",
+        "lifted": "The lock on {path} was lifted",
+        "confirmTitle": "Lift this lock?",
+        "confirmText": "The app “{app}” froze {path} while it works on it, and will not be told that the lock is gone. Lift it only when the app has stopped or the work was abandoned."
+      },
+      "schedule": {
+        "title": "Schedule",
+        "next": "Next wake-up {when}",
+        "decided": "last one: {note}",
+        "neverWoken": "it has not been woken yet",
+        "woken": "woken {count}×",
+        "node": "on {node}",
+        "empty": "The last wake-up asked for nothing.",
+        "action": "Work",
+        "due": "Due",
+        "status": "Status",
+        "job": "Job",
+        "openQueue": "Open the ops queue",
+        "notQueued": "not queued yet",
+        "statuses": {
+          "due": "Due",
+          "running": "Running",
+          "queued": "Queued",
+          "failed": "Failed",
+          "skipped": "Skipped"
+        }
+      },
+      "logs": {
+        "title": "Log",
+        "empty": "Nothing logged yet.",
+        "live": "Live — refreshed every 2 seconds"
+      },
+      "grantedTitle": "What it was allowed to do"
+    },
+    "kind": {
+      "languagePack": "Language pack"
+    },
+    "lang": {
+      "heading": "Languages it adds to filex",
+      "coverage": "{percent}% translated",
+      "fallback": "the rest shows in English",
+      "unknown": "{count} string this version of filex does not have | {count} strings this version of filex does not have",
+      "strings": "{count} string | {count} strings"
+    },
+    "page": {
+      "breadcrumb": "App details",
+      "back": "Apps",
+      "missing": "No app named “{name}” is installed on this server."
     }
   },
   "usage": {
@@ -1445,10 +2030,10 @@
     "cost": {
       "title": "Estimated cost",
       "storage": "Storage",
-      "egress": "Download",
+      "egress": "Data downloaded",
       "transactions": "Transactions",
       "covered": "Covered by the free allowance",
-      "billableFree": "free"
+      "billableAndFree": "{billable} / {free} free"
     },
     "buckets": {
       "title": "By bucket",
@@ -1476,7 +2061,7 @@
       "ai": "AI assistant"
     },
     "subtitle": {
-      "profile": "Your name, e-mail and picture — what other people see.",
+      "profile": "Your name, email and picture — what other people see.",
       "preferences": "How this app looks and reads on your devices.",
       "notifications": "What reaches your bell, and what reaches your desktop.",
       "security": "Your password and second factor.",
@@ -1504,10 +2089,27 @@
       "appearance": "Appearance",
       "mode": "Light or dark",
       "modeHint": "Which variant is painted. Auto follows your operating system.",
-      "palette": "Colour palette",
-      "paletteHint": "Which colours that variant is made of. Every palette has a light and a dark version, so this and the setting above work together.",
-      "folderMemory": "Remember each folder’s view",
-      "folderMemoryHint": "A folder opens the way you last left it — list or grid, and its sort. Off by default; your last choice applies everywhere instead.",
+      "palette": "Color palette",
+      "paletteHint": "Which colors that variant is made of. Every palette has a light and a dark version, so this and the setting above work together.",
+      "folderView": "Default folder view",
+      "folderViewHint": "How a folder you have never changed opens. A folder you have changed keeps its own view — changing this does not touch it.",
+      "fvMode": "View",
+      "fvSort": "Sort by",
+      "fvDir": "Direction",
+      "fvInherit": "Server default ({value})",
+      "fvView_list": "List",
+      "fvView_grid": "Grid",
+      "fvView_gallery": "Gallery",
+      "fvSort_name": "Name",
+      "fvSort_type": "Type",
+      "fvSort_modified": "Modified",
+      "fvSort_size": "Size",
+      "fvDir_asc": "Ascending",
+      "fvDir_desc": "Descending",
+      "fvColumns": "Your default columns are customized (set with “Make this my default for all folders”).",
+      "fvColumnsReset": "Reset them",
+      "fvKept": "{count} folder keeps a view of its own. | {count} folders keep a view of their own.",
+      "fvForget": "Forget them all",
       "openTrigger": "Open files with",
       "openTriggerHint": "How a mouse opens a file. On a touchscreen a tap always opens, and the checkbox always selects.",
       "openTriggerDouble": "Double-click",
@@ -1529,7 +2131,8 @@
         "share_created": "Someone creates a share link",
         "drop_received": "A file arrives through a request link",
         "comment_added": "Someone comments on a file",
-        "e2e_escrow_used": "An encrypted folder is opened with the escrow key"
+        "e2e_escrow_used": "An encrypted folder is opened with the escrow key",
+        "plugin_notice": "An installed app sends you a message"
       }
     },
     "security": {
@@ -1544,5 +2147,116 @@
       "soon": "Coming soon",
       "body": "This release has no per-user assistant settings. The AI features filex does ship are configured for the whole instance by an administrator, so there is nothing here for you to turn on or off yet."
     }
+  },
+  "appearance": {
+    "title": "Appearance",
+    "subtitle": "Compose a theme in your own colors, set it as the default for everyone, and — if you really need it — paste your own CSS.",
+    "saved": "Instance themes",
+    "noThemes": "No themes yet. Compose one below and it appears beside the built-in palettes for everyone.",
+    "new": "New theme",
+    "import": "Import",
+    "export": "Export",
+    "makeDefault": "Make default",
+    "isDefault": "Default",
+    "composing": "New theme",
+    "editing": "Editing “{name}”",
+    "name": "Name",
+    "nameHelp": "What people see under the palette card.",
+    "key": "Identifier",
+    "keyHelp": "Lower-case letters, digits and hyphens. It becomes the palette id and cannot be changed later.",
+    "keyInvalid": "Use 1-40 characters: a-z, 0-9 and -",
+    "variant": "Variant",
+    "light": "Light",
+    "dark": "Dark",
+    "radius": "Corner radius (px)",
+    "radiusHelp": "The other three radii follow from this one.",
+    "font": "Font family",
+    "fontHelp": "A plain CSS font stack. No url() — embed a face through the custom CSS panel instead.",
+    "preview": "Live preview",
+    "previewHelp": "Painted with the same theme variables the product uses, so this is what you get.",
+    "previewUpload": "Upload",
+    "previewNew": "New",
+    "previewOk": "Synced",
+    "previewWarn": "Pending",
+    "previewDanger": "Failed",
+    "sampleSlides": "slides.pptx",
+    "sampleNotes": "notes.txt",
+    "reset": "Start over",
+    "savedOk": "Theme saved.",
+    "deletedOk": "Theme deleted.",
+    "defaultOk": "Instance default set.",
+    "deleteConfirm": "Delete the theme “{name}”? Anybody using it goes back to the default palette.",
+    "deleteFallbackNote": "Deleting a theme puts everybody using it back on the default palette — nobody is left on a theme that no longer exists.",
+    "importOk": "“{name}” imported.",
+    "importBad": "That file is not a filex theme.",
+    "contrastTitle": "Some pairings are below the readability bar",
+    "col": {
+      "name": "Theme",
+      "id": "Palette id"
+    },
+    "token": {
+      "bg": "Page background",
+      "bgElev": "Raised background",
+      "border": "Borders",
+      "text": "Text",
+      "textMuted": "Muted text",
+      "primary": "Primary",
+      "primaryHover": "Primary, hover",
+      "primarySoft": "Primary tint",
+      "primaryInk": "Ink on the tint",
+      "danger": "Danger",
+      "warning": "Warning",
+      "ok": "Success"
+    },
+    "contrast": {
+      "text": "Text on the page background",
+      "muted": "Muted text on the page background",
+      "ink": "Ink on the primary tint",
+      "primary": "Primary against the page background",
+      "danger": "Danger against the page background"
+    },
+    "css": {
+      "title": "Custom CSS",
+      "help": "The escape hatch, for the things theme variables cannot say. Almost everything you want is in the theme editor above.",
+      "warnTitle": "Read this before you turn it on",
+      "warnScope": "It never applies to the sign-in page or to this screen, so you can always get back here to switch it off.",
+      "warnNetwork": "{'@'}import is stripped and every url() that is not a data: URI is made inert, so a stylesheet cannot call home.",
+      "warnLie": "Within the screens it does reach, CSS can still hide, cover or relabel a control — including a delete confirmation. Only paste CSS you wrote.",
+      "warnOperator": "Instance operators only. On a multi-tenant installation a tenant administrator cannot set this.",
+      "enable": "Apply custom CSS",
+      "enableHelp": "Off by default. Turn it off again here at any time.",
+      "field": "Stylesheet",
+      "hint": "Plain CSS. Overriding the --fe-* variables is the gentlest thing you can do here.",
+      "count": "{used} / {max} bytes",
+      "tooBig": "The stylesheet is over the size limit.",
+      "remove": "Remove",
+      "removeConfirm": "Remove the stylesheet and switch custom CSS off?",
+      "removedOk": "Stylesheet removed.",
+      "savedOk": "Stylesheet saved."
+    },
+    "namePlaceholder": "Acme Cloud"
+  },
+  "language": {
+    "fromApp": "Added by the {app} app"
+  },
+  "editor": {
+    "missingPath": "Missing {param} query parameter."
+  },
+  "appLock": {
+    "refused": "{app} is holding this file — it cannot be changed until the app lets it go.",
+    "refusedReason": "{app} is holding this file ({reason}) — it cannot be changed until the app lets it go.",
+    "someApp": "An app"
+  },
+  "forms": {
+    "required": "Fill in this field.",
+    "email": "Enter an email address, like name{'@'}example.com.",
+    "url": "Enter a full address starting with http:// or https://.",
+    "number": "Enter a number.",
+    "min": "Enter {min} or more.",
+    "max": "Enter {max} or less.",
+    "step": "Enter a whole number.",
+    "minLength": "Use at least {n} character. | Use at least {n} characters.",
+    "maxLength": "Use at most {n} character. | Use at most {n} characters.",
+    "pattern": "This is not in the expected form."
   }
 }

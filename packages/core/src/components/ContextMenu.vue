@@ -12,6 +12,8 @@ import type { FileNode } from '../types/FileNode';
 import { useLocale } from '../composables/useLocale';
 import { menuShortcutHint } from '../composables/useKeyboardShortcuts';
 import { actionIconSvg } from '../lib/actionIcons';
+import { openAlongInline } from '../lib/direction';
+import { POPUP_BASE_Z, openerCandidates, popupLayer } from '../lib/popupLayer'; /* katman:z1 */
 
 export interface ContextAction {
   key: string;
@@ -42,6 +44,14 @@ export interface ContextAction {
   title?: string;
   hidden?: boolean;
   divider?: boolean;
+  /**
+   * A test hook on the menu ITEM. The menu teleports to <body>, so an
+   * entry cannot be addressed through the component that opened it; a spec
+   * (or a plugin's own e2e) that used to click a loose row button needs a
+   * name for the verb now that the verb lives in here. Absent for every
+   * explorer action, which are addressed by label.
+   */
+  testid?: string;
   /**
    * tus:t1 — registry action id whose key this row should print. Optional:
    * rows whose `key` already matches the registry (rename, delete, copy…)
@@ -75,7 +85,10 @@ const emit = defineEmits<{
   (e: 'select', action: ContextAction, target: FileNode[]): void;
 }>();
 
-const { t } = useLocale(() => props.locale); // bag:b4 — sheet aria labels need t()
+// bag:b4 — sheet aria labels need t(). ⚠ RTL: `dir` goes on the teleported
+// backdrop — under <body> the menu would otherwise take the HOST page's
+// direction, not the language its own rows are written in.
+const { t, dir } = useLocale(() => props.locale);
 
 /* tus:t1 — a row's key label. `shortcutId` wins when an embedder sets one;
  * otherwise the row's own key is looked up in the shared menu map. */
@@ -95,6 +108,11 @@ function iconFor(a: ContextAction): string {
 const open = ref(false);
 const x = ref(0);
 const y = ref(0);
+/* katman:z1 — the layer this menu is painted on, measured from whatever opened
+ * it. See lib/popupLayer.ts: a menu opened inside the explorer's Connections /
+ * API-keys overlay (`.fe-overlay`, z-index 130) used to be drawn at 80 and was
+ * invisible. The stylesheet's 80 stays as the value for every ordinary open. */
+const layerZ = ref(POPUP_BASE_Z);
 const targetNodes = ref<FileNode[]>([]);
 const menuEl = ref<HTMLElement | null>(null);
 
@@ -110,6 +128,9 @@ let prevFocus: HTMLElement | null = null;
 
 async function show(ev: { clientX: number; clientY: number }, nodes: FileNode[]) {
   prevFocus = (document.activeElement as HTMLElement | null) ?? null; /* wiring:c4 */
+  /* katman:z1 — BEFORE the backdrop exists: once it does it covers the
+   * viewport and `elementFromPoint` answers with the backdrop itself. */
+  layerZ.value = popupLayer(openerCandidates(ev.clientX, ev.clientY));
   open.value = true;
   x.value = ev.clientX;
   y.value = ev.clientY;
@@ -144,10 +165,11 @@ function clampToViewport() {
     const flipped = anchorY - rect.height;
     y.value = flipped >= margin ? flipped : Math.max(margin, vh - rect.height - margin);
   }
-  if (anchorX + rect.width > vw - margin) {
-    const flipped = anchorX - rect.width;
-    x.value = flipped >= margin ? flipped : Math.max(margin, vw - rect.width - margin);
-  }
+  /* ⚠ RTL: the menu opens toward the inline END of the pointer — down-LEFT in
+   * a right-to-left interface — and flips to the other side the same way.
+   * `openAlongInline` is the flip-then-clamp this block used to spell out,
+   * mirrored for RTL; in LTR it is the same arithmetic, number for number. */
+  x.value = openAlongInline(anchorX, rect.width, vw, dir.value, margin);
 }
 
 function hide() {
@@ -321,7 +343,9 @@ defineExpose({ show, hide });
       <div
         v-if="open"
         class="fe-ctx-backdrop"
+        :dir="dir"
         :class="[themeClass, { 'fe-ctx-backdrop--sheet': sheet }]"
+        :style="{ zIndex: layerZ /* katman:z1 */ }"
         :data-prefers-dark="prefersDark ? '1' : '0'"
         @click="hide"
         @contextmenu.prevent="hide"
@@ -360,6 +384,7 @@ defineExpose({ show, hide });
                 :class="{ 'is-danger': a.danger, 'is-disabled': a.disabled }"
                 :disabled="a.disabled"
                 :title="a.title"
+                :data-testid="a.testid"
                 role="menuitem"
                 @click="pick(a)"
               >
@@ -391,6 +416,7 @@ defineExpose({ show, hide });
               :class="{ 'is-danger': a.danger, 'is-disabled': a.disabled }"
               :disabled="a.disabled"
               :title="a.title"
+              :data-testid="a.testid"
               role="menuitem"
               @click="pick(a)"
             >

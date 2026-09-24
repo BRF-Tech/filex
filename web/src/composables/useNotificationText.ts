@@ -8,7 +8,9 @@
  * label slightly differently, a person would read one sentence in the bell and
  * a different one in the toast that told them to look at the bell.
  */
+import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { foreignText, localeStrings, localesVersion } from '@brftech/filex-core';
 
 import {
   renderNotification,
@@ -21,6 +23,21 @@ import { userEventKey } from '@/lib/webhookEvents';
 export function useNotificationText() {
   const { t, te, locale } = useI18n();
 
+  /**
+   * The installed language pack's `server.notify.*` strings for the language
+   * on screen — the phrases in a language filex does not ship (or a pack's
+   * overlay of one it does). Re-read when a pack arrives or leaves
+   * (`localesVersion`), and filtered ONCE here: `localeStrings` copies the
+   * whole ~3 000-key table, and a bell renders a row per notification.
+   */
+  const packNotify = computed(() => {
+    void localesVersion.value;
+    const all = localeStrings(locale.value);
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(all)) if (k.startsWith('server.notify.')) out[k] = v;
+    return Object.keys(out).length ? out : undefined;
+  });
+
   /** Render one row in the language this app is currently showing. */
   function notificationText(row: NotificationLike): NotificationText {
     const lang: NotifyLocale = locale.value === 'tr' ? 'tr' : 'en';
@@ -31,6 +48,14 @@ export function useNotificationText() {
     const key = userEventKey(row.event);
     return renderNotification(row, lang, {
       fallbackLabel: te(key) ? t(key) : undefined,
+      strings: packNotify.value,
+      lang: locale.value,
+      // ⚠⚠ The reader's direction. A notification is composed out of a
+      // phrase and a ROW, never through vue-i18n, so the panel's
+      // post-translation hook never sees it — and nearly every body is
+      // machine text (a path, a reason, an app's own words). Both surfaces
+      // this composable serves get it, because they describe one row.
+      foreign: (text: string) => foreignText(String(locale.value), text),
     });
   }
 

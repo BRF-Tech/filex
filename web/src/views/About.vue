@@ -7,8 +7,9 @@ import { useCapabilitiesStore } from '@/stores/capabilities';
 import LogoMark from '@/components/LogoMark.vue';
 import Badge from '@/components/ui/Badge.vue';
 import CopyButton from '@/components/ui/CopyButton.vue';
+import { driverName } from '@/lib/storageWords';
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 const caps = useCapabilitiesStore();
 
 const data = computed(() => caps.data);
@@ -18,12 +19,29 @@ interface ToolEntry {
   available: boolean;
 }
 
+/* ⚠ Programs are named the way their makers write them ("ImageMagick", not
+ * "imagemagick"), and each row reads name first, then its state — the
+ * badge used to stand BEFORE the name, so "— imagemagick Tamam ffmpeg" read
+ * as "imagemagick: Tamam" (release-candidate sweep, 2026-09-21, QA #9). The
+ * availability itself is the server's one answer (enginebin), shared with
+ * Apps and the converter. */
 const thumbnailTools = computed<ToolEntry[]>(() => [
-  { name: 'imagemagick', available: data.value.imagemagick },
-  { name: 'ffmpeg', available: data.value.ffmpeg },
-  { name: 'ghostscript', available: data.value.ghostscript },
-  { name: 'libreoffice', available: data.value.libreoffice },
+  { name: 'ImageMagick', available: data.value.imagemagick },
+  { name: 'FFmpeg', available: data.value.ffmpeg },
+  { name: 'Ghostscript', available: data.value.ghostscript },
+  { name: 'LibreOffice', available: data.value.libreoffice },
 ]);
+
+/** A database engine by its product name — the page capitalised the id
+ *  ("Sqlite"). */
+const DB_NAMES: Record<string, string> = { sqlite: 'SQLite', postgres: 'PostgreSQL', mysql: 'MySQL' };
+const dbName = computed(() => DB_NAMES[data.value.db_driver] ?? data.value.db_driver);
+
+/** A sign-in method by name, as the Identity providers page names it. */
+function authName(d: string): string {
+  const k = `authProviders.providers.${d}`;
+  return te(k) ? t(k) : d;
+}
 </script>
 
 <template>
@@ -48,9 +66,9 @@ const thumbnailTools = computed<ToolEntry[]>(() => [
 
       <div class="card card-body">
         <p class="text-xs uppercase tracking-wide text-zinc-500">{{ t('about.db') }}</p>
-        <p class="mt-1 text-lg font-semibold capitalize">{{ data.db_driver }}</p>
-        <p class="mt-1 text-xs text-zinc-500">
-          search:
+        <p class="mt-1 text-lg font-semibold" data-testid="about-db">{{ dbName }}</p>
+        <p class="mt-1 flex items-center gap-1.5 text-xs text-zinc-500">
+          <span>{{ t('about.search') }}</span>
           <Badge :tone="data.search_enabled ? 'emerald' : 'zinc'" size="xs">
             {{ data.search_enabled ? t('common.enabled') : t('common.disabled') }}
           </Badge>
@@ -65,8 +83,9 @@ const thumbnailTools = computed<ToolEntry[]>(() => [
             :key="d"
             tone="brand"
             size="xs"
+            :title="d"
           >
-            {{ d }}
+            {{ driverName(d, t, te) }}
           </Badge>
           <span v-if="!data.storage_drivers.length" class="text-xs text-zinc-500">—</span>
         </div>
@@ -80,8 +99,9 @@ const thumbnailTools = computed<ToolEntry[]>(() => [
             :key="d"
             tone="violet"
             size="xs"
+            :title="d"
           >
-            {{ d }}
+            {{ authName(d) }}
           </Badge>
           <span v-if="!data.auth_drivers.length" class="text-xs text-zinc-500">—</span>
         </div>
@@ -98,10 +118,10 @@ const thumbnailTools = computed<ToolEntry[]>(() => [
           :key="t2.name"
           class="flex items-center gap-2 text-sm"
         >
-          <Badge :tone="t2.available ? 'emerald' : 'zinc'" dot size="xs">
-            {{ t2.available ? t('common.ok') : '—' }}
+          <span>{{ t2.name }}</span>
+          <Badge :tone="t2.available ? 'emerald' : 'zinc'" dot size="xs" :data-testid="`about-tool-${t2.name}`">
+            {{ t2.available ? t('about.toolFound') : t('about.toolMissing') }}
           </Badge>
-          <span class="font-mono">{{ t2.name }}</span>
         </li>
       </ul>
     </div>
@@ -134,7 +154,7 @@ const thumbnailTools = computed<ToolEntry[]>(() => [
           </a>
         </li>
       </ul>
-      <p class="mt-3 text-xs text-zinc-500">{{ t('about.license') }}: MIT</p>
+      <p class="mt-3 text-xs text-zinc-500">{{ t('about.licenseIs', { license: 'MIT' }) }}</p>
     </div>
   </div>
 </template>

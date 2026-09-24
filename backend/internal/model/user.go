@@ -93,6 +93,36 @@ type User struct {
 }
 
 // IsAdmin returns true if the user has the admin role.
+// PersonLabel is how filex names a person to anybody reading a screen: the
+// display name, else the username, else the e-mail address — trimmed, the
+// first one that is not empty.
+//
+// ⚠⚠ ONE rule, everywhere a person is shown (QA, 2026-09-21): the same
+// administrator was "admin2" in the Owner column, "admin@local" in
+// notifications and the signing app, and a full name on signatures — the
+// Owner column's lookup said display → username → e-mail, the presence strip
+// display → e-mail local part, the permissions panel display → e-mail. This
+// is the rule; the browser's twin is personName()
+// (packages/core/src/lib/personName.ts) and web/tests/lib/personName.test.ts
+// holds the two to the same cases. docs/CONTRIBUTING.md → "A person is named
+// one way".
+func PersonLabel(displayName, username, email string) string {
+	for _, s := range []string{displayName, username, email} {
+		if v := strings.TrimSpace(s); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// Label is PersonLabel for this account ("" for a nil user).
+func (u *User) Label() string {
+	if u == nil {
+		return ""
+	}
+	return PersonLabel(u.DisplayName, u.Username, u.Email)
+}
+
 func (u *User) IsAdmin() bool {
 	if u == nil {
 		return false
@@ -143,7 +173,14 @@ type APIToken struct {
 	UserID    int64  `json:"user_id"`
 	Label     string `json:"label"`
 	TokenHash string `json:"-"`
-	Scopes    string `json:"scopes"` // comma-separated allow-list; "" == all
+	// Scopes is the comma-separated allow-list of what this token may do.
+	// ⚠⚠ An EMPTY list grants NOTHING (HasScope answers false). Until
+	// v0.43.0 it meant "every scope", `admin` included, and a token created
+	// with nothing ticked could read the admin API; every door that issues a
+	// token now refuses an empty list (400 scopes_required), and a stored
+	// empty row fails closed. Do not restore the old reading — the reasoning
+	// is in auth/drivers/apitoken/issue.go.
+	Scopes string `json:"scopes"`
 	// Usernames is the comma-separated allow-list of identities a caller may
 	// act under (X-Filex-Token-User); the FIRST entry is the default. One
 	// durable token often serves several consumers (work panel, PWA, a PC MCP
@@ -247,14 +284,22 @@ func (t *APIToken) ResolveUsername(requested string) (string, bool) {
 	return "", false
 }
 
-// HasScope reports whether the token grants `want`. An empty Scopes field
-// means "all scopes" (full access for the bound user's role).
+// HasScope reports whether the token grants `want` — only when `want` is
+// in its list.
+//
+// ⚠⚠ An EMPTY list grants NOTHING (fail closed). Until v0.43.0 it granted
+// everything, admin included, and a token minted on the admin screen with
+// nothing ticked read /api/ai/admin/users (release-candidate sweep,
+// 2026-09-21). No door issues an empty list any more (apitoken.ParseIssued)
+// and migration 00054 wrote every old empty list out as the explicit full
+// one, so a row that is empty now is a mistake — and a mistake in an
+// authorization check must fall towards "no".
 func (t *APIToken) HasScope(want string) bool {
 	if t == nil {
 		return false
 	}
 	if strings.TrimSpace(t.Scopes) == "" {
-		return true
+		return false
 	}
 	for _, s := range strings.Split(t.Scopes, ",") {
 		if strings.TrimSpace(s) == want {

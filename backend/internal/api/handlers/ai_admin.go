@@ -18,11 +18,13 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/external"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/queue"
 	"github.com/brf-tech/filex/backend/internal/replica"
 	"github.com/brf-tech/filex/backend/internal/search"
@@ -82,6 +84,7 @@ type AIAdminDeps struct {
 	Queue           queue.Driver
 	Notify          notify.Service
 	Trash           *trash.Service
+	Ops             *ops.Service
 	Index           *search.Index
 	ReplicaService  *replica.Service
 	ReplicaCron     *replica.CronScheduler
@@ -101,6 +104,18 @@ type AIAdminDeps struct {
 	// giving (issue #17).
 	PublicURL    string
 	PublicURLSet bool
+	// AuthLive is the running set of sign-in providers, so the admin MCP
+	// tools change sign-in through the same handler, with the same guards, as
+	// the page (handlers/auth_providers.go).
+	AuthLive *authsetup.Live
+}
+
+// newTrashWithOps is the trash handler with the queue "empty the trash now"
+// runs on, so the MCP tool starts the same ops job the page does.
+func newTrashWithOps(svc *trash.Service, store db.Store, o *ops.Service) *Trash {
+	h := NewTrash(svc, store)
+	h.AttachOps(o)
+	return h
 }
 
 // NewAIAdmin constructs the admin AI surface from shared deps. Each wrapped
@@ -117,14 +132,14 @@ func NewAIAdmin(d AIAdminDeps) *AIAdmin {
 		storagesAdm: NewStoragesAdmin(d.Store),
 		syncAdm:     NewSyncAdmin(d.Store),
 		sharesAdm:   NewSharesAdmin(d.Store),
-		trash:       NewTrash(d.Trash, d.Store),
+		trash:       newTrashWithOps(d.Trash, d.Store, d.Ops),
 		searchAdm:   NewSearchAdmin(d.Index, d.Store),
 		authProv:    newDemoAwareAuthProviders(d),
 		external:    newExternalAdminWithPublicURL(d),
 		replica:     NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader),
 		repTargets:  NewReplicationTargets(d.Store),
-		queue:       NewQueue(d.Queue),
-		notif:       NewNotifications(d.Notify),
+		queue:       newQueueWithStore(d.Queue, d.Store),
+		notif:       NewNotifications(d.Notify, d.Store, acl.New(d.Store)),
 		audit:       newDemoAwareAudit(d),
 		grants:      NewGrants(d.Store, acl.New(d.Store)),
 	}
@@ -210,6 +225,7 @@ func (a *AIAdmin) Register(r chi.Router) {
 		r.Get("/", a.trash.List)
 		r.Post("/restore", a.trash.Restore)
 		r.Post("/empty", a.trash.AdminEmpty)
+		r.Get("/empty", a.trash.EmptyStatus)
 		r.Delete("/{id}", a.trash.Purge)
 	})
 
@@ -308,6 +324,7 @@ func (a *AIAdmin) invoke(ctx context.Context, principal *model.User, h http.Hand
 	}
 
 	c := auth.WithUser(ctx, principal)
+	c, detail := auth.WithAuditDetail(c)
 	if len(urlParams) > 0 {
 		rctx := chi.NewRouteContext()
 		for k, v := range urlParams {
@@ -326,7 +343,7 @@ func (a *AIAdmin) invoke(ctx context.Context, principal *model.User, h http.Hand
 
 	rec := newBufRecorder()
 	h(rec, req)
-	a.auditInvoke(ctx, principal, method, path, urlParams, rec.status)
+	a.auditInvoke(ctx, principal, method, path, urlParams, rec.status, detail)
 	return rec.status, rec.buf.Bytes()
 }
 
@@ -338,7 +355,7 @@ func (a *AIAdmin) invoke(ctx context.Context, principal *model.User, h http.Hand
 // result. The action mirrors the REST path's name (prefixed "ai." via
 // auth.AIAdminAction) so panel / AI-REST / AI-MCP writes are indistinguishable
 // in the Audit page beyond that single "ai." marker.
-func (a *AIAdmin) auditInvoke(callCtx context.Context, principal *model.User, method, path string, urlParams map[string]string, status int) {
+func (a *AIAdmin) auditInvoke(callCtx context.Context, principal *model.User, method, path string, urlParams map[string]string, status int, detail *auth.AuditDetail) {
 	if a.store == nil {
 		return
 	}
@@ -368,8 +385,13 @@ func (a *AIAdmin) auditInvoke(callCtx context.Context, principal *model.User, me
 	}
 	// Stamp which token + username acted — MCP calls ride the API-token
 	// middleware, so both live on the tool-call context.
+	entry.Metadata = detail.Into(entry.Metadata)
+	entry.TargetID, entry.Metadata = detail.ApplyTarget(entry.TargetID, entry.Metadata)
 	if tok := auth.TokenFrom(callCtx); tok != nil {
-		entry.Metadata = map[string]interface{}{"token_id": tok.ID}
+		if entry.Metadata == nil {
+			entry.Metadata = map[string]interface{}{}
+		}
+		entry.Metadata["token_id"] = tok.ID
 		if tu := auth.TokenUserFrom(callCtx); tu != "" {
 			entry.Metadata["token_username"] = tu
 		}
@@ -626,9 +648,15 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.trash.Restore, method: http.MethodPost, path: "/api/ai/admin/trash/restore", body: in.Body}
 		})
-	regAdminTool(r, "admin_trash_empty", "Purge trash. body: {older_than_days?} (0/omitted wipes everything soft-deleted).",
+	regAdminTool(r, "admin_trash_empty", "Purge trash. body: {older_than_days?, storage_id?} (0/omitted wipes everything soft-deleted). "+
+		"Answers with the final counts when the purge finishes within a few seconds; otherwise 202 {running: true, total, purged, …} "+
+		"while it goes on in the background — follow it with admin_trash_empty_status.",
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.trash.AdminEmpty, method: http.MethodPost, path: "/api/ai/admin/trash/empty", body: in.Body}
+		})
+	regAdminTool(r, "admin_trash_empty_status", "Progress of the latest admin_trash_empty: {op_id, running, queued, cancelled, total, purged, failed, bytes, started_at, finished_at, error}. Cancel a running one with POST /api/files/ops/{op_id}/cancel.",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.trash.EmptyStatus, method: http.MethodGet, path: "/api/ai/admin/trash/empty"}
 		})
 	regAdminTool(r, "admin_trash_purge", "Hard-delete a single trashed node by id.",
 		func(in adminIDIn) reqSpec {
@@ -651,7 +679,7 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.authProv.List, method: http.MethodGet, path: "/api/ai/admin/auth-providers"}
 		})
-	regAdminTool(r, "admin_auth_providers_update", "Update an auth provider's config by name. body: the full config object.",
+	regAdminTool(r, "admin_auth_providers_update", "Change an identity provider managed on the Identity providers page (oidc, ldap, proxy-header) and apply it at once. body: {enabled?, config?: {field: value}, confirm_failed_test?}. A provider the environment defines is read-only; switching one on whose test fails needs confirm_failed_test; the last way an administrator can sign in cannot be switched off.",
 		func(in adminNameBodyIn) reqSpec {
 			return reqSpec{handler: a.authProv.Update, method: http.MethodPatch, path: "/api/ai/admin/auth-providers/" + in.Name,
 				urlParams: nameParam(in.Name), body: in.Body}

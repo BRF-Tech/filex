@@ -1,11 +1,10 @@
 // Package handlers — meta.go
 //
-// Tags / Starred / Recently-opened endpoints. All require an authenticated
-// user; tags are SHARED across users (stored on node_meta), starred and
-// recent are PER-USER (stored on user_node_meta).
+// Starred / Recently-opened endpoints, and the row shape the tag listings
+// share with them. All require an authenticated user; starred and recent are
+// PER-USER (stored on user_node_meta). Tags — personal and team since v0.43.0
+// — have their own file, tags.go.
 //
-//	POST /api/files/manager/tags        body {node_id, tags: []string}
-//	GET  /api/files/manager/tags?node_id=…  OR ?storage_id=…
 //	POST /api/files/manager/star        body {node_id, starred: bool}
 //	GET  /api/files/manager/star/list?storage_id=…&limit=
 //	POST /api/files/manager/recent      body {node_id}
@@ -24,6 +23,8 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/syspath"
+	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
 const (
@@ -38,6 +39,9 @@ type Meta struct {
 	// `perm`. Optional — nil means no enforcement and no `perm` on the wire,
 	// exactly as the folder listing behaves with the resolver unwired.
 	ACL *acl.Resolver
+	// ThumbSigner stamps the `thumb_url` these rows hand out, as the folder
+	// listing's does (thumb_url.go). Nil emits it unsigned.
+	ThumbSigner *thumb.Signer
 }
 
 // NewMeta constructs the handler.
@@ -46,6 +50,9 @@ func NewMeta(store db.Store) *Meta { return &Meta{Store: store} }
 // AttachACL wires the RBAC/ACL resolver so every starred / recent / tag row
 // carries the caller's effective level on it.
 func (h *Meta) AttachACL(r *acl.Resolver) { h.ACL = r }
+
+// AttachThumbSigner wires the thumbnail URL stamp.
+func (h *Meta) AttachThumbSigner(s *thumb.Signer) { h.ThumbSigner = s }
 
 // metaRow is a node row as the starred / recent / tag listings put it on the
 // wire: the indexed node, plus the two facts the explorer's context menu
@@ -72,6 +79,17 @@ type metaRow struct {
 	// consumer must be able to tell "writable" from "an older server that
 	// did not say".
 	ReadOnly bool `json:"read_only"`
+	// Locked/Lock: an app plugin holds this file read-only (see
+	// app_plugins_badges.go); AppState: the `<plugin>:<key>` state keys apps
+	// keep on it.
+	Locked   bool           `json:"locked,omitempty"`
+	Lock     map[string]any `json:"lock,omitempty"`
+	AppState []string       `json:"app_state,omitempty"`
+	// ThumbURL is present exactly when the thumbnail endpoint would serve an
+	// image for this file (thumbServable) — the folder listing's rule. The
+	// client used to build `/api/files/thumb/<id>` for EVERY file on these
+	// rows and got `404 "not ready"` for each one it could not have.
+	ThumbURL string `json:"thumb_url,omitempty"`
 }
 
 // rows turns the store's node rows into the wire shape: storage NAME,
@@ -99,7 +117,23 @@ func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
 		if n == nil {
 			continue
 		}
+		// ⚠ Recent, Starred and every tag view come through here, and each
+		// is keyed on a node id recorded while the node was in front of
+		// somebody. Anyone who reached `.filex-open/` before it was hidden —
+		// a notification click did exactly that (2026-09-21) — and opened
+		// the working copy there has it in Recent, its Location column naming
+		// the internal folder; a starred or tagged file later moved into one
+		// would follow it the same way. syspath.Hidden is the rule every
+		// listing applies; this is the listing for these three views.
+		if syspath.Hidden(n.Path) {
+			continue
+		}
 		row := metaRow{Node: n}
+		if n.Type == model.NodeTypeFile {
+			if t, err := h.Store.GetThumbnail(ctx, n.ID); err == nil && thumbServable(t) {
+				row.ThumbURL = thumbURL(h.ThumbSigner, n.ID)
+			}
+		}
 		st := byID[n.StorageID]
 		if st != nil {
 			n.Storage = st.Name
@@ -115,157 +149,36 @@ func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
 		}
 		out = append(out, row)
 	}
+	// App badges, one storage at a time.
+	byStorage := map[int64][]int{}
+	for i, row := range out {
+		byStorage[row.StorageID] = append(byStorage[row.StorageID], i)
+	}
+	for sid, idx := range byStorage {
+		rels := make([]string, len(idx))
+		for j, i := range idx {
+			rels[j] = strings.Trim(out[i].Path, "/")
+		}
+		badges := appBadgesFor(ctx, h.Store, sid, rels)
+		for j, i := range idx {
+			b, ok := badges[rels[j]]
+			if !ok {
+				continue
+			}
+			if b.Lock != nil {
+				out[i].Locked = true
+				out[i].Lock = lockView(b.Lock)
+				if out[i].Perm == "editor" || out[i].Perm == "owner" {
+					out[i].Perm = "viewer"
+				}
+			}
+			out[i].AppState = b.State
+		}
+	}
 	return out
 }
 
-// nonNilStrings guarantees a JSON array on the wire for the tag-name list.
-//
-// A nil Go slice marshals to `null`, and every one of these endpoints is
-// consumed as a list (`.length`, `.map`, `v-for`). A user with nothing
-// starred, nothing opened recently, or no nodes under a tag is the NORMAL
-// first-run state — exactly when these lists get read — so the empty case is
-// the one that has to be right. The node listings get the same guarantee from
-// (*Meta).rows, which always allocates.
-func nonNilStrings(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
-}
-
-// ─────────────────── Tags ───────────────────
-
-type tagsSetReq struct {
-	NodeID int64    `json:"node_id"`
-	Tags   []string `json:"tags"`
-}
-
-// SetTags replaces the full tag list for a node.
-func (h *Meta) SetTags(w http.ResponseWriter, r *http.Request) {
-	var req tagsSetReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
-		return
-	}
-	if req.NodeID <= 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad node_id"})
-		return
-	}
-	cleaned := make([]string, 0, len(req.Tags))
-	for _, t := range req.Tags {
-		t = strings.ToLower(strings.TrimSpace(t))
-		if t == "" || len(t) > 64 {
-			continue
-		}
-		cleaned = append(cleaned, t)
-	}
-	if !ownsNode(w, r, h.Store, req.NodeID, "node") {
-		return
-	}
-	if !rootNodeAllowed(w, r, h.Store, req.NodeID) {
-		return
-	}
-	if err := h.Store.SetNodeTags(r.Context(), req.NodeID, cleaned); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":   true,
-		"tags": cleaned,
-	})
-}
-
-// GetTags lists the tags for one node (?node_id=) or every distinct tag in
-// a storage (?storage_id=). Exactly one of the two query params must be set.
-func (h *Meta) GetTags(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	if v := q.Get("node_id"); v != "" {
-		nodeID, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || nodeID <= 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad node_id"})
-			return
-		}
-		if !ownsNode(w, r, h.Store, nodeID, "node") {
-			return
-		}
-		if !rootNodeAllowed(w, r, h.Store, nodeID) {
-			return
-		}
-		tags, err := h.Store.GetNodeTags(r.Context(), nodeID)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"node_id": nodeID, "tags": tags})
-		return
-	}
-	if v := q.Get("storage_id"); v != "" {
-		storageID, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || storageID <= 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad storage_id"})
-			return
-		}
-		if !ownsStorage(w, r, storageID, "storage") {
-			return
-		}
-		tags, err := h.Store.ListAllTagsForStorage(r.Context(), storageID)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"storage_id": storageID, "tags": tags})
-		return
-	}
-	writeJSON(w, http.StatusBadRequest, map[string]string{"error": "node_id or storage_id required"})
-}
-
-// ListAllTags lists every distinct tag across all storages (alphabetical).
-// Powers the "Tagged files" page's tag-chip list.
-func (h *Meta) ListAllTags(w http.ResponseWriter, r *http.Request) {
-	tags, err := h.Store.ListAllTags(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"tags": nonNilStrings(tags)})
-}
-
-// TaggedNodes lists non-deleted nodes carrying the given tag (?tag=…),
-// newest-first, capped by an optional ?limit=. Empty tag → 400.
-func (h *Meta) TaggedNodes(w http.ResponseWriter, r *http.Request) {
-	tag := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
-	if tag == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tag required"})
-		return
-	}
-	limit := parseLimit(r.URL.Query().Get("limit"), 500, 1000)
-	nodes, err := h.Store.ListNodesByTag(r.Context(), tag, limit)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	// ListNodesByTag has no storage predicate, so one `?tag=invoice` returned
-	// up to `limit` FULL node rows — path included — from every tenant on the
-	// box. This is the same filter handlers/search.go applies to search hits;
-	// the tag listing is the second door into the same catalogue and did not
-	// have it.
-	nodes = confineNodesToTenant(r.Context(), nodes)
-	nodes = confineNodesToRoot(r.Context(), h.Store, nodes)
-	// ⚠⚠ THE TAG VIEW WAS EMPTY IN EVERY MULTI-STORAGE INSTALL WITHOUT THIS, and
-	// silently: a node row carries only `storage_id`, the client cannot build
-	// `name://path` from a number, and `nodeRowToFileNode` therefore DROPS every
-	// row it cannot address (guessing the drive would open somebody else's).
-	// So "Nothing is tagged X" was drawn over three files that were tagged X
-	// (measured 2026-09-13: `?tag=test` answered with 3 nodes, the view showed
-	// 0 rows). Starred and Recently-opened — the two sibling handlers below,
-	// and the very case the storage-name attach was written for — have always
-	// gone through `rows`; the tag listing is the third door into the same
-	// catalogue and was the one that missed it.
-	writeJSON(w, http.StatusOK, map[string]any{
-		"nodes": h.rows(r.Context(), nodes),
-		"tag":   tag,
-	})
-}
+// Tags live in tags.go (personal + team, v0.43.0).
 
 // ─────────────────── Starred ───────────────────
 

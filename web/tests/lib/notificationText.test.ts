@@ -211,3 +211,116 @@ describe('fillTemplate', () => {
     expect(fillTemplate('Moved: {name}', { name: '' })).toBe('Moved');
   });
 });
+
+// ⚠ An "open with filex" save, as the server now sends it (personview.go): the
+// ORIGINAL document's name, no path (it lives on the person's computer, where
+// no storage path names it), `meta.open_with`. Before, the same save read
+// "File changed: a1b2c3d4e5f6-Bütçe Özeti.xlsx" over "/.filex-open/…" —
+// measured in the bell on 2026-09-21.
+describe('an open-with save', () => {
+  const row: NotificationLike = {
+    event: 'file.updated',
+    body: '',
+    meta: { node: { storage_id: 1, path: '', name: 'Bütçe Özeti.xlsx' }, open_with: true, origin: 'onlyoffice' },
+  };
+
+  it('names the document and says where it is, in both languages', () => {
+    expect(renderNotification(row, 'en')).toEqual({
+      title: 'File changed: Bütçe Özeti.xlsx',
+      body: 'Opened with the filex desktop app',
+    });
+    expect(renderNotification(row, 'tr')).toEqual({
+      title: 'Dosya değişti: Bütçe Özeti.xlsx',
+      body: 'filex masaüstü uygulamasıyla açıldı',
+    });
+  });
+
+  it('never reaches for a body, whatever the row carries', () => {
+    const stale = { ...row, body: '/.filex-open/a1b2c3d4e5f6-Bütçe Özeti.xlsx' };
+    for (const loc of ['en', 'tr'] as const) {
+      const text = renderNotification(stale, loc);
+      expect(`${text.title} ${text.body}`).not.toContain('.filex-open');
+    }
+  });
+
+  it('an infected working copy warns about the document itself', () => {
+    const infected: NotificationLike = {
+      event: 'file.infected',
+      meta: { node: { path: '', name: 'Plan.docx' }, open_with: true, signature: 'Eicar-Test-Signature' },
+    };
+    expect(renderNotification(infected, 'tr')).toEqual({
+      title: 'Plan.docx dosyasında virüs bulundu',
+      body: 'Eicar-Test-Signature — filex masaüstü uygulamasıyla açıldı',
+    });
+  });
+});
+
+// An app's notice names the app the way the reader knows it. Measured in the
+// release-candidate sweep (2026-09-21): "sign: “sözleşme.pdf” imzanızı
+// bekliyor…" — `sign` is the install id; the side panel calls it "İmzalar".
+describe('an app notice', () => {
+  const base = {
+    event: 'plugin.notice',
+    title: 'Signature requested',
+    meta: {
+      plugin: 'sign',
+      title_en: 'Signature requested',
+      title_tr: 'İmza istendi',
+      body_en: '“contract.pdf” is waiting for your signature',
+      body_tr: '“sözleşme.pdf” imzanızı bekliyor',
+    },
+  };
+
+  it("prints the app's label in the reader's language, never its install id", () => {
+    const row = { ...base, meta: { ...base.meta, plugin_label_en: 'Signatures', plugin_label_tr: 'İmzalar' } };
+    expect(renderNotification(row, 'tr').body).toBe('İmzalar: “sözleşme.pdf” imzanızı bekliyor');
+    expect(renderNotification(row, 'en').body).toBe('Signatures: “contract.pdf” is waiting for your signature');
+  });
+
+  it('leaves the prefix out on a row recorded before labels existed', () => {
+    const text = renderNotification(base, 'tr');
+    expect(text.body).toBe('“sözleşme.pdf” imzanızı bekliyor');
+    expect(text.body).not.toMatch(/^sign\b/);
+  });
+});
+
+// 2026-09-22: a German account's bell said "e-Signature: “dummy.pdf” is
+// waiting for your signature…" although the app had written the notice in
+// German too. `locale` is only the built-in table ('en' for German); the
+// app's own text is looked up in the reader's language first.
+describe("an app notice in the reader's own language", () => {
+  const german = {
+    event: 'plugin.notice',
+    title: 'Signature requested',
+    meta: {
+      plugin: 'sign',
+      plugin_label_en: 'e-Signature',
+      plugin_label_tr: 'e-İmza',
+      plugin_label_de: 'E-Signatur',
+      title_en: 'Signature requested',
+      title_tr: 'İmza istendi',
+      title_de: 'Unterschrift angefordert',
+      body_en: '“contract.pdf” is waiting for your signature',
+      body_tr: '“sözleşme.pdf” imzanızı bekliyor',
+      body_de: '„vertrag.pdf“ wartet auf Ihre Unterschrift',
+    },
+  };
+
+  it('speaks it when the app wrote it', () => {
+    expect(renderNotification(german, 'en', { lang: 'de' })).toEqual({
+      title: 'Unterschrift angefordert',
+      body: 'E-Signatur: „vertrag.pdf“ wartet auf Ihre Unterschrift',
+    });
+    // A regional tag finds its base language.
+    expect(renderNotification(german, 'en', { lang: 'de-AT' }).title).toBe('Unterschrift angefordert');
+  });
+
+  it('falls back to English for a language the app did not write', () => {
+    expect(renderNotification(german, 'en', { lang: 'fr' })).toEqual({
+      title: 'Signature requested',
+      body: 'e-Signature: “contract.pdf” is waiting for your signature',
+    });
+    // …and the built-in tables still answer for themselves.
+    expect(renderNotification(german, 'tr', { lang: 'tr' }).body).toBe('e-İmza: “sözleşme.pdf” imzanızı bekliyor');
+  });
+});

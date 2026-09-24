@@ -19,6 +19,10 @@ export function applyDragGhost(ev: DragEvent, name: string, count: number): void
     el.className = 'fe-dragghost';
     const label = document.createElement('span');
     label.className = 'fe-dragghost__name';
+    // ⚠ RTL: a file name is the person's text, not the interface's — `auto`
+    // lets `Report (final).pdf` read right inside an Arabic page and an Arabic
+    // name read right inside an English one.
+    label.dir = 'auto';
     label.textContent = name;
     el.appendChild(label);
     if (count > 1) {
@@ -29,6 +33,8 @@ export function applyDragGhost(ev: DragEvent, name: string, count: number): void
     }
     el.style.position = 'fixed';
     el.style.top = '-1000px';
+    // Physical on purpose: FIXED boxes add no scrollable overflow, so off the
+    // left edge is off screen in either direction (the RTL guard allow-lists it).
     el.style.left = '-1000px';
     document.body.appendChild(el);
     dt.setDragImage(el, 14, 14);

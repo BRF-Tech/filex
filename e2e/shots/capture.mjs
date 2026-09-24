@@ -290,12 +290,19 @@ async function newContext(browser, scheme, height = 940) {
     deviceScaleFactor: 2,
     locale: 'en-US',
     colorScheme: scheme,
+    /* ⚠⚠ NO SERVICE WORKER. The admin UI is a PWA: once its worker is
+       registered it answers from its own cache, and a picture then shows the
+       bundle of an EARLIER build — the pack agent's first look at Connections
+       had the Storages tab that this release removed, which reads exactly
+       like a regression (v0.43.0). A screenshot must be of the build in this
+       tree, so the worker is blocked outright rather than reloaded around. */
+    serviceWorkers: 'block',
   });
   // The stored preference wins over browser detection — pin it before any app
   // code runs.
   await ctx.addInitScript(() => {
     localStorage.setItem('filex.locale', 'en');
-    // ⚠ The exact key the explorer checks (FileExplorer.vue → TOUR_LS_KEY).
+    // ⚠ The exact key the explorer checks (packages/core lib/tour.ts → TOUR_LS_KEY).
     // Guessing it wrong leaves the onboarding tour open, and the tour's
     // backdrop swallows every click the capture needs to make.
     localStorage.setItem('filex.tourDone', '1');
@@ -332,7 +339,7 @@ async function dismissTour(page) {
   }
 }
 
-// Opens Share / Permissions for the current selection.
+// Opens the Share dialog for the current selection ("Share / Permissions" before v0.43.0).
 //
 // ⚠ Selecting a file no longer puts a TEXT button on screen: the row under the
 // breadcrumb is the selection bar (gorunum:v2), whose entries are icon-only —
@@ -352,24 +359,28 @@ async function openAccess(page) {
     return;
   }
   await page.locator('[data-testid="selbar-more"]').click();
-  await page.locator('.fe-ctx__item', { hasText: /Share \/ Permissions/i }).first().click();
+  await page.locator('.fe-ctx__item', { has: page.locator('.fe-ctx__label', { hasText: /^Share$/i }) }).first().click();
 }
 
 // The explorer lives at /admin/explore; ?storage= opens it inside one storage
 // rather than on the storage list. Sub-folders are reached the way a user
 // reaches them — by opening the row.
+//
+// ⚠ Rows and tiles are found by `data-fe-path`, the one attribute every view
+// puts on an entry. This used to wait for `.fe-list__row, .fe-grid__item`, and
+// `.fe-grid__item` stopped existing when the grid was rebuilt (its tiles are
+// `.fe-grid__card` now). Nobody noticed while the storage opened in the list;
+// since v0.43.0 a person's view mode is kept on their ACCOUNT, so the grid the
+// light hero pass chose is what the dark pass opens in, and the old selector
+// waited 25 s for a list that was never drawn.
 async function openExplorer(page, folder = '') {
   await page.goto(`${URL}/admin/explore?storage=demo`);
-  await page.waitForSelector('.fe-list__row, .fe-grid__item', { timeout: 25_000 });
+  await page.waitForSelector('[data-fe-path^="demo://"]', { timeout: 25_000 });
   await dismissTour(page);
   await sleep(800);
   if (folder) {
-    await page.evaluate((name) => {
-      const row = [...document.querySelectorAll('.fe-list__row, .fe-grid__item')].find((r) =>
-        (r.textContent ?? '').includes(name),
-      );
-      row?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-    }, folder);
+    await page.locator(`[data-fe-path="demo://${folder}"]`).first().dblclick();
+    await page.waitForSelector(`[data-fe-path^="demo://${folder}/"]`, { timeout: 15_000 });
     await sleep(1500);
   }
 }
@@ -562,6 +573,13 @@ async function run() {
       await signIn(page);
       await openExplorer(page, 'Photos');
       await setGridView(page);
+      // ⚠ Playwright leaves the mouse where it last clicked, and the card
+      // under it wears its hover state — a checkbox and a star nobody asked
+      // for, on the one picture the README opens with. (The sidebar grew a
+      // "My shares" entry in v0.43.0, which moved that leftover point onto a
+      // thumbnail.) Park it somewhere neutral and let the hover settle.
+      await page.mouse.move(4, 4);
+      await sleep(250);
       await shot(page, `explorer-grid-${scheme}.png`);
       await ctx.close();
     }
@@ -599,8 +617,7 @@ async function run() {
     // for, and its page shows both halves — the credential panel above and the
     // real commands below.
     await page.goto(`${URL}/admin/connections`);
-    await page.waitForSelector('[data-testid="tab-connect"]', { timeout: 15_000 });
-    await page.locator('[data-testid="tab-connect"]').click();
+    await page.waitForSelector('[data-testid="guide-protocol"]', { timeout: 15_000 });
     await page.locator('[data-testid="guide-protocol"]').selectOption('sftp');
     await page.waitForSelector('[data-testid="guide-facts"]', { timeout: 15_000 });
     await sleep(800);
@@ -610,6 +627,10 @@ async function run() {
     // expiry, a DOWNLOAD LIMIT and the one-line curl for the finished link.
     await clearShares(token, 'demo://Photos/aurora.png');
     await openExplorer(page, 'Photos');
+    // The list, whatever view the account last left: the checkbox below is a
+    // list row's (and the hero passes above chose the grid).
+    await page.getByTestId('view-list').click();
+    await page.waitForSelector('.fe-list__row', { timeout: 10_000 });
     // Select it through its checkbox — the one click that selects (issue #26).
     await page.locator('.fe-list__row .fe-list__check').first().click();
     await sleep(400);
@@ -634,7 +655,32 @@ async function run() {
     await page.waitForSelector('.fx-perm-cli', { timeout: 10_000 });
     await sleep(600);
     await shot(page.locator('.fx-perm-modal'), 'share-modal.png');
+
+    /* 3b — …and what the person at the other end opens.
+       filex has ONE outward-facing screen — a share, a file request, an
+       app's signing page and a PIN gate are all the same shell — and it is
+       the only screen a stranger ever sees, so the README ought to show it.
+       ⚠ The link is read out of the dialog that just created it, and opened
+       in a context that has never met this instance: no session, no cookie,
+       nothing of the explorer. A picture taken in the signed-in browser
+       would be a different page than the one the recipient gets. */
     await page.keyboard.press('Escape');
+    /* ⚠ The token comes from the SERVER's own record of the link, not from
+       the dialog's text: the link is drawn ellipsised (`…ample.com/s/ab7f5a1…`)
+       and a token read out of that is a 404 — which is a picture of the "not
+       available" page, the one screen this shot must not be. */
+    const shareList = await (await api(token, `/api/files/share?path=${encodeURIComponent('demo://Photos/aurora.png')}`)).json();
+    const shareUrl = (shareList.shares ?? []).map((x) => x.url).filter(Boolean).pop() ?? '';
+    const shareToken = (shareUrl.match(/\/s\/([A-Za-z0-9_-]{8,})/) ?? [])[1] ?? '';
+    if (!shareToken) throw new Error(`no share link to open: ${JSON.stringify(shareList).slice(0, 200)}`);
+    const pctx = await newContext(browser, 'light', 900);
+    const ppage = await pctx.newPage();
+    await ppage.goto(`${URL}/s/${shareToken}`);
+    await ppage.waitForSelector('[data-testid="public-share-download"]', { timeout: 20_000 });
+    await ppage.mouse.move(0, 0);
+    await sleep(700);
+    await shot(ppage, 'public-share.png');
+    await pctx.close();
 
     // 4 — the markdown VIEWER.
     // ⚠ Neither a double-click nor Space: double-clicking a .md opens the
@@ -643,7 +689,7 @@ async function run() {
     // The read-only preview is the context menu's "Preview" — the same route a
     // reader would take.
     await openExplorer(page, '');
-    const readme = page.locator('.fe-list__row, .fe-grid__item').filter({ hasText: 'README.md' }).first();
+    const readme = page.locator('[data-fe-path="demo://README.md"]').first();
     await readme.click({ button: 'right' });
     await sleep(500);
     // ⚠ Not /^Preview$/ — every context-menu item is prefixed with an emoji

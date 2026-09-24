@@ -113,3 +113,24 @@ type NodeVersion struct {
 	Etag       string    `json:"etag,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 }
+
+// NameMatch is what a search without the index asks the database for: the
+// live nodes of one storage whose NAME holds every word (search.PlanFallback
+// builds it; db.Store.SearchNodes answers it). Every field is literal text,
+// never LIKE grammar: the store escapes what its dialect needs.
+type NameMatch struct {
+	// Words must ALL be in the name, compared the way internal/namefold
+	// compares — composed, the four i's one letter, case folded — on both
+	// sides. Each word is already folded that way. Checked after Runs.
+	Words []string
+	// Runs are ASCII text every stored spelling of a matching name holds as
+	// it is (see namefold.Plain), so the database can reject most rows with
+	// its own case-insensitive LIKE before the costlier comparison above.
+	// They narrow nothing Words would not; they only make it cheap.
+	Runs []string
+	// Prefer decides which rows survive the LIMIT: names equal to it, or to
+	// it plus an extension, first; then names starting with it; then the
+	// rest — shorter names first within a tier, then by name. Folded like
+	// Words. "" orders by name.
+	Prefer string
+}

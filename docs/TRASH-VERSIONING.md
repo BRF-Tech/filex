@@ -61,9 +61,12 @@ replaced it and for how an install that already took the damage repairs itself.
 >   to a real hard delete — and then the item is deliberately **not** listed in
 >   the trash, because a Restore there could never work. None of the shipped
 >   drivers (local, S3, SFTP, FTP, WebDAV) fall into that case.
-> - Deleting an item that is **already in trash** (its path is under
->   `.filex-trash/`) **hard‑deletes it permanently** — this is how "empty a
->   single item from trash" works.
+> - Removing one item from the trash for good is an administrator's action,
+>   `DELETE /api/admin/trash/{id}`. A path under `.filex-trash/` cannot be
+>   deleted (or written, moved or shared) through any person-facing surface —
+>   it is refused with **403 `RESERVED_NAME`**. ⚠ Before 0.43 the file
+>   manager's `delete` hard-deleted it for any editor, which bypassed exactly
+>   that rule.
 
 ### Every delete surface uses the same trash
 
@@ -87,6 +90,13 @@ Restore brings the whole subtree back. Note that the descendants are still
 individual rows, and the trash listing is flat — a deleted folder therefore
 shows its children as separate entries even though restoring the folder is one
 action.
+
+⚠ Until this was fixed, a folder whose name (or whose parent's name) is not plain
+ASCII — `Müşteri`, `Çıktılar` — went to the trash **without** its contents: the
+descendants were matched by a prefix length counted in bytes where the database
+counts characters. The files stayed live under a folder that was gone, and the
+next storage sync tombstoned them one by one, outside the folder's trash entry.
+Restoring such a folder had the same blind spot.
 
 > ⚠ **Sync clients delete in bulk.** A single `rclone sync --delete` run can
 > remove hundreds of files, and every one of them now lands in the trash. That
@@ -120,15 +130,33 @@ Trashed items are kept for a fixed window, then hard‑deleted automatically.
 A **daily background loop** scans for nodes whose `deleted_at` is older than the
 retention window and, for each one:
 
-1. deletes the backing storage object (**best‑effort** — if the driver delete
-   fails, the run logs a warning and still continues);
+1. deletes the backing storage object under `.filex-trash/` (**best‑effort** —
+   if the driver delete fails, the run logs a warning and still continues).
+   A row the storage sync soft‑deleted **where it stood** (it found the file
+   gone) has no bytes of its own, so only the row goes: whatever stands at its
+   path now arrived later and is left alone. ⚠ The purge used to delete that
+   path anyway, which destroyed a file that had come back under the old name —
+   and, for a folder row, the whole folder that stood there again;
 2. decrements the owner's [quota](STORAGE.md) usage (files only);
 3. hard‑deletes the DB row.
 
 The first tick fires **one interval after startup**, not immediately, so a
-restart‑looping server doesn't hammer the backend. The purge is batched (500
-rows at a time) and reports a summary (`scanned` / `deleted` / `failed` /
-`bytes`).
+restart‑looping server doesn't hammer the backend. The purge walks the trash in
+batches of 500 rows, **by id**, so every row is met once per run — a row it may
+not touch (another storage, another tenant) or cannot purge is passed over, not
+read again — and reports a summary (`scanned` / `deleted` / `failed` /
+`bytes`). **One purge sweep runs at a time:** the daily loop waits for an admin
+"empty trash" that is running, and an "empty trash" asked for while another
+sweep runs waits its turn (see below). Two sweeps over the same rows would each release the
+owner's quota for them.
+
+A purge narrowed to one storage (`storage_id`) or to a tenant's own storages
+reads only those storages' rows. ⚠ It used to read every storage's oldest rows
+and skip the foreign ones, and a skipped row never goes away: with 500 older
+trashed rows on other storages, emptying one storage's trash re-read the same
+500 until the request timed out, and purged nothing. A batch in which not one
+row could be purged now ends the run as well (the failures are counted and
+logged; the next run tries again).
 
 ### Trash endpoints
 
@@ -138,6 +166,13 @@ rows at a time) and reports a summary (`scanned` / `deleted` / `failed` /
 |---|---|---|
 | `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, and **`ttl_days`** (days remaining before purge, floored at 0). |
 | `POST /api/files/manager/restore` | `{ "node_id": 123 }` | Moves the file back to its original path and re‑attaches the row. Returns **409** `{ "code": "EXISTS", "name", "path" }` when something already holds that path; nothing moves and the entry stays in the trash. |
+
+The explorer's **Trash** view draws these entries in its own table with the
+facts a deleted item has: **Deleted** (when — the date column, sortable and
+grouped by it), **Deleted from** (the storage and folder it will be restored
+to) and **Time left** (`ttl_days`: "30 days", "1 day", *Due for deletion* at
+0). A trashed row has no owner in this listing, so the Owner column is not
+drawn there, and **+ New** is gone — nothing is made inside the Trash.
 
 Both are **filtered by access**: a [confined](RBAC.md) (root‑locked) caller only
 sees / can restore items whose original path is inside its root, and
@@ -154,10 +189,49 @@ answer to whoever holds a grant on `.filex-trash/`.
 
 | Method & path | Body / query | Notes |
 |---|---|---|
-| `POST /api/admin/trash/empty` | `?older_than_days=N` **or** JSON `{ "older_than_days": N, "storage_id": … }` | Immediate purge of everything older than `N` days. **`0` or missing wipes everything currently in trash.** Returns `{ ok, purged, failed, scanned, bytes }`. |
+| `POST /api/admin/trash/empty` | `?older_than_days=N&storage_id=…` **or** JSON `{ "older_than_days": N, "storage_id": … }` | Queues a purge of everything deleted more than `N` days before **the moment it is asked for**, in one storage or every storage the caller can reach. **`0` or missing days is everything in the trash at that moment** — a file deleted while the purge runs stays in the trash. Waits up to two seconds: **200** with the final counts when the purge is done by then, otherwise **202** with its progress so far while it carries on as an ops job — see the run fields below. **409** `{ "code": "BUSY", "job": … }` while the caller's tenant already has one queued or running (`job` is that run); another tenant's purge, or the nightly retention, does not refuse it — it waits its turn (`queued: true`). **400** for anything it cannot read — a non‑integer or negative day count, a storage id that is not a number, an unknown field — and nothing is purged. |
+| `GET /api/admin/trash/empty` | — | The latest purge the caller's tenant asked for: queued, running or finished. `{ "running": false }` alone when it has asked for none. |
 | `DELETE /api/admin/trash/{id}` | — | Immediately hard‑delete one trashed node (storage object + quota + row). |
 
+A run reports `{ ok, op_id, running, queued, cancelled, storage_id,
+older_than_days, total, total_bytes, scanned, purged, failed, bytes, started_at,
+finished_at, error }`. `total` / `total_bytes` are the rows in its scope when it
+was asked for and the bytes their files hold; `running: false` is the end —
+`purged` can finish below `total`, because a folder takes the rows inside it
+along. `failed` counts rows that could not be purged (they stay in the trash;
+the server log names them); `error` is a run that could not go on at all;
+`cancelled` is a run somebody stopped. `started_at` is the moment it was asked
+for — the cutoff the run purges below.
+
+**The run is an ops job** (kind `trash-empty`, `op_id`): it is in the
+explorer's operations centre and the admin tray, `GET /api/files/ops/{op_id}`
+reads it and `POST /api/files/ops/{op_id}/cancel` stops it (an administrator,
+or the admin who asked). A stopped run finishes the row in hand and stops;
+what it had not reached stays in the trash. It never takes the queue's worker —
+copies, moves, deletes and upload commits keep running beside it — and a
+restart does not forget it: the row is requeued at boot and the run carries on
+with what is left, still bounded by the moment it was asked for. A run belongs
+to the tenant that asked for it: another tenant's admin neither sees it nor its
+counts, on this endpoint or in the operations list.
+
+> ⚠ Up to v0.42.2 the purge ran **inside** the request and answered only
+> when it was done, so a large trash could not be emptied from the UI at all:
+> tens of thousands of files take many minutes, and the first proxy timeout in
+> front of filex (nginx: 60 s; the admin page's own client: 30 s) cut the request
+> — and the purge with it. A script that reads `purged` from any 2xx should now
+> check `running` too: a 202 carries the counts so far, not the final ones.
+> (Contributed by Berk Başarır, [#47](https://github.com/BRF-Tech/filex/pull/47).)
+
 ### Trash — failure modes & troubleshooting
+
+**"Empty trash" seemed to do nothing, or answered 504.**
+Up to v0.42.2 the purge ran inside the request and the first proxy timeout cut
+it short; update. A large trash now shows its progress on the admin Trash page,
+in the explorer's trash banner and in the operations centre, and carries on if
+you leave the page. A purge still running when the server restarts carries on
+after the restart. To stop one, press **Stop** on the Trash page or Cancel on
+its row in the operations centre: what it purged is gone, the rest is still in
+the trash.
 
 **A restored file reappeared at the storage root, not its old folder.**
 Its original parent directory was itself deleted in the meantime. filex prefers
@@ -205,9 +279,21 @@ row (version number, size, etag). Where the driver supports server‑side copy t
 snapshot is a fast backend copy; otherwise filex streams the bytes
 (read → write).
 
-Only **files** are versioned. Directories and symlinks are skipped. A snapshot
+Only **files** are versioned. Directories are skipped, and so are symlinks a
+storage does not follow ([Symlinks](STORAGE.md#symlinks)); a link inside a
+`local` storage's folder is catalogued as what it points at, so a linked file
+is versioned like any other. A snapshot
 is also skipped when there is nothing to capture — a brand‑new file with no live
 content yet, or a row whose object isn't on the backend.
+
+A snapshot is **not a catalogue entry**. It belongs to its `node_versions` row,
+which is keyed by the file it versions, and the storage sync never walks into
+`.versions/` (nor `.thumbs/`, nor `.filex-trash/`). Older versions did: a full
+scan minted a hidden, system-owned row for every snapshot folder and file, and
+those rows could later land in the trash — where purging a folder row deletes
+its whole prefix, i.e. the version history. The next full sync after upgrading
+drops every such row from the catalogue (never from the backend), and the sync's
+delete pass never moves anything inside these trees into the trash.
 
 ⚠ That last case is a **silent** skip: if the catalogued path and the object on
 the backend ever disagree, the guard finds nothing to snapshot and reports
@@ -285,6 +371,15 @@ the antivirus scan, trash on delete — they do have. Versioning is the one gap.
 If version history is what you are relying on, keep those three protocols out
 of the write path, or check the file's history after the first overwrite rather
 than assuming it.
+
+**Renames and moves are not in that table because they never overwrite.** A
+rename onto a name that is taken is refused (`409 NAME_TAKEN`); a move lands
+beside it as `name-copy`. ⚠ Until the rename was guarded it replaced the file
+that held the name with no snapshot, and the catalogue then dropped that file's
+row — so the versions it already had were lost with it. A WebDAV `MOVE` sent
+with `Overwrite: T` replaces the destination at the client's explicit request,
+and deletes it into the trash first (the protocol's delete-before-move), so it
+stays restorable from there.
 
 A snapshot is taken **only when** there is something to lose: the path already
 holds a catalogued **file**. A brand‑new file, a directory, and filex's own
@@ -401,7 +496,7 @@ Check which surface wrote it. **SFTP, FTPS and NFS take no snapshot at all**
 (see the table above) — that is the likeliest answer, and it fails silently. The
 other three: the guard is switched off
 ([`FILEX_VERSIONS_ON_OVERWRITE=0`](CONFIGURATION.md#versioning-on-overwrite),
-which logs a WARN at boot); directories and symlinks are **never** versioned;
+which logs a WARN at boot); directories and unfollowed symlinks are **never** versioned;
 and the **first** save of a new file has no prior content to snapshot.
 
 **A version I wanted is gone / "restore" can't find it.**

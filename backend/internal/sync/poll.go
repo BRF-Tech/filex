@@ -2,10 +2,13 @@ package sync
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"path"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -15,21 +18,27 @@ import (
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
 // RunOnce performs one full sync pass for the storage:
 //  1. Open a sync_runs row (status=running)
 //  2. Recursively walk the backend, upserting nodes and updating seen_at
-//  3. Reconcile the trash bucket: nothing may be live in there.
+//  3. Reconcile the trash bucket: nothing may be live in there. Then drop
+//     every row an older walk minted inside `.versions/` and `.thumbs/`.
 //  4. Tombstone-pass: any node whose seen_at < runStart is soft-deleted —
-//     but only if seen_count >= 0.7 * lastSeenCount (false-positive guard).
+//     but only if seen_count >= 0.7 * lastSeenCount (false-positive guard),
+//     and never a row inside filex's own trees.
 //  5. Close the sync_runs row with the final status.
 //
-// ⚠ Step 2 skips `.filex-trash/` entirely, so `seen` no longer counts trashed
-// objects. On the first pass after upgrading, a storage whose trash held more
-// than 30% of its objects will trip the step-4 guard once (a warning, and one
-// tombstone pass skipped); the next run compares like with like.
+// ⚠ Step 2 skips filex's own trees entirely (`.filex-trash/`, `.versions/`,
+// `.thumbs/`), so `seen` does not count their objects. On the first pass after
+// the upgrade that stopped counting one of them, a storage where it held more
+// than 30% of the objects will trip the step-4 guard once (a warning, and one
+// tombstone pass skipped); the next run compares like with like. The same
+// holds for the first pass after a scan exclusion (issue #44) that covers more
+// than 30% of what the previous pass saw.
 func (s *storageSyncer) RunOnce(ctx context.Context) error {
 	// ⚠ One run at a time per storage. The poll loop is sequential by itself,
 	// but "Scan now" (Worker.Trigger) is a second door: pressed while a poll
@@ -74,38 +83,29 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	added, updated := 0, 0
+	c := &walkCounts{}
 	// A backend that can hand over the whole tree in one pass (object stores)
 	// is asked once, up front; the walk then reads directories out of memory.
 	// Anything else — or a tree too large to hold — is walked directory by
 	// directory as before.
 	list := dirLister(s.driver.List)
-	if idx, ok := s.prefetchTree(ctx); ok {
+	if idx, ok := s.prefetchTree(ctx, "/"); ok {
 		list = idx.list
 	}
-	seen, err := s.walk(ctx, "/", nil, &added, &updated, list)
+	seen, err := s.walk(ctx, "/", nil, c, list, storage.NewCycleGuard(), 0)
 	if err != nil {
-		_ = s.store.FinishSyncRun(ctx, run.ID, "", seen, added, updated, 0, "failed", err.Error())
+		s.finishRun(ctx, run.ID, seen, c.added, c.updated, 0, err)
 		return err
 	}
 
 	s.reconcileTrash(ctx)
+	s.reconcileInternalTrees(ctx)
 
 	deleted := 0
 	if guardOK(seen, prevSeen) {
 		stale, err := s.store.ListStaleNodes(ctx, s.storage.ID, runStart)
 		if err == nil {
-			for _, n := range stale {
-				if !s.confirmGone(ctx, n) {
-					continue
-				}
-				if err := s.store.SoftDeleteNode(ctx, n.ID); err == nil {
-					deleted++
-					if s.index != nil {
-						_ = s.index.DeleteNode(ctx, n.ID)
-					}
-				}
-			}
+			deleted = s.tombstone(ctx, stale)
 		}
 	} else {
 		slog.Warn("sync: tombstone guard tripped",
@@ -122,8 +122,44 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 		slog.Warn("sync: folder-size recompute",
 			slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
 	}
-	_ = s.store.FinishSyncRun(ctx, run.ID, "", seen, added, updated, deleted, "ok", "")
-	return nil
+	s.finishRun(ctx, run.ID, seen, c.added, c.updated, deleted, nil)
+	// A run whose context died after the walk skipped whatever came after it
+	// (the tombstone pass, the folder sizes); it is recorded as aborted and
+	// the caller hears why.
+	return ctx.Err()
+}
+
+// finishRun closes the run's sync_runs row: "ok", "failed" (runErr), or
+// "aborted" when the run's own context was cancelled or ran out — a shutdown,
+// a storage edit restarting the syncer, the ceiling on a manual scan.
+//
+// ⚠ Always on a context the run's cancellation cannot reach. It used to close
+// the row on the run's own context, so exactly the runs that were cut short
+// tried to record their end on a dead context, failed silently, and said
+// `running` for ever.
+func (s *storageSyncer) finishRun(ctx context.Context, runID int64, seen, added, updated, deleted int, runErr error) {
+	status, msg := "ok", ""
+	switch {
+	case ctx.Err() != nil:
+		status, msg = "aborted", interruptedMessage(ctx.Err())
+	case runErr != nil:
+		status, msg = "failed", runErr.Error()
+	}
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := s.store.FinishSyncRun(fctx, runID, "", seen, added, updated, deleted, status, msg); err != nil {
+		slog.Warn("sync: could not close the run's record",
+			slog.Int64("run", runID), slog.String("status", status),
+			slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
+	}
+}
+
+// interruptedMessage says why a run stopped before it finished.
+func interruptedMessage(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "interrupted: the scan ran past its time limit"
+	}
+	return "interrupted: the scan was stopped before it finished (server shutdown or storage change)"
 }
 
 // CatalogueTree catalogues everything under dir on drv exactly as a sync pass
@@ -143,12 +179,23 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 func CatalogueTree(ctx context.Context, store db.Store, idx *search.Index,
 	avScan func(ctx context.Context, n *model.Node),
 	st *model.Storage, drv storage.Driver, dir string, parent *int64) error {
-	s := &storageSyncer{store: store, index: idx, avScan: avScan, storage: st, driver: drv, ctx: ctx}
-	added, updated := 0, 0
+	s := &storageSyncer{store: store, index: idx, avScan: avScan, storage: st, driver: drv, rule: ruleFor(st, nil), ctx: ctx}
 	// ⚠ Always the live listing, never a prefetch: the subtree was written a
 	// moment ago by the caller and no snapshot taken before that can hold it.
-	_, err := s.walk(ctx, dir, parent, &added, &updated, s.driver.List)
+	_, err := s.walk(ctx, dir, parent, &walkCounts{}, s.driver.List, storage.NewCycleGuard(), 0)
 	return err
+}
+
+// walkCounts is what one walk did to the catalogue.
+type walkCounts struct {
+	added, updated int
+	// reconciled is the part of updated that settled a staged upload whose
+	// bytes were already on the storage (settleTransfer).
+	reconciled int
+	// partial is set when a directory below the walk's root could not be
+	// listed, or was left uncatalogued: the walk carries on past it, and
+	// everything under it looks unseen without being gone.
+	partial bool
 }
 
 // dirLister answers "what is in directory p" for one walk — the driver's List,
@@ -172,14 +219,18 @@ var TreePrefetchMax = 2_000_000
 
 var errTreeTooLarge = errors.New("sync: tree too large to prefetch")
 
-// prefetchTree asks a TreeWalker backend for everything under "/" in one pass
+// prefetchTree asks a TreeWalker backend for everything under root in one pass
 // and returns it grouped by parent. ok is false when the driver cannot, the
 // tree is over TreePrefetchMax, or the pass failed — the caller then walks the
 // backend the ordinary way, so a shortcut that does not fit never costs a scan.
 //
-// The trash subtree is dropped here rather than in the walk (which skips it
-// anyway): with 30% of a bucket in `.filex-trash/` that is 30% less to hold.
-func (s *storageSyncer) prefetchTree(ctx context.Context) (treeIndex, bool) {
+// Whatever the walk would not enter (scanrule: filex's own `.filex-trash/`,
+// `.versions/`, `.thumbs/`, and the storage's scan exclusions) is dropped here
+// rather than in the walk (which skips it anyway): with 30% of a bucket in the
+// trash, or a `node_modules` as large as the project around it, that is that
+// much less to hold. ⚠ A one-pass listing cannot prune a prefix, so an object
+// store still RETURNS the excluded keys; they are only not kept.
+func (s *storageSyncer) prefetchTree(ctx context.Context, root string) (treeIndex, bool) {
 	tw, ok := s.driver.(storage.TreeWalker)
 	if !ok {
 		return nil, false
@@ -187,8 +238,8 @@ func (s *storageSyncer) prefetchTree(ctx context.Context) (treeIndex, bool) {
 	idx := treeIndex{}
 	n := 0
 	started := time.Now()
-	err := tw.WalkTree(ctx, "/", func(o storage.Object) error {
-		if trash.IsTrashPath(o.Path) {
+	err := tw.WalkTree(ctx, root, func(o storage.Object) error {
+		if s.rule.Skips(o.Path) {
 			return nil
 		}
 		n++
@@ -216,7 +267,7 @@ func (s *storageSyncer) prefetchTree(ctx context.Context) (treeIndex, bool) {
 // walk recursively lists the storage from `path` downwards. parent is the
 // DB id of the parent node (nil at root). list answers each directory —
 // the driver, or a tree fetched up front (see prefetchTree).
-func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added, updated *int, list dirLister) (int, error) {
+func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *walkCounts, list dirLister, guard *storage.CycleGuard, depth int) (int, error) {
 	objs, err := list(ctx, p)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -247,13 +298,27 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 			return count, ctx.Err()
 		default:
 		}
-		// filex's own trash bucket is not part of the catalogue and is not
-		// the walk's to reconcile. The rows for everything in there already
-		// exist -- soft-deleted, retagged to the very keys sitting on the
-		// storage -- and they are maintained by the trash service (restore,
-		// retention purge), never by a listing. Walking in was how a deletion
-		// undid itself.
-		if trash.IsTrashPath(obj.Path) {
+		// filex's own trees at the storage root are not part of the catalogue
+		// and are not the walk's to reconcile (syspath.Sealed).
+		//
+		//   - `.filex-trash/`: the rows for everything in there already exist
+		//     -- soft-deleted, retagged to the very keys sitting on the storage
+		//     -- and the trash service maintains them (restore, retention
+		//     purge), never a listing. Walking in was how a deletion undid
+		//     itself.
+		//   - `.versions/`: snapshots belong to node_versions rows keyed by
+		//     the file they version. Walking in minted a system-owned row for
+		//     every snapshot folder and file — counted in the storage's totals,
+		//     indexed for search — and, once unseen, the tombstone pass put the
+		//     folder rows in the trash in place, where a purge deletes the
+		//     whole prefix on the backend: the version history itself.
+		//   - `.thumbs/`: a cache, never content.
+		//
+		// …and nor are the paths the storage's scan exclusions name (issue
+		// #44): a matching folder is not listed at all, which is the point —
+		// a `.git` or a download client's `incomplete/` costs nothing.
+		// scanrule.Rule.Skips is the one question for both.
+		if s.rule.Skips(obj.Path) {
 			continue
 		}
 		hash := pathkey.Hash(s.storage.ID, obj.Path)
@@ -299,14 +364,30 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 				BackendMtime: timePtr(obj.Mtime),
 				SyncState:    model.SyncStateSynced,
 			}
-			if obj.Kind == storage.KindDirectory {
+			switch obj.Kind {
+			case storage.KindDirectory:
 				n.Type = model.NodeTypeDirectory
 				// A folder row's size is the RECURSIVE total RecomputeFolderSizes
 				// caches, never the directory entry's own few kilobytes. RunOnce
 				// recomputes right after the walk; CatalogueTree (the copy
 				// mirror) does not, so the entry size would stand until then.
 				n.Size = 0
-			} else {
+			case storage.KindSymlink:
+				// ⚠⚠ This branch used to be absent, and the `else` below typed
+				// every non-directory NodeTypeFile — symlink rows included. It
+				// was not harmless bookkeeping: measured on a root holding a
+				// link to a file outside it, the row was created as a file, the
+				// antivirus queue was handed it, and the scanner READ the bytes
+				// on the other end. Out-of-root content was being virus-scanned,
+				// content-indexed, version-tracked and quota-counted, because
+				// every one of those gates asks `Type == NodeTypeFile`.
+				//
+				// After v0.43.0 a driver reports KindSymlink only for something
+				// the caller may NOT open — out of the root with following off,
+				// broken, or a remote link the driver will not resolve — so the
+				// honest type is the one that keeps all four gates shut.
+				n.Type = model.NodeTypeSymlink
+			default:
 				n.Type = model.NodeTypeFile
 			}
 			created, err := s.store.CreateNode(ctx, n)
@@ -338,6 +419,7 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 					if obj.Name == e2e.MarkerName && obj.Kind != storage.KindDirectory {
 						slog.Warn("sync: leaving a directory uncatalogued this pass, its encrypted-folder marker row could not be written",
 							slog.String("path", p), slog.String("storage", s.storage.Name))
+						c.partial = true
 						return count, nil
 					}
 					/* /wiring:e2 */
@@ -345,9 +427,9 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 				}
 			}
 			if wasRepair {
-				*updated++
+				c.updated++
 			} else {
-				*added++
+				c.added++
 			}
 			count++
 			if s.index != nil {
@@ -357,21 +439,43 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 			// time. This — not the drift branch below — is the first import
 			// of an existing storage, and the reason the hook exists.
 			s.enqueueScan(ctx, created)
-			if obj.Kind == storage.KindDirectory {
-				cn, err := s.walk(ctx, obj.Path, &created.ID, added, updated, list)
+			if obj.Kind == storage.KindDirectory && guard.Enter(obj, depth+1) {
+				cn, err := s.walk(ctx, obj.Path, &created.ID, c, list, guard, depth+1)
 				if err == nil {
 					count += cn
+				} else {
+					c.partial = true
 				}
 			}
 		} else {
-			// existing — update if the backend's copy drifted from the row
+			// existing. A row whose staged upload never flipped to stored is
+			// settled first when the object is demonstrably its bytes; then
+			// the row is updated if the backend's copy drifted from it.
+			unstored := isUnstored(existing)
+			settled := unstored && s.settleTransfer(ctx, existing, obj)
 			drifted := false
-			if objectDrift(existing, obj) {
-				if err := s.store.UpdateNodeMeta(ctx, existing.ID, obj.Size, obj.Mime, obj.Etag, obj.Mtime); err == nil {
-					*updated++
+			switch {
+			case unstored && !settled:
+				// ⚠ Seen, and nothing else. An unstored row describes the upload
+				// that was COMMITTED, not whatever sits at its key — the version
+				// an in-flight overwrite is replacing, a partial write, nothing
+				// related. Writing that object's size and time over the row
+				// would show the wrong file, and would erase the evidence
+				// settleTransfer reads: the next pass would take the wrong
+				// object for the upload.
+				_ = s.store.TouchNodeSeen(ctx, existing.ID)
+			case objectDrift(existing, obj):
+				// An object store's listing carries no mime at all. The row's
+				// came from sniffing the bytes at upload, and a listing with
+				// nothing to say about it must not erase it.
+				mime := obj.Mime
+				if mime == "" {
+					mime = existing.Mime
+				}
+				if err := s.store.UpdateNodeMeta(ctx, existing.ID, obj.Size, mime, obj.Etag, obj.Mtime); err == nil {
 					drifted = true
 				}
-			} else {
+			default:
 				_ = s.store.TouchNodeSeen(ctx, existing.ID)
 				// Backfill a missing backend_mtime for nodes first synced by an
 				// older version (before mtime was recorded on insert). Without
@@ -382,16 +486,23 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 					_ = s.store.SetNodeMtime(ctx, existing.ID, timePtr(obj.Mtime))
 				}
 			}
-			// ⚠ Only a DRIFTED file is re-read here. The walk sees every
-			// object on every pass, so hanging a scan off "the walk saw it"
-			// would re-scan the whole storage every sync interval, forever.
-			// Content that has not changed has already been scanned by the
-			// pass that first catalogued it.
+			if settled {
+				c.reconciled++
+			}
+			if settled || drifted {
+				c.updated++
+			}
+			// ⚠ Only a DRIFTED or a SETTLED file is re-read here. The walk
+			// sees every object on every pass, so hanging a scan off "the walk
+			// saw it" would re-scan the whole storage every sync interval,
+			// forever. Content that has not changed has already been scanned
+			// by the pass that first catalogued it — except a settled upload's:
+			// the post-transfer hooks that scan it never ran.
 			//
 			// The row is re-read once and shared by both consumers: `existing`
 			// still carries the PRE-drift size, and the scanner's size ceiling
 			// has to be applied to the bytes that are actually there.
-			if drifted && (s.index != nil || s.avScan != nil) {
+			if (drifted || settled) && (s.index != nil || s.avScan != nil) {
 				if fresh, _ := s.store.GetNode(ctx, existing.ID); fresh != nil {
 					if s.index != nil {
 						_ = s.index.IndexNode(ctx, fresh)
@@ -400,10 +511,12 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 				}
 			}
 			count++
-			if existing.Type == model.NodeTypeDirectory {
-				cn, err := s.walk(ctx, obj.Path, &existing.ID, added, updated, list)
+			if existing.Type == model.NodeTypeDirectory && guard.Enter(obj, depth+1) {
+				cn, err := s.walk(ctx, obj.Path, &existing.ID, c, list, guard, depth+1)
 				if err == nil {
 					count += cn
+				} else {
+					c.partial = true
 				}
 			}
 		}
@@ -506,6 +619,152 @@ func (s *storageSyncer) reconcileTrash(ctx context.Context) {
 	}
 }
 
+// reconcileInternalTrees drops every catalogue row sitting in filex's own
+// trees other than the trash: `.versions/` and `.thumbs/`.
+//
+// An older walk descended into them and minted a system-owned row for every
+// snapshot folder and file, and for whatever `.thumbs/` held. Nothing maintains
+// those rows and nothing should: a snapshot belongs to the node_versions row of
+// the file it versions — keyed by THAT file's id, pointing at
+// `.versions/<id>/<n>` by key and never at a catalogue row. So the rows only
+// ever did harm: counted in the storage's totals, indexed for search and, once
+// the walk stopped seeing them, moved into the trash IN PLACE by the tombstone
+// pass. A trashed directory row in there is the worst thing the trash can hold:
+// purging it deletes its prefix on the backend, which is the version history.
+//
+// So every such row is hard-deleted — live ones and ones already in the trash
+// alike — deepest first (each row is released on its own, never swept away by
+// the parent_id cascade), each with its search document.
+//
+// ⚠ Catalogue only. The backend is never touched, and dropping these rows
+// cannot cascade into node_versions, whose rows reference the versioned file.
+//
+// Runs before the tombstone pass, like reconcileTrash. Best-effort: a failure
+// is logged and the pass carries on, because the tombstone pass refuses these
+// trees on its own (see tombstone) — a cleanup that did not happen is a cleanup
+// deferred to the next pass, never a version history in the trash.
+func (s *storageSyncer) reconcileInternalTrees(ctx context.Context) {
+	for _, tree := range []string{syspath.Versions, syspath.Thumbs} {
+		rows, err := s.store.ListNodesUnder(ctx, s.storage.ID, tree, true)
+		if err != nil {
+			slog.Warn("sync: internal-tree reconcile query",
+				slog.String("tree", tree), slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
+			continue
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		sort.SliceStable(rows, func(i, j int) bool {
+			di, dj := strings.Count(rows[i].Path, "/"), strings.Count(rows[j].Path, "/")
+			if di != dj {
+				return di > dj
+			}
+			return rows[i].ID > rows[j].ID
+		})
+		dropped := 0
+		for _, n := range rows {
+			if err := s.store.HardDeleteNode(ctx, n.ID); err != nil {
+				slog.Warn("sync: could not drop a catalogue row inside filex's own tree",
+					slog.Int64("node", n.ID), slog.String("path", n.Path), slog.String("err", err.Error()))
+				continue
+			}
+			dropped++
+			if s.index != nil {
+				_ = s.index.DeleteNode(ctx, n.ID)
+			}
+		}
+		slog.Info("sync: dropped catalogue rows an earlier sync minted inside filex's own tree; the backend was not touched",
+			slog.String("tree", tree),
+			slog.Int("rows", dropped),
+			slog.String("storage", s.storage.Name))
+	}
+}
+
+// isUnstored reports whether a file row's bytes were never confirmed on the
+// storage: a staged upload committed it, and its transfer has not flipped it
+// to "stored" — still running, failed, or its bookkeeping was lost.
+func isUnstored(n *model.Node) bool {
+	return n.Type == model.NodeTypeFile && n.TransferState != "" && n.TransferState != model.TransferStateStored
+}
+
+// settleTransfer marks an unstored file row "stored" when its bytes are
+// demonstrably on the storage and nothing else will ever say so.
+//
+// A staged upload flips its row to "stored" in a catalogue write AFTER the
+// driver write. When that write failed and the cleanup after it went ahead,
+// the row said "staged" for ever with no staging behind it: listed, but every
+// read answered 503 STAGING_GONE, every overwrite was refused (the version
+// snapshot reads the same way) and the bytes were never scanned. A full scan
+// saw the object, updated the row's metadata and never touched
+// transfer_state.
+//
+// Both of these must hold:
+//
+//   - no staged_uploads session references the row. While one does, the
+//     session owns the bytes — in flight, or failed and retryable — and its
+//     commit or the sweeper settles it. A lookup that fails is not "none".
+//   - model.TransferLanded: the object has the committed size and is not
+//     older than the commit.
+func (s *storageSyncer) settleTransfer(ctx context.Context, n *model.Node, obj storage.Object) bool {
+	if obj.Kind == storage.KindDirectory || !model.TransferLanded(n, obj.Size, obj.Mtime) {
+		return false
+	}
+	sess, err := s.store.GetStagedUploadByNode(ctx, n.ID)
+	switch {
+	case err == nil && sess != nil:
+		return false
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return false
+	}
+	if err := s.store.SetNodeTransferState(ctx, n.ID, model.TransferStateStored); err != nil {
+		slog.Warn("sync: could not mark a landed staged upload stored",
+			slog.Int64("node", n.ID), slog.String("path", n.Path), slog.String("err", err.Error()))
+		return false
+	}
+	slog.Info("sync: a staged upload's bytes were already on the storage; the row now says stored",
+		slog.Int64("node", n.ID),
+		slog.String("path", n.Path),
+		slog.String("was", n.TransferState),
+		slog.String("storage", s.storage.Name))
+	return true
+}
+
+// tombstone moves the stale candidates that are really gone into the trash
+// and returns how many it moved.
+//
+// ⚠⚠ A row inside one of filex's own trees is NEVER a candidate, whatever
+// else went wrong. The walk does not look in there, so such a row is always
+// "unseen"; for a directory row confirmGone has no object to Stat and says
+// yes; and the trash then holds a folder whose purge deletes its prefix on the
+// backend — `.versions/` is every version of every file. The reconcile passes
+// that run before this one are what clears those rows up; this refusal is
+// what makes their failure harmless.
+//
+// ⚠⚠ Nor is a row the storage's scan exclusions cover (issue #44), for the
+// same reason: the walk does not look there, so "unseen" says nothing about
+// it. Such a row was catalogued before its pattern was added, or written
+// through filex since; it stays as it is. Trashing it would be worse than
+// wrong — a folder row in the trash is purged by deleting its prefix on the
+// backend, and the folder is still there.
+func (s *storageSyncer) tombstone(ctx context.Context, stale []*model.Node) int {
+	deleted := 0
+	for _, n := range stale {
+		if s.rule.Skips(n.Path) {
+			continue
+		}
+		if !s.confirmGone(ctx, n) {
+			continue
+		}
+		if err := s.store.SoftDeleteNode(ctx, n.ID); err == nil {
+			deleted++
+			if s.index != nil {
+				_ = s.index.DeleteNode(ctx, n.ID)
+			}
+		}
+	}
+	return deleted
+}
+
 // confirmGone decides whether a node the walk did not see may be moved to
 // trash.
 //
@@ -572,8 +831,15 @@ func (s *storageSyncer) confirmGone(ctx context.Context, n *model.Node) bool {
 	return true
 }
 
+// previousSeenCount is the tombstone guard's baseline: what the last run that
+// FINISHED ok saw.
+//
+// ⚠ Not simply the last run. A failed or aborted run records whatever it had
+// counted when it stopped — usually 0 — and as the baseline that switched the
+// guard off for the next run: a listing that came back half empty after an
+// interrupted scan went straight to the trash.
 func (s *storageSyncer) previousSeenCount(ctx context.Context) (int, error) {
-	last, err := s.store.GetLastSyncRun(ctx, s.storage.ID)
+	last, err := s.store.GetLastSyncRunByStatus(ctx, s.storage.ID, "ok")
 	if err != nil || last == nil {
 		return 0, err
 	}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path"
@@ -22,6 +23,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
+	"github.com/brf-tech/filex/backend/internal/regfile"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -48,6 +50,11 @@ type Driver struct {
 	knownHostsPath  string
 	hostKeyPin      string
 	insecureHostKey bool
+
+	// skipped: the remote named pipes, sockets and devices already reported
+	// (issue #38 — the SFTP server opens a pipe for us and waits on it just
+	// the same, holding our request with it).
+	skipped regfile.Skipped
 
 	mu     sync.Mutex
 	ssh    *ssh.Client
@@ -267,20 +274,53 @@ func (d *Driver) List(_ context.Context, p string) ([]storage.Object, error) {
 	}
 	out := make([]storage.Object, 0, len(entries))
 	for _, e := range entries {
+		if regfile.Special(e.Mode()) {
+			d.skipped.Report("sftp", d.root, path.Join(abs, e.Name()), e.Mode())
+			continue
+		}
 		obj := storage.Object{
 			Path:  path.Join(p, e.Name()),
 			Name:  e.Name(),
 			Size:  e.Size(),
 			Mtime: e.ModTime(),
 		}
-		if e.IsDir() {
-			obj.Kind = storage.KindDirectory
-		} else {
-			obj.Kind = storage.KindFile
+		obj.Kind = kindOf(e.Mode())
+		if obj.Kind == storage.KindSymlink {
+			obj.Size = 0
+			obj.Metadata = map[string]string{storage.MetaLinkState: storage.LinkUnresolved}
 		}
 		out = append(out, obj)
 	}
 	return out, nil
+}
+
+// kindOf classifies one SFTP directory entry.
+//
+// ⚠⚠ There used to be no symlink branch here at all: the code asked IsDir and
+// called everything else a file, so a remote DIRECTORY symlink came back as
+// storage.KindFile. That is not an approximation, it is a flat lie — the
+// explorer offered it as a downloadable file, the download opened a directory
+// and failed, and the catalogue walk wrote a file row for something that has
+// no bytes.
+//
+// ⚠ SFTP READDIR returns LSTAT attributes, so a link is visible here and is
+// reported as one. It is NOT resolved to its target the way the local driver
+// resolves an in-root link: doing so would cost a round trip per link, and —
+// the deciding reason — this driver has no containment story. filex's boundary
+// on a remote host is the SSH account's own permissions, so relabelling a
+// remote directory link as KindDirectory would make the catalogue walk descend
+// through it, outside the configured root, with nothing to stop it. That is
+// precisely the escape being closed in the local driver, and it is not worth
+// opening here to save a click. See storage.LinkUnresolved.
+func kindOf(mode fs.FileMode) storage.ObjectKind {
+	switch {
+	case mode&fs.ModeSymlink != 0:
+		return storage.KindSymlink
+	case mode.IsDir():
+		return storage.KindDirectory
+	default:
+		return storage.KindFile
+	}
 }
 
 // Stat implements storage.Driver.
@@ -295,6 +335,11 @@ func (d *Driver) Stat(_ context.Context, p string) (storage.Object, error) {
 			return storage.Object{}, storage.ErrNotFound
 		}
 		return storage.Object{}, err
+	}
+	// List does not show a named pipe, socket or device, so Stat does not
+	// know one either (issue #38).
+	if regfile.Special(info.Mode()) {
+		return storage.Object{}, storage.ErrNotFound
 	}
 	obj := storage.Object{
 		Path:  p,

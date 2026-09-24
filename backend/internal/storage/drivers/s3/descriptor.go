@@ -86,7 +86,7 @@ func init() {
 			{
 				Key:         "disable_presign",
 				Type:        storage.FieldBool,
-				Label:       "Disable presigned URLs",
+				Label:       "Stream transfers through filex",
 				I18nKey:     "storages.fields.disablePresign",
 				Help:        "On by default: uploads and the downloads behind share links stream through filex, so the bucket endpoint never has to be reachable from a browser. Turn off only when it is (AWS, a public MinIO) and you want the browser to talk to the bucket directly.",
 				HelpI18nKey: "storages.fieldHelp.disablePresign",

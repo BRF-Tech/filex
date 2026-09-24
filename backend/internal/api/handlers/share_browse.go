@@ -11,7 +11,8 @@ contracts.
 
 Sub-files are served by GET /s/{token}/f/{rel...}: PIN + expiry enforced
 via the same share Resolve, the rel path is containment-checked under the
-shared folder, and internal dirs (.filex-trash/.thumbs) stay invisible.
+shared folder, and filex's own directories (syspath.Hidden, the one list)
+stay invisible.
 ?thumb=1 marks a gallery <img> fetch: images stream inline and do NOT
 count as downloads; everything else 404s (video tiles render a play badge
 instead of a poster). A full file open counts one download. */
@@ -19,7 +20,6 @@ instead of a poster). A full file open counts one download. */
 import (
 	"context"
 	"errors"
-	"fmt"
 	"html/template"
 	"io"
 	"net/http"
@@ -29,22 +29,26 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
 )
 
-// browseSkipNames are filex-internal entries never shown on (or served
-// from) a public share — mirrors streamFolderZip's skip list.
-var browseSkipNames = map[string]bool{
-	".filex-trash": true,
-	".thumbs":      true,
-	".keepdir":     true,
-}
+// browseSkip reports the filex-internal entries never shown on (or served
+// from) a public share: syspath.IsName, the one list — internal directories
+// plus the keep marker.
+//
+// ⚠ This was a three-name map of its own (trash, thumbs, keepdir): it did not
+// know `.versions` (the prior contents of every file ever overwritten) or
+// `.filex-open` (the desktop's working copies), so wherever one of those sat
+// inside a shared folder an anonymous visitor was shown it and
+// `/s/<token>/f/<it>/…` served its bytes. The archive walk (sharezip) had
+// already drifted from this list once; now neither carries its own.
+func browseSkip(name string) bool { return syspath.IsName(name) }
 
 // cleanShareRel normalizes a client-supplied rel path under the shared
 // root. Returns ok=false on traversal attempts ("..", absolute) or
@@ -59,7 +63,7 @@ func cleanShareRel(rel string) (string, bool) {
 		return "", false
 	}
 	for _, seg := range strings.Split(cleaned, "/") {
-		if seg == ".." || browseSkipNames[seg] {
+		if seg == ".." || browseSkip(seg) {
 			return "", false
 		}
 	}
@@ -109,7 +113,7 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 
 	entries := make([]share.FolderEntry, 0, len(objs))
 	for _, o := range objs {
-		if browseSkipNames[o.Name] {
+		if browseSkip(o.Name) {
 			continue
 		}
 		childRel := o.Name
@@ -181,7 +185,7 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 				q = "?pin=" + url.QueryEscape(pin)
 			}
 			row.Href = base + "/f/" + escapePathSegments(e.RelPath) + q
-			row.SizeLabel = share.HumanSize(e.Size)
+			row.SizeLabel = srvtext.Bytes(lang, e.Size)
 			if !e.Mtime.IsZero() {
 				row.DateLabel = e.Mtime.Format("02.01.2006 15:04")
 			}
@@ -196,7 +200,7 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 		page.Entries = append(page.Entries, row)
 	}
 
-	page.CountsLabel = fmt.Sprintf(t["folder_counts"], page.DirCount, page.FileCnt)
+	page.CountsLabel = publicCount(lang, "folder_count", page.DirCount) + " · " + publicCount(lang, "file_count", page.FileCnt)
 
 	_ = share.RenderFolderPage(w, page)
 }
@@ -205,7 +209,7 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 // GET /s/{token}/f/{rel...}. Media endpoint → plain-text errors (the
 // browse page is the human-facing surface).
 func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
-	tok := chi.URLParam(r, "token")
+	tok := pathParam(r, "token")
 	pin := h.extractPIN(r)
 
 	resolved, err := h.Service.Resolve(r.Context(), tok, pin)
@@ -227,8 +231,15 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	rel, ok := cleanShareRel(chi.URLParam(r, "*"))
+	rel, ok := cleanShareRel(pathParam(r, "*"))
 	if !ok || rel == "" {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	full := joinShareRel(node.Path, rel)
+	// Nothing inside filex's own trees is served, whichever row the link
+	// names (see HandleDownload).
+	if syspath.Hidden(node.Path) || syspath.Hidden(full) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -237,7 +248,6 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "storage error", http.StatusInternalServerError)
 		return
 	}
-	full := joinShareRel(node.Path, rel)
 	// Where the child's bytes are: the driver, or filex's staging area while a
 	// staged upload into this folder is still transferring. Resolved before the
 	// download claim below, so a vanished staging answers an error rather than

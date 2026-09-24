@@ -17,6 +17,7 @@ import (
 	"strconv"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
 // Duplicates serves the admin duplicate-file report.
@@ -77,6 +78,23 @@ func (h *Duplicates) Report(w http.ResponseWriter, r *http.Request) {
 		}
 		rows = kept
 	}
+	// A version snapshot IS a byte-identical copy of a file as it once was,
+	// and a desktop working copy of the document it was uploaded from — filex
+	// keeps both on purpose (syspath). Reporting them as "wasted space" invites
+	// an operator to delete a file's history. A group this leaves with a
+	// single member is not a duplicate any more and is dropped below.
+	hid := false
+	{
+		kept := rows[:0]
+		for _, row := range rows {
+			if syspath.Hidden(row.Path) {
+				hid = true
+				continue
+			}
+			kept = append(kept, row)
+		}
+		rows = kept
+	}
 
 	// Fold flat rows into groups. Key = "<size>-<etag>" per contract;
 	// insertion order preserved via the slice, lookup via the map.
@@ -115,6 +133,19 @@ func (h *Duplicates) Report(w http.ResponseWriter, r *http.Request) {
 		}
 		return groups[i].Key < groups[j].Key
 	})
+	if hid {
+		// Only when the filter above removed something: every other group
+		// arrived from SQL with at least two members, and this keeps the
+		// report byte-identical to what it was for an install with nothing
+		// of filex's own among its duplicates.
+		kept := groups[:0]
+		for _, g := range groups {
+			if g.Count >= 2 {
+				kept = append(kept, g)
+			}
+		}
+		groups = kept
+	}
 	if len(groups) > limit {
 		groups = groups[:limit]
 	}

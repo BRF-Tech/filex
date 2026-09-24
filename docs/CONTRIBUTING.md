@@ -165,6 +165,7 @@ There are two, and both run against a throwaway instance this repo starts for
 them — never against a live host, never with a secret:
 
 ```bash
+bash scripts/build-wasm-fixture.sh   # once: the app-plugin fixture 95-app-plugins installs (skips without it)
 node e2e/run.mjs local      # Playwright — e2e/tests/*.spec.ts
 node e2e/run.mjs cypress    # Cypress   — web/cypress/e2e/*.cy.ts
 ```
@@ -271,6 +272,201 @@ fragment passes only see duplication that is still *shaped* like the original
 is caught by the listing-surface rule instead, not by tokens), and Vue
 `<template>` and `<style>` blocks are not scanned at all.
 
+### UI rules
+
+#### One table — the explorer's — and nothing else draws one
+
+**filex has exactly one table: `DataTable`
+(`packages/core/src/components/DataTable.vue`), which is the explorer's own
+list view with the files taken out of it.** The explorer's listing renders
+through it, and so does every other table in the product — every admin page,
+the connection panels, My shares, the notifications list, an archive's or a
+spreadsheet's preview, and an app's `list` node. **If something is tabular, it
+is a `DataTable`.** No `<table>`, no table roles, no copy of the `fe-list`
+markup, no second table component — anywhere in `web/src` or
+`packages/core/src`.
+
+The owner, 2026-09-21: *"Artık explore tablomuz bizim her yerde kullanacağımız
+tablo yapısıdır; bir yere tablo gerekiyorsa bu tabloyu koymak zorundayız. Bunu
+kural olarak yazalım, çok önemli bir kural."* ("From now on the explorer's
+table is the table we use everywhere; wherever a table is needed, this is the
+table that goes there. Write it down as a rule — a very important one.")
+
+**Why it is a rule and not a preference.** The round before it built
+`ui/Table.vue`: *one* admin table, with the explorer's frozen edges and its
+Actions menu — an **imitation**. It had exactly the parts somebody remembered
+to copy. Resizing a column, sorting, the column menu, reordering and
+remembering the arrangement all live in the explorer's code, and none of them
+reached the admin panel. Nothing failed; the owner opened the Users page and
+found he could not widen a column or sort it (*"Admin tabloları hâlâ explore
+tablolarıyla AYNI KODDA DEĞİL … tablo sütunları düzenlenebilir değil, büyütme
+küçültme yok, sıralama yok"*). The same code gets everything the explorer can
+do, and keeps getting whatever is added to it next. A look-alike never does.
+
+What every table gets, whoever draws it:
+
+- **resizable columns** — drag the edge, arrow keys on the focused handle,
+  double-click for the shipped width;
+- **sorting** — click a header, click again to reverse. ⚠ Over one page of a
+  server-paged list the headers **close and say why** instead of re-ordering
+  25 rows of 300 and calling it sorted; a caller whose server can sort passes a
+  controlled `sort` and handles `@sort`;
+- **the column menu** — the header's ⋮ or a right-click on the header: show,
+  hide, step left/right, reset; plus dragging a header to move its column;
+- **remembered** — per table, on the person's account (`table-id`, stored in
+  the per-person view document under `t`). The explorer's listing is
+  remembered per folder instead;
+- **the frozen lead and ONE Actions control** — the column that says which row
+  this is stays on the left, the row's verbs are one labelled control on the
+  right (`:row-actions`), and the table scrolls sideways rather than dropping a
+  column. ⚠ Either is frozen only while it leaves room to scroll: a sticky
+  cell carries an opaque ground, so in a pane it cannot spare (an app's list
+  in the details panel is ~265px) it would cover the very columns it was
+  frozen to keep company. Below that nothing is pinned, the row scrolls as
+  one piece, and the lead falls to its own minimum instead of taking the
+  whole pane — still without hiding anything.
+
+How to use it:
+
+```vue
+<DataTable
+  table-id="admin.widgets"
+  :columns="[{ id: 'name', label: t('…'), sortable: true, width: 220 },
+             { id: 'size', label: t('…'), sortable: true, align: 'right',
+               format: (r) => formatBytes(r.size), sortValue: (r) => r.size }]"
+  :rows="rows"
+  row-key="id"
+  :row-actions="(r) => [{ key: 'delete', label: t('…'), danger: true }]"
+  @row-action="(key, r) => …"
+>
+  <template #cell-name="{ row }"><div>{{ row.name }}<span class="tbl-sub">{{ row.path }}</span></div></template>
+</DataTable>
+```
+
+- Every `DataTable` has a **unique `table-id`** (`admin.<page>[.<table>]`,
+  `conn.<panel>`, `app.<plugin>.<node>`). The one exception is a table whose
+  columns are whatever the data brings (the CSV preview): it binds
+  `:table-id="undefined"` and says why beside it.
+- A cell slot is a flex row: **wrap a cell that stacks two lines in one
+  `<div>`**, or the lines sit side by side. A `mt-1` on a second root node of
+  the slot is a margin on a flex ITEM — it does not start a line, it pushes
+  the box down ON TOP of the one beside it (v0.43.0 QA: the Apps table's
+  Label cell drew the "Language pack" badge over the label and the coverage
+  line over the badge, at every width). `.tbl-sub` as a direct child is the
+  one shape the stylesheet handles on its own.
+- A list the server pages: pass `:page`, `:page-size` and `:total` (or
+  `:pages`). ⚠ Pass `:total` even when there is **no pager** and the endpoint
+  answers "the first N of M" — that is what tells the table the rows on screen
+  are not the whole list.
+- Language and light/dark reach every table from the host once (`TABLE_ENV` —
+  `web/src/lib/tableEnv.ts`, and the explorer provides its own); a page does not
+  pass them. A unit test that mounts a page on its own provides `TABLE_ENV` if
+  it asserts translated table text.
+
+**The gate:** `web/tests/ui/tablePinnedActions.test.ts` scans both trees and
+fails on a raw `<table>`, on table elements, table roles or the `fe-list` table
+markup outside `DataTable.vue`, on a `DataTable` without a `table-id` or with a
+duplicate one, on a `RowActions` drawn anywhere but inside the table, and on a
+`#cell-*` slot whose second root node carries a top or bottom margin (the
+overlap above). There
+are **no exemptions** — the earlier version of this rule let the file previews
+keep tables of their own "because they render foreign content", and an
+exemption list is where the next second table hides.
+
+#### A service that is not there: disabled with a reason, or not offered
+
+For an action that needs an optional external service — ONLYOFFICE, draw.io,
+the converter, outgoing mail — that is not configured (or not answering):
+**an administrator sees the action greyed, with a sentence that says what is
+missing and where to set it up; everybody else is not offered it at all.**
+Nobody is ever shown a raw HTTP status or a JSON body. The owner, after
+`Config fetch 503: {"error":"onlyoffice not configured"}` reached a person who
+had clicked Open on a `.docx`: *"disabled with a reason for administrators,
+hidden for everybody else."* Use `gateOnService()` (`packages/core/src/lib/
+serviceGate.ts`); "is this person an administrator who could fix it" is the
+server's answer (`capabilities.caller_admin`), never a role guessed in the
+browser.
+
+#### Words: one term per concept
+
+A thing on screen has **one name**, in every language filex ships, on every
+surface. The release-candidate sweep of v0.43.0 (2026-09-21) found the API key
+called "API anahtarı", "API jetonu" and "API token" on three neighbouring
+screens, a share's PIN called "PIN" in the dialog that made it and "Kod" on the
+page that asks for it, and "Giriş" meaning both *Home* and *sign in*. A person
+reading two names assumes two things.
+
+| Concept | English | Türkçe | Not these |
+|---|---|---|---|
+| The key a person creates for a device, a mount or an AI agent | API key | API anahtarı | API token, token, API jetonu, jeton |
+| The secret a share link can require | PIN | PIN | code, kod |
+| A place filex keeps files (an admin adds it under Storages) | storage | depo | disk, drive, sürücü; "bucket / kova" only for the S3 bucket behind or in front of one |
+| What an API key is allowed to do (the checkboxes on the key, the column that lists them afterwards) | permission | izin | scope, kapsam, yetki, "can do". A **provider's** `scope` parameter (`authProviders.fields.scopes`) is OIDC's word and stays |
+| A GitHub (or other code) repository | repository | repo | depo — that is a storage |
+| Deleted files, until they expire | Trash | Çöp kutusu | Çöp Kutusu, çöp |
+| What something is called | name | ad (display name: görünen ad) | isim |
+| What a person signs in with | password | parola | şifre (şifreleme is *encryption* and stays) |
+| The first screen of the file manager | Home | Ana sayfa | Giriş |
+| Starting a session | sign in / sign-in | oturum aç / oturum açma | log in, login, giriş yap |
+| Ending it | sign out | oturumu kapat | log out, çıkış yap |
+| The short name a person signs in with | username | kullanıcı adı | login name, giriş adı |
+| An electronic mail address, or a message | email | e-posta | e-mail, mail |
+| filex reading a storage to bring its catalogue up to date (Sync runs, Sync now, Last sync) | sync | senkron (noun), senkronize et (verb) | eşitleme, senkronizasyon |
+| The desktop app keeping a copy of folders on a computer, both ways (folder sync, "Syncing…") — and any other tool that does the same | folder sync, sync | klasör eşitleme, eşitle | klasör senkronu, senkronizasyon |
+| A replica write mode: wait for the replica, or don't | synchronous / asynchronous | eşzamanlı / eşzamansız | Sync / Async, senkron / asenkron |
+| When a file last changed (column, filter, sort, details) | Modified | Değiştirilme | Tarih, Değiştirildi |
+| Who a file belongs to (column and filter) | Owner | Sahibi | People, Kişiler |
+| An address that opens a share | link | bağlantı | link (in Turkish) |
+| Narrowing a list | filter | filtre | süzgeç |
+
+**Spelling is American English.** color, license, favorite, center, gray,
+behavior, organize, analyze, catalog, defense, customize — never colour,
+licence, favourite, centre, grey, behaviour, organise, catalogue. (v0.43.0:
+"Colour palette", "your own colours", "the colour palette" and macFUSE's
+"licence" survived the sweep beside "Accent color" and "License: {license}" on
+the next screen.) The gate below fails a British spelling.
+
+**Case.** Sentence case for every label, button, menu item, title and column,
+in both languages: "Delete permanently", "Kalıcı olarak sil", "Keyboard
+shortcuts". A proper name keeps its own case (filex, WebDAV, Finder, a menu
+name quoted from another program's screen). `web/tests/i18n/labelCase.test.ts`
+fails a label written twice in two cases and a short label in Title Case.
+
+**Turkish is written in the "siz" form.** A sentence that addresses the reader
+says "Tekrar deneyin", "hesabınızla", "görebilirsiniz" — never "Tekrar dene",
+"hesabınla", "görebilirsin", never "sen". A command — a button, a menu item, a
+placeholder — is the bare verb, as every Turkish interface writes it: "Kaydet",
+"Yeni sekmede aç", "Ara…". That is not the "sen" form, and it is not changed.
+
+The machine-checkable part of this table is `web/tests/i18n/vocabulary.test.ts`:
+it reads every catalogue — explorer, admin, and the server's `server.*` text —
+and fails on a word from the right-hand column. A technical name that is
+somebody else's (the OIDC *token* endpoint, an HTTP header, a webhook target's
+*Bearer token*) is listed there by key, with the reason. Add a row here and a
+pattern there together.
+
+#### A person is named one way
+
+Wherever filex shows a person — the Owner column, the details panel, the share
+dialog, the account menu, an admin table, a notification — it prints **their
+display name, else their username, else their email address**. In the browser
+that is `personName()` (`packages/core/src/lib/personName.ts`); on the server
+it is `model.PersonLabel` (`backend/internal/model/user.go`), which the Owner
+column's name lookup and every row that names a person use. An email address
+is shown as the name only when an account has nothing else; where it helps (an
+admin table, a tooltip) it is the second line, never the first.
+
+#### Dates and numbers: the explorer's format, everywhere
+
+A date a person reads is the explorer's: "Sep 21, 2026, 2:50 PM",
+"21 Eyl 2026, 14:50" — `formatWhen()` from `@brftech/filex-core`, in the
+viewer's language and the viewer's chosen time zone. The admin panel's
+`formatDate()` (`web/src/lib/format.ts`) and every share line call it; nothing
+builds its own `Intl.DateTimeFormat`. A byte count is `formatByteSize()`, with
+the catalogue's unit words (`unit.*`) and the viewer's number format, so
+Turkish reads "1,96 KB" and French "1,96 Ko". ISO 8601 is for machines only: a
+log line, an export, an API document — never a label.
+
 ### General
 
 - **Line endings are LF, and `.gitattributes` enforces it** — you do not need to
@@ -346,6 +542,32 @@ Playwright's Chromium once: `pnpm --dir e2e exec playwright install chromium`.
 CI runs the same command on every tag and on demand (GitLab `shots`, GitHub
 *Screenshots*) and uploads the pictures with the sheet, so a script that no
 longer fits the product turns a job red instead of a release night.
+
+**The app scenes are taken locally.** `apps.mjs` and `signing.mjs` photograph
+the two apps filex ships alongside itself, and their builds are not in this
+repository: they come from sibling checkouts of
+[filex-sign](https://github.com/BRF-Tech/filex-sign) and
+[filex-convert](https://github.com/BRF-Tech/filex-convert) (`../filex-sign/dist`,
+`../filex-convert`), or from `FILEX_SIGN_APP_DIR` / `FILEX_CONVERT_APP_DIR`.
+Without one, `pnpm shots` stops before it builds anything and says which. In CI
+(`CI` is set) those two scenes are **left out** instead — named in the log, the
+verdict and the contact sheet, and their folders spared the leftover check —
+because at a tag there may be no app release to fetch yet, and the converter
+scene needs Docker, which the GitLab runner does not have. `--with-apps` puts
+them back; `--without-apps` leaves them out anywhere.
+
+**The converter picture needs the conversion engines.** Its wizard lists what
+the server found and names every missing engine *Not installed on this server*
+— not a picture for the README. When the host lacks one (a Windows workstation
+lacks all of them), `apps.mjs` runs **this tree's build inside the full image**
+(`ghcr.io/brf-tech/filex:full`, which carries ffmpeg, ImageMagick, Ghostscript,
+poppler, LibreOffice and rsvg) with Docker — nothing is installed on the host,
+the image is pulled once, and the container's UI is checked byte for byte
+against `web/dist` like the host binary's. `SHOTS_ENGINES=host|container`
+forces one side. The scene refuses to take the picture while anything on it
+says an engine is missing. To rehearse a scene without replacing its pictures:
+`SHOTS_DRY_RUN=1 node e2e/shots/apps.mjs` walks to every picture and writes
+none.
 
 ---
 

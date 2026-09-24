@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/throughput"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -182,6 +183,9 @@ func (h *Manager) vfNewFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fullRel := path.Join(destRel, name)
+	if gate(w, r, h.ACL, current.ID, writegate.Writes(fullRel)) {
+		return
+	}
 
 	// A file landing on an existing folder name: the same collision from the
 	// other side, and on an object store nothing else would notice it.
@@ -254,7 +258,7 @@ func (h *Manager) vfNewFile(w http.ResponseWriter, r *http.Request) {
 			Mime:      mime,
 		}, writehook.OriginManager, writehook.Created)
 	} else {
-		h.mirrorNewDocNode(r, current.ID, parentID, name, clean, mime, size)
+		h.mirrorNewDocNode(r, drv, current.ID, parentID, name, fullRel, clean, mime, size)
 	}
 
 	emitFolderChange(current.ID, destRel, realtime.ChangeEvent{Action: "upload"})
@@ -276,12 +280,16 @@ func (h *Manager) vfNewFile(w http.ResponseWriter, r *http.Request) {
 // (deleted out of band, restored from a backup, a driver that lost it). In
 // that state a plain CreateNode would fail the path-hash uniqueness constraint
 // and the file would be on disk but invisible.
-func (h *Manager) mirrorNewDocNode(r *http.Request, storageID int64, parentID *int64, name, clean, mime string, size int64) {
+//
+// ⚠ That row's etag describes bytes that no longer exist. The row takes what
+// landed instead (storage.Landed), or an empty etag when the backend cannot say.
+func (h *Manager) mirrorNewDocNode(r *http.Request, drv storage.Driver, storageID int64, parentID *int64, name, rel, clean, mime string, size int64) {
 	ctx := r.Context()
 	hash := pathkey.Hash(storageID, clean)
 
 	if existing, _ := h.Store.GetNodeByPath(ctx, storageID, hash); existing != nil {
-		_ = h.Store.UpdateNodeMeta(ctx, existing.ID, size, mime, existing.Etag, time.Now())
+		lsize, etag, mtime := storage.Landed(ctx, drv, rel, size)
+		_ = h.Store.UpdateNodeMeta(ctx, existing.ID, lsize, mime, etag, mtime)
 		if fresh, _ := h.Store.GetNode(ctx, existing.ID); fresh != nil {
 			h.indexNode(ctx, fresh)
 			h.dispatchThumb(fresh)

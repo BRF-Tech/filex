@@ -19,12 +19,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 )
 
 // Op kinds.
@@ -38,6 +40,12 @@ const (
 	// the search index, thumbnails and the writehook all live in the handler
 	// layer (same reason DBSync is injected rather than reimplemented here).
 	OpUploadCommit = "upload-commit"
+	// OpPluginAction runs one app-plugin action (internal/wasmplugin). The
+	// row's Dest carries the job id (app_plugin_jobs) and Sources the input
+	// paths; the work is done by the injected PluginRunner, which owns the
+	// sandbox, the output commit and the job row. One op = one job, so
+	// Done/Failed move as a unit rather than per source.
+	OpPluginAction = "plugin-action"
 )
 
 // Status values.
@@ -47,6 +55,9 @@ const (
 	StatusOK      = "ok"
 	StatusFailed  = "failed"
 	StatusPartial = "partial"
+	// StatusCancelled is a row Cancel ended: a pending row that never ran,
+	// or a running one whose context was cancelled.
+	StatusCancelled = "cancelled"
 )
 
 // Op is a queued file operation row.
@@ -68,20 +79,57 @@ type Op struct {
 	// BytesTotal / BytesDone are a running cross-storage transfer's byte
 	// counters (issue #27), merged in from memory by Get/List — never stored.
 	// BytesTotal 0 with BytesDone > 0 means the total is not known (yet).
-	BytesTotal int64      `json:"bytes_total,omitempty"`
-	BytesDone  int64      `json:"bytes_done,omitempty"`
-	Failed     int        `json:"failed"`
-	Status     string     `json:"status"`
-	Error      string     `json:"error,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	BytesTotal int64  `json:"bytes_total,omitempty"`
+	BytesDone  int64  `json:"bytes_done,omitempty"`
+	Failed     int    `json:"failed"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
+	// ErrorCode / ErrorEngine classify a failed APP job for the client, which
+	// says it in the person's language (lib/errorWords `jobFailure`) and keeps
+	// `Error` — English, sometimes plumbing — for an administrator's second
+	// line. Filled by the plugin Decorator, never stored.
+	ErrorCode   string     `json:"error_code,omitempty"`
+	ErrorEngine string     `json:"error_engine,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	// Plugin fields are filled by the Decorator for OpPluginAction rows and
+	// never stored here: which plugin/action ran, the action's label in the
+	// caller's locale, the last progress message, and the committed outputs.
+	Plugin  string     `json:"plugin,omitempty"`
+	Action  string     `json:"action,omitempty"`
+	Label   string     `json:"label,omitempty"`
+	Message string     `json:"message,omitempty"`
+	Outputs []OpOutput `json:"outputs,omitempty"`
 	// ActorID is who asked for this op. The worker runs on a server-lifetime
 	// context long after the request that queued the work is gone, so the only
 	// way a pasted file can be attributed to the person who pasted it is for
 	// the queue row to carry them (migration 00038). nil is SYSTEM — a row
 	// queued before the column existed, or by something that is not a person.
 	ActorID *int64 `json:"actor_id,omitempty"`
+
+	// An OpTrashEmpty row's request (trash_empty.go): kept out of the
+	// answers, which carry its counts only.
+	trash  trashParams
+	tenant string
+}
+
+// shape finishes a scanned row. An OpTrashEmpty row stores its request where
+// the other kinds store paths; that is read into the private fields and
+// taken out of the public ones.
+func shape(op *Op) {
+	if op.DestStorageID == 0 {
+		op.DestStorageID = op.StorageID
+	}
+	if op.Kind != OpTrashEmpty {
+		return
+	}
+	p, err := decodeTrashParams(op.Sources)
+	if err != nil {
+		slog.Warn("ops: trash-empty row unreadable; it reaches nothing", slog.Int64("op", op.ID), slog.String("err", err.Error()))
+	}
+	op.trash, op.tenant = p, op.Dest
+	op.Sources, op.Dest = nil, ""
 }
 
 // Service is the queue + worker bundle.
@@ -93,10 +141,34 @@ type Service struct {
 	dialect         string
 	storageResolver func(int64) (storage.Driver, error)
 	dbsync          DBSync
+	// locks is the live app-lock table of a storage (acl.Resolver.Locks),
+	// wired by the router; nil judges names only (writegate.Check).
+	locks           func(ctx context.Context, storageID int64) writegate.Locks
 	uploadCommitter UploadCommitter
+	pluginRunner    PluginRunner
+	decorator       func(ctx context.Context, rows []*Op)
+
+	// cancels holds the cancel handle of every running op (Cancel).
+	cancels sync.Map
 
 	// live holds the byte counters of running cross-storage ops (progress.go).
 	live sync.Map
+
+	// deleteWorkers bounds how many items of ONE delete job are trashed at
+	// the same time (SetDeleteWorkers; delete_pool.go).
+	deleteWorkers int
+
+	// "Empty the trash now" (trash_empty.go): the purge, the lock that makes
+	// a tenant's second press see its first, and the runs in flight.
+	trashEmptier TrashEmptier
+	trashMu      sync.Mutex
+	trashDone    sync.Map // op id -> chan struct{}, closed when the run ends
+
+	// life is what background runs live in; Stop ends it and waits (bg).
+	lifeMu     sync.Mutex
+	life       context.Context
+	lifeCancel context.CancelFunc
+	bg         sync.WaitGroup
 
 	wakeup chan struct{}
 	stopMu sync.Mutex
@@ -136,6 +208,19 @@ type DBSync interface {
 // SetSync wires the DB-sync hook. Call once at boot, before Run.
 func (s *Service) SetSync(d DBSync) { s.dbsync = d }
 
+// SetLocks wires the app-lock lookup SubmitTo judges every operation
+// against (see Targets).
+func (s *Service) SetLocks(fn func(ctx context.Context, storageID int64) writegate.Locks) {
+	s.locks = fn
+}
+
+func (s *Service) lockView(ctx context.Context, storageID int64) writegate.Locks {
+	if s.locks == nil {
+		return nil
+	}
+	return s.locks(ctx, storageID)
+}
+
 // UploadCommitter transfers one staged upload's bytes to the storage driver
 // and runs the post-write side effects (node update, search index, thumbnail,
 // writehook). Implemented by the staged-upload HTTP handler and injected via
@@ -151,6 +236,59 @@ type UploadCommitter interface {
 // SetUploadCommitter wires the staged-upload transfer hook. Call once at boot,
 // before Run.
 func (s *Service) SetUploadCommitter(c UploadCommitter) { s.uploadCommitter = c }
+
+// OpOutput is one file a plugin job produced.
+type OpOutput struct {
+	Path string `json:"path"`
+}
+
+// PluginRunner executes an OpPluginAction row: reads the job behind op.Dest,
+// runs the plugin in its sandbox, commits the outputs and records the job's
+// outcome. live receives progress the plugin reports (done/total), which the
+// tray draws through the same byte counters a cross-storage copy uses.
+// Implemented by wasmplugin.Registry, injected via SetPluginRunner.
+type PluginRunner interface {
+	RunPluginAction(ctx context.Context, op *Op, live func(done, total int64)) error
+}
+
+// SetPluginRunner wires the app-plugin executor. Without it an
+// OpPluginAction row fails loudly.
+func (s *Service) SetPluginRunner(r PluginRunner) { s.pluginRunner = r }
+
+// SetDecorator installs the hook Get/List call to fill the plugin fields of
+// rows (Op.Plugin, Label, Outputs, …) from the job table.
+func (s *Service) SetDecorator(fn func(ctx context.Context, rows []*Op)) { s.decorator = fn }
+
+// Cancel ends an op. A pending row is marked cancelled without running; a
+// running row has its context cancelled, which tears down the plugin
+// instance (or stops the transfer loop), and is marked cancelled when the
+// worker returns. Unknown or finished rows are a no-op with ok=false.
+func (s *Service) Cancel(ctx context.Context, id int64) (bool, error) {
+	res, err := s.db.ExecContext(ctx, s.q(
+		`UPDATE pending_ops SET status=?, finished_at=CURRENT_TIMESTAMP WHERE id=? AND status=?`),
+		StatusCancelled, id, StatusPending)
+	if err != nil {
+		return false, err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		// A queued trash empty already has its goroutine, waiting for its
+		// turn: tell it to stop waiting.
+		if v, ok := s.cancels.Load(id); ok {
+			v.(*cancelHandle).cancel()
+		}
+		return true, nil
+	}
+	if v, ok := s.cancels.Load(id); ok {
+		v.(*cancelHandle).cancel()
+		return true, nil
+	}
+	return false, nil
+}
+
+type cancelHandle struct {
+	cancel    context.CancelFunc
+	cancelled atomic.Bool
+}
 
 // TrashPrefix is the in-storage dir soft-deleted files are moved into.
 // Re-exported from the trash package so there is exactly one definition of
@@ -180,6 +318,7 @@ func NewForDialect(database *sql.DB, dialect string, resolver func(int64) (stora
 		db:              database,
 		dialect:         dialect,
 		storageResolver: resolver,
+		deleteWorkers:   DefaultDeleteWorkers,
 		wakeup:          make(chan struct{}, 1),
 		stop:            make(chan struct{}),
 	}
@@ -243,7 +382,7 @@ func (s *Service) Submit(ctx context.Context, kind string, storageID int64, sour
 // queue had nowhere to put the target's storage.
 func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStorageID int64, sources []string, dest string) (*Op, error) {
 	switch kind {
-	case OpCopy, OpMove, OpDelete, OpUploadCommit:
+	case OpCopy, OpMove, OpDelete, OpUploadCommit, OpPluginAction:
 	default:
 		return nil, fmt.Errorf("ops: unknown kind %q", kind)
 	}
@@ -253,19 +392,27 @@ func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStor
 	if len(sources) == 0 {
 		return nil, errors.New("ops: no sources")
 	}
-	if (kind == OpCopy || kind == OpMove) && dest == "" {
+	if (kind == OpCopy || kind == OpMove || kind == OpPluginAction) && dest == "" {
 		return nil, errors.New("ops: dest required")
 	}
 	if destStorageID == 0 {
 		destStorageID = storageID
+	}
+	srcT, dstT := Targets(kind, sources, dest)
+	if err := writegate.Check(s.lockView(ctx, storageID), 0, srcT...); err != nil {
+		return nil, err
+	}
+	if err := writegate.Check(s.lockView(ctx, destStorageID), 0, dstT...); err != nil {
+		return nil, err
 	}
 	if kind == OpCopy || kind == OpMove {
 		if err := refuseSelfDescendant(storageID, destStorageID, sources, dest); err != nil {
 			return nil, err
 		}
 	}
-	if kind == OpDelete || kind == OpUploadCommit {
-		// Neither has a destination; a stray id here would only be able to lie.
+	if kind == OpDelete || kind == OpUploadCommit || kind == OpPluginAction {
+		// None of these has a destination storage; a stray id here would only
+		// be able to lie.
 		destStorageID = storageID
 	}
 	srcJSON, _ := json.Marshal(sources)
@@ -314,6 +461,9 @@ func (s *Service) Get(ctx context.Context, id int64) (*Op, error) {
 	op, err := scanOp(row)
 	if err == nil {
 		s.attachLive(op)
+		if s.decorator != nil {
+			s.decorator(ctx, []*Op{op})
+		}
 	}
 	return op, err
 }
@@ -338,6 +488,14 @@ func (s *Service) List(ctx context.Context, status string) ([]*Op, error) {
 // their own feature. A row matches on either end, because a cross-storage copy
 // belongs to the tenant on either side of it.
 func (s *Service) ListIn(ctx context.Context, status string, storageIDs []int64) ([]*Op, error) {
+	if storageIDs == nil {
+		return s.ListFor(ctx, status, Viewer{All: true})
+	}
+	return s.ListFor(ctx, status, Viewer{StorageIDs: storageIDs})
+}
+
+// ListFor is List as v sees it (Viewer.Sees, in the SQL).
+func (s *Service) ListFor(ctx context.Context, status string, v Viewer) ([]*Op, error) {
 	const cols = `id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at, actor_id`
 	q := `SELECT ` + cols + ` FROM pending_ops`
 	var (
@@ -348,23 +506,31 @@ func (s *Service) ListIn(ctx context.Context, status string, storageIDs []int64)
 		where = append(where, `status=?`)
 		args = append(args, status)
 	}
-	if storageIDs != nil {
-		if len(storageIDs) == 0 {
+	if !v.All {
+		var either []string
+		if len(v.StorageIDs) > 0 {
+			ph := make([]string, len(v.StorageIDs))
+			for i, id := range v.StorageIDs {
+				ph[i] = "?"
+				args = append(args, id)
+			}
+			in := strings.Join(ph, ",")
+			either = append(either, `storage_id IN (`+in+`)`, `COALESCE(dest_storage_id,0) IN (`+in+`)`)
+			for _, id := range v.StorageIDs {
+				args = append(args, id)
+			}
+		}
+		if v.Tenant != "" {
+			either = append(either, `(kind=? AND COALESCE(dest,'')=?)`)
+			args = append(args, OpTrashEmpty, v.Tenant)
+		}
+		if len(either) == 0 {
 			// A scope that reaches no storage sees no ops. An empty `IN ()` is
 			// a syntax error on some drivers and, worse, an invitation to
 			// "just skip the clause" — which is the unscoped query again.
 			return []*Op{}, nil
 		}
-		ph := make([]string, len(storageIDs))
-		for i, id := range storageIDs {
-			ph[i] = "?"
-			args = append(args, id)
-		}
-		in := strings.Join(ph, ",")
-		where = append(where, `(storage_id IN (`+in+`) OR COALESCE(dest_storage_id,0) IN (`+in+`))`)
-		for _, id := range storageIDs {
-			args = append(args, id)
-		}
+		where = append(where, `(`+strings.Join(either, ` OR `)+`)`)
 	}
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
@@ -383,13 +549,17 @@ func (s *Service) ListIn(ctx context.Context, status string, storageIDs []int64)
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(srcJSON), &op.Sources)
-		if op.DestStorageID == 0 {
-			op.DestStorageID = op.StorageID
-		}
+		shape(op)
 		s.attachLive(op)
 		out = append(out, op)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if s.decorator != nil && len(out) > 0 {
+		s.decorator(ctx, out)
+	}
+	return out, nil
 }
 
 // Run blocks until ctx is cancelled, draining the queue continuously.
@@ -406,6 +576,9 @@ func (s *Service) Run(ctx context.Context) {
 	s.stopWg.Add(1)
 	s.stopMu.Unlock()
 	defer s.stopWg.Done()
+
+	// A trash empty the previous process left behind carries on.
+	s.resumeTrashEmpties(ctx)
 
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
@@ -437,6 +610,7 @@ func (s *Service) Stop() {
 		close(stop)
 	}
 	s.stopWg.Wait()
+	s.stopBackground()
 }
 
 func (s *Service) poke() {
@@ -475,7 +649,9 @@ func (s *Service) claimNext(ctx context.Context) (*Op, bool, error) {
 	}
 	defer tx.Rollback()
 	var id int64
-	row := tx.QueryRowContext(ctx, `SELECT id FROM pending_ops WHERE status='pending' ORDER BY id ASC LIMIT 1`)
+	// A trash empty is never the worker's: it runs in its own goroutine
+	// (trash_empty.go) and would hold the whole queue for as long as it runs.
+	row := tx.QueryRowContext(ctx, `SELECT id FROM pending_ops WHERE status='pending' AND kind <> 'trash-empty' ORDER BY id ASC LIMIT 1`)
 	if err := row.Scan(&id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, false, nil
@@ -529,6 +705,21 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		}
 	}
 
+	// Every running op can be cancelled (Cancel): the handle ends this
+	// context, and a plugin instance or a transfer loop stops with it.
+	parent := ctx
+	ctx, cancelOp := context.WithCancel(ctx)
+	defer cancelOp()
+	ch := &cancelHandle{}
+	ch.cancel = func() { ch.cancelled.Store(true); cancelOp() }
+	s.cancels.Store(op.ID, ch)
+	defer s.cancels.Delete(op.ID)
+
+	if op.Kind == OpPluginAction {
+		s.executePlugin(ctx, parent, op, ch)
+		return
+	}
+
 	if s.isCross(op) {
 		lp := &liveProgress{}
 		s.live.Store(op.ID, lp)
@@ -543,27 +734,55 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 	}
 
 	var lastErr error
-	for _, src := range op.Sources {
-		if ctx.Err() != nil {
-			break
+	// left gathers what the cross-storage transfers deliberately did not carry,
+	// across every source of this op (cross.go, Skipped). A source that left
+	// entries behind is DONE — everything it could carry arrived and was
+	// verified — but the op must not read as a clean success, because the one
+	// place the person learns what was left out is this row: the tray and the
+	// toast draw a `partial` row's error text, and draw nothing for an `ok`.
+	var left *SkipsError
+	if op.Kind == OpDelete {
+		// Several items at once, within this one job (delete_pool.go). The
+		// job itself still runs in queue order, like every other.
+		lastErr = s.runDeletes(ctx, drv, dstDrv, op)
+	} else {
+		for _, src := range op.Sources {
+			if ctx.Err() != nil {
+				break
+			}
+			err := s.runOne(ctx, drv, dstDrv, op, src)
+			var skips *SkipsError
+			switch {
+			case err == nil:
+				op.Done++
+			case errors.As(err, &skips):
+				op.Done++
+				if left == nil {
+					left = &SkipsError{}
+				}
+				left.Skipped = append(left.Skipped, skips.Skipped...)
+				left.SourceKept = left.SourceKept || skips.SourceKept
+			default:
+				op.Failed++
+				lastErr = err
+				slog.Warn("ops: step failed",
+					slog.Int64("op", op.ID),
+					slog.String("kind", op.Kind),
+					slog.String("src", src),
+					slog.String("err", err.Error()))
+			}
+			_, _ = s.db.ExecContext(ctx, s.q(`UPDATE pending_ops SET done=?, failed=? WHERE id=?`), op.Done, op.Failed, op.ID)
 		}
-		if err := s.runOne(ctx, drv, dstDrv, op, src); err != nil {
-			op.Failed++
-			lastErr = err
-			slog.Warn("ops: step failed",
-				slog.Int64("op", op.ID),
-				slog.String("kind", op.Kind),
-				slog.String("src", src),
-				slog.String("err", err.Error()))
-		} else {
-			op.Done++
-		}
-		_, _ = s.db.ExecContext(ctx, s.q(`UPDATE pending_ops SET done=?, failed=? WHERE id=?`), op.Done, op.Failed, op.ID)
 	}
 
 	status := StatusOK
 	errMsg := ""
 	switch {
+	case ch.cancelled.Load():
+		status = StatusCancelled
+	case op.Failed == 0 && left != nil:
+		status = StatusPartial
+		errMsg = left.Error()
 	case op.Failed == 0:
 		status = StatusOK
 	case op.Done == 0:
@@ -572,10 +791,51 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 	default:
 		status = StatusPartial
 		errMsg = errMessage(lastErr)
+		if left != nil {
+			errMsg += "; " + left.Error()
+		}
 	}
+	// The counters ride along: a delete job writes its progress at most once
+	// a second, so the last item's count may not be on the row yet.
 	_, _ = s.db.ExecContext(ctx, s.q(
-		`UPDATE pending_ops SET status=?, error=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`),
-		status, errMsg, op.ID)
+		`UPDATE pending_ops SET status=?, error=?, done=?, failed=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`),
+		status, errMsg, op.Done, op.Failed, op.ID)
+}
+
+// executePlugin runs an OpPluginAction row as one unit through the injected
+// PluginRunner. Progress arrives through the live counters; the outcome is
+// the row's status, with cancelled kept apart from failed so the tray can say
+// which it was.
+func (s *Service) executePlugin(ctx, parent context.Context, op *Op, ch *cancelHandle) {
+	if s.pluginRunner == nil {
+		s.fail(ctx, op, "ops: no plugin runner wired")
+		return
+	}
+	lp := &liveProgress{}
+	s.live.Store(op.ID, lp)
+	defer s.live.Delete(op.ID)
+	err := s.pluginRunner.RunPluginAction(ctx, op, func(done, total int64) {
+		lp.done.Store(done)
+		if total > 0 {
+			lp.total.Store(total)
+		}
+	})
+	wctx := context.WithoutCancel(parent)
+	switch {
+	case err == nil:
+		_, _ = s.db.ExecContext(wctx, s.q(
+			`UPDATE pending_ops SET status=?, done=total, error='', finished_at=CURRENT_TIMESTAMP WHERE id=?`),
+			StatusOK, op.ID)
+	case ch.cancelled.Load():
+		_, _ = s.db.ExecContext(wctx, s.q(
+			`UPDATE pending_ops SET status=?, error='', finished_at=CURRENT_TIMESTAMP WHERE id=?`),
+			StatusCancelled, op.ID)
+	default:
+		slog.Warn("ops: plugin action failed", slog.Int64("op", op.ID), slog.String("job", op.Dest), slog.String("err", err.Error()))
+		_, _ = s.db.ExecContext(wctx, s.q(
+			`UPDATE pending_ops SET status=?, error=?, failed=total, finished_at=CURRENT_TIMESTAMP WHERE id=?`),
+			StatusFailed, errMessage(err), op.ID)
+	}
 }
 
 func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op, src string) error {
@@ -641,7 +901,10 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 		if !ok {
 			return errors.New("driver not movable")
 		}
-		dst := MoveDest(ctx, drv, src, joinIntoDir(op.Dest, src))
+		dst, err := MoveDest(ctx, drv, src, joinIntoDir(op.Dest, src))
+		if err != nil {
+			return err
+		}
 		if normOpPath(dst) == normOpPath(src) {
 			return nil
 		}
@@ -669,7 +932,10 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 		if !ok {
 			return errors.New("driver not copyable")
 		}
-		dst := uniqueCopyDest(ctx, drv, src, joinIntoDir(op.Dest, src))
+		dst, err := uniqueCopyDest(ctx, drv, src, joinIntoDir(op.Dest, src))
+		if err != nil {
+			return err
+		}
 		if err := c.Copy(ctx, src, dst); err != nil {
 			return err
 		}
@@ -704,9 +970,29 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 //
 // (sweep-2026-05-09 bug 25 — "Kopyasını Oluştur" (Duplicate) was sending
 // source == destination and the S3 driver was 400ing the self-copy.)
-func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string) string {
-	if dst != src && !storage.Exists(ctx, drv, dst) {
-		return dst
+func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string, taken ...Taken) (string, error) {
+	occupied := func(p string) bool {
+		if storage.Exists(ctx, drv, p) {
+			return true
+		}
+		for _, t := range taken {
+			if t != nil && t(p) {
+				return true
+			}
+		}
+		return false
+	}
+	if dst != src && caseOnlyRename(src, dst) {
+		// ⚠ On a case-insensitive disk (Windows, macOS) Stat of `C.txt` finds
+		// `c.txt` — the item being renamed — and the rename would be turned
+		// into `C-copy.txt`. Only an entry spelled EXACTLY like the new name
+		// is another item.
+		if free, ok := caseOnlyFree(ctx, drv, src, dst, taken); ok && free {
+			return dst, nil
+		}
+	}
+	if dst != src && !occupied(dst) {
+		return dst, nil
 	}
 	// Split base + ext for `<base>-copy<ext>` pattern. We rename the
 	// *destination* basename rather than the parent dir, so a paste of
@@ -731,14 +1017,62 @@ func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string) st
 		} else {
 			candidate = fmt.Sprintf("%s%s-copy-%d%s", dir, stem, i, ext)
 		}
-		if candidate != src && !storage.Exists(ctx, drv, candidate) {
-			return candidate
+		if candidate != src && !occupied(candidate) {
+			return candidate, nil
 		}
 	}
-	// Saturated — let the driver surface the collision/self-copy error
-	// instead of looping forever. Caller's error-message path will
-	// surface this to the user via the failed-step log.
-	return dst
+	// ⚠⚠ Saturated: an ERROR, never `dst`. It used to hand back the taken
+	// name "to let the driver surface the collision" — but every driver's
+	// Move and Copy REPLACE an occupied destination (a local rename does, an
+	// object store's copy-then-delete does), so a folder already holding
+	// `a-copy.txt` … `a-copy-100.txt` had its `a.txt` silently overwritten.
+	return "", fmt.Errorf("%w: %s", ErrNoFreeName, dst)
+}
+
+// ErrNoFreeName means every name a move or copy would give an item beside a
+// taken destination is taken as well. Nothing was written.
+var ErrNoFreeName = errors.New("no free name left beside the destination")
+
+// Taken is an extra "is this name taken?" a caller can add to a destination
+// check — the catalogue's live rows, which the driver cannot see when a row's
+// bytes went missing. Moving onto such a name would make the catalogue drop
+// that row, and its history with it.
+type Taken func(rel string) bool
+
+// caseOnlyRename reports a rename that changes nothing but the case.
+func caseOnlyRename(src, dst string) bool {
+	s, d := normOpPath(src), normOpPath(dst)
+	return s != "" && s != d && strings.EqualFold(s, d)
+}
+
+// caseOnlyFree lists dst's folder and reports whether an entry spelled
+// exactly like dst exists (then it is another item and the name is taken).
+// ok is false when the folder cannot be listed; the caller then falls back
+// to the ordinary check.
+func caseOnlyFree(ctx context.Context, drv storage.Driver, src, dst string, taken []Taken) (free, ok bool) {
+	lister, isLister := drv.(interface {
+		List(ctx context.Context, p string) ([]storage.Object, error)
+	})
+	if !isLister {
+		return false, false
+	}
+	d := normOpPath(dst)
+	objs, err := lister.List(ctx, "/"+path.Dir(d))
+	if err != nil {
+		return false, false
+	}
+	base := path.Base(d)
+	for _, o := range objs {
+		if o.Name == base {
+			return false, true
+		}
+	}
+	for _, t := range taken {
+		if t != nil && t(dst) {
+			return false, true
+		}
+	}
+	return true, true
 }
 
 func (s *Service) fail(ctx context.Context, op *Op, msg string) {
@@ -801,6 +1135,55 @@ func joinIntoDir(dest, src string) string {
 // reachable without it.
 var ErrIntoOwnDescendant = errors.New("ops: a folder cannot be moved or copied into itself or into one of its own subfolders")
 
+// Targets is what one queued operation writes, for writegate.Check: on the
+// source storage and on the destination storage. SubmitTo judges every
+// operation by it — the explorer's copy, move and delete, the unified
+// /api/files/ops endpoint, an app's action and a scheduled one — and the
+// handlers ask the same function earlier, so the two cannot disagree about
+// what an operation touches.
+//
+//   - move and delete TAKE their sources (and everything under a folder): a
+//     frozen document, or the folder around it, does not move or go.
+//   - copy and an app's action only READ their sources: named, not changed.
+//     (An app's output is judged where it is written, handlers.AppPlugins.)
+//   - a copy or move destination is named, not replaced: the worker
+//     de-collides (UniqueDest / MoveDest), so nothing already there is
+//     overwritten.
+//
+// Every one of them is judged on filex's own names — a copy INTO
+// `.filex-trash` is a file nobody can find, a move OUT of `.filex-open` takes
+// a document from under the desktop that is about to write it back.
+// Upload commits are not judged here: their sources are staged-upload ids,
+// and the target was judged when the upload began (StagedUpload.Begin).
+func Targets(kind string, sources []string, dest string) (src, dst []writegate.Target) {
+	if kind == OpUploadCommit {
+		return nil, nil
+	}
+	for _, raw := range sources {
+		rel := opRel(raw)
+		switch kind {
+		case OpMove, OpDelete:
+			src = append(src, writegate.Writes(rel))
+		default:
+			src = append(src, writegate.Names(rel))
+		}
+		if kind == OpCopy || kind == OpMove {
+			dst = append(dst, writegate.Names(opRel(dest)), writegate.Names(opRel(joinIntoDir(dest, raw))))
+		}
+	}
+	return src, dst
+}
+
+// opRel is a storage-relative path from any spelling a queued operation
+// carries (`adapter://a/b`, `/a/b/`, `a/b`) — the key app locks are stored
+// under.
+func opRel(p string) string {
+	if i := strings.Index(p, "://"); i >= 0 {
+		p = p[i+3:]
+	}
+	return normOpPath(p)
+}
+
 // refuseSelfDescendant rejects a copy/move whose real destination lands inside
 // one of its own sources.
 //
@@ -854,8 +1237,6 @@ func scanOp(row *sql.Row) (*Op, error) {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(srcJSON), &op.Sources)
-	if op.DestStorageID == 0 {
-		op.DestStorageID = op.StorageID
-	}
+	shape(op)
 	return op, nil
 }

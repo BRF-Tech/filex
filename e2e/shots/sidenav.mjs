@@ -707,6 +707,44 @@ async function run(tokens) {
       `listing ${Math.round(listingClosed)}px closed, ${Math.round(listingOpen)}px with the drawer open`,
     );
     await shot(mpage, 'sidenav-drawer-390.png');
+
+    // ⚠ The connections panel ON A PHONE. v0.43.0 took its tab strip away, and
+    // a layout that loses a row can stop working as easily as one that gains
+    // it: the strip was the panel's only full-width block above the two
+    // pickers, and those pickers are `min-width: 180px` each in a flex row.
+    // 390 is where a second picker either wraps or pushes the page sideways.
+    await mpage.locator('[data-testid="sidenav-connect"]').click();
+    await mpage.waitForSelector('[data-testid="connections-panel"]', { timeout: 20_000 });
+    await sleep(700);
+    const conn390 = await mpage.evaluate(() => {
+      const panel = document.querySelector('[data-testid="connections-panel"]');
+      const card = document.querySelector('.fe-overlay__card');
+      const picks = [...document.querySelectorAll('.fe-conn__pick')];
+      return {
+        strips: document.querySelectorAll('.fe-conn__tabs').length,
+        docOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        cardOverflow: card ? card.scrollWidth - card.clientWidth : -1,
+        panelRight: panel ? Math.round(panel.getBoundingClientRect().right) : -1,
+        viewport: window.innerWidth,
+        stacked: picks.length === 2 && picks[1].getBoundingClientRect().top > picks[0].getBoundingClientRect().top,
+      };
+    });
+    check(
+      'the connections panel has no tab strip left, at 390px either',
+      conn390.strips === 0,
+      `${conn390.strips} strip(s)`,
+    );
+    check(
+      'and it does not push the phone sideways',
+      conn390.docOverflow <= 0 && conn390.cardOverflow <= 0 && conn390.panelRight <= conn390.viewport,
+      `page +${conn390.docOverflow}px, dialog +${conn390.cardOverflow}px, panel right ${conn390.panelRight}/${conn390.viewport}`,
+    );
+    check(
+      'the two pickers wrap onto their own rows rather than shrinking off it',
+      conn390.stacked,
+      conn390.stacked ? 'stacked' : 'side by side at 390px',
+    );
+    await mpage.keyboard.press('Escape');
     await mob.close();
 
     // ── the panel inside somebody else's page ────────────────────────────
@@ -780,6 +818,36 @@ async function run(tokens) {
         (await epage.locator('filex-explorer [data-testid="token-form-full"]').count()) === 1,
     );
     await shot(epage, 'embed-apikeys-1440.png');
+
+    // ⚠ And the connections panel in the SAME embed. The host page's page
+    // ground, fonts and stacking are not ours, so "it lays out in the admin
+    // app" is not an answer for it — v0.43.0's tab removal has to leave the
+    // embedded copy whole too, because it is literally the same component.
+    await epage.keyboard.press('Escape');
+    await epage.locator('[data-testid="sidenav-connect"]').click();
+    await epage.waitForSelector('[data-testid="connections-panel"]', { timeout: 20_000 });
+    await sleep(800);
+    const connEmbed = await epage.evaluate(() => {
+      const panel = document.querySelector('[data-testid="connections-panel"]');
+      const card = document.querySelector('.fe-overlay__card');
+      return {
+        strips: document.querySelectorAll('.fe-conn__tabs').length,
+        guide: document.querySelectorAll('[data-testid="guide-protocol"]').length,
+        docOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        cardOverflow: card ? card.scrollWidth - card.clientWidth : -1,
+        height: panel ? Math.round(panel.getBoundingClientRect().height) : 0,
+      };
+    });
+    check(
+      'the embedded connections panel opens straight on the guides, with no tab strip',
+      connEmbed.strips === 0 && connEmbed.guide === 1 && connEmbed.height > 200,
+      `${connEmbed.strips} strip(s), ${connEmbed.guide} protocol picker(s), ${connEmbed.height}px tall`,
+    );
+    check(
+      'and it fits the host page without a sideways scrollbar',
+      connEmbed.docOverflow <= 0 && connEmbed.cardOverflow <= 0,
+      `page +${connEmbed.docOverflow}px, dialog +${connEmbed.cardOverflow}px`,
+    );
     await emb.close();
 
     // ── the administrator, same panel, collapsed ─────────────────────────

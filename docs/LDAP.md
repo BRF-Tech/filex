@@ -14,6 +14,10 @@ drivers for enterprise directories and gateway‑fronted deployments:
 > You pick which drivers are *enabled* the usual way (`FILEX_AUTH_DRIVERS` or
 > `auth.drivers`). See
 > [CONFIGURATION.md → Authentication](CONFIGURATION.md#authentication).
+> Since v0.43.0 LDAP and the proxy header can also be configured on **Admin →
+> Identity providers**, applied without a restart and added after `local`; a
+> driver the environment lists wins and is shown there read-only. See
+> [SSO.md → Managing providers on the Identity providers page](SSO.md#managing-providers-on-the-identity-providers-page).
 
 Both drivers **upsert the user into filex's local users table** on success, so
 [RBAC](RBAC.md) grants, shares and the rest of filex treat them like any other
@@ -187,7 +191,7 @@ also mount `/dav` with the same credentials.
   the directory, so signing in by filex username works too.
 - **2FA.** An account with TOTP enabled is refused on these protocols, whether
   its password is local or in the directory — none of them can carry a second
-  factor. Such an account must use an API token (file explorer → navigation panel →
+  factor. Such an account must use an API key (file explorer → navigation panel →
   **Connections → API keys**; an embed proxied with a shared *app* token does
   not show that entry — see [MCP.md](MCP.md#token-kinds--user-vs-app)).
 

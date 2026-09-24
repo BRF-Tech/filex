@@ -126,7 +126,7 @@ Notes:
 | `FILEX_THUMB_BACKFILL_ON_BOOT` | *(unset)* | env | Set `once` (or `true` / `1`) to run one background backfill on startup. See [Backfill](#backfill--catching-up-existing-files). |
 | `thumbs.cache_dir` | `<data_dir>/thumbs` | **config.yaml only** | Directory the cached `<id>.jpg` files live in. No env override. |
 | `thumbs.formats` | `[image, video, pdf, office]` | **config.yaml only** | Declares the kind list. No env override. |
-| `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | env / `thumbs.sweep_interval` | How often the cache is reconciled against the node catalogue. `0` disables the sweeper entirely. See [Reclaiming the cache](#reclaiming-the-cache). |
+| `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | env / `thumbs.sweep_interval` | How often the cache is reconciled against the node catalogue (and, once per boot, pages cached at full size before 0.41.0 are scaled down). `0` disables both. See [Reclaiming the cache](#reclaiming-the-cache). |
 | `FILEX_THUMBS_URL_TTL` | `24h` | env / `thumbs.url_ttl` | How long a stamped `thumb_url` stays valid — see [Serving](#serving). Matches the endpoint's `Cache-Control: private, max-age=86400`. ⚠ `0` means *use the default*, **not** "never expires"; an unbounded stamp would be a permanent bearer capability for that preview. Shortening it never locks out the SPA, the desktop app or an embedded explorer — all three fetch with credentials and are authorized per request. |
 
 There is **no env var or config key for the external tools** — filex probes
@@ -172,8 +172,24 @@ the sweeper safe to run unattended:
 4. the file has not been written within the last 10 minutes, so a thumbnail
    still being generated is never judged mid‑flight.
 
-Set `FILEX_THUMBS_SWEEP_INTERVAL=0` to turn it off; nothing else in filex
-removes a cached thumbnail on a schedule.
+**Pages cached at full size are scaled down, once per boot** (since v0.43.0,
+[#37](https://github.com/BRF-Tech/filex/pull/37)). Before 0.41.0 PDF and office
+thumbnails were written at page size — 794×1123 for A4 — and 0.41.0 changed
+only new renders, so an upgraded install kept serving the old ones at full
+size. Every generator bounds the width at 320 px, so a cached `<id>.jpg` wider
+than that can only be one of those: after the boot sweep, the same worker
+rewrites each at the size a new render gets, through a temporary file renamed
+over it. It deletes nothing and regenerates nothing, and it leaves alone
+anything written in the last 10 minutes, anything that is not a readable JPEG,
+a header claiming more than 50 megapixels, and a file that changes while it
+works. One line says what it did:
+
+```
+thumb cache re-fit dir=/data/thumbs scanned=43467 refitted=14706 freed_bytes=1527318528 failed=0 skipped=0
+```
+
+Set `FILEX_THUMBS_SWEEP_INTERVAL=0` to turn both off; nothing else in filex
+removes or rewrites a cached thumbnail on a schedule.
 
 ---
 
@@ -269,7 +285,11 @@ curl https://files.example.com/api/files/capabilities | jq .thumbs
 (Every one of them is `true` on the stock full image and `false` except `image`
 on `:slim`.)
 
-(The probe result is cached for 1 hour.)
+(The capabilities answer is cached for an hour, but the `thumbs` values in it
+are fixed when filex starts: since v0.43.0 the engines — ffmpeg, ImageMagick,
+LibreOffice, Ghostscript, poppler, rsvg — are looked for **once per process**,
+so **About**, **Apps** and the converter all agree. Install a tool, then
+**restart filex**; waiting for the cache to lapse does nothing.)
 
 ---
 

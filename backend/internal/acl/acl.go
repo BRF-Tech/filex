@@ -20,8 +20,10 @@ package acl
 
 import (
 	"context"
+	"log/slog"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -119,6 +121,12 @@ type Set struct {
 	storage *model.Storage
 	grants  []*model.FileGrant
 	ceiling Level
+	// locks are the live app-plugin locks on this storage, keyed by clean
+	// rel. A locked path is capped at LevelViewer for EVERY caller —
+	// administrators and owners included — which is the one place the
+	// admin short-circuit does not apply: a document under signature must
+	// not change under the signers, whoever is asking.
+	locks map[string]*model.AppPluginLock
 }
 
 // LoadSet builds the ACL set for user u on storage s. For admins and RBAC-off
@@ -127,6 +135,11 @@ func (r *Resolver) LoadSet(ctx context.Context, u *model.User, s *model.Storage)
 	set := &Set{user: u, storage: s}
 	if u != nil {
 		set.ceiling = RoleCeiling(u.Role)
+	}
+	if s != nil {
+		// Locks come before the admin/RBAC-off short-circuit on purpose:
+		// they bind everyone. See loadLocks.
+		set.locks = r.loadLocks(ctx, s.ID)
 	}
 	if u == nil || u.IsAdmin() || s == nil || !s.RBACEnabled {
 		return set, nil
@@ -139,6 +152,48 @@ func (r *Resolver) LoadSet(ctx context.Context, u *model.User, s *model.Storage)
 	return set, nil
 }
 
+// Locks returns the live app-plugin locks of one storage as a Set that
+// answers only Lock and LockWithin — for a write with no person behind it (a
+// document server's save, an app's output) and for protocol sessions, whose
+// per-session Set was loaded when the session began and does not see a lock
+// taken after that (writegate.Check). A nil Resolver answers nil, which
+// writegate reads as "nothing is locked".
+func (r *Resolver) Locks(ctx context.Context, storageID int64) *Set {
+	if r == nil {
+		return nil
+	}
+	return &Set{locks: r.loadLocks(ctx, storageID)}
+}
+
+// loadLocks reads the live locks of one storage, keyed by clean rel.
+//
+// ⚠ A failure is logged and ignored rather than returned: this runs on the
+// path of EVERY request, including an administrator's on an RBAC-off
+// storage, which used to reach the DB not at all. A transient error must not
+// turn into "nobody may touch any file". Locks protect a flow's integrity,
+// not confidentiality, and for everyone but an administrator the grants query
+// fails closed on the same outage anyway. The query is a primary-key range
+// scan on a table that is empty on most installs.
+func (r *Resolver) loadLocks(ctx context.Context, storageID int64) map[string]*model.AppPluginLock {
+	locks, err := r.store.ListAppPluginLocks(ctx, storageID)
+	if err != nil {
+		slog.Warn("acl: app plugin locks unavailable, continuing without them",
+			slog.Int64("storage_id", storageID), slog.String("err", err.Error()))
+		return nil
+	}
+	var out map[string]*model.AppPluginLock
+	now := time.Now()
+	for _, l := range locks {
+		if l.Live(now) {
+			if out == nil {
+				out = map[string]*model.AppPluginLock{}
+			}
+			out[CleanRel(l.Rel)] = l
+		}
+	}
+	return out
+}
+
 // Effective returns the caller's effective capability on a storage-relative
 // path: the highest grant covering it (direct or inherited from an ancestor
 // folder), capped by the account-role ceiling. Admins are always Owner;
@@ -147,6 +202,25 @@ func (s *Set) Effective(rel string) Level {
 	if s == nil || s.user == nil {
 		return LevelNone
 	}
+	lv := s.effective(rel)
+	if lv > LevelViewer && s.Lock(rel) != nil {
+		return LevelViewer
+	}
+	return lv
+}
+
+// EffectiveIgnoringLocks is Effective without the app-plugin lock cap — for
+// the one caller that may write into a locked file: a job of the plugin
+// holding the lock.
+func (s *Set) EffectiveIgnoringLocks(rel string) Level {
+	if s == nil || s.user == nil {
+		return LevelNone
+	}
+	return s.effective(rel)
+}
+
+// effective is Effective before the lock cap.
+func (s *Set) effective(rel string) Level {
 	if s.user.IsAdmin() {
 		return LevelOwner
 	}
@@ -163,6 +237,38 @@ func (s *Set) Effective(rel string) Level {
 		}
 	}
 	return capLevel(best, s.ceiling)
+}
+
+// LockWithin returns a live app-plugin lock on rel itself or anywhere under
+// it, or nil. Renaming, moving or deleting a folder takes every file inside
+// along, so a mutation of the folder ENTRY is refused while any descendant
+// is locked — while uploads into the folder, which touch no locked file,
+// stay open (LockWithin is consulted by source-side mutations only; Effective
+// is not).
+func (s *Set) LockWithin(rel string) *model.AppPluginLock {
+	if s == nil || len(s.locks) == 0 {
+		return nil
+	}
+	rel = CleanRel(rel)
+	if l := s.locks[rel]; l != nil {
+		return l
+	}
+	for lrel, l := range s.locks {
+		if rel == "" || strings.HasPrefix(lrel, rel+"/") {
+			return l
+		}
+	}
+	return nil
+}
+
+// Lock returns the live app-plugin lock on rel, or nil. Exact path only: a
+// lock on a file does not freeze its folder (the folder can still gain
+// siblings), and a lock on a folder freezes only the folder entry itself.
+func (s *Set) Lock(rel string) *model.AppPluginLock {
+	if s == nil || len(s.locks) == 0 {
+		return nil
+	}
+	return s.locks[CleanRel(rel)]
 }
 
 // CanSee reports whether rel should appear in a listing for this caller:

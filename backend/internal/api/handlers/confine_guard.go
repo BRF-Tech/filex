@@ -44,6 +44,18 @@ func rootAllows(ctx context.Context, store db.Store, storageID int64, rel string
 	return root.Within(rootStorageName(ctx, store, storageID), rel)
 }
 
+// callerRoot is the request's confinement root on every mount a handler is
+// reached through: the one confine.Middleware stashed (token `root:` narrowed
+// by `X-Filex-Root`), or — on the /api/ai surfaces, which do not pass through
+// that middleware — the token's own `root:` scope (confine.RootFromToken, the
+// helper aiOps uses). ok=false for an unconfined caller.
+func callerRoot(ctx context.Context) (confine.Root, bool) {
+	if root, ok := confine.RootFrom(ctx); ok {
+		return root, true
+	}
+	return confine.RootFromToken(ctx)
+}
+
 // rootStorageName resolves a storage id to its adapter name for a confinement
 // check, "" when it cannot be resolved.
 func rootStorageName(ctx context.Context, store db.Store, storageID int64) string {

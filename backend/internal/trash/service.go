@@ -24,16 +24,16 @@ import (
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/storage"
-	"github.com/brf-tech/filex/backend/internal/tenant"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
 // SettingKey is the settings table row that stores the retention days value.
 const SettingKey = "trash.retention_days"
 
 // Prefix is the in-storage directory soft-deleted objects are renamed into.
-// It mirrors the manager's unexported trashPrefix; listings everywhere filter
-// it out and Restore renames back out of it.
-const Prefix = ".filex-trash"
+// It is syspath.Trash — the one list of filex's own directories, through
+// which every listing filters it out — and Restore renames back out of it.
+const Prefix = syspath.Trash
 
 // NewKey returns a fresh storage-relative trash key for base:
 // `.filex-trash/<unix>-<rand>__<base>` — the exact shape vfDelete mints, so
@@ -71,6 +71,10 @@ type Service struct {
 	// JPEG, any staging directory still holding this node's bytes). See
 	// OnPurge. Nil is a no-op, which is what the unit tests use.
 	Reclaim OnPurge
+
+	// sweep admits one purge sweep at a time (see sweepLock): the nightly
+	// retention run, EmptyOlderThan and every RunEmpty take it.
+	sweep sweepLock
 }
 
 // New constructs a Service.
@@ -104,11 +108,23 @@ type PurgeResult struct {
 
 // PurgeExpired hard-deletes nodes whose deleted_at is older than the
 // configured retention window.
+//
+// It waits its turn behind a running "empty the trash" rather than sweeping
+// the same rows beside it (see sweepLock).
 func (s *Service) PurgeExpired(ctx context.Context) (PurgeResult, error) {
+	if s == nil || s.Store == nil {
+		return PurgeResult{}, errors.New("trash: service not initialised")
+	}
+	if err := s.sweep.acquire(ctx); err != nil {
+		return PurgeResult{}, err
+	}
+	defer s.sweep.release()
 	days := s.RetentionDays(ctx)
-	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
-	// 0 = every storage: the nightly retention sweep is not narrowed.
-	return s.purgeOlderThan(ctx, cutoff, 0)
+	// UTC: SQLite compares deleted_at (CURRENT_TIMESTAMP, UTC) with the bound
+	// parameter as TEXT, so a local-zone bound was off by the zone's offset.
+	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+	// nil = every storage: the nightly retention sweep is not narrowed.
+	return s.purgeOlderThan(ctx, cutoff, nil, nil)
 }
 
 // EmptyOlderThan ignores the configured retention and purges anything older
@@ -124,15 +140,29 @@ func (s *Service) PurgeExpired(ctx context.Context) (PurgeResult, error) {
 // storage, only that one is affected." An admin who narrowed the operation to
 // one storage and confirmed it permanently destroyed the trash of EVERY
 // storage — irreversibly, with the dialog telling them the opposite.
+//
+// It is RunEmpty in the caller's goroutine, scoped by the caller's context,
+// and it ends with that context. The admin endpoint does not use it for that
+// reason: a large trash outlives any request, so the endpoint queues the same
+// job on the ops queue (ops.SubmitTrashEmpty) and the run belongs to the
+// server.
 func (s *Service) EmptyOlderThan(ctx context.Context, olderThanDays int, storageID int64) (PurgeResult, error) {
-	cutoff := time.Now()
-	if olderThanDays > 0 {
-		cutoff = cutoff.Add(-time.Duration(olderThanDays) * 24 * time.Hour)
-	} else {
-		// 0 days = purge everything currently in the trash.
-		cutoff = cutoff.Add(24 * time.Hour) // future cutoff matches everything in past
+	return s.RunEmpty(ctx, EmptyJob{
+		Before:    EmptyCutoff(time.Now(), olderThanDays),
+		StorageID: storageID,
+		Reach:     Reach(ctx),
+	}, nil, nil)
+}
+
+// EmptyCutoff is the deleted_at bound an "empty the trash" asked for at `at`
+// purges below: `at` itself for 0 days (everything that was in the trash when
+// it was asked for — and nothing deleted after), `at` minus the days
+// otherwise. UTC, for SQLite's TEXT comparison (see PurgeExpired).
+func EmptyCutoff(at time.Time, olderThanDays int) time.Time {
+	if olderThanDays < 0 {
+		olderThanDays = 0
 	}
-	return s.purgeOlderThan(ctx, cutoff, storageID)
+	return at.UTC().Add(-time.Duration(olderThanDays) * 24 * time.Hour)
 }
 
 // ConflictError reports that a restore's original path is occupied. Nothing
@@ -386,14 +416,34 @@ func (s *Service) RunDailyLoop(ctx context.Context, interval time.Duration) {
 //  2. delete backing object via Deleter;
 //  3. decrement owner quota;
 //  4. hard-delete the row.
-func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, storageID int64) (PurgeResult, error) {
+//
+// ⚠⚠ It walks the trash with a cursor. It used to ask for "the oldest batch"
+// on every pass and rely on the purge to empty the window — but a row it
+// skipped (another storage, another tenant) or failed to purge stayed in the
+// window, and once a full batch of those sat at the head every pass was the
+// same batch: nothing purged, no end. A tenant emptying their own trash on an
+// instance where any other tenant had 500 older deleted files spun until the
+// proxy gave up; the nightly worker, which has no deadline, would never have
+// stopped.
+//
+// scope is the set of storages it may touch (narrow): nil every storage, an
+// empty slice none. progress, when set, is told the running totals after every
+// row it purged or failed to purge (the ops row's progress).
+func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, scope []int64, progress func(PurgeResult)) (PurgeResult, error) {
 	if s == nil || s.Store == nil {
 		return PurgeResult{}, errors.New("trash: service not initialised")
 	}
+	if scope != nil && len(scope) == 0 {
+		return PurgeResult{}, nil // a scope that reaches no storage purges nothing
+	}
 	const batchSize = 500
 	var res PurgeResult
+	var after int64
 	for {
-		batch, err := s.Store.ListTrashedExpired(ctx, cutoff, batchSize)
+		// Narrowed in the SQL as well as by reaches() below, so rows of
+		// storages the run may not touch are never even read — and walked by
+		// id, so a row passed over or failed is never read twice.
+		batch, err := s.Store.ListTrashedExpired(ctx, cutoff, scope, after, batchSize)
 		if err != nil {
 			return res, fmt.Errorf("trash: list: %w", err)
 		}
@@ -401,41 +451,36 @@ func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, storageI
 			return res, nil
 		}
 		for _, n := range batch {
-			// The storage the caller narrowed to, if any. Filtered here for
-			// the same reason tenancy is: the service walks the whole trash in
-			// batches, so the handler has no list it could filter instead.
-			if storageID != 0 && n.StorageID != storageID {
-				continue
+			after = max(after, n.ID)
+			// A run that was cut short stops HERE, and says so. Carrying on
+			// through the batch failed every remaining row on the dead context
+			// — each one logged and counted as a failed purge — and then the
+			// run returned nil, as if it had finished.
+			if err := ctx.Err(); err != nil {
+				return res, err
 			}
-			// ⚠⚠ Tenancy, and it has to be inside the sweep rather than at the
-			// handler, because the handler has no list to filter — the service
-			// walks the whole trash itself in batches.
-			//
-			// POST /api/admin/trash/empty is a legitimate tenant feature
-			// ("empty my trash"), so it is scoped rather than gated. Unscoped
-			// it was permanent, irreversible destruction of EVERY tenant's
-			// deleted files by an admin of any one of them — the most damaging
-			// single request in the admin surface, and it answers 200.
-			//
-			// The context is the whole mechanism: a request carries the
-			// caller's scope, the nightly retention worker carries none, and
-			// "no scope" means unscoped — so the worker still sweeps every
-			// tenant exactly as before and single-tenant installs are
-			// untouched.
-			if scope, ok := tenant.FromContext(ctx); ok && scope != nil &&
-				!scope.IsSupertenant && !scope.CanAccessStorage(n.StorageID) {
+			if !reaches(scope, n.StorageID) {
 				continue
 			}
 			res.Scanned++
-			if err := s.purgeOne(ctx, n); err != nil {
+			// ⚠ A row that has started finishes, on a context the run's
+			// cancellation does not reach. A row is several steps — the
+			// storage delete, the caches, the database row — and a
+			// cancellation landing between them left a row in the trash whose
+			// bytes were already gone: listed, "restorable", and nothing to
+			// restore. Cancelling stops the run at the next row (above).
+			if err := s.purgeOne(context.WithoutCancel(ctx), n); err != nil {
 				slog.Warn("trash purge one failed",
 					slog.Int64("node_id", n.ID),
 					slog.String("err", err.Error()))
 				res.Failed++
-				continue
+			} else {
+				res.Deleted++
+				res.Bytes += n.Size
 			}
-			res.Deleted++
-			res.Bytes += n.Size
+			if progress != nil {
+				progress(res)
+			}
 		}
 		if len(batch) < batchSize {
 			return res, nil
@@ -454,7 +499,14 @@ func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 	if n.Type == model.NodeTypeDirectory {
 		s.purgeDirDescendants(ctx, n)
 	}
-	if s.Resolver != nil {
+	if !ownsBytesAt(n.Path) {
+		// ⚠⚠ Soft-deleted where it stood (see ownsBytesAt): nothing of this
+		// row's is at its path, so whatever is there now arrived later. Only
+		// the row goes.
+		slog.Info("trash purge: row was deleted in place; leaving its path alone",
+			slog.Int64("node_id", n.ID),
+			slog.String("path", n.Path))
+	} else if s.Resolver != nil {
 		if drv, err := s.Resolver(n.StorageID); err == nil {
 			if d, ok := drv.(storage.Deleter); ok {
 				// `n.Path` is the actual on-disk location for trashed
@@ -500,6 +552,20 @@ func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 	return s.Store.HardDeleteNode(ctx, n.ID)
 }
 
+// ownsBytesAt reports whether a trashed row's own bytes can be at p — that is,
+// whether p is inside the trash.
+//
+// A row trashed the ordinary way was renamed into `.filex-trash/`, and its
+// bytes are there. A row soft-deleted WHERE IT STOOD never had bytes behind it
+// by the time it was: the storage sync's tombstone pass writes one only after
+// confirming the file is gone (confirmGone), and the queue's "already missing"
+// and "could not trash, deleted outright" branches only after the bytes are.
+// So anything at such a path arrived later — a new upload with the old name, a
+// restore from backup, a folder that exists again — and deleting it would
+// destroy a file nobody deleted; for a folder, recursively. Before this check
+// the purge did exactly that, 30 days after the tombstone was written.
+func ownsBytesAt(p string) bool { return IsTrashPath(p) }
+
 // purgeDirDescendants hard-purges every trashed row still parked under a
 // trashed directory's `.filex-trash/...` path (SoftDeleteAndRetag rewrites
 // descendants to live there). Files get their storage object deleted and
@@ -537,7 +603,7 @@ func (s *Service) purgeDirDescendants(ctx context.Context, dir *model.Node) {
 		drv, _ = s.Resolver(dir.StorageID)
 	}
 	for _, c := range descendants {
-		if c.Type == model.NodeTypeFile && drv != nil {
+		if c.Type == model.NodeTypeFile && drv != nil && ownsBytesAt(c.Path) {
 			if d, ok := drv.(storage.Deleter); ok {
 				if err := d.Delete(ctx, c.Path); err != nil && !errors.Is(err, storage.ErrNotFound) {
 					slog.Warn("trash storage delete failed",

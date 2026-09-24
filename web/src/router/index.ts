@@ -6,11 +6,22 @@ import { startRouteName } from '@/lib/startPage';
 
 import AdminLayout from '@/components/AdminLayout.vue';
 
-// The SPA is served from TWO prefixes (backend/internal/api/routes.go →
-// wireStatic). Same bundle, same routes; only the address bar differs.
+// The SPA is served from several prefixes (backend/internal/api/routes.go →
+// wireStatic). Same bundle; only the address bar differs — and under the
+// public ones, the routes too.
 //
 //   /admin/  the operator's front door — unchanged, every old bookmark works
 //   /drive/  the end-user's front door
+//   /s/      a SHARE, followed by somebody with no account (v3 §1)
+//   /d/      a FILE REQUEST, likewise
+//   /p/      an app plugin's page — RETIRED by v3 (an app's public page is a
+//            share now) and kept only so links already sent still open
+//
+// ⚠⚠ The last three are the PUBLIC prefixes and they share one route table
+// and one component (`views/public/PublicLink.vue` → the package's
+// `PublicLinkPage`). Before v3 `/s/` and `/d/` were HTML that Go wrote by
+// hand and `/p/` was a Vue screen, which is exactly why the PIN box of a
+// signature request looked nothing like the PIN box of a download.
 //
 // Reported as GitHub #14: a non-admin who signed in landed on /admin/explore
 // with the whole file manager open and no admin chrome, and was still told
@@ -19,6 +30,22 @@ import AdminLayout from '@/components/AdminLayout.vue';
 // the signposting was not.
 export const ADMIN_BASE = '/admin/';
 export const USER_BASE = '/drive/';
+export const SHARE_BASE = '/s/';
+export const REQUEST_BASE = '/d/';
+/**
+ * ⚠⚠ RETIRED by v3 §1. An app's public page is a share now, and the SERVER
+ * answers `/p/<token>` with a 301 to `/s/<token>` (routes.go →
+ * `RetiredPagePrefix`). The constant stays because callers import it; the SPA
+ * has no route table for it, because a browser never gets here.
+ */
+export const PAGE_BASE = '/p/';
+
+/** Which public link a prefix means, or '' for the application's own bases. */
+export type PublicKind = 'share' | 'request';
+const PUBLIC_BASES: Array<[string, PublicKind]> = [
+  [SHARE_BASE, 'share'],
+  [REQUEST_BASE, 'request'],
+];
 
 // Which prefix served THIS document. Read once, at module load, because that
 // is exactly what vue-router's history base has to be: the base is baked into
@@ -26,15 +53,84 @@ export const USER_BASE = '/drive/';
 // The existing /files/edit carve-out proves it — a browser sent to the bare
 // /files/edit has its address rewritten to /admin/files/edit the moment the
 // router hydrates (measured 2026-09-04, before this change).
-const mountBase =
-  typeof window !== 'undefined' &&
-  (window.location.pathname === '/drive' || window.location.pathname.startsWith(USER_BASE))
-    ? USER_BASE
-    : ADMIN_BASE;
+const mountBase = pickMountBase(typeof window !== 'undefined' ? window.location.pathname : '');
+
+/** Which prefix a document path was served from. Exported for the tests. */
+export function pickMountBase(pathname: string): string {
+  if (pathname === '/drive' || pathname.startsWith(USER_BASE)) return USER_BASE;
+  for (const [base] of PUBLIC_BASES) {
+    if (pathname.startsWith(base)) return base;
+  }
+  return ADMIN_BASE;
+}
+
+/** Which kind of public link this document is, or '' when it is the app. */
+export function publicKindOf(base: string): PublicKind | '' {
+  return PUBLIC_BASES.find(([b]) => b === base)?.[1] ?? '';
+}
 
 /** True when this document was served from the end-user prefix. */
 export function onUserBase(): boolean {
   return mountBase === USER_BASE;
+}
+
+/**
+ * The prefix this document was served from (`/admin/`, `/drive/`, `/p/`).
+ *
+ * ⚠ Read by anything that builds an address the BROWSER will follow rather
+ * than a route the router will push — an app plugin's page opens in a new
+ * tab, so vue-router cannot prepend the base for it, and `/apps/…` without
+ * the base is a server 404 (routes.go → wireStatic serves only these three).
+ */
+export function currentMountBase(): string {
+  return mountBase;
+}
+
+/**
+ * True when this document is a PUBLIC link of any kind (`/s/`, `/d/`, `/p/`).
+ *
+ * ⚠ Everything that reads this is asking one question: "is there a session
+ * to hydrate and somewhere to redirect to?" The answer for all three is no —
+ * a stranger with a link has a token and nothing else, so a 401 here would
+ * only buy a sign-in form they cannot use. It kept its old name because
+ * every caller means exactly what it says.
+ */
+export function onPublicPageBase(): boolean {
+  return publicKindOf(mountBase) !== '';
+}
+
+/** Which public link this document is (`share` | `request` | `page` | ''). */
+export function currentPublicKind(): PublicKind | '' {
+  return publicKindOf(mountBase);
+}
+
+// The public route table. ⚠ Nothing from the application's: no login, no
+// home, no admin layout. A visitor here has a token and nothing else, so
+// every path is either a link or "not available" — never a redirect into a
+// sign-in form for an account they do not have.
+//
+// ⚠ ONE table for all three prefixes. `kind` is the only difference and it
+// comes from the prefix that served the document, so a fourth public link
+// would be a row in PUBLIC_BASES rather than a second table.
+function publicRoutes(kind: PublicKind): RouteRecordRaw[] {
+  return [
+    {
+      path: '/:token([A-Za-z0-9_-]+)',
+      name: 'public-link',
+      component: () => import('@/views/public/PublicLink.vue'),
+      props: (route) => ({ kind, token: route.params.token }),
+      meta: { public: true, layout: 'blank' },
+    },
+    {
+      // A bare prefix, or anything that is not a token: the same view with
+      // no token, which draws the "not available" state.
+      path: '/:pathMatch(.*)*',
+      name: 'public-link-missing',
+      component: () => import('@/views/public/PublicLink.vue'),
+      props: () => ({ kind, token: '' }),
+      meta: { public: true, layout: 'blank' },
+    },
+  ];
 }
 
 const routes: RouteRecordRaw[] = [
@@ -97,6 +193,76 @@ const routes: RouteRecordRaw[] = [
     name: 'explore',
     component: () => import('@/views/Explore.vue'),
     meta: { public: true, layout: 'blank' },
+  },
+  {
+    // An app plugin's `page` view — a wizard with the document beside it,
+    // opened in a new tab by the file menu (docs/APP-PLUGINS-API.md →
+    // Placements). Reads `?path=<adapter>://<rel>` and draws the SAME
+    // surface a `modal` view would, without the dialog.
+    //
+    // ⚠ It lives under the SPA's mount base, not at the site root: only
+    // `/admin/*`, `/drive/*` and `/p/*` fall back to index.html
+    // (routes.go → wireStatic), so a bare `/apps/…` is a server 404. The
+    // explorer builds the address from `pluginPageBase`, which Explore.vue
+    // sets to whichever prefix served the document.
+    //
+    // ⚠ NOT `public: true`: every call this page makes is an authenticated
+    // `/api/files/plugins/…` one, so an anonymous visitor would get a blank
+    // screen full of 401s instead of the login form. The outside
+    // participant's screen is `/p/<token>`, which is a different thing.
+    path: '/apps/:plugin/:view',
+    name: 'app-page',
+    component: () => import('@/views/AppPage.vue'),
+    props: true,
+    meta: { layout: 'blank' },
+  },
+  {
+    /**
+     * "Paylaştıklarım" / "My shares" — the links THIS person handed out.
+     *
+     * ⚠⚠ OUTSIDE the AdminLayout block below, and that is the whole point.
+     * The panel is admin-only (`requiresAdmin` on its parent) and a non-admin
+     * who lands on one of its routes is sent to the end-user front door, so a
+     * page for everybody could not live in there. Same route table, both
+     * bases: /drive/my-shares and /admin/my-shares.
+     *
+     * ⚠ NOT `public: true`. Every call it makes is an authenticated
+     * `/api/shares` one, so an anonymous visitor here would watch a table
+     * 401 instead of being offered the sign-in form.
+     *
+     * ⚠ The admin's own `shares` route (everybody's links) stays exactly what
+     * it is. Two audiences, two screens — see views/MyShares.vue.
+     */
+    path: '/my-shares',
+    name: 'my-shares',
+    component: () => import('@/views/MyShares.vue'),
+    meta: { layout: 'blank', breadcrumb: 'myShares.title' },
+  },
+  {
+    /**
+     * An app plugin's `home` view as a page of ITS OWN, in the same tab —
+     * the explorer's "Apps" rows open here (`config.appHomePage` →
+     * `open-app-home`). `?section=` is the section of the page on screen
+     * (`surface.sections`), so Back walks the sections and a notification
+     * can land on one.
+     *
+     * ⚠⚠ The owner, 2026-09-21: "İmzalar popup açıyor … kendi sayfasını
+     * açsın ve her biri ayrı bir menü içinde farklı tablolar göstersin". It
+     * is laid out the way My shares is, beside which it sits, and like it
+     * it lives OUTSIDE the AdminLayout block: the panel is admin-only, and
+     * every person an app offers a home view to must be able to reach it.
+     *
+     * ⚠ `/app/`, not `/apps/`. `/apps/:plugin/:view` is the new-tab `page`
+     * view above and `apps/:plugin/home/:view` the admin panel's own copy
+     * inside AdminLayout; two routes on one path do not both work (vue-router
+     * scores them alike and the first registered wins).
+     *
+     * ⚠ NOT `public: true`: every call it makes is an authenticated one.
+     */
+    path: '/app/:plugin/:view',
+    name: 'app-home',
+    component: () => import('@/views/AppScreen.vue'),
+    meta: { layout: 'blank', breadcrumb: 'nav.apps' },
   },
   {
     // Standalone editor — the SFC's "Open" / double-click opens this in
@@ -194,6 +360,19 @@ const routes: RouteRecordRaw[] = [
         name: 'branding',
         component: () => import('@/views/Branding.vue'),
         meta: { breadcrumb: 'nav.branding' },
+      },
+      {
+        // tema:v1 — the instance's own themes plus the raw-CSS escape hatch.
+        //
+        // ⚠⚠ A route of its own, and not a section of Settings, because this
+        // is the screen that has to keep working when an operator has pasted a
+        // ruinous stylesheet: it suspends that stylesheet while it is open
+        // (views/Appearance.vue), and a URL somebody can type is the last
+        // resort when the chrome around it has been styled away.
+        path: 'appearance',
+        name: 'appearance',
+        component: () => import('@/views/Appearance.vue'),
+        meta: { breadcrumb: 'nav.appearance' },
       },
       {
         path: 'external',
@@ -304,6 +483,38 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.plugins' },
       },
       {
+        // One installed app, as a PAGE with sections — it was a dialog
+        // holding settings, three tables and a live log (views/
+        // AppPluginPage.vue says why it moved). Addressed by the app's name.
+        //
+        // ⚠ Checked against the top-level paths (router lesson): this is
+        // `/plugins/apps/:name`, and no top-level route starts with
+        // `/plugins`; `/apps/:plugin/:view` (the new-tab page view) and
+        // `apps/:plugin/home/:view` below are different paths.
+        path: 'plugins/apps/:name',
+        name: 'plugins.app',
+        component: () => import('@/views/AppPluginPage.vue'),
+        meta: { breadcrumb: 'appPlugins.page.breadcrumb', parent: 'plugins' },
+      },
+      {
+        // An app plugin's `home` view, drawn INSIDE the panel — the sidebar's
+        // "Apps" section opens one of these. Generic: every installed plugin
+        // that ships a `home` view gets a row, nothing here knows a plugin's
+        // name (views/AppHome.vue, composables/usePluginHomeApps.ts).
+        //
+        // ⚠⚠ NOT `apps/:plugin/:view`. That address is already taken, by the
+        // chrome-less `page` view this SPA opens in a NEW TAB (the top-level
+        // route above, and `PLUGIN_PAGE_SEGMENT` in the package). Two routes
+        // with the same path do not both work: vue-router scores them alike
+        // and the first one registered wins, so the panel's page would simply
+        // never render. The extra `home` segment is the placement's own name,
+        // which is exactly what distinguishes the two screens.
+        path: 'apps/:plugin/home/:view',
+        name: 'admin-app',
+        component: () => import('@/views/AppHome.vue'),
+        meta: { breadcrumb: 'nav.apps' },
+      },
+      {
         // bag:b3 — webhook v2 target CRUD (multi-destination, signed).
         path: 'webhooks',
         name: 'webhooks',
@@ -344,15 +555,21 @@ const routes: RouteRecordRaw[] = [
 
 const router = createRouter({
   // Whichever prefix served this document. Vite's build `base` stays '/admin/'
-  // — asset URLs are absolute, so the same index.html works from either mount.
+  // — asset URLs are absolute, so the same index.html works from any mount.
   history: createWebHistory(mountBase),
-  routes,
+  routes: onPublicPageBase() ? publicRoutes(currentPublicKind() as PublicKind) : routes,
   scrollBehavior(_to, _from, saved) {
     return saved ?? { top: 0 };
   },
 });
 
 router.beforeEach(async (to) => {
+  // A public link has no session to hydrate and nowhere to redirect to:
+  // asking /api/auth/me here would only cost a 401 (and, once a route has
+  // matched, the axios interceptor's push to /login — a form the visitor
+  // cannot use). See App.vue, which skips its own boot fetches the same way.
+  if (onPublicPageBase()) return true;
+
   const auth = useAuthStore();
 
   // ⚠ Desktop pairing params must be stashed HERE, not only in the login

@@ -25,8 +25,9 @@ export default defineConfig({
   title: 'filex',
   titleTemplate: ':title · filex',
   description:
-    'Self-hosted file manager — one Go binary, an embeddable UI, and storage that plugs in: ' +
-    'local, S3, SFTP, WebDAV, FTP, SMB. Reachable back as S3, SFTP, FTPS, NFS or WebDAV.',
+    'Self-hosted file manager — one Go binary, an embeddable UI, storage that plugs in ' +
+    '(local, S3, SFTP, WebDAV, FTP, SMB), apps that plug in, and a language pack for your ' +
+    'own language. Reachable back as S3, SFTP, FTPS, NFS or WebDAV.',
   lang: 'en-US',
   base: '/',
   srcDir: '../docs',
@@ -119,6 +120,9 @@ export default defineConfig({
         items: [
           { text: 'Storage', link: '/STORAGE' },
           { text: 'Storage plugins', link: '/PLUGINS' },
+          { text: 'Apps (app plugins)', link: '/APP-PLUGINS' },
+          { text: 'Writing an app plugin', link: '/PLUGIN-KIT' },
+          { text: 'App plugin wire contract', link: '/APP-PLUGINS-API' },
           { text: 'Usage & cost', link: '/USAGE' },
           { text: 'Uploads & resume', link: '/UPLOADS' },
           { text: 'Quotas', link: '/QUOTAS' },
@@ -132,7 +136,8 @@ export default defineConfig({
           { text: 'RBAC & Permissions', link: '/RBAC' },
           { text: 'End-to-end encryption', link: '/E2E-ENCRYPTION' },
           { text: 'Replication', link: '/REPLICATION' },
-          { text: 'Multi-tenancy', link: '/MULTI-TENANCY' }
+          { text: 'Multi-tenancy', link: '/MULTI-TENANCY' },
+          { text: 'Right-to-left languages', link: '/RTL' }
         ]
       },
       {

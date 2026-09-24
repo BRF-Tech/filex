@@ -74,11 +74,149 @@ function sameTree(a, b) {
   return fa.every((f) => f.endsWith('.map') || sha(fs.readFileSync(path.join(a, f))) === sha(fs.readFileSync(path.join(b, f))));
 }
 
+/**
+ * The one embedded file the server rewrites as it serves it — see the note
+ * beside `stamped` in compareServedUI.
+ */
+export const CATALOGUE_CONTEXT = 'i18n/filex-catalogue-context.json';
+
+/**
+ * A JSON value as one string, with object keys in a fixed order and `drop`
+ * removed at every level.
+ *
+ * ⚠ Sorted, because the two sides do not agree on key order by accident: Go
+ * marshals a map alphabetically and the build writes the order the generator
+ * used. Comparing `JSON.stringify` output directly would report a difference
+ * that is not one.
+ */
+export function canonicalJSON(value, drop) {
+  if (Array.isArray(value)) return `[${value.map((v) => canonicalJSON(v, drop)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .filter((k) => k !== drop)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJSON(value[k], drop)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
 /** When a file — or the newest file in a tree — was last written. */
 function stamp(p) {
   if (!fs.existsSync(p)) return 'missing';
   const times = fs.statSync(p).isDirectory() ? walk(p).map((f) => fs.statSync(path.join(p, f)).mtimeMs) : [fs.statSync(p).mtimeMs];
   return new Date(Math.max(0, ...times)).toISOString().replace('T', ' ').slice(0, 19) + 'Z';
+}
+
+/**
+ * Compares what the filex at `url` serves under /admin/ and /embed/ with
+ * web/dist and packages/webcomponent/dist, byte for byte.
+ *
+ * ⚠ Split out of checkEmbeddedUI so an instance this module did not start can
+ * be held to the same standard: the screenshot scene that runs the build
+ * inside the full container image (e2e/shots/scene.mjs → bootInstance with
+ * `engines`) boots a LINUX binary built beside the verified one, and "built
+ * from the same tree" is exactly the assumption the 2026-09-14 incident broke.
+ * `binary` is only named in the explanation when something differs.
+ *
+ * @returns {Promise<{ ok: boolean, report: string }>}
+ */
+export async function compareServedUI({ url, binary = '', log = () => {} }) {
+  const lines = [];
+  let ok = true;
+  for (const t of EMBEDDED_TREES) {
+    const distDir = path.join(REPO, t.dist);
+    const files = walk(distDir);
+    const bad = [];
+    let next = 0;
+    const worker = async () => {
+      while (next < files.length) {
+        const f = files[next++];
+        const want = sha(fs.readFileSync(path.join(distDir, f)));
+        let got = null;
+        let status = '';
+        try {
+          const r = await fetch(url + t.route + f.split('/').map(encodeURIComponent).join('/'));
+          status = `HTTP ${r.status}`;
+          got = r.ok ? sha(Buffer.from(await r.arrayBuffer())) : null;
+        } catch (err) {
+          status = err.message;
+        }
+        if (got !== want) {
+          bad.push({ f, why: got === null ? `${status} — the binary has no such file` : 'served with different bytes' });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: 16 }, worker));
+    // ⚠⚠ ONE file is rewritten on its way out, deliberately: the translator's
+    // context file goes out carrying the RUNNING binary's version in its
+    // `filex` field (backend/internal/api/catalogue_version.go), because a
+    // pack's coverage is measured against the server it was taken from. The
+    // web build wrote the version IT knew, so a RELEASE binary serves
+    // different bytes than web/dist holds — and byte equality would call
+    // every release build stale, which is the opposite of what this check is
+    // for. (Measured 2026-09-23: the only difference between a stamped
+    // v0.43.0 build and its own web/dist was this one field.) The honest
+    // question for this file is "the same document apart from the version it
+    // stamps", and a file the binary does not HAVE still fails.
+    const stamped = [];
+    for (const b of [...bad]) {
+      if (b.f !== CATALOGUE_CONTEXT || b.why !== 'served with different bytes') continue;
+      try {
+        const res = await fetch(url + t.route + b.f.split('/').map(encodeURIComponent).join('/'));
+        const served = canonicalJSON(await res.json(), 'filex');
+        const built = canonicalJSON(JSON.parse(fs.readFileSync(path.join(distDir, b.f), 'utf8')), 'filex');
+        if (served !== built) continue;
+        stamped.push(b);
+        bad.splice(bad.indexOf(b), 1);
+      } catch {
+        /* unreadable either side: leave it counted as a difference */
+      }
+    }
+    // The entry points first: they are what a browser loads, so they are the
+    // lines that say which UI a screenshot would show.
+    const entries = fs.existsSync(path.join(distDir, 'index.html'))
+      ? new Set(['index.html', ...entryAssets(fs.readFileSync(path.join(distDir, 'index.html'), 'utf8')).map((u) => u.slice(t.route.length))])
+      : new Set();
+    bad.sort((a, b) => Number(entries.has(b.f)) - Number(entries.has(a.f)) || a.f.localeCompare(b.f));
+    // ⚠ A source map that differs only in BYTES is not a different UI, and
+    // is not deterministic: vite-plugin-pwa writes the service worker's
+    // bundle through a random temp directory and that path lands in
+    // `sw.js.map` (measured 2026-09-14: two builds of the same tree, sw.js
+    // identical, sw.js.map differing in "sources"). A browser never runs a
+    // map, so a rebuild with nothing changed must not read as a stale
+    // binary. A map the binary does not HAVE at all still fails — that is a
+    // different build, not a different temp dir.
+    const mapOnly = bad.filter((b) => b.f.endsWith('.map') && b.why === 'served with different bytes');
+    const real = bad.filter((b) => !mapOnly.includes(b));
+    lines.push(
+      `  ${t.label.padEnd(14)} ${t.dist} → ${t.route}  ${files.length - bad.length}/${files.length} files identical` +
+        (mapOnly.length ? `, ${mapOnly.length} source map(s) differing only in bytes (not run by a browser)` : '') +
+        (stamped.length ? `, ${CATALOGUE_CONTEXT} served with this binary's version in it` : ''),
+    );
+    log(lines.at(-1).trim());
+    if (real.length === 0) continue;
+    ok = false;
+
+    if (fs.existsSync(path.join(distDir, 'index.html'))) {
+      const served = await (await fetch(`${url}${t.route}index.html`)).text();
+      const built = fs.readFileSync(path.join(distDir, 'index.html'), 'utf8');
+      lines.push(`      the binary's index.html loads   ${entryAssets(served).join(', ') || '(nothing recognisable)'}`);
+      lines.push(`      ${t.dist}/index.html loads  ${entryAssets(built).join(', ') || '(nothing recognisable)'}`);
+    }
+    const embedDir = path.join(REPO, t.embed);
+    lines.push(
+      sameTree(distDir, embedDir)
+        ? `      cause: ${t.embed} already matches ${t.dist}, so this binary was built BEFORE the last ` +
+            '`sync:embed` (or from another tree) — rebuild it: `pnpm run build:backend`'
+        : `      cause: ${t.embed} does not match ${t.dist} — \`pnpm run sync:embed\` did not run after the ` +
+            'last frontend build, and a binary built from it embeds the older UI',
+    );
+    lines.push(`      newest file: ${t.dist} ${stamp(distDir)} · ${t.embed} ${stamp(embedDir)} · binary ${stamp(binary)}`);
+    for (const b of real.slice(0, 8)) lines.push(`      ${b.f}: ${b.why}`);
+    if (real.length > 8) lines.push(`      … and ${real.length - 8} more`);
+  }
+  return { ok, report: lines.join('\n') };
 }
 
 /**
@@ -186,75 +324,7 @@ export async function checkEmbeddedUI({ binary, workDir, env = process.env, log 
       );
     }
 
-    const lines = [];
-    let ok = true;
-    for (const t of EMBEDDED_TREES) {
-      const distDir = path.join(REPO, t.dist);
-      const files = walk(distDir);
-      const bad = [];
-      let next = 0;
-      const worker = async () => {
-        while (next < files.length) {
-          const f = files[next++];
-          const want = sha(fs.readFileSync(path.join(distDir, f)));
-          let got = null;
-          let status = '';
-          try {
-            const r = await fetch(url + t.route + f.split('/').map(encodeURIComponent).join('/'));
-            status = `HTTP ${r.status}`;
-            got = r.ok ? sha(Buffer.from(await r.arrayBuffer())) : null;
-          } catch (err) {
-            status = err.message;
-          }
-          if (got !== want) {
-            bad.push({ f, why: got === null ? `${status} — the binary has no such file` : 'served with different bytes' });
-          }
-        }
-      };
-      await Promise.all(Array.from({ length: 16 }, worker));
-      // The entry points first: they are what a browser loads, so they are the
-      // lines that say which UI a screenshot would show.
-      const entries = fs.existsSync(path.join(distDir, 'index.html'))
-        ? new Set(['index.html', ...entryAssets(fs.readFileSync(path.join(distDir, 'index.html'), 'utf8')).map((u) => u.slice(t.route.length))])
-        : new Set();
-      bad.sort((a, b) => Number(entries.has(b.f)) - Number(entries.has(a.f)) || a.f.localeCompare(b.f));
-      // ⚠ A source map that differs only in BYTES is not a different UI, and
-      // is not deterministic: vite-plugin-pwa writes the service worker's
-      // bundle through a random temp directory and that path lands in
-      // `sw.js.map` (measured 2026-09-14: two builds of the same tree, sw.js
-      // identical, sw.js.map differing in "sources"). A browser never runs a
-      // map, so a rebuild with nothing changed must not read as a stale
-      // binary. A map the binary does not HAVE at all still fails — that is a
-      // different build, not a different temp dir.
-      const mapOnly = bad.filter((b) => b.f.endsWith('.map') && b.why === 'served with different bytes');
-      const real = bad.filter((b) => !mapOnly.includes(b));
-      lines.push(
-        `  ${t.label.padEnd(14)} ${t.dist} → ${t.route}  ${files.length - bad.length}/${files.length} files identical` +
-          (mapOnly.length ? `, ${mapOnly.length} source map(s) differing only in bytes (not run by a browser)` : ''),
-      );
-      log(lines.at(-1).trim());
-      if (real.length === 0) continue;
-      ok = false;
-
-      if (fs.existsSync(path.join(distDir, 'index.html'))) {
-        const served = await (await fetch(`${url}${t.route}index.html`)).text();
-        const built = fs.readFileSync(path.join(distDir, 'index.html'), 'utf8');
-        lines.push(`      the binary's index.html loads   ${entryAssets(served).join(', ') || '(nothing recognisable)'}`);
-        lines.push(`      ${t.dist}/index.html loads  ${entryAssets(built).join(', ') || '(nothing recognisable)'}`);
-      }
-      const embedDir = path.join(REPO, t.embed);
-      lines.push(
-        sameTree(distDir, embedDir)
-          ? `      cause: ${t.embed} already matches ${t.dist}, so this binary was built BEFORE the last ` +
-              '`sync:embed` (or from another tree) — rebuild it: `pnpm run build:backend`'
-          : `      cause: ${t.embed} does not match ${t.dist} — \`pnpm run sync:embed\` did not run after the ` +
-              'last frontend build, and a binary built from it embeds the older UI',
-      );
-      lines.push(`      newest file: ${t.dist} ${stamp(distDir)} · ${t.embed} ${stamp(embedDir)} · binary ${stamp(binary)}`);
-      for (const b of real.slice(0, 8)) lines.push(`      ${b.f}: ${b.why}`);
-      if (real.length > 8) lines.push(`      … and ${real.length - 8} more`);
-    }
-    return { ok, report: lines.join('\n') };
+    return await compareServedUI({ url, binary, log });
   } finally {
     child.kill();
     for (let n = 0; n < 50 && exited === null; n++) await sleep(100);

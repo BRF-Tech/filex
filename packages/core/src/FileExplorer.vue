@@ -14,7 +14,7 @@
  * (PWA / OIDC) / CSRF (panel) / basic / none — `useFileApi` swallows
  * the difference.
  */
-import { computed, customRef, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, ref, watch, watchEffect } from 'vue';
 import type { ExplorerConfig, ThemeMode } from './types/ExplorerConfig';
 import type {
   FileNode,
@@ -32,8 +32,9 @@ import {
 } from './composables/useUploadChunked';
 import { useSelection } from './composables/useSelection';
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
-import { useLocale } from './composables/useLocale';
+import { useLocale, localeTag } from './composables/useLocale';
 import { usePendingOps, type PendingOp } from './composables/usePendingOps';
+import { usePluginActions } from './composables/usePluginActions'; /* App plugins — docs/APP-PLUGINS-API.md */
 import { useRealtime } from './composables/useRealtime';
 import { useThumbs } from './composables/useThumbs';
 import { preloadEditor } from './composables/useMonacoLoader';
@@ -46,20 +47,27 @@ import {
   activeSortDir,
   activeSortKey,
   applySort,
+  defaultSort,
   defaultSortDir,
-  globalSort,
   setSortLocale,
   type ListingOrder,
 } from './lib/sortOrder'; /* surucu:d1-sort */
 import {
-  attachViewPrefsStore,
+  ROOT_FOLDER_KEY,
+  defaultFolderView,
+  folderIsRemembered,
   folderKey as makeFolderKey,
-  folderMemoryEnabled,
-  folderPrefs,
+  onViewPrefsApplied,
   rememberFolder,
+  resolveFolderView,
+  setPersonFolderDefault,
   touchFolder,
   viewPrefsReady,
 } from './lib/viewPrefs'; /* tablo:t1 */
+import { attachViewPrefsHttp } from './lib/viewPrefsHttp';
+import { provideTableEnv } from './lib/tableEnv';
+import { gateOnService, isOfficeExt, legacyConvertGate } from './lib/serviceGate';
+import { opFailure } from './lib/errorWords';
 import { resolveUiProfile } from './lib/uiProfile';
 import RecentlyOpened from './components/RecentlyOpened.vue';
 import {
@@ -112,6 +120,7 @@ import { useOperations } from './composables/useOperations';
 /* /wiring:c3 */
 /* wiring:c4 */
 import OnboardingTour from './components/OnboardingTour.vue';
+import { markTourSeen, offerTourOnce } from './lib/tour'; /* the tour is offered to a person once */
 /* /wiring:c4 */
 /* wiring:d1 — tabs + per-tab split */
 import TabBar from './components/TabBar.vue';
@@ -156,6 +165,7 @@ import {
   isVirtualViewPath,
   makeTagSegment,
   tagOfPath,
+  tagKindOfPath,
   showHiddenFiles,
   setShowHiddenFiles,
   injectTrashRow,
@@ -164,8 +174,16 @@ import {
 import { nodeRowToFileNode as nodeRowToFileNodePure } from './lib/nodeRow'; /* Recent / Starred / tag / Home rows — one shape, with `perm` + `read_only` */
 import { iconFamilyFor, isStorageRow } from './lib/fileIcons'; /* pane:p1 — the storage-row predicate's one home */
 import { actionIconSvg } from './lib/actionIcons'; /* inceleme:r1 — the drop overlay's mark, off the emoji font */
+import { convertAppOffered, isPluginActionKey, pluginActionKey, pluginMenuRows } from './lib/pluginMenu'; /* App plugins — the menu block, pure */
+import { isPagePlacement, pluginPageUrl } from './lib/pluginPage'; /* App plugins — a `page` view opens in a new tab */
+import { lockOf, lockWords, lockedRefusal } from './lib/appLock'; /* App plugins — an app's hold on a file */
+import { linkWordsFor } from './lib/symlink'; /* issue #34 — a link the server will not follow */
+import { labelOf as pluginLabelOf } from './lib/pluginLabel';
+import type { PluginActionRow, PluginSurface, PluginViewRow } from './types/Plugins';
+import type { NavApp } from './components/SideNav.vue';
 import { setNodeStarred } from './lib/star';
-import { fetchAllTags, fetchTaggedRows, invalidateTagCache } from './lib/tags';
+import { emptyTrashAndFollow, TrashEmptyBusy, type TrashEmptyStatus } from './lib/trashEmpty';
+import { fetchAllTags, fetchTaggedRows, onTagsChanged, type TagItem, type TagKind } from './lib/tags';
 import { resolveTransfer, type TransferIntent } from './lib/transfer';
 import { downloadArchive } from './lib/downloadSelection'; /* tasi:m1 */
 import { labelOfWire } from './lib/destinationTree'; /* tasi:m1 */
@@ -189,6 +207,8 @@ import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
 import Modal from './modals/Modal.vue'; /* tablo:t1 — the empty-trash confirmation */
 import PreviewModal from './modals/PreviewModal.vue';
 import ConvertModal from './modals/ConvertModal.vue';
+import PluginViewModal from './components/plugin/PluginViewModal.vue'; /* App plugins */
+import PluginConfirmModal from './components/plugin/PluginConfirmModal.vue';
 import PermissionsModal from './modals/PermissionsModal.vue';
 import DestinationPickerModal from './modals/DestinationPickerModal.vue'; /* tasi:m1 */
 import { resolveLocale } from './locales/resolve';
@@ -227,6 +247,29 @@ const emit = defineEmits<{
    * storage list simply ignores it.
    */
   (e: 'refresh'): void;
+  /**
+   * paylas:m1 — the navigation panel's "My shares" row was pressed.
+   *
+   * ⚠ Passed through, not acted on. "How to connect" and "API keys" are
+   * surfaces this component OWNS, so it opens them itself; the list of links a
+   * person minted is a page of the host application (the SPA's `my-shares`
+   * route), and the explorer has no business deciding what a host's URLs look
+   * like.
+   *
+   * ⚠ Which is why the row is behind `config.mySharesVisible` and that flag is
+   * OFF by default: an embedder who does not listen would otherwise be given
+   * the one row in the panel that leads nowhere. Listening and setting the
+   * flag are the same decision, made once — see the note on the row itself in
+   * SideNav.vue.
+   */
+  (e: 'open-my-shares'): void;
+  /**
+   * An "Apps" row was pressed and the host draws app home pages itself
+   * (`config.appHomePage`): the plugin and its `home` view. ⚠ Passed
+   * through, like `open-my-shares` — the page and its address are the
+   * host's.
+   */
+  (e: 'open-app-home', p: { plugin: string; view: string }): void;
 }>();
 
 // --------------------------------------------------------------------
@@ -249,7 +292,9 @@ const locale = computed(() => resolveLocale(props.config.locale));
  * either would leave the comparator on a stale alphabet exactly when they are
  * not mounted. */
 watch(locale, (l) => setSortLocale(l), { immediate: true });
-const { t, formatSize } = useLocale(locale); /* tablo:t1 — the empty-trash confirmation names the space */
+const { t, formatSize, formatDate, dir } = useLocale(locale); /* tablo:t1 — the empty-trash confirmation names the space; `formatDate` reads an app lock's end on the user's clock */
+// ⚠ RTL — `dir` goes on the root: the explorer's direction is its OWN locale's,
+// never the host page's (lib/direction has the rule and why).
 
 // Live collaboration (WebSocket file-change events + presence), bundled into the
 // core so every consumer — the native panel AND the embedded webcomponent —
@@ -299,10 +344,21 @@ const pendingOps = usePendingOps(props.config, api, {
   onSettled: (op: PendingOp) => {
     const undo = opUndo.get(op.id);
     opUndo.delete(op.id);
+    /* "Empty the trash" says how it ended itself (emptyTrash below), and a
+     * row somebody cancelled is not announced as done. */
+    if (op.op_type === 'trash-empty' || op.status === 'cancelled') {
+      void load();
+      return;
+    }
     if (op.status === 'error') {
-      flashToast(op.error_message || t('toast.failed'));
+      // Said, not printed: the server's error text is English and sometimes
+      // plumbing ("engine libreoffice is not installed on this host").
+      flashToast(opFailure(op, t).text);
     } else if (undo) {
       undoToast(`${undo.message} (${op.progress_total})`, undo.fn);
+    } else if (op.op_type === 'plugin') {
+      /* App plugins — the job's own last words, else "<label> finished". */
+      flashToast(op.message || t('plugin.done', { label: pluginOpLabel(op) }));
     } else {
       const verb =
         op.op_type === 'copy'
@@ -352,23 +408,27 @@ function retryLoad() {
   void load(loadErrorPath);
 }
 
+/**
+ * The first-paint cache of the DEFAULT view mode (`lib/viewPrefs` writes it
+ * from the person's or the instance's default). ⚠ Read here, never written:
+ * see below.
+ */
 const VIEW_MODE_KEY = 'brf-file-explorer:view-mode';
 /**
- * tablo:t1 — true while a folder's REMEMBERED setup is being restored, as
- * opposed to a person choosing one.
+ * The view mode on screen.
  *
- * ⚠⚠ Without this the whole design inverts. `brf-file-explorer:view-mode` is
- * the GLOBAL default — what a folder nobody has configured opens as — and the
- * per-folder memory is layered over it. If restoring a folder's grid view also
- * wrote the global key, then merely WALKING INTO one folder you once set to
- * grid would make grid the default for the entire product, and the person
- * would have no way to tell which folder did it. Restoring is not choosing.
- * The same flag also keeps the watcher below from re-recording what it just
- * applied.
+ * ⚠⚠ Setting it writes NOTHING global, and that is the fix for the owner's
+ * report of 2026-09-21 — "Explore içindeki değişikliklerimiz o klasör özelinde
+ * olmalı; tüm klasörlerde görünüm değişikliği geçerli oluyor." It used to
+ * write `brf-file-explorer:view-mode` AND the account's global default on
+ * every change, under the rule "your last choice becomes the default for every
+ * folder you have never set up": switch folder A to grid and folder B, never
+ * touched, came up as grid. A change is now recorded against the folder it was
+ * made in (the recorder below) and nowhere else; the default is set on purpose
+ * in the person's settings or by the operator.
  */
-let restoringFolderView = false;
-const viewMode = customRef<ViewMode>((track, trigger) => {
-  let value: ViewMode = (() => {
+const viewMode = ref<ViewMode>(
+  (() => {
     try {
       const stored = localStorage.getItem(VIEW_MODE_KEY);
       if (stored === 'list' || stored === 'grid' || stored === 'gallery') return stored; /* wiring:d2 */
@@ -376,30 +436,20 @@ const viewMode = customRef<ViewMode>((track, trigger) => {
       /* private mode */
     }
     return props.config.viewMode ?? 'list';
-  })();
-  return {
-    get() {
-      track();
-      return value;
-    },
-    set(next) {
-      if (next === value) return;
-      value = next;
-      if (!restoringFolderView) {
-        try {
-          localStorage.setItem(VIEW_MODE_KEY, next);
-        } catch {
-          /* quota */
-        }
-      }
-      trigger();
-    },
-  };
-});
+  })(),
+);
 /* cila:a density — Toolbar owns the persisted preference (filex.density);
    mirrored here only so the root `.fe` can carry fe--density-compact. */
 const density = ref<'comfortable' | 'compact'>('comfortable');
 const searchQuery = ref('');
+/** The search answer on screen was cut: more rows matched than came back
+ *  (`truncated` on the response; lib/advSearch `advSearchTruncated`). Reset by
+ *  every load(), so it can only ever describe the listing that is showing. */
+const searchTruncated = ref(false);
+/** The manager's search action asks the index for this many hits
+ *  (handlers.Manager, managerSearchPage) — the page an older server's full
+ *  answer is recognised by. */
+const MANAGER_SEARCH_PAGE = 250;
 // trashMode — true while viewing the filex trash (soft-deleted nodes from the
 // backend trash endpoint), entered by opening the virtual `.trash` row and
 // exited by any normal navigation (load() resets it). Replaces a brittle
@@ -466,66 +516,82 @@ const folderMemoryOn = computed(() => props.config.rememberFolderView !== false)
 const currentFolderKey = computed(() => {
   if (!folderMemoryOn.value) return '';
   const path = String(currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
-  if (!path) return '';
+  /* The listing of every storage is a place too: a person who sorts their
+     drives expects them to stay sorted, and `''` would mean "no folder", whose
+     changes land on the person's DEFAULT. */
+  if (!path) return ROOT_FOLDER_KEY;
   const [first, ...rest] = path.split('/');
   const st = (props.config.storages ?? []).find((s) => s.name === first);
   return makeFolderKey(st?.uid || first, rest.join('/'));
 });
 
-/** The GLOBAL default view mode — what a folder nobody has configured opens
- *  as. Read from the same key the `viewMode` ref persists to, so there is one
- *  answer rather than a second copy drifting beside it. */
-function globalViewMode(): ViewMode {
-  try {
-    const stored = localStorage.getItem(VIEW_MODE_KEY);
-    if (stored === 'list' || stored === 'grid' || stored === 'gallery') return stored;
-  } catch {
-    /* private mode */
+/**
+ * The DEFAULT view mode — what a folder nobody has configured opens as: the
+ * person's default, else the instance's (`lib/viewPrefs.defaultFolderView`),
+ * else this host's `config.viewMode`, else list. Until the account's document
+ * has landed, this browser's cached copy of that answer stands in for it.
+ */
+function defaultViewMode(): ViewMode {
+  const d = defaultFolderView().v;
+  if (d) return d;
+  if (!viewPrefsReady()) {
+    try {
+      const stored = localStorage.getItem(VIEW_MODE_KEY);
+      if (stored === 'list' || stored === 'grid' || stored === 'gallery') return stored;
+    } catch {
+      /* private mode */
+    }
   }
   return props.config.viewMode ?? 'list';
 }
 
-/** What we last RESTORED, so the recorder below can tell a restore's echo from
- *  a person's choice.
+/**
+ * The stored document landed — or another browser's newer one did when this
+ * tab came back to the front, or the operator's default arrived with it.
+ * Re-apply the folder on screen: its own memory wins, and a folder with none
+ * follows whatever the default now is.
  *
- * ⚠⚠ A signature and not a boolean flag, and the difference is a bug I would
- * otherwise have shipped: Vue's watchers are asynchronous, so a `restoring =
- * true … restoring = false` fence around the assignment is already back down
- * by the time the recorder runs and every navigation would record itself as a
- * deliberate choice — which would mean walking through a folder configures it.
- * The `viewMode` setter's own guard CAN be a flag because a `customRef` setter
- * runs synchronously inside the fence; these two need different mechanisms
- * because they run at different times. */
-let appliedSig = '';
+ * ⚠ Unsubscribed with the component: the registry is module-level and two
+ * explorers can be mounted at once.
+ */
+onScopeDispose(
+  onViewPrefsApplied(() => {
+    if (!viewPrefsReady()) return;
+    applyFolderView(currentFolderKey.value);
+  }),
+);
 
-function viewSig(key: string): string {
-  return `${key}|${viewMode.value}|${activeSortKey()}|${activeSortDir()}`;
-}
+/**
+ * What the folder on screen was last put into — by the applier, or by the
+ * recorder after it wrote a change down. The recorder compares against it to
+ * tell a person's change from a restore's echo, and to know WHICH field
+ * changed.
+ *
+ * ⚠⚠ A record and not a `restoring = true … false` fence: Vue's watchers are
+ * asynchronous, so a fence around an assignment is already back down by the
+ * time the recorder runs, and every navigation would record itself as a
+ * deliberate choice — walking through a folder would configure it.
+ */
+let applied: { key: string; v: ViewMode; k: string; d: string } | null = null;
 
-/** A navigation ended: put this folder back the way it was left. */
+/** A navigation ended (or the defaults changed): put this folder back the way
+ *  it was left — its own memory, else the default, field by field. */
 function applyFolderView(key: string) {
-  if (!key) return;
+  if (!key && folderMemoryOn.value) return;
   touchFolder(key); // LRU clock — only bumps folders already remembered
-  const p = folderPrefs(key);
-  restoringFolderView = true;
-  try {
-    /* ⚠ The `else` halves matter as much as the `if`s. Without them a folder
-     * with no memory of its own would inherit whatever the PREVIOUS folder was
-     * restored to — walk from a remembered gallery into a plain folder and it
-     * comes up as a gallery, which reads as the memory leaking rather than as
-     * a default holding. A folder with no memory follows the global default,
-     * and that has to be asserted, not assumed. */
-    const wantView = p?.v ?? globalViewMode();
-    if (wantView !== viewMode.value) viewMode.value = wantView;
-    if (p?.k) applySort(p.k, p.d ?? defaultSortDir(p.k));
-    else {
-      const g = globalSort();
-      applySort(g.key, g.dir);
-    }
-  } finally {
-    restoringFolderView = false;
+  const p = key ? resolveFolderView(key) : {};
+  /* ⚠ The `else` halves matter as much as the `if`s. Without them a folder
+   * with no memory of its own would inherit whatever the PREVIOUS folder was
+   * put into — walk from a remembered gallery into a plain folder and it
+   * comes up as a gallery, which is the leak wearing a different hat. */
+  const wantView = p.v ?? defaultViewMode();
+  if (wantView !== viewMode.value) viewMode.value = wantView;
+  if (p.k) applySort(p.k, p.d ?? defaultSortDir(p.k));
+  else {
+    const g = defaultSort();
+    applySort(g.key, g.dir);
   }
-  appliedSig = viewSig(key);
+  applied = { key, v: viewMode.value, k: activeSortKey(), d: activeSortDir() };
 }
 
 /**
@@ -538,45 +604,13 @@ function applyFolderView(key: string) {
  * land first in practice, and nothing is applied to a folder until they do.
  */
 onMounted(() => {
-  const base = props.config.apiBase ?? '';
-  const url = `${base}/api/files/manager/view-prefs`;
-  attachViewPrefsStore({
-    async load() {
-      const res = await fetch(url, {
-        headers: await buildAuthHeaders(),
-        credentials: api.credentialsMode(),
-      });
-      /* ⚠ A 401 is not an error here, it is an ANSWER: an app token or a
-       * public share link has no person to remember anything for. Returning
-       * null degrades to "remember nothing, write nothing", which is what the
-       * module does with it — no retry loop, no console noise. */
-      if (!res.ok) return null;
-      const body = (await res.json()) as { prefs?: unknown };
-      return body?.prefs ?? null;
-    },
-    save(doc) {
-      void (async () => {
-        try {
-          const payload = JSON.stringify({ prefs: doc });
-          await fetch(url, {
-            method: 'PUT',
-            headers: { ...(await buildAuthHeaders()), 'Content-Type': 'application/json' },
-            credentials: api.credentialsMode(),
-            body: payload,
-            /* ⚠ `keepalive` is what lets the save fired on `pagehide` outlive
-             * the page — but browsers cap a keepalive body at 64 KB and reject
-             * the request outright above it. The document is capped far below
-             * that (300 folders ≈ 33 KB), so this only ever guards the
-             * pathological case; sending it without keepalive is strictly
-             * better than having it rejected. */
-            keepalive: payload.length < 60000,
-          });
-        } catch {
-          /* Fire and forget. A view preference is never worth a toast, and the
-             next save carries the whole document again. */
-        }
-      })();
-    },
+  /* The one transport (`lib/viewPrefsHttp`), shared with the admin app. A
+   * no-op when the host already attached it — which the admin app does on
+   * sign-in, because its tables keep their columns in the same document. */
+  attachViewPrefsHttp({
+    apiBase: props.config.apiBase ?? '',
+    headers: buildAuthHeaders,
+    credentials: api.credentialsMode(),
   });
 });
 
@@ -600,35 +634,58 @@ watch(
   { immediate: true, flush: 'post' },
 );
 
-/** A person changed a view. Record it against the folder — and note that the
- *  GLOBAL default was already written by the control they used (`setSort`
- *  persists; the `viewMode` setter persists), which is what makes "Apply to
- *  all folders" a pure forget rather than a second write. */
+/**
+ * A person changed a view. Record it against THE FOLDER — and only the field
+ * that changed: switching to grid records the view mode and leaves the
+ * folder's sort following the default, so a default sort chosen later still
+ * reaches it.
+ *
+ * ⚠⚠ Nothing global is written here or anywhere else on a click. This is the
+ * fix for "tüm klasörlerde görünüm değişikliği geçerli oluyor".
+ *
+ * ⚠ A host that switched the per-folder memory OFF (`rememberFolderView:
+ * false`) has no folder to record against (`currentFolderKey` is ''), and asked
+ * for one arrangement everywhere — so for it, and only for it, a change is the
+ * person's default.
+ */
 watch(
   () => [currentFolderKey.value, viewMode.value, activeSortKey(), activeSortDir()] as const,
   ([key, v, k, d]) => {
-    /* ⚠ Nothing is recorded before the document has landed. Until then the
-     * state on screen is this session's defaults, not the person's choices,
-     * and writing it back would overwrite everything they had arranged with
-     * whatever the app happened to boot into. */
-    if (!key || !viewPrefsReady()) return;
-    const sig = viewSig(key);
-    if (sig === appliedSig) return; // the restore, echoing back
-    appliedSig = sig;
-    rememberFolder(key, { v, k, d });
+    /* ⚠ Nothing is recorded before the document has landed: until then the
+     * state on screen is this session's defaults, not the person's choices. */
+    if (!viewPrefsReady()) return;
+    if (!applied || applied.key !== key) return; // a navigation — the applier's turn
+    const patch: { v?: ViewMode; k?: typeof k; d?: typeof d } = {};
+    if (v !== applied.v) patch.v = v;
+    if (k !== applied.k || d !== applied.d) {
+      patch.k = k;
+      patch.d = d;
+    }
+    applied = { key, v, k, d };
+    if (!Object.keys(patch).length) return;
+    if (key) rememberFolder(key, patch);
+    else if (!folderMemoryOn.value) setPersonFolderDefault(patch);
   },
-  /* ⚠⚠ `post`, and registered AFTER the applier, for a reason that is not
-   * stylistic. A navigation changes `currentFolderKey`, which is a dependency
-   * of BOTH watchers. Left pre-flush this one would run first, while the view
-   * state is still the folder you just LEFT, and write that folder's view mode
-   * and sort against the folder you just arrived in — every walk through the
-   * tree quietly configuring the next folder with the last one's setup. Post
-   * puts the applier first; by the time this runs, `appliedSig` matches and it
-   * correctly does nothing. */
+  /* ⚠⚠ `post`, and registered AFTER the applier: a navigation changes
+   * `currentFolderKey`, which both watchers depend on. Pre-flush this would
+   * run first, while the view state is still the folder you LEFT, and record
+   * that folder's setup against the one you arrived in. */
   { flush: 'post' },
+);
+
+/* "Forget this folder's view" (the column menu): put the folder on screen
+ * back onto the default straight away, rather than at the next navigation. */
+watch(
+  () => folderIsRemembered(currentFolderKey.value),
+  (now, was) => {
+    if (was && !now && viewPrefsReady()) applyFolderView(currentFolderKey.value);
+  },
 );
 /** The tag being browsed while navView === 'tag' ('' otherwise). */
 const navTag = ref<string>('');
+/** …and which KIND of it (etiket:k2, v0.43): 'personal', 'team', or '' for
+ *  both — what a `#.tag~x` link from before kinds existed still opens. */
+const navTagKind = ref<TagKind | ''>('');
 /** Sentinel parked in `dirname` so the breadcrumb can label the view. The tag
  *  view's sentinel is built per tag (`makeTagSegment`) — see lib/listing. */
 const NAV_VIEW_DIRNAME: Record<Exclude<NavView, '' | 'trash' | 'tag'>, string> = {
@@ -645,7 +702,9 @@ const NAV_VIEW_DIRNAME: Record<Exclude<NavView, '' | 'trash' | 'tag'>, string> =
  * for a folder called `.starred` and landing on "not found". (That was already
  * true of the four shipped views; the tag view would have inherited it.)
  */
-function virtualViewOf(path: string): { kind: Exclude<NavView, ''>; tag: string } | null {
+function virtualViewOf(
+  path: string,
+): { kind: Exclude<NavView, ''>; tag: string; tagKind: TagKind | '' } | null {
   /* ⚠ The "is this a sentinel at all?" half is `lib/listing`'s
      `isVirtualViewPath`, not a second reading of the map here: FilePane has to
      answer the same question before it qualifies a path (a qualified sentinel
@@ -655,9 +714,9 @@ function virtualViewOf(path: string): { kind: Exclude<NavView, ''>; tag: string 
   if (!isVirtualViewPath(path)) return null;
   const clean = String(path ?? '').replace(/^\/+|\/+$/g, '');
   const tag = tagOfPath(clean);
-  if (tag) return { kind: 'tag', tag };
+  if (tag) return { kind: 'tag', tag, tagKind: tagKindOfPath(clean) };
   const kind = clean.slice(1) as Exclude<NavView, '' | 'tag'>;
-  return { kind, tag: '' };
+  return { kind, tag: '', tagKind: '' };
 }
 
 // When the caller can see exactly ONE storage, the multi-storage root is a
@@ -811,6 +870,62 @@ watch(
 const clipboard = ref<ClipboardState>({ mode: null, items: [], sourcePath: null });
 
 const capabilitiesData = ref<Capabilities | null>(null);
+
+/**
+ * `GET /api/capabilities`, asked once — RETRIED, and AWAITABLE.
+ *
+ * ⚠⚠ This used to be a fire-and-forget `.then(…).catch(() => {})` in
+ * `onMounted`, and that one swallowed catch was a silent, page-wide feature
+ * kill. Everything gated on capabilities reads a ref that a failed or slow
+ * call simply leaves null: app plugins (`pluginsEnabled` below), OnlyOffice,
+ * draw.io, the convert service, new-document types. Nothing retried, so ONE
+ * unlucky request — a reload during a backend restart, a proxy hiccup — turned
+ * every plugin deep link on that page load into a no-op, for the whole life of
+ * the page, with nothing in the console to say why.
+ *
+ * ⚠⚠ And it was a RACE as well as a failure mode. A notification's deep link
+ * arrives from the host (Explore.vue → `openAppTarget`) as soon as the row is
+ * revealed, which can be before this answer lands; `openAppTarget` then read
+ * `pluginsEnabled` as false and returned. Awaiting THIS PROMISE is the fix —
+ * not a delay before trying, which would only move the coin toss.
+ *
+ * ⚠ `settled`, not `loaded`: a caller waits for the question to be ANSWERED,
+ * including "the server would not say". Resolving only on success would hang
+ * every awaiting caller on an instance that has no such endpoint.
+ */
+const CAPABILITIES_TRIES = 3;
+let capabilitiesSettled: Promise<void> | null = null;
+
+function loadCapabilities(): Promise<void> {
+  if (capabilitiesSettled) return capabilitiesSettled;
+  if (!api.endpoints.capabilities) {
+    capabilitiesSettled = Promise.resolve();
+    return capabilitiesSettled;
+  }
+  capabilitiesSettled = (async () => {
+    for (let attempt = 1; attempt <= CAPABILITIES_TRIES; attempt++) {
+      try {
+        capabilitiesData.value = await api.capabilities();
+        return;
+      } catch (e) {
+        if (attempt === CAPABILITIES_TRIES) {
+          // ⚠ SAID, not swallowed. The host logs this (Explore.vue →
+          // onExplorerError) so "my apps disappeared" has an answer in the
+          // console instead of being indistinguishable from "this instance
+          // has no apps".
+          emit('error', {
+            message: `capabilities: ${(e as Error)?.message ?? String(e)}`,
+            context: { what: 'capabilities', attempts: attempt },
+          });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 200 * attempt));
+      }
+    }
+  })();
+  return capabilitiesSettled;
+}
+
 /* zaman:z3 — the two clock tiers only an explorer instance can know: the zone
  * its host configured, and the account behind its credential when that
  * credential is a person's. Ranked in lib/timezone, never here. */
@@ -823,6 +938,385 @@ useExplorerTimeZone({
 // Longest life a new share link may be given (server setting, days; 0 = no
 // ceiling). Both share dialogs derive their expiry choices from it.
 const shareMaxTtlDays = computed(() => capabilitiesData.value?.share_max_ttl_days ?? 0);
+
+/* === App plugins (docs/APP-PLUGINS-API.md) ==============================
+ * Rows a WebAssembly plugin adds to the file menu, run as ops jobs. The
+ * feature follows `capabilities.app_plugins.enabled` unless the host decides
+ * (`config.plugins`); while it is off the explorer makes no plugin request.
+ * The actions list is fetched once and shared across instances
+ * (usePluginActions); the menu block is pure (lib/pluginMenu). */
+const pluginsEnabled = computed<boolean>(() => {
+  if (typeof props.config.plugins === 'boolean') return props.config.plugins;
+  return capabilitiesData.value?.app_plugins?.enabled === true;
+});
+const pluginActions = usePluginActions(api, () => pluginsEnabled.value);
+
+/** The open `modal` view: which plugin/view, its first surface, the row it was opened on. */
+const pluginView = ref<{
+  plugin: string;
+  view: string;
+  surface: PluginSurface;
+  path?: string;
+  /** A `home` view is drawn full-size whatever the surface says. */
+  size?: 'xl';
+} | null>(null);
+
+/** The `inspector` views, for the details panel; `[]` while the feature is off. */
+const pluginInspectorViews = computed<PluginViewRow[]>(() =>
+  pluginsEnabled.value ? pluginActions.views.value.filter((v) => v.placement === 'inspector') : [],
+);
+
+/** The `home` views, as the navigation panel's "Apps" rows. */
+const pluginHomeApps = computed<NavApp[]>(() =>
+  pluginsEnabled.value
+    ? pluginActions.views.value
+        .filter((v) => v.placement === 'home')
+        .map((v) => ({ key: `${v.plugin}/${v.id}`, label: pluginLabelOf(v.label, locale.value) || v.id, icon: v.icon }))
+    : [],
+);
+
+/**
+ * An "Apps" row: the host's own page for it when it has one (same tab, its
+ * own address — `config.appHomePage`), else `GET …/views/{p}/{v}` with no
+ * path, drawn full-size in a dialog.
+ */
+async function openPluginHome(key: string) {
+  const view = pluginActions.views.value.find((v) => `${v.plugin}/${v.id}` === key);
+  if (!view) return;
+  closeNavDrawer();
+  if (props.config.appHomePage === true) {
+    emit('open-app-home', { plugin: view.plugin, view: view.id });
+    return;
+  }
+  try {
+    const res = await api.pluginView(view.plugin, view.id);
+    if (!res?.surface) {
+      flashToast(t('plugin.view.error'));
+      return;
+    }
+    pluginView.value = { plugin: view.plugin, view: view.id, surface: res.surface, size: 'xl' };
+  } catch (e) {
+    flashToast((e as Error)?.message || t('plugin.view.error'));
+  }
+}
+/** An action whose manifest asks for confirmation, waiting for the answer. */
+const pluginConfirm = ref<{ action: PluginActionRow; targets: FileNode[] } | null>(null);
+
+/** Menu rows for a selection — hidden in the trash, inside an encrypted
+ *  folder and (through `selectionActionList`'s early return) on storage rows.
+ *  On a read-only storage the actions that write their result are left out
+ *  (`pluginActionWrites`): the folder's own flag for rows listed in it, each
+ *  row's storage for Recent / Starred / a tag / Home, where no folder is. */
+function pluginActionRows(sel: FileNode[]): ContextAction[] {
+  if (!pluginsEnabled.value) return [];
+  return pluginMenuRows(pluginActions.actions.value, sel, {
+    locale: locale.value,
+    trash: trashActive.value,
+    e2e: e2eActive.value,
+    readOnly: dirReadOnly.value || selReadOnly(sel),
+    // The level each row answers with — the same one the built-in verbs
+    // read — so an app's row a viewer could only be refused is not offered.
+    permOf: (n) => rowPerm(n as FileNode),
+    hasIcon: (name) => actionIconSvg(name) !== '',
+    // Greyed rows with the reason are an ADMINISTRATOR's (the server sends
+    // `gated` to them only; asked here too, so no other caller draws one).
+    needWords: callerAdmin.value
+      ? (need) => (need.kind === 'engine' ? t('plugin.needs_engine', { name: need.name }) : t('plugin.needs_other', { name: need.name }))
+      : undefined,
+  });
+}
+
+/** What a queued plugin job is called in a toast: its label, or the action id. */
+function pluginOpLabel(op: PendingOp): string {
+  return op.label || op.action || t('opc.kind.plugin');
+}
+
+/**
+ * Where an app job's result lands — the tray's little "new file" / "new
+ * version" chip.
+ *
+ * ⚠ Read from the CACHED ACTIONS LIST, because the ops row does not carry it:
+ * the queue knows the plugin and the action, and the action's manifest output
+ * is what the list already holds. Two consequences worth knowing rather than
+ * discovering: a hidden action (never listed) and a surface that overrode the
+ * output for that one job (`job.output`, which the browser never sees) both
+ * answer `undefined`, and the chip is simply not drawn. A wrong chip would be
+ * worse than none — it is the difference between "your file was replaced" and
+ * "a copy appeared".
+ */
+function pluginOutputModeOf(op: PendingOp): string | undefined {
+  if (!op.plugin || !op.action) return undefined;
+  return pluginActions.actions.value.find((a) => a.plugin === op.plugin && a.id === op.action)?.output_mode;
+}
+
+/** The menu row was chosen: confirm if the manifest asks, then run. */
+async function onPluginAction(key: string, targets: FileNode[]) {
+  const action = pluginActions.byKey(key);
+  if (!action || targets.length === 0) return;
+  const confirm = pluginLabelOf(action.confirm, locale.value);
+  if (confirm) {
+    pluginConfirm.value = { action, targets };
+    return;
+  }
+  await runPluginAction(action, targets);
+}
+
+async function onPluginConfirmed() {
+  const pending = pluginConfirm.value;
+  pluginConfirm.value = null;
+  if (pending) await runPluginAction(pending.action, pending.targets);
+}
+
+/**
+ * A `page` action: open the view as a whole page in a new tab and DO NOT run
+ * anything here. The tab asks for the surface itself (`GET …/views/…?path=`)
+ * and the job is born from its own submit — the same `{surface}` conversation
+ * a modal has, in a frame that has room for a document.
+ *
+ * ⚠ Returns false when the host has not said where its pages live
+ * (`config.pluginPageBase`) or when the browser refused the tab; the caller
+ * then falls back to the dialog. A `page` action that silently does nothing
+ * because a pop-up blocker spoke is indistinguishable from a broken app.
+ */
+function openPluginPage(action: PluginActionRow, targets: FileNode[]): boolean {
+  const view = action.view;
+  const base = props.config.pluginPageBase;
+  if (!view || base === undefined) return false;
+  const target = { plugin: action.plugin, view, path: targets[0]?.path };
+  const url = pluginPageUrl(base, target);
+  if (props.config.openPluginPage?.({ ...target, url }) === true) return true;
+  // ⚠⚠ `noopener` is NOT in the feature string, and that is not an oversight.
+  // Per the HTML spec a `window.open` that sets `noopener` returns **null**
+  // even when the tab opened perfectly — so a caller that reads the return as
+  // "was it blocked?" gets a false every single time. Measured: the wizard
+  // opened in its own tab AND a dialog appeared behind it, because this
+  // function answered false and the caller fell back to `…/run`. The opener
+  // is severed on the handle instead, which keeps the guarantee and leaves
+  // `null` meaning the one thing worth knowing: a pop-up blocker spoke.
+  const win = window.open(url, '_blank');
+  if (!win) {
+    flashToast(t('plugin.page_view.blocked'));
+    return false;
+  }
+  try {
+    win.opener = null;
+  } catch {
+    /* a browser that will not let us sever it still opened the page */
+  }
+  return true;
+}
+
+/**
+ * POST run. `{op}` → the ops tray (same path a copy takes); `{surface}` → the
+ * view dialog, whose submit will bring the `{op}` later.
+ */
+/**
+ * A mutation was refused. ⚠⚠ `423` is an APP LOCK, not a permission problem:
+ * a named app is holding the file until a named date, and the person is
+ * otherwise perfectly allowed to do what they just tried. Dropping it into
+ * the generic path told them "Error (423)" and, once a caller mapped it onto
+ * the permission text, "you are not allowed to do this" — a sentence they
+ * can do nothing with. Every rename / move / delete catch goes through here
+ * so there is exactly one place that decides.
+ */
+function reportMutationError(err: unknown, context: Record<string, unknown>): void {
+  const held = lockedRefusal(err);
+  if (held) flashToast(lockWords(held, { t, formatDate, locale: locale.value }));
+  emit('error', { message: (err as Error)?.message ?? String(err), context });
+}
+
+async function runPluginAction(action: PluginActionRow, targets: FileNode[]) {
+  const label = pluginLabelOf(action.label, locale.value);
+  if (isPagePlacement(action.view_placement) && openPluginPage(action, targets)) return;
+  try {
+    const res = await pluginActions.run(action, targets);
+    if (res.surface) {
+      pluginView.value = {
+        plugin: action.plugin,
+        view: action.view || action.id,
+        surface: res.surface,
+        path: targets[0]?.path,
+      };
+      return;
+    }
+    if (res.op) onPluginOpQueued(res.op, label);
+  } catch (e) {
+    const err = e as Error & { status?: number; detail?: string };
+    const detail = String(err?.detail ?? '');
+    const held = lockedRefusal(err);
+    if (held) flashToast(lockWords(held, { t, formatDate, locale: locale.value }));
+    else if (err?.status === 422 && detail.includes('not_applicable')) flashToast(t('plugin.not_applicable'));
+    else if (err?.status === 409 && detail.includes('read_only')) flashToast(t('plugin.read_only'));
+    else flashToast(err?.message || t('plugin.failed', { label }));
+  }
+}
+
+/** A job was enqueued (by `run` or by a view's submit): track it, say so. */
+function onPluginOpQueued(op: Record<string, unknown>, label?: string) {
+  pendingOps.register(op);
+  const name = label || (typeof op.label === 'string' ? op.label : '') || t('opc.kind.plugin');
+  flashToast(t('plugin.queued', { label: name }));
+}
+
+/**
+ * A notification's deep link (`target.open`): show the file and open what the
+ * app asked for on it — its action, or its view.
+ *
+ * ⚠⚠ Why this is exposed rather than a config prop. A bell click does not
+ * remount anything: the person is already standing in the explorer, the hash
+ * changes, the listing reloads. An `initialPluginAction` prop would fire once,
+ * at mount, and every click after the first would land on the file and stop
+ * there — which is the bug this whole field exists to fix ("please sign" that
+ * drops you in a folder instead of in the signing screen).
+ *
+ * ⚠ The row may not be in the listing yet (a fresh tab, a folder still
+ * loading), so a path that is not on screen is carried as a bare node. The
+ * server re-checks `applies` and the ACL on every run, so the worst case is
+ * an honest 422 rather than a wrong screen.
+ *
+ * ⚠⚠ It AWAITS the capability answer before reading `pluginsEnabled`. That
+ * flag comes from `GET /api/capabilities`, which the explorer asks for in its
+ * own `onMounted` — so whether this function found it filled was a matter of
+ * which of two unrelated requests came back first. Measured as "roughly one
+ * opening in eight the signing screen does not come up"; it was never the
+ * plugin LIST (that was already awaited two lines down), it was the flag
+ * gating it. Awaiting the promise removes the timing question instead of
+ * betting on it.
+ *
+ * ⚠ Every refusal below now SAYS something. Four `return false`s in this path
+ * were silent, and a deep link that silently does nothing is the hardest
+ * possible bug to report: the person clicked a notification, the folder
+ * opened, and the thing they were asked to do never appeared.
+ */
+async function openAppTarget(p: {
+  plugin: string;
+  action?: string;
+  view?: string;
+  path: string;
+}): Promise<boolean> {
+  if (!p.plugin || !p.path) return false;
+  await loadCapabilities();
+  if (!pluginsEnabled.value) {
+    emit('error', {
+      message: 'app plugins are off on this instance — deep link ignored',
+      context: { what: 'openAppTarget', plugin: p.plugin, path: p.path },
+    });
+    return false;
+  }
+  await pluginActions.refresh();
+  const node: FileNode =
+    files.value.find((f) => f.path === p.path) ??
+    ({ path: p.path, basename: p.path.split('/').pop() ?? p.path, type: 'file' } as FileNode);
+  if (p.action) {
+    const action = pluginActions.byKey(`plugin:${p.plugin}/${p.action}`);
+    if (!action) {
+      // The server validated this pair when it stored the target, so getting
+      // here means the app was removed, disabled, or is not visible to this
+      // account — all of which are worth a sentence.
+      flashToast(t('plugin.not_applicable'));
+      emit('error', {
+        message: `no such plugin action: ${p.plugin}/${p.action}`,
+        context: { what: 'openAppTarget', path: p.path },
+      });
+      return false;
+    }
+    await onPluginAction(pluginActionKey(action), [node]);
+    return true;
+  }
+  if (!p.view) return false;
+  // A `page` view is never listed in `views[]` (only inspector/home are), so
+  // its placement is learned from an action that opens it. Nothing else
+  // knows, and guessing "page" for everything would take a dialog-sized
+  // screen into a tab of its own.
+  const owner = pluginActions.actions.value.find((a) => a.plugin === p.plugin && a.view === p.view);
+  if (owner && isPagePlacement(owner.view_placement)) {
+    return openPluginPage(owner, [node]);
+  }
+  try {
+    const res = await api.pluginView(p.plugin, p.view, p.path);
+    if (!res?.surface) {
+      flashToast(t('plugin.view.error'));
+      return false;
+    }
+    pluginView.value = { plugin: p.plugin, view: p.view, surface: res.surface, path: p.path };
+    return true;
+  } catch (e) {
+    flashToast((e as Error)?.message || t('plugin.view.error'));
+    return false;
+  }
+}
+
+/**
+ * v3 §3.0 — a surface answered "go to this file, and start that screen".
+ *
+ * ⚠⚠ In-app, through `openAppTarget`, rather than by navigating the window
+ * to the deep link: the person is already standing in the explorer, and a
+ * reload would throw away the folder, the selection and the tab strip to
+ * arrive at a screen the explorer can simply open. The deep-link ADDRESS is
+ * the right answer for a frame with no explorer under it (a plugin `page`
+ * view navigates); it is the wrong one here.
+ *
+ * ⚠ The screen that asked is closed first — an answer carrying `done` has
+ * already closed it, and one that does not would otherwise sit over the
+ * screen the person was sent to.
+ *
+ * ⚠ No permission check here, and that is deliberate: the host verified the
+ * screen belongs to the plugin that answered, and the server re-checked the
+ * path against THIS person's rights before the answer left, dropping the
+ * request rather than refusing the screen. A second, weaker copy of that
+ * rule in the browser would be the kind of check that drifts.
+ */
+async function onSurfaceOpen(plugin: string, req: { path: string; action?: string; view?: string }): Promise<void> {
+  if (!plugin || !req?.path) return;
+  pluginView.value = null;
+  // The folder first, so the person can SEE where they were taken — the same
+  // walk `onOpenOpOutput` makes for a job's output.
+  const sep = req.path.indexOf('://');
+  const storageName = sep === -1 ? '' : req.path.slice(0, sep);
+  const rel = stripAdapter(req.path).replace(/^\/+|\/+$/g, '');
+  const slash = rel.lastIndexOf('/');
+  const dirRel = slash === -1 ? '' : rel.slice(0, slash);
+  const target = multiStorageRoot.value && storageName ? (dirRel ? `${storageName}/${dirRel}` : storageName) : dirRel;
+  try {
+    await load(target);
+  } catch {
+    /* the folder may be gone; the screen below still tries the file */
+  }
+  await openAppTarget({ plugin, action: req.action, view: req.view, path: req.path });
+}
+
+/** Cancel from the operations center — the server stops the job. */
+async function onCancelPendingOp(id: number) {
+  try {
+    await api.opsCancel(id);
+    await pendingOps.poll();
+  } catch {
+    flashToast(t('plugin.cancel_failed'));
+  }
+}
+
+/**
+ * "Open" on a finished job: go to the output's folder and select it. The
+ * output is an adapter-qualified path (`docs://reports/nda-signed.pdf`); the
+ * folder is loaded the way a search hit's is, then the row is picked out of
+ * the fresh listing by its exact path.
+ */
+async function onOpenOpOutput(_id: number, path: string) {
+  const sep = path.indexOf('://');
+  const storageName = sep === -1 ? '' : path.slice(0, sep);
+  const rel = stripAdapter(path).replace(/^\/+|\/+$/g, '');
+  const slash = rel.lastIndexOf('/');
+  const dirRel = slash === -1 ? '' : rel.slice(0, slash);
+  const target = multiStorageRoot.value && storageName ? (dirRel ? `${storageName}/${dirRel}` : storageName) : dirRel;
+  await load(target);
+  const node = files.value.find((f) => f.path === path);
+  if (node) {
+    selection.click(node.path);
+    return;
+  }
+  flashToast(t('plugin.output_missing'));
+}
+/* === /App plugins === */
 
 // Creative UI state: starred / tags / recently-opened. The component
 // helpers (StarButton, TagPicker, RecentlyOpened) handle their own
@@ -988,16 +1482,24 @@ function openTagPickerFor(n: FileNode) {
  * once the chip has navigated, leaving it up means a dialog about one file
  * covering the view of all the others that share its tag.
  */
-function openTagView(tag: string) {
+function openTagView(tag: string, kind: TagKind | '' = '') {
   showTagPicker.value = false;
-  void loadTagView(tag);
+  void loadTagView(tag, kind);
 }
 
 function onNodeTagsChanged() {
-  invalidateTagCache();
-  void loadNavTags(true);
-  if (navView.value === 'tag' && navTag.value) void loadTagView(navTag.value);
+  // The cache is already dropped (lib/tags `announceTagsChanged`), so this
+  // re-ask is real — and unforced, so every explorer on the page shares one.
+  void loadNavTags();
+  if (navView.value === 'tag' && navTag.value) void loadTagView(navTag.value, navTagKind.value);
 }
+/* etiket:k2 — the ONE path a tag write reaches the panel by: the module-level
+ * announcement, which survives the picker being closed before the save
+ * answered (a component emit does not) and reaches every explorer on the page.
+ * The picker's own `change` / the details panel's `tags-changed` are no longer
+ * wired here, or each save would reload the list twice. */
+const offTagsChanged = onTagsChanged(onNodeTagsChanged);
+onBeforeUnmount(offTagsChanged);
 
 function onRecentOpen(entry: { id: number; storage_id?: number; path: string; name: string }) {
   // RecentlyOpened emits the bare row. The same converter Recent / Starred /
@@ -1049,6 +1551,16 @@ const effectiveOnlyOfficeBase = computed<string | null>(() => {
   return capabilitiesData.value?.onlyoffice_url || null;
 });
 
+/**
+ * Could this caller SET UP a missing optional service? The server's answer
+ * (`caller_admin` — an administrator who can reach the instance settings;
+ * a tenant admin and an API token cannot), never a role guessed here. It picks
+ * between the owner's two answers for an action that needs a service that is
+ * not there: "disabled with a reason for administrators, hidden for everybody
+ * else" (lib/serviceGate).
+ */
+const callerAdmin = computed(() => capabilitiesData.value?.caller_admin === true);
+
 const effectiveOnlyOfficeConfigEndpoint = computed<string | null>(() => {
   if (!effectiveOnlyOfficeBase.value) return null;
   return api.endpoints.onlyOfficeConfig || null;
@@ -1065,8 +1577,35 @@ const effectiveDrawioUrl = computed<string | null>(() => {
 // Universal converter (p2r3/convert fork). convert_url is only populated by
 // the backend when the "convert" external service is enabled, so a simple
 // presence check is enough gating.
-const effectiveConvertUrl = computed<string | null>(
-  () => props.config.convertBase || capabilitiesData.value?.convert_url || null,
+const effectiveConvertUrl = computed<string | null>(() => {
+  if (props.config.convertBase) return props.config.convertBase;
+  /* ⚠ Health too, like the two above: the server fills `convert_url` whenever
+   * the service is ENABLED, so a converter that is enabled but unreachable
+   * used to be offered and then sat on "Loading the converter…" for ever. */
+  const ext = capabilitiesData.value?.external?.convert;
+  if (ext && !isExternalUsable(ext)) return null;
+  return capabilitiesData.value?.convert_url || null;
+});
+
+/* The legacy converter against the Convert app: one of them, never both
+ * (lib/serviceGate `legacyConvertGate`). `legacyConvertUrl` is what every
+ * door to the iframe dialog reads — the menu, the toolbar, the dialog's own
+ * v-if — so none of them can offer what the rule withheld. */
+const legacyConvert = computed(() =>
+  legacyConvertGate({
+    appOffered: pluginsEnabled.value && convertAppOffered(pluginActions.actions.value),
+    configured:
+      !!props.config.convertBase ||
+      capabilitiesData.value?.external?.convert?.enabled === true ||
+      !!capabilitiesData.value?.convert_url,
+    healthy: !!effectiveConvertUrl.value,
+    callerAdmin: callerAdmin.value,
+    unhealthyReason: t('ctx.needs_convert'),
+    adminNote: t('convert.legacy_admin'),
+  }),
+);
+const legacyConvertUrl = computed<string | null>(() =>
+  legacyConvert.value.hidden || legacyConvert.value.disabled ? null : effectiveConvertUrl.value,
 );
 
 /* belge:n1 — what the SERVER can create, crossed with what WE could open.
@@ -1095,6 +1634,14 @@ const showRename = ref(false);
 const showDelete = ref(false);
 const showPreview = ref(false);
 const renameTarget = ref<FileNode | null>(null);
+/* Why the last rename did not happen, shown in the dialog. A failure used to be
+ * only EMITTED, which the stock web app logs to the console: the dialog stayed
+ * open and silent, the one answer a person can act on — the name is taken —
+ * unseen. */
+const renameError = ref<string | null>(null);
+watch(showRename, (open) => {
+  if (open) renameError.value = null;
+});
 /* ui-fix — does the open rename/delete/new-folder modal belong to the side
  * pane? (the menu is identical to the main pane's; this routes the mutation
  * to the right one.) */
@@ -1285,11 +1832,22 @@ const sharedStorageNames = ref<string[]>([]);
  * embedder's users had no path to a protocol guide or to the API token those
  * guides tell them to use.
  *
- * ⚠ Not gated on role. The backend decides — ConnectionsPanel renders what the
- * API returns (a non-admin gets the guides and a "why not" card instead of the
- * storage form), and /api/tokens caps every scope against the caller's own role.
+ * ⚠ Not gated on role. The backend decides — ConnectionsPanel is the protocol
+ * guides and the credentials they need, which every caller may read, and
+ * /api/tokens caps every scope against the caller's own role.
  */
 const connectionsEnabled = computed(() => props.config.connections ?? !simpleUi.value);
+
+/**
+ * paylas:m1 — may the panel draw its "My shares" row?
+ *
+ * ⚠ `=== true`, not `?? <default>`: the row's screen is the HOST's, this
+ * component only announces the intent, and an embedder who has not said yes
+ * has not built that screen. Silence therefore has to mean no — the inverse of
+ * `connectionsEnabled` above, whose panel this component draws itself and can
+ * always deliver on.
+ */
+const mySharesEnabled = computed(() => props.config.mySharesVisible === true);
 
 /**
  * Is this caller an integration rather than a person (backend migration 00030)?
@@ -1474,6 +2032,19 @@ watch(
  *  2. **The live count**, which is a real query. See `advSearchCount`.
  */
 const showAdvSearch = ref(false);
+/* etiket:k2 — the dialog offers the person's tags, each with its kind, as
+   picks under the Tags box. Asked for when it opens, through the same
+   module-level cache as the panel's list, so it costs nothing when the panel
+   already has them — and works in an embed that shows no panel at all. */
+const advKnownTags = ref<TagItem[]>([]);
+watch(showAdvSearch, async (open) => {
+  if (!open) return;
+  advKnownTags.value = await fetchAllTags({
+    apiBase: props.config.apiBase ?? '',
+    authHeaders: () => buildAuthHeaders(),
+    authCredentials: api.credentialsMode(),
+  });
+});
 /** The folder the dialog was opened from, frozen for its lifetime. */
 const advPathBase = ref('');
 
@@ -1536,15 +2107,28 @@ function advHitToNode(h: GlobalSearchHit, storageName: string): FileNode {
   };
 }
 
-/** Run one advanced search and hand back the rows, unfiltered. */
-async function advFetchRows(scope: AdvScope, query: string, target: string): Promise<FileNode[]> {
+/** Run one advanced search and hand back the rows, unfiltered — and whether
+ *  the answer was cut. The name scope has the server's own word for that
+ *  (`truncated`); /api/files/search's flag does not survive `globalSearch`,
+ *  which returns hits only, so the content scope keeps the full-page guess. */
+async function advFetchRows(
+  scope: AdvScope,
+  query: string,
+  target: string,
+): Promise<{ rows: FileNode[]; truncated: boolean }> {
   if (scope === 'name') {
     const resp = await api.search(target, query);
-    return filterListing(resp.files);
+    return {
+      rows: filterListing(resp.files),
+      truncated: advSearchTruncated(resp.files.length, MANAGER_SEARCH_PAGE, resp.truncated),
+    };
   }
   const hits = await api.globalSearch(query, { limit: ADV_CONTENT_LIMIT, scope });
   const storageName = adapter.value || (props.config.storages ?? [])[0]?.name || '';
-  return filterListing(hits.map((h) => advHitToNode(h, storageName)));
+  return {
+    rows: filterListing(hits.map((h) => advHitToNode(h, storageName))),
+    truncated: advSearchTruncated(hits.length, ADV_CONTENT_LIMIT),
+  };
 }
 
 /** The target `load()` would use for the current position. */
@@ -1567,11 +2151,10 @@ function advTarget(): string {
  */
 async function advSearchCount(req: AdvSearchRequest): Promise<AdvCountResult> {
   const query = advQueryString(req);
-  const rows = await advFetchRows(req.scope, query, advTarget());
-  const limit = req.scope === 'name' ? 250 : ADV_CONTENT_LIMIT;
+  const { rows, truncated } = await advFetchRows(req.scope, query, advTarget());
   return {
     count: applyFilters(rows, req.filters).length,
-    capped: advSearchTruncated(rows.length, limit),
+    capped: truncated,
   };
 }
 
@@ -1811,6 +2394,7 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
     if (!navView.value) navViewOrigin.value = currentPath.value ?? '';
     navView.value = 'home';
     navTag.value = '';
+    navTagKind.value = '';
     trashMode.value = false;
     e2eRoot.value = '';
     forgetFolderPerm();
@@ -1824,7 +2408,7 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
   }
   if (kind === 'tag') {
     // The tag view needs a name; the panel calls loadTagView directly.
-    if (navTag.value) await loadTagView(navTag.value);
+    if (navTag.value) await loadTagView(navTag.value, navTagKind.value);
     return;
   }
   if (kind === 'trash') {
@@ -1836,6 +2420,7 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
     // never lights up.
     navView.value = 'trash';
     navTag.value = '';
+    navTagKind.value = '';
     return;
   }
   loading.value = true;
@@ -1845,6 +2430,7 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
   if (!navView.value) navViewOrigin.value = currentPath.value ?? '';
   navView.value = kind;
   navTag.value = '';
+  navTagKind.value = '';
   trashMode.value = false;
   e2eRoot.value = '';
   forgetFolderPerm();
@@ -1878,7 +2464,7 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
  * hash — goes through `virtualSegmentLabel`, so none of them can print the
  * sentinel the way the strip once printed `.shared`.
  */
-async function loadTagView(tag: string) {
+async function loadTagView(tag: string, kind: TagKind | '' = '') {
   closeNavDrawer();
   const name = String(tag ?? '').trim();
   if (!name) return;
@@ -1886,18 +2472,26 @@ async function loadTagView(tag: string) {
   if (!navView.value) navViewOrigin.value = currentPath.value ?? '';
   navView.value = 'tag';
   navTag.value = name;
+  navTagKind.value = kind;
   trashMode.value = false;
   e2eRoot.value = '';
   forgetFolderPerm();
   selection.clear();
   try {
-    const rows = await fetchTaggedRows(name, {
-      apiBase: props.config.apiBase ?? '',
-      authHeaders: () => buildAuthHeaders(),
-      authCredentials: api.credentialsMode(),
-    });
+    const rows = await fetchTaggedRows(
+      name,
+      {
+        apiBase: props.config.apiBase ?? '',
+        authHeaders: () => buildAuthHeaders(),
+        authCredentials: api.credentialsMode(),
+      },
+      200,
+      kind,
+    );
     files.value = rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null);
-    const seg = makeTagSegment(name);
+    // etiket:k2 — the kind is part of the address (`.mytag~x` / `.teamtag~x`),
+    // so a reload or a copied link opens the same one of two same-named tags.
+    const seg = makeTagSegment(name, kind);
     dirname.value = seg;
     currentPath.value = seg;
     // Spans every storage, like Starred/Recent/Shared — so no storage crumb.
@@ -1905,7 +2499,7 @@ async function loadTagView(tag: string) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     files.value = [];
-    emit('error', { message: msg, context: { op: `nav-view:tag:${name}` } });
+    emit('error', { message: msg, context: { op: `nav-view:tag:${kind ? `${kind}:` : ''}${name}` } });
     flashToast(msg);
   } finally {
     loading.value = false;
@@ -1924,7 +2518,7 @@ async function loadTagView(tag: string) {
  * none. The cache is dropped the instant the user edits tags, which is the
  * only staleness anybody can notice.
  */
-const navTags = ref<string[]>([]);
+const navTags = ref<TagItem[]>([]);
 const navTagsLoaded = ref(false);
 
 async function loadNavTags(force = false) {
@@ -2291,6 +2885,9 @@ function refreshAll() {
 }
 
 async function load(path?: string) {
+  // Whatever an earlier search said about ITS answer, this listing has not
+  // answered yet (the "more results than shown" strip reads this).
+  searchTruncated.value = false;
   /* === etiket:t1 — a sentinel is a VIEW, not a folder ===================
    * A restored tab, a reload on `#.trash` / `#.starred` / `#.tag~invoices`,
    * or the breadcrumb crumb for the view you are standing in all arrive here
@@ -2329,7 +2926,7 @@ async function load(path?: string) {
       writePersistedPath('');
       return await load('');
     }
-    if (asView.kind === 'tag') await loadTagView(asView.tag);
+    if (asView.kind === 'tag') await loadTagView(asView.tag, asView.tagKind);
     else await loadNavView(asView.kind);
     return;
   }
@@ -2365,6 +2962,7 @@ async function load(path?: string) {
      folder listing. */
   navView.value = '';
   navTag.value = '';
+  navTagKind.value = '';
   let requested = path ?? currentPath.value ?? '';
   try {
     notFoundPath.value = '';
@@ -2403,17 +3001,24 @@ async function load(path?: string) {
        here. Everything downstream — the views, the selection, the inspector —
        sees ordinary rows, which is the point: one results surface. */
     const advContent = !!searchQuery.value && advScope.value !== 'name';
-    const resp: ManagerResponse = advContent
+    const adv = advContent ? await advFetchRows(advScope.value, searchQuery.value, target) : null;
+    const resp: ManagerResponse = adv
       ? {
           adapter: adapter.value,
           storages: (props.config.storages ?? []).map((s) => s.name),
           dirname: dirname.value,
           read_only: false,
-          files: await advFetchRows(advScope.value, searchQuery.value, target),
+          files: adv.rows,
+          truncated: adv.truncated,
         }
       : searchQuery.value
         ? await api.search(target, searchQuery.value)
         : await api.index(target);
+    // A search that matched more than it returned says so (banner strip). The
+    // server's `truncated` is the answer; an older server that does not send
+    // it leaves the full-page guess the advanced search count always made.
+    searchTruncated.value =
+      !!searchQuery.value && advSearchTruncated(resp.files.length, MANAGER_SEARCH_PAGE, resp.truncated);
     adapter.value = resp.adapter;
     dirname.value = resp.dirname;
     dirPerm.value = (resp.perm as string) || '';
@@ -2523,6 +3128,14 @@ const trashRetentionDays = ref<number | null>(null);
 const trashCanEmpty = ref(false);
 const trashEmptying = ref(false);
 const showTrashConfirm = ref(false);
+/** The purge being followed, while the server reports it as running. */
+const trashEmptyRun = ref<TrashEmptyStatus | null>(null);
+/* Set when the explorer is taken down: it stops the following — the purge
+ * is the server's and carries on. */
+let trashEmptyUnwatched = false;
+onBeforeUnmount(() => {
+  trashEmptyUnwatched = true;
+});
 
 async function probeTrashPolicy() {
   trashRetentionDays.value = null;
@@ -2571,24 +3184,73 @@ const trashConfirmKey = computed(() =>
   trashSizeKnown.value ? 'trash.empty_confirm_body' : 'trash.empty_confirm_body_nosize',
 );
 
+/** "Emptying the trash… 120 of 61,844" while a purge is followed. */
+const trashEmptyProgress = computed(() => {
+  const run = trashEmptyRun.value;
+  if (!run?.running) return '';
+  if (run.queued) return t('trash.emptying_queued');
+  const nf = new Intl.NumberFormat(localeTag(locale.value));
+  return t('trash.emptying', { done: nf.format(run.scanned ?? 0), total: nf.format(run.total ?? 0) });
+});
+
+/* ⚠⚠ A 2xx is not "emptied" any more. The endpoint used to purge inside the
+ * request, so a large trash never answered — nginx's 504 at sixty seconds
+ * became a toast reading "504". It now answers within seconds: the final
+ * counts, or 202 while the purge goes on in the background, which
+ * lib/trashEmpty follows on GET until the run ends. */
 async function emptyTrash() {
   showTrashConfirm.value = false;
   if (!trashCanEmpty.value || trashEmptying.value) return;
   trashEmptying.value = true;
+  const url = `${props.config.apiBase ?? ''}/api/admin/trash/empty`;
   try {
-    const res = await fetch(`${props.config.apiBase ?? ''}/api/admin/trash/empty`, {
-      method: 'POST',
-      headers: await buildAuthHeaders(),
-      credentials: api.credentialsMode(),
+    const end = await emptyTrashAndFollow({
+      start: async () =>
+        fetch(url, { method: 'POST', headers: await buildAuthHeaders(), credentials: api.credentialsMode() }),
+      status: async () => fetch(url, { headers: await buildAuthHeaders(), credentials: api.credentialsMode() }),
+      /* The run is an ops row: it goes into the operations centre (progress,
+       * Cancel) the moment the server names it — a run done within the wait
+       * as well, like any other operation the person started. */
+      onStart: (run) => {
+        if (!run.op_id) return;
+        pendingOps.register({
+          id: run.op_id,
+          kind: 'trash-empty',
+          status: run.running ? (run.queued ? 'pending' : 'running') : run.cancelled ? 'cancelled' : 'ok',
+          total: run.total ?? 0,
+          done: run.scanned ?? 0,
+        });
+      },
+      onProgress: (run) => {
+        trashEmptyRun.value = run;
+      },
+      onBusy: () => flashToast(t('trash.empty_busy')),
+      stopped: () => trashEmptyUnwatched,
     });
-    if (!res.ok) throw new Error(String(res.status));
-    await loadTrash();
-    flashToast(t('trash.emptied'));
+    if (end === null) return;
+    if (end.error) throw new Error(t('trash.empty_stopped', { error: end.error }));
+    /* Only the view that is still showing the trash is redrawn: somebody who
+     * went on to a folder while it ran is not pulled back into the trash. */
+    if (trashMode.value) await loadTrash();
+    /* `{running: false}` with no start is a run the server no longer knows —
+     * it restarted under it. The listing just reloaded says what is left, and
+     * nothing is claimed about the rest. */
+    if (!end.started_at) return;
+    if (end.cancelled) {
+      flashToast(t('trash.empty_cancelled', { count: end.purged ?? 0 }));
+      return;
+    }
+    flashToast(end.failed ? t('trash.emptied_partly', { count: end.failed }) : t('trash.emptied'));
   } catch (err) {
+    if (err instanceof TrashEmptyBusy) {
+      flashToast(t('trash.empty_busy'));
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     emit('error', { message: msg, context: { op: 'trash:empty' } });
     flashToast(msg);
   } finally {
+    trashEmptyRun.value = null;
     trashEmptying.value = false;
   }
 }
@@ -2606,7 +3268,10 @@ async function loadTrash() {
         ({
           type: 'file',
           id: e.id,
-          path: e.storage_name ? `${e.storage_name}://${e.path}` : e.path,
+          /* ⚠ The ORIGINAL path, which the server sends with its leading
+             slash: `depo:///x.txt` put an empty segment in the Location
+             column ("depo/"), so it is dropped here. */
+          path: e.storage_name ? `${e.storage_name}://${e.path.replace(/^\/+/, '')}` : e.path,
           basename: e.name,
           extension: e.name.includes('.') ? e.name.split('.').pop() || '' : '',
           storage: e.storage_name || '',
@@ -2619,6 +3284,10 @@ async function loadTrash() {
           size: e.size,
           file_size: e.size,
           mime_type: e.mime || '',
+          /* The date the Trash's date column prints and sorts by — WHEN it was
+             deleted. A trashed row has no modification date to show, and the
+             column read "—" for every row. */
+          last_modified: Date.parse(e.deleted_at) || undefined,
           extra_metadata: { deleted_at: e.deleted_at, ttl_days: e.ttl_days ?? null },
         }) as unknown as FileNode,
     );
@@ -2858,7 +3527,12 @@ watch(currentPath, (p) => {
 // Let a host force a soft re-fetch of the current folder (reusing the existing
 // list-fetch) — used by the realtime layer to refresh on live change events
 // without a full component remount.
-defineExpose({ reload: () => load() });
+defineExpose({
+  reload: () => load(),
+  /* App plugins — a notification's `target.open` lands here (see the
+     function's own note for why this is a method and not a prop). */
+  openAppTarget,
+});
 
 onMounted(async () => {
   // Eagerly start fetching Monaco — the user doesn't pay for it
@@ -2904,16 +3578,10 @@ onMounted(async () => {
   if (api.endpoints.opsList) {
     pendingOps.startPolling();
   }
-  if (api.endpoints.capabilities) {
-    api
-      .capabilities()
-      .then((cap) => {
-        capabilitiesData.value = cap;
-      })
-      .catch(() => {
-        /* swallow — `onlyoffice_url` falls back to null */
-      });
-  }
+  // ⚠ Not awaited here — the listing must not wait on it — but tracked, so a
+  // caller that genuinely needs the answer (openAppTarget) can await the same
+  // promise instead of reading a ref that may not be filled yet.
+  void loadCapabilities();
 });
 
 // --------------------------------------------------------------------
@@ -3134,6 +3802,29 @@ function openNode(n: FileNode) {
   // The virtual `.trash` row opens the backend trash listing, not a real dir.
   if (n.basename === '.trash') {
     void loadTrash();
+    return;
+  }
+  /* ⚠⚠ issue #34 — A SYMLINK THE SERVER WILL NOT FOLLOW IS REFUSED HERE,
+     OUT LOUD, and this is the ONE funnel every way of opening a row passes
+     through (double-click, Enter, the menu's Open, the command palette, a
+     deep link's auto-open), so the answer is the same everywhere.
+
+     The reported bug was the silence: an out-of-root link arrived looking like
+     an ordinary 0-byte file, and clicking it did nothing at all. Letting the
+     request go instead is barely an improvement — the driver's containment
+     refusal surfaces as a generic failure, which reads as "filex is broken"
+     rather than "this boundary is a setting somebody chose". So: no request,
+     and a toast carrying the sentence from lib/symlink, which is the same
+     sentence the row's badge and the details panel already show. Nothing is
+     lost by not asking; the server would refuse it too, and only this side
+     knows the wording that names the setting. */
+  const link = linkWordsFor(n, { t });
+  if (link) {
+    /* ⚠ 8 seconds, not flashToast's 2.5: this is a two-clause explanation
+       that names a setting, and a sentence nobody finishes reading is the
+       silence again with extra steps. Same budget undoToast uses for the
+       other toast people are expected to act on. */
+    showToast({ message: link.why }, 8000);
     return;
   }
   if (n.type === 'dir') {
@@ -3710,7 +4401,7 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
     ];
   }
   const isFile = single && sel[0]?.type === 'file';
-  const tagsLabel = locale.value === 'en' ? 'Tags…' : 'Etiketler…';
+  const tagsLabel = t('ctx.tags_menu');
   const singleHasId = single && typeof sel[0]?.id === 'number';
   /* yildiz:s1 */
   const canStar = starableNodes(sel).length > 0;
@@ -3727,9 +4418,27 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
   // Unified "Paylaş / İzinler" popup carries the public share link, per-user
   // permissions AND the folder-only "Dosya İste" (file-drop) tab — the user
   // picks the action from inside the modal, so there's no separate button.
-  const accessLabel = locale.value === 'en' ? 'Share / Permissions' : 'Paylaş / İzinler';
+  const accessLabel = t('shortcuts.share'); // the same words the shortcut list uses
+  /* ⚠ "Open" on an office document IS "open in ONLYOFFICE": every path it
+   * takes (the standalone editor tab, the desktop's host window, the in-page
+   * modal) ends at the document server. With none configured it used to open
+   * a tab that printed `Config fetch 503: {"error":"onlyoffice not
+   * configured"}`. The owner's rule (2026-09-21): an administrator sees it
+   * greyed with where to set it up; everybody else is not offered it. Preview
+   * stays — it says the same thing in words and offers the download. */
+  const openExt = String(sel[0]?.extension ?? '').toLowerCase();
+  const openGate = !isFile
+    ? {}
+    : isOfficeExt(openExt)
+      ? gateOnService(!!effectiveOnlyOfficeBase.value, callerAdmin.value, t('ctx.needs_onlyoffice'))
+      : openExt === 'drawio' || openExt === 'dio'
+        ? gateOnService(!!effectiveDrawioUrl.value, callerAdmin.value, t('ctx.needs_drawio'))
+        : {};
+  /* The legacy converter: configured-and-healthy is the only state in which
+     it is offered as working, and never beside the Convert app. */
+  const convertGate = legacyConvert.value;
   return [
-    { key: 'open', label: t('ctx.open'), hidden: !single },
+    { key: 'open', label: t('ctx.open'), ...openGate, hidden: !single || openGate.hidden === true },
     { key: 'open-tab', label: t('ctx.open_new_tab'), hidden: !single || sel[0]?.type !== 'dir' } /* wiring:d1 — open the folder in a new tab */,
     { key: 'preview', label: t('ctx.preview'), hidden: !single, disabled: !isFile },
     /* tasi:m1 — Download works on ANY selection now. It used to disappear the
@@ -3741,7 +4450,13 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
        decrypted IN THE BROWSER, one file at a time, and the server has no
        plaintext to zip. */
     { key: 'download', label: t('ctx.download'), hidden: !any || (e2eActive.value && !single), disabled: !any },
-    { key: 'convert', label: t('ctx.convert'), hidden: !single || !effectiveConvertUrl.value || !w || e2eActive.value /* wiring:e2 — convert is meaningless on ciphertext */, disabled: !isFile },
+    {
+      key: 'convert',
+      label: t('ctx.convert'),
+      title: convertGate.title,
+      hidden: !single || convertGate.hidden === true || !w || e2eActive.value /* wiring:e2 — convert is meaningless on ciphertext */,
+      disabled: !isFile || convertGate.disabled === true,
+    },
     /* tasi:m1 — VISIBLE and grey above a multi-selection, not gone. Sharing
        really is one item at a time (a share link addresses one node), and the
        row now says so in its tooltip; vanishing taught the reader that filex
@@ -3790,6 +4505,10 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
       hidden: !canStar,
     },
     { key: 'tags', label: tagsLabel, hidden: !singleHasId, disabled: !singleHasId },
+    /* App plugins — one row per action whose `applies` rule accepts the
+       selection, under its own `sep-plugins` divider; `[]` when the feature
+       is off, in the trash, or inside an encrypted folder (lib/pluginMenu). */
+    ...pluginActionRows(sel),
     ...keepActionsFor(sel),
     { divider: true, key: 'sep2', label: '', hidden: !w },
     { key: 'delete', label: t('ctx.delete'), danger: true, hidden: !any || !w, disabled: !any },
@@ -3860,6 +4579,12 @@ function actingInPane(): boolean {
 }
 
 async function dispatchItemAction(key: string, targets: FileNode[]) {
+  /* App plugins — `plugin:<plugin>/<action>` rows are not in the switch: the
+     set is whatever the server listed, so they are resolved by prefix. */
+  if (isPluginActionKey(key)) {
+    await onPluginAction(key, targets);
+    return;
+  }
   switch (key) {
     /* gorunum:v1 — the selection bar's × . It used to be delivered by
      * synthesising a click on the listing's background, because nothing here
@@ -3939,7 +4664,7 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       if (targets[0] && typeof targets[0].id === 'number') {
         const id = targets[0].id;
         navigator.clipboard?.writeText(String(id)).then(
-          () => flashToast(locale.value === 'en' ? `Node id ${id} copied` : `Node id ${id} kopyalandı`),
+          () => flashToast(t('toast.node_id_copied', { id })),
           () => flashToast(`#${id}`),
         );
       }
@@ -4060,7 +4785,7 @@ async function paste() {
     }
     clipboard.value = { mode: null, items: [], sourcePath: null };
   } catch (err) {
-    emit('error', { message: (err as Error).message, context: { op: 'paste' } });
+    reportMutationError(err, { op: 'paste' });
   }
 }
 
@@ -4069,7 +4794,7 @@ async function duplicate(n: FileNode) {
     const { op } = await api.copy([n.path], qualify(currentPath.value));
     pendingOps.register(op);
   } catch (err) {
-    emit('error', { message: (err as Error).message, context: { op: 'duplicate' } });
+    reportMutationError(err, { op: 'duplicate' });
   }
 }
 
@@ -4204,6 +4929,12 @@ async function submitNewFolder(name: string) {
 async function submitRename(name: string) {
   const target = renameTarget.value;
   if (!target) return;
+  /* ⚠ Cleared BEFORE the attempt, not only when the dialog opens. The dialog
+   * drops the line as soon as the name is edited and re-shows it when this ref
+   * CHANGES — so retrying the same taken name, which fails with the identical
+   * sentence, left the ref untouched, nothing re-rendered, and Save looked like
+   * it did nothing at all. */
+  renameError.value = null;
   const inPane = mutationInPane.value; /* ui-fix — rename from the side pane */
   try {
     const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
@@ -4222,7 +4953,11 @@ async function submitRename(name: string) {
       });
     }
   } catch (err) {
-    emit('error', { message: (err as Error).message, context: { op: 'rename' } });
+    const e = err as Error & { status?: number };
+    // 409 is the server refusing to replace what already has the name
+    // (NAME_TAKEN). Everything else still says what went wrong, in the dialog.
+    renameError.value = e.status === 409 ? t('newdoc.err.exists', { name }) : e.message || String(err);
+    reportMutationError(err, { op: 'rename' });
   }
 }
 
@@ -4275,17 +5010,19 @@ async function confirmDelete() {
     if (inPane) void splitPaneRef.value?.reload();
     else selection.clear();
   } catch (err) {
-    emit('error', { message: (err as Error).message, context: { op: 'delete' } });
+    reportMutationError(err, { op: 'delete' });
   }
 }
 
 function openConvert(n: FileNode) {
+  // A shortcut or a stale menu must not open what the rule withholds.
+  if (!legacyConvertUrl.value) return;
   convertTarget.value = n;
   showConvert.value = true;
 }
 
 function onConvertDone(name: string) {
-  flashToast(locale.value === 'en' ? `Converted → ${name}` : `Dönüştürüldü → ${name}`);
+  flashToast(t('toast.converted_to', { name }));
   void load();
 }
 
@@ -4294,7 +5031,7 @@ function onConvertDone(name: string) {
 
 function triggerUpload() {
   if (!canWriteHere.value) {
-    flashToast(locale.value === 'en' ? 'Read-only here' : 'Burada yazma yetkiniz yok');
+    flashToast(t('toast.read_only_here'));
     return;
   }
   fileInputEl.value?.click();
@@ -4570,7 +5307,7 @@ function onDropUpload(ev: DragEvent) {
   dragOver.value = false;
   // RBAC: block drag-drop upload where the user can't write.
   if (!canWriteHere.value) {
-    flashToast(locale.value === 'en' ? 'Read-only here' : 'Burada yazma yetkiniz yok');
+    flashToast(t('toast.read_only_here'));
     return;
   }
   const list = ev.dataTransfer?.files ? Array.from(ev.dataTransfer.files) : [];
@@ -4821,7 +5558,7 @@ async function moveSourcesAsync(sources: string[], targetDir: string, opLabel: s
     }
     selection.clear();
   } catch (err) {
-    emit('error', { message: (err as Error).message, context: { op: opLabel, targetDir } });
+    reportMutationError(err, { op: opLabel, targetDir });
   }
 }
 
@@ -4956,6 +5693,12 @@ const { themeMode: themeModePref, setThemeMode: setThemeModePref } = useThemeMod
 const themeMode = computed<ThemeMode>(() =>
   themeModePref.value === 'host' ? props.config.theme || 'auto' : themeModePref.value,
 );
+/* tablo:t3 — every table under the explorer (its own listing, the connection
+ * panels, an archive's or a spreadsheet's preview, an app's list) is the one
+ * DataTable, and its column menu and Actions menu teleport to <body>: they
+ * learn the language and the mode here, once, instead of from a prop each
+ * surface would have to remember to pass (lib/tableEnv). */
+provideTableEnv({ locale, theme: themeMode });
 // Resolved mode: an explicit choice wins, otherwise the OS preference — the
 // same logic variables.css encodes in CSS. The inline root variables beat every
 // stylesheet rule, so they must track this resolution at runtime.
@@ -5094,23 +5837,15 @@ function retryUploadJob(job: UploadJob) {
 }
 /* /wiring:c3 */
 /* === wiring:c4 — onboarding coach-mark tour ===
- * First mount with no `filex.tourDone` flag auto-starts the tour (short
- * delay so the listing/toolbar are laid out). Closing it — finished OR
- * skipped — stamps the flag; "Turu tekrar başlat" re-opens it any time.
+ * Offered to a PERSON once, never once per mount (lib/tour): the first mount
+ * that finds neither this browser's flag nor the account's opens it a moment
+ * later and records it right away, so a second tab, a remount or another
+ * device does not open it again. "Turu tekrar başlat" re-opens it any time.
  * Restart arrives as a bubbled `fe:tour-restart` CustomEvent from the
  * Toolbar overflow menu, so no extra prop/emit threading through the
  * shared component tags is needed. */
-const TOUR_LS_KEY = 'filex.tourDone';
 const showTour = ref(false);
-let tourTimer: ReturnType<typeof setTimeout> | undefined;
-
-function tourAlreadyDone(): boolean {
-  try {
-    return localStorage.getItem(TOUR_LS_KEY) === '1';
-  } catch {
-    return true; // no storage → never auto-nag
-  }
-}
+let cancelTourOffer: (() => void) | undefined;
 
 function startTour() {
   showTour.value = true;
@@ -5118,11 +5853,9 @@ function startTour() {
 
 function onTourClose() {
   showTour.value = false;
-  try {
-    localStorage.setItem(TOUR_LS_KEY, '1');
-  } catch {
-    /* private mode / quota */
-  }
+  // Already recorded when it was offered; recorded again for a restart that
+  // somebody opened on a browser where it had never been offered.
+  markTourSeen();
   rootEl.value?.focus();
 }
 
@@ -5132,14 +5865,12 @@ function onTourRestartEvent() {
 
 onMounted(() => {
   rootEl.value?.addEventListener('fe:tour-restart', onTourRestartEvent);
-  if (!tourAlreadyDone()) {
-    tourTimer = setTimeout(() => {
-      if (!showTour.value) startTour();
-    }, 900);
-  }
+  cancelTourOffer = offerTourOnce(() => {
+    if (!showTour.value) startTour();
+  });
 });
 onBeforeUnmount(() => {
-  if (tourTimer) clearTimeout(tourTimer);
+  cancelTourOffer?.();
   rootEl.value?.removeEventListener('fe:tour-restart', onTourRestartEvent);
 });
 /* === /wiring:c4 === */
@@ -5228,7 +5959,7 @@ function applyTabLocation(tb: TabState) {
    * onto one, so the tab's copy is redundant and is ignored. With it off,
    * nothing here changes at all and tabs keep exactly the behaviour they had.
    */
-  if (!folderMemoryEnabled() && tb.viewMode && tb.viewMode !== viewMode.value) {
+  if (!folderMemoryOn.value && tb.viewMode && tb.viewMode !== viewMode.value) {
     viewMode.value = tb.viewMode;
   }
   /* ⚠ AFTER the load, not before. `load()` is async, so `currentPath` — and
@@ -5684,8 +6415,11 @@ async function transferItems(
       // "cross-storage is not supported" text here; it IS supported now, so
       // that text would mask the real cause (permissions, a read-only storage,
       // a full quota).
-      emit('error', { message: (err as Error).message, context: { op: 'transfer', targetWire } });
-      flashToast((err as Error).message);
+      // ⚠ `reportMutationError` already flashed the lock sentence when the
+      // server answered 423; the generic message would then overwrite it.
+      const held = lockedRefusal(err);
+      reportMutationError(err, { op: 'transfer', targetWire });
+      if (!held) flashToast((err as Error).message);
       return;
     }
   } else {
@@ -6253,6 +6987,7 @@ function closeRecoveryKey() {
   <div
     ref="rootEl"
     class="fe"
+    :dir="dir"
     :class="{
       'fe--theme-light': themeMode === 'light',
       'fe--theme-dark': themeMode === 'dark',
@@ -6290,7 +7025,7 @@ function closeRecoveryKey() {
            bar's position can never describe two different panes. */"
       :selection-pane="activePaneId /* pane:p1 — which half the bar mounts into */"
       :paste-enabled="!!clipboard.mode"
-      :convert-enabled="!!effectiveConvertUrl"
+      :convert-enabled="!!legacyConvertUrl"
       :can-go-up="canGoUp"
       :at-virtual-root="atVirtualRoot"
       :can-write="canWriteHere"
@@ -6358,6 +7093,7 @@ function closeRecoveryKey() {
       :narrow="isNarrow"
       :active-view="navView"
       :active-tag="navTag"
+      :active-tag-kind="navTagKind"
       :tags="navTags"
       :tags-loaded="navTagsLoaded"
       :active-storage="adapter"
@@ -6365,6 +7101,7 @@ function closeRecoveryKey() {
       :shared-storages="sharedStorageNames"
       :trash-visible="config.trashVisible !== false"
       :show-connections="connectionsEnabled"
+      :show-my-shares="mySharesEnabled /* paylas:m1 — off unless the host has the page */"
       :show-identity-surfaces="identitySurfaces"
       :can-write="canWriteHere && !atVirtualRoot && !trashActive"
       :locale="locale"
@@ -6383,6 +7120,9 @@ function closeRecoveryKey() {
       @new-folder="showNewFolder = true"
       @open-connections="openConnections"
       @open-tokens="openTokens"
+      @open-my-shares="emit('open-my-shares') /* paylas:m1 — the host owns the page */"
+      :apps="pluginHomeApps /* App plugins — the home views */"
+      @open-app="openPluginHome"
     />
     <!-- The drawer's scrim. A button, not a div: dismissing an overlay by
          clicking beside it has to be reachable from the keyboard too. -->
@@ -6467,6 +7207,7 @@ function closeRecoveryKey() {
       :show-view-switcher="navView !== 'home'"
       :folder-key="currentFolderKey"
       :show-parent-path="!!searchQuery || crossFolderView"
+      :trash="trashActive"
       :clipped="clippedPaths"
       :extra-filters="advFilters"
       :can-write="canWriteHere && !trashActive"
@@ -6520,6 +7261,16 @@ function closeRecoveryKey() {
 
       <!-- Strips that describe the WINDOW's state rather than the listing. -->
       <template #banners>
+    <!-- A search that matched more than it returned: the index filled its page,
+         or the index-less fallback filled its window of names. Without this a
+         cut list reads as the whole answer. No count — the number that came
+         back is the window's, not the matches'. -->
+    <div
+      v-if="searchQuery && searchTruncated && !navView && !trashActive"
+      class="fe-search-cut"
+      role="status"
+    >{{ t('search.truncated') }}</div>
+
     <!-- Live presence: who else is viewing this folder (empty → nothing shown).
          When the live socket is unavailable the same strip carries a small
          degraded-connection badge instead (presence is empty in fallback);
@@ -6650,6 +7401,9 @@ function closeRecoveryKey() {
          view rather than of the rows. -->
     <div v-if="trashMode && !loading" class="fe-trashbar">
       <p class="fe-trashbar__text">{{ trashBannerText }}</p>
+      <p v-if="trashEmptyProgress" class="fe-trashbar__progress" role="status" aria-live="polite">
+        {{ trashEmptyProgress }}
+      </p>
       <!-- Offered only when the SERVER has said this caller may purge. The
            backend refuses regardless of what we draw; this is so nobody is
            handed a button that always fails. -->
@@ -6993,6 +7747,7 @@ function closeRecoveryKey() {
              not what is ticked in front of you, and it lives here. */"
       :locale="locale"
       :narrow="isNarrow"
+      :caller-admin="callerAdmin /* the Node ID row is an administrator's (InspectorPanel) */"
       :thumb-src="thumbs.src"
       :api-base="props.config.apiBase ?? '' /* etiket:t1 — the details panel's
              Tags section mounts the same TagPicker the context menu opens, and
@@ -7005,9 +7760,11 @@ function closeRecoveryKey() {
              API breaks without it. */"
       :auth-headers="() => buildAuthHeaders()"
       :auth-credentials="api.credentialsMode()"
-      @tags-changed="onNodeTagsChanged /* etiket:t1 — drop the panel's cached
-             tag list when the details panel edits tags, exactly as the modal
-             does. Harmless until InspectorPanel emits it. */"
+      :plugin-views="pluginInspectorViews /* App plugins — inspector sections */"
+      :theme="themeMode"
+      :storages="(props.config.storages ?? []).map((st) => st.name)"
+      @plugin-op="(op) => onPluginOpQueued(op)"
+      @plugin-open="(p) => onSurfaceOpen(p.plugin, p.req)"
       @open-tag="openTagView /* etiket:t1 — a tag chip in this panel is a door to
              that tag's view, the same door the navigation panel's Tags section
              opens. */"
@@ -7041,10 +7798,8 @@ function closeRecoveryKey() {
         <ConnectionsPanel
           v-if="showConnections"
           :config="config"
-          initial-tab="connect"
           closable
           @close="closeOverlays"
-          @changed="() => load()"
           @error="onConnectionsError"
         />
         <template v-else>
@@ -7097,7 +7852,11 @@ function closeRecoveryKey() {
       :ops="pendingOps.ops.value"
       :locale="locale"
       :center="opsCenter"
+      :output-mode-of="pluginOutputModeOf"
+      :caller-admin="callerAdmin"
       @dismiss="(id) => pendingOps.dismiss(id)"
+      @cancel="onCancelPendingOp"
+      @open="onOpenOpOutput"
     />
 
     <OperationsCenter
@@ -7165,6 +7924,7 @@ function closeRecoveryKey() {
                  typecheck. */"
       :only-office-ready="!!effectiveOnlyOfficeBase"
       :drawio-ready="!!effectiveDrawioUrl"
+      :can-configure="callerAdmin"
       @close="showNewDocument = false"
       @created="onDocumentCreated"
       @error="emit('error', { message: $event.message, context: { op: 'newdoc' } })"
@@ -7233,6 +7993,7 @@ function closeRecoveryKey() {
       :open="showRename"
       :locale="locale"
       :current-name="renameTarget?.basename || ''"
+      :error="renameError"
       @close="showRename = false"
       @submit="submitRename"
     />
@@ -7281,6 +8042,7 @@ function closeRecoveryKey() {
       :download-url="(p) => (e2eUnlocked ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 */"
       :only-office-base="e2eActive ? null : effectiveOnlyOfficeBase /* wiring:e2 — OO cannot open ciphertext */"
       :only-office-config-endpoint="effectiveOnlyOfficeConfigEndpoint"
+      :can-configure="callerAdmin"
       :new-tab-enabled="!e2eActive /* wiring:e2 — the standalone route pulls raw bytes */"
       :save-text-endpoint="e2eActive ? null : api.endpoints.saveText || null /* wiring:e2 — a plaintext save would be a leak */"
       :archive-list-endpoint="api.endpoints.archiveList || null"
@@ -7306,9 +8068,39 @@ function closeRecoveryKey() {
       @nav="onPreviewNav"
       @close="showPreview = false"
     />
+    <!-- App plugins — a `modal` view, and the manifest's confirm question. -->
+    <PluginViewModal
+      v-if="pluginView"
+      :open="!!pluginView"
+      :api="api"
+      :locale="locale"
+      :theme="themeMode"
+      :plugin="pluginView.plugin"
+      :view="pluginView.view"
+      :surface="pluginView.surface"
+      :path="pluginView.path"
+      :size="pluginView.size"
+      :storages="(props.config.storages ?? []).map((st) => st.name)"
+      :start-at="qualify(paneIsActive ? (splitPaneRef?.getPath() ?? '') : currentPath)"
+      @close="pluginView = null"
+      @op="(op) => onPluginOpQueued(op)"
+      @toast="flashToast"
+      @open="(req) => onSurfaceOpen(pluginView?.plugin ?? '', req)"
+    />
+    <PluginConfirmModal
+      :open="!!pluginConfirm"
+      :locale="locale"
+      :theme="themeMode"
+      :title="pluginConfirm ? pluginLabelOf(pluginConfirm.action.label, locale) : ''"
+      :message="pluginConfirm ? pluginLabelOf(pluginConfirm.action.confirm, locale) : ''"
+      :danger="pluginConfirm?.action.danger === true"
+      @close="pluginConfirm = null"
+      @confirm="onPluginConfirmed"
+    />
     <ConvertModal
-      v-if="showConvert && convertTarget && effectiveConvertUrl"
-      :convert-url="effectiveConvertUrl"
+      v-if="showConvert && convertTarget && legacyConvertUrl"
+      :convert-url="legacyConvertUrl"
+      :admin-note="callerAdmin ? t('convert.legacy_admin') : ''"
       :file-name="convertTarget?.basename || convertTarget?.path || ''"
       :fetch-bytes="() => api.fetchArrayBuffer(convertTarget?.path ?? '')"
       :upload="(f) => api.uploadMultipart(qualify(currentPath), [f]).then(() => {})"
@@ -7322,9 +8114,12 @@ function closeRecoveryKey() {
       :path="permTarget.path"
       :is-dir="permTarget.type === 'dir'"
       :size="typeof permTarget.size === 'number' ? permTarget.size : undefined"
-      :locale="locale === 'en' ? 'en' : 'tr'"
+      :locale="locale"
       :share-max-ttl-days="shareMaxTtlDays"
       :initial-tab="permInitialTab /* surucu:d1 */"
+      :mail-ready="capabilitiesData?.mail?.ready"
+      :can-configure="callerAdmin"
+      :perm="permTarget.perm || dirPerm"
       @close="showPerm = false; permInitialTab = undefined"
     />
 
@@ -7345,10 +8140,11 @@ function closeRecoveryKey() {
       >
         <div class="fe-recents__panel" @click.stop>
           <div class="fe-recents__header">
-            <strong>{{ locale === 'en' ? 'Recently opened' : 'Son açılanlar' }}</strong>
-            <button class="fe-recents__close" aria-label="Close" @click="showRecents = false">×</button>
+            <strong>{{ t('recents.title') }}</strong>
+            <button class="fe-recents__close" :aria-label="t('recents.close')" @click="showRecents = false">×</button>
           </div>
           <RecentlyOpened
+            :locale="locale"
             :api-base="props.config.apiBase ?? ''"
             :auth-headers="() => buildAuthHeaders()"
             :auth-credentials="api.credentialsMode()"
@@ -7372,9 +8168,9 @@ function closeRecoveryKey() {
         <div class="fe-modal__card fe-modal__card--md" @click.stop>
           <header class="fe-modal__head">
             <h2 class="fe-modal__title">
-              {{ locale === 'en' ? 'Tags' : 'Etiketler' }} — {{ tagPickerNode.basename }}
+              {{ t('tags.title') }} — {{ tagPickerNode.basename }}
             </h2>
-            <button class="fe-modal__close" aria-label="Close" @click="showTagPicker = false">×</button>
+            <button class="fe-modal__close" :aria-label="t('tags.close')" @click="showTagPicker = false">×</button>
           </header>
           <div class="fe-modal__body">
             <TagPicker
@@ -7383,7 +8179,6 @@ function closeRecoveryKey() {
               :api-base="props.config.apiBase ?? ''"
               :auth-headers="() => buildAuthHeaders()"
               :auth-credentials="api.credentialsMode()"
-              @change="onNodeTagsChanged"
               @open="openTagView /* etiket:t1 — the SAME door as in the details
                      panel; `openTagView` closes this dialog on the way, because
                      leaving a modal open over the view it just navigated to is
@@ -7407,6 +8202,7 @@ function closeRecoveryKey() {
       :path-base="advPathBase"
       :content-search="advContentAvailable"
       :count="advSearchCount"
+      :known-tags="advKnownTags"
       @close="showAdvSearch = false"
       @submit="applyAdvancedSearch"
     />
@@ -7511,6 +8307,7 @@ function closeRecoveryKey() {
       :download-url="(p: string) => (e2eUnlocked ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 */"
       :only-office-base="e2eActive ? null : effectiveOnlyOfficeBase /* wiring:e2 */"
       :only-office-config-endpoint="effectiveOnlyOfficeConfigEndpoint"
+      :can-configure="callerAdmin"
       :auth-headers="() => buildAuthHeaders({ 'Content-Type': 'application/json' })"
       :auth-credentials="api.credentialsMode()"
       :drawio-url="effectiveDrawioUrl"
@@ -7535,3 +8332,8 @@ function closeRecoveryKey() {
 
 <style src="./styles/variables.css"></style>
 <style src="./styles/base.css"></style>
+<!-- The five signing faces, self-hosted. Declared here so the ONE rolled-up
+     `style.css` every host already imports carries them; a browser fetches a
+     `.woff2` only when text is actually drawn in that family, so a host that
+     never opens a signing screen pays nothing. -->
+<style src="./styles/sign-fonts.css"></style>

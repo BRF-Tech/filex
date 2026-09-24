@@ -2,6 +2,33 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'node:path';
+// Shared with scripts/i18n-export.mjs (types: i18n-catalogue.d.mts).
+import { catalogueFiles } from '../scripts/lib/i18n-catalogue.mjs';
+
+/**
+ * The interface's string catalogue, written next to the SPA it describes
+ * (`dist/i18n/filex-catalogue-{en,context}.json`).
+ *
+ * ⚠⚠ Three readers, one file: the Go binary embeds it and measures every
+ * language pack's coverage against it (wasmplugin SetCatalogue — "Español —
+ * 97% translated" in the Apps screens is THIS file's key count); the running
+ * server serves it at /admin/i18n/ so a translator can take the exact
+ * catalogue of the version they run; and the release attaches it
+ * (.goreleaser.yml extra_files). Built from the sources at build time, so it
+ * can never describe a different interface from the one beside it.
+ */
+function i18nCatalogue() {
+  return {
+    name: 'filex-i18n-catalogue',
+    apply: 'build' as const,
+    generateBundle(this: { emitFile: (f: { type: 'asset'; fileName: string; source: string }) => void }) {
+      const files = catalogueFiles(path.resolve(__dirname, '..'));
+      for (const [name, source] of Object.entries(files)) {
+        this.emitFile({ type: 'asset', fileName: `i18n/${name}`, source });
+      }
+    },
+  };
+}
 
 // Vite config for the filex admin UI.
 // The bundle is emitted to dist/ and consumed by the Go binary via go:embed.
@@ -13,8 +40,23 @@ import path from 'node:path';
 // plumbing, so those hosts never show a filex install prompt or register a
 // competing service worker. The SW `scope` below is pinned to '/admin/' as a
 // second guard so it can't claim clients outside this app.
+
+/**
+ * Where `vite dev` sends /api, /embed.js and /z.
+ *
+ * ⚠ 5212 is `go run ./cmd/filex serve`'s own port and stays the default, so
+ * nothing about the ordinary dev loop changes. `FILEX_DEV_API` is for the case
+ * the port cannot answer for: a backend that will not compile (a colleague's
+ * refactor in flight) or a binary already serving on another port. Without it
+ * the only way to see a UI change in a browser is a full Go rebuild, and a
+ * frontend change becomes unverifiable for reasons that have nothing to do
+ * with the frontend — measured 2026-09-20.
+ */
+const devApi = process.env.FILEX_DEV_API || 'http://localhost:5212';
+
 export default defineConfig({
   plugins: [
+    i18nCatalogue(),
     vue({
       template: {
         compilerOptions: {
@@ -39,7 +81,7 @@ export default defineConfig({
       // routes.go) therefore has no offline shell — it loads from the network
       // like any other page, which is correct and not an oversight.
       scope: '/admin/',
-      includeAssets: ['favicon.svg', 'icons/icon.svg'],
+      includeAssets: ['favicon.svg', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/badge-96.png'],
       manifest: {
         id: '/admin/',
         name: 'filex — File Manager',
@@ -67,8 +109,6 @@ export default defineConfig({
         icons: [
           // A full-bleed SVG doubles as the "any" and "maskable" icon; Chrome
           // (desktop + Android) accepts sizes:"any" SVG for installability.
-          // iOS Safari ignores SVG apple-touch icons — a PNG set is a known
-          // follow-up once raster tooling is available in this environment.
           {
             src: 'icons/icon.svg',
             sizes: 'any',
@@ -81,9 +121,24 @@ export default defineConfig({
             type: 'image/svg+xml',
             purpose: 'maskable',
           },
+          // ⚠ The PNG set is not a nicety. iOS Safari ignores an SVG
+          // apple-touch icon, and — the reason it exists now — Chromium's
+          // NOTIFICATION decoder has no SVG at all, so an installed app whose
+          // only icon is the SVG raises toasts with no logo. Rasterised from
+          // the same mark by `scripts/make-icon-pngs.mjs`.
+          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       workbox: {
+        // ⚠ The notification handlers. The worker is GENERATED, so there is
+        // nowhere in it to write `notificationclick` / `push`; this pulls in
+        // `public/notify-sw.js` verbatim. Without it a toast raised BY the
+        // worker (the only kind Android Chrome allows) has a click that does
+        // nothing, and a future push would show the browser's "site updated
+        // in the background" placeholder instead of the app's own toast.
+        importScripts: ['notify-sw.js'],
         // ⚠ No map for the generated service worker. workbox builds it from a
         // temp copy, so its map's only source was the builder's temp path —
         // `C:/Users/<account>/AppData/Local/Temp/…/sw.js`, account name
@@ -160,8 +215,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:5212',
-      '/embed.js': 'http://localhost:5212',
+      '/api': devApi,
+      '/embed.js': devApi,
       // ⚠ Not under /api, and it has to be here or the feature cannot be
       // exercised in dev at all. `/z/<ticket>` is where a multi-selection
       // download streams from: the browser NAVIGATES to it (a fetch would
@@ -169,7 +224,7 @@ export default defineConfig({
       // header and cannot live behind the /api prefix. Unproxied it 404s
       // against the dev server itself, which looks like a broken feature
       // rather than a missing line — measured 2026-09-13.
-      '/z': 'http://localhost:5212',
+      '/z': devApi,
     },
   },
   preview: {

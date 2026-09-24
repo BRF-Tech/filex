@@ -20,6 +20,7 @@ package filesync
 import (
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -102,6 +103,47 @@ type Action struct {
 	// and conflict actions, so the local copy can be stamped with it. 0 =
 	// the storage reported none.
 	RemoteMod int64
+	// RemoteSize carries the size the server LISTED on download and conflict
+	// actions. The engine refuses to install a body of any other length: it is
+	// how a status report sent in place of a file (a 202 "preparing" JSON, a
+	// proxy's error page) is told apart from the file.
+	RemoteSize int64
+	// Mixed marks a conflict between a folder on one side and a file on the
+	// other. Nothing is downloaded or uploaded for it: the user is told.
+	Mixed bool
+	// Hold marks a conflict planned while the pair holds its local-only items
+	// for a decision (Pair.HoldNew): it is settled if both sides turn out to
+	// hold the same bytes, and otherwise left exactly as it is.
+	Hold bool
+	// LocalSig / RemoteSig are the two sides' signatures AT PLAN TIME
+	// (Node.Signature(); "" = absent on that side). The plan is a decision
+	// about the world as it was when the snapshots were taken, and these are
+	// what let the engine notice that the world moved before the decision
+	// was carried out:
+	//
+	//   - a download or local delete only replaces/removes the local file if
+	//     it still carries LocalSig — otherwise it was edited here in the
+	//     meantime and the "changed in both places" rule applies next round;
+	//   - an upload is sent with RemoteSig as its precondition ("expect"), so
+	//     the server refuses it if the file was saved in the browser after the
+	//     listing — same rule, from the other side;
+	//   - the new baseline row is built from them, never from a later
+	//     snapshot (see ledger in engine.go).
+	//
+	// ⚠⚠ Measured before this existed: a web edit landing while a run was
+	// already under way was written into the baseline as "agreed" by the
+	// settle pass and never downloaded at all — the local file stayed old,
+	// silently, until the next edit on either side.
+	LocalSig  string
+	RemoteSig string
+}
+
+// sigOf is Node.Signature for a node that may be absent.
+func sigOf(n Node, present bool) string {
+	if !present {
+		return ""
+	}
+	return n.Signature()
 }
 
 // Options tunes a plan.
@@ -194,7 +236,7 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 		// too means the local disk never gets into that state either. Neither
 		// side wins — the user is told and nothing is touched.
 		case hasL && hasR && l.IsDir != r.IsDir:
-			out = append(out, Action{Kind: ActionConflict, Rel: rel,
+			out = append(out, Action{Kind: ActionConflict, Rel: rel, Mixed: true,
 				ConflictName: conflictName(rel, SideRemote, opts.Now),
 				Reason:       "one side has a folder where the other has a file"})
 			continue
@@ -227,13 +269,16 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 					Reason: "changed locally"})
 			case !lChanged && rChanged:
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					RemoteMod: r.ModMillis, Reason: "changed on the server"})
+					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "changed on the server"})
 			default:
-				// Both moved. Same size is not proof of same content, so we do
-				// not try to be clever: keep both and let the person decide.
+				// Both moved. Same size is not proof of same content, so the
+				// planner does not try to be clever: it asks for a conflict, and
+				// the engine compares the actual bytes before keeping two copies
+				// of what may well be one file (apply, ActionConflict).
 				out = append(out, Action{Kind: ActionConflict, Rel: rel,
 					ConflictName: conflictName(rel, SideRemote, opts.Now),
 					RemoteMod:    r.ModMillis,
+					RemoteSize:   r.Size,
 					Reason:       "changed in both places"})
 			}
 
@@ -257,13 +302,13 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 			switch {
 			case !hasB:
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					RemoteMod: r.ModMillis, Reason: "new file on the server"})
+					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "new file on the server"})
 			case opts.FirstRun:
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					RemoteMod: r.ModMillis, Reason: "first run — nothing is deleted"})
+					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "first run — nothing is deleted"})
 			case b.Remote != r.Signature():
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					RemoteMod: r.ModMillis, Reason: "deleted here but edited on the server — kept"})
+					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "deleted here but edited on the server — kept"})
 			default:
 				out = append(out, Action{Kind: ActionDeleteRemot, Rel: rel,
 					Reason: "deleted locally"})
@@ -274,6 +319,15 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 			// the baseline row by simply not emitting anything; Apply rebuilds
 			// the baseline from the post-run snapshots.
 		}
+	}
+
+	// Every action carries both plan-time signatures (Action.LocalSig /
+	// RemoteSig) — the facts the decision was made from.
+	for i := range out {
+		l, hasL := local[out[i].Rel]
+		r, hasR := remote[out[i].Rel]
+		out[i].LocalSig = sigOf(l, hasL)
+		out[i].RemoteSig = sigOf(r, hasR)
 	}
 
 	// Deletes must run deepest-first, or removing a folder fails because its
@@ -309,14 +363,27 @@ func isDelete(k ActionKind) bool {
 	return k == ActionDeleteLocal || k == ActionDeleteRemot
 }
 
+// conflictMarkers matches the "(server copy …)" / "(local copy …)" suffixes
+// conflictName appends, plus the " (2)" counter the engine adds when a name is
+// taken — one or more of them at the end of a stem.
+var conflictMarkers = regexp.MustCompile(`(?:\s*\((?:server|local) copy(?: \d{4}-\d{2}-\d{2} \d{2}-\d{2})?\)(?: \(\d+\))?)+$`)
+
 // conflictName builds "report (server copy 2026-08-07 14-05).xlsx".
 //
 // The extension is preserved so the copy still opens in the right application —
 // a conflict file the user cannot double-click is a conflict file they ignore.
+//
+// ⚠ A conflict on a file that is itself a conflict copy does not add a second
+// marker: the old markers are dropped first. Nesting them is how one busy
+// 13 KB spreadsheet grew 14,724 copies named `X (server copy A) (server copy
+// B) (server copy C)…` — each round's copy conflicted in the next round.
 func conflictName(rel string, from Side, now time.Time) string {
 	base := path.Base(rel)
 	ext := path.Ext(base)
 	stem := strings.TrimSuffix(base, ext)
+	if clean := conflictMarkers.ReplaceAllString(stem, ""); clean != "" {
+		stem = clean
+	}
 	if now.IsZero() {
 		return fmt.Sprintf("%s (%s copy)%s", stem, from, ext)
 	}

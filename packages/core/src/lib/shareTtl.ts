@@ -9,7 +9,21 @@
 // from the same rule. A surface that clamps differently would mean the same
 // product behaves two ways.
 
-import { formatInstant } from '../composables/useLocale'; /* zaman:z1 */
+import { formatWhen, translate } from '../composables/useLocale'; /* zaman:z1 */
+
+/**
+ * A catalogue string for a bare locale code — this is a module, not a
+ * component, so it cannot call `useLocale`. ⚠ Through `translate`, which is
+ * `t()`'s own lookup: a language pack's words reach these lines too (they were
+ * `tr ? … : …` pairs, which a pack could not translate and which printed
+ * TURKISH under any language that was not English), and "{days} days" takes
+ * its form by the pack language's plural rule, not English's. It had a copy
+ * of `t()`'s lookup, and the copy read English's `_one` under a pack that had
+ * written only the plain form.
+ */
+function say(locale: string, key: string, vars: Record<string, string | number> = {}): string {
+  return translate(locale, key, vars);
+}
 
 export interface ExpiryOption {
   /** Days; 0 = never. */
@@ -76,11 +90,11 @@ export function expiryInputMax(maxDays: number | undefined, now: Date = new Date
 /** "Valid until 30 Aug 2026, 14:05" / "Does not expire" from the server's `expires_at`. */
 export function validUntilLine(
   expiresAt: string | null | undefined,
-  locale: 'tr' | 'en',
+  locale: string,
   /** The explorer whose clock applies (lib/timezone EXPLORER_CLOCK). */
   clock?: symbol,
 ): string {
-  if (!expiresAt) return locale === 'tr' ? 'Bu bağlantının süresi yoktur.' : 'This link does not expire.';
+  if (!expiresAt) return say(locale, 'share.ttl.never');
   const d = new Date(expiresAt);
   // zaman:z1 — the viewer's chosen clock, not the browser's. "Valid until
   // 14:05" is a deadline, and a deadline printed in somebody else's zone is
@@ -90,19 +104,19 @@ export function validUntilLine(
   // then map the tag itself, to 'en-GB', while useLocale mapped it to
   // 'en-US': the same deadline was spelled "20 Sept 2026, 13:53" in the share
   // dialog and "Sep 20, 2026, 1:53 PM" in the listing behind it.
-  const when = Number.isNaN(d.getTime())
-    ? expiresAt
-    : formatInstant(d, locale, { dateStyle: 'medium', timeStyle: 'short' }, clock);
-  return locale === 'tr' ? `Bu bağlantı ${when} tarihine kadar geçerli.` : `This link is valid until ${when}.`;
+  //
+  // ⚠ And the FORMAT is the explorer's (`formatWhen`), not a `dateStyle:
+  // 'medium'` pair of its own: that printed "21 Eyl 2026 15:02" beside the
+  // listing's "21 Eyl 2026, 14:50" (QA, 2026-09-21).
+  const when = Number.isNaN(d.getTime()) ? expiresAt : formatWhen(d, locale, { time: true }, clock);
+  return say(locale, 'share.ttl.until', { when });
 }
 
 /** The hint under an expiry control: what the server will allow at most. */
-export function ttlCeilingHint(maxDays: number | undefined, locale: 'tr' | 'en'): string {
+export function ttlCeilingHint(maxDays: number | undefined, locale: string): string {
   const max = maxDays && maxDays > 0 ? Math.floor(maxDays) : 0;
   if (!max) return '';
-  return locale === 'tr'
-    ? `Bağlantılar en fazla ${max} gün geçerli olabilir (sunucu ayarı).`
-    : `Links can be valid for at most ${max} day${max === 1 ? '' : 's'} (server setting).`;
+  return say(locale, 'share.ttl.ceiling', { days: max });
 }
 
 /**

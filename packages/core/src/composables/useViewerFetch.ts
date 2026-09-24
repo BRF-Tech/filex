@@ -12,6 +12,8 @@
  * doesn't reject the request when the viewer fetches the file body
  * directly (instead of letting the browser do it via `<img src>` etc).
  */
+import { requestFailure } from '../lib/errorWords';
+
 export interface ViewerFetchOptions {
   url: string;
   headers?: Record<string, string>;
@@ -26,10 +28,11 @@ async function fetchOk(opts: ViewerFetchOptions): Promise<Response> {
     signal: opts.signal,
   });
   if (!res.ok) {
+    // Said, not printed (lib/errorWords): the viewers used to show
+    // "404 Not Found — {…}" in the pane. The viewer re-says it in its own
+    // language through `sayFailure(err, …, { t })`.
     const text = await res.text().catch(() => '');
-    throw new Error(
-      `${res.status} ${res.statusText}${text ? ' — ' + text.slice(0, 200) : ''}`,
-    );
+    throw requestFailure(res.status, text, undefined);
   }
   return res;
 }

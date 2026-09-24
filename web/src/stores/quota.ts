@@ -9,6 +9,7 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { quotaApi, type QuotaSnapshot } from '@/api/quota';
 import { extractError } from '@/api/client';
+import { t } from '@/i18n';
 
 export const useQuotaStore = defineStore('quota', () => {
   const snapshot = ref<QuotaSnapshot | null>(null);
@@ -35,7 +36,7 @@ export const useQuotaStore = defineStore('quota', () => {
       snapshot.value = await quotaApi.me();
       lastFetched.value = Date.now();
     } catch (e: unknown) {
-      error.value = extractError(e, 'Failed to load quota');
+      error.value = extractError(e, t('errors.loadFailed'));
     } finally {
       loading.value = false;
     }

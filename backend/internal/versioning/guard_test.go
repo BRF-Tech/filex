@@ -123,6 +123,10 @@ func TestGuardOverwrite_SkipsInternalTrees(t *testing.T) {
 		".thumbs/abc.jpg",
 		".filex-trash/old.txt",
 		"project/.keepdir",
+		// The desktop app's open-with working copy: every editor save
+		// replaces it, and its history is of a transient copy nobody can
+		// see (the original lives on the person's computer).
+		".filex-open/0123456789ab-Plan.docx",
 	} {
 		n := seedLiveFile(t, store, stID, root, rel, "internal")
 		require.NoError(t, svc.GuardOverwrite(context.Background(), stID, rel), rel)

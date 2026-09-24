@@ -43,11 +43,12 @@ const HeaderName = "X-Filex-Token"
 // bearerPrefix detects `Authorization: Bearer <token>`.
 const bearerPrefix = "Bearer "
 
-// Issuable token scopes. A token with an empty Scopes field grants every
-// scope (full access for the bound user's role). RequireScope gates each
-// verb against these; the admin token-issuer rejects anything not in the
-// set so an operator can't mint a token carrying a typo'd scope that
-// silently grants nothing.
+// Issuable token scopes. A token grants exactly the scopes in its list — an
+// empty list grants NOTHING (see ParseIssued in issue.go for why, and for the
+// one rule every door that mints a token applies). RequireScope gates each
+// verb against these; the issuers reject anything not in the set so an
+// operator can't mint a token carrying a typo'd scope that silently grants
+// nothing.
 //
 //	read   — list / info / download / search (REST) — read-only file ops
 //	write  — upload / mkdir / move (REST)            — file mutations

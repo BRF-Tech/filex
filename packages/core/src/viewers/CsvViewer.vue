@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { sayFailure } from '../lib/errorWords';
 /**
  * CsvViewer — lightweight CSV / TSV table preview.
  *
@@ -17,6 +18,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 import { fetchViewerText } from '../composables/useViewerFetch';
+import DataTable, { type DataColumn } from '../components/DataTable.vue';
 
 const props = defineProps<{
   url: string;
@@ -86,7 +88,7 @@ async function load(): Promise<void> {
       credentials: props.authCredentials,
     });
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'fetch failed';
+    error.value = sayFailure(err, tt('viewer.failed_to_load', 'Failed to load file'), { t: props.t }).text;
     loading.value = false;
     return;
   }
@@ -125,26 +127,92 @@ const dataRows = computed<string[][]>(() => {
   return firstRowHeader.value ? rows.value.slice(1) : rows.value;
 });
 
-const filtered = computed<string[][]>(() => {
+/** A parsed row with the line it came from, so `#` keeps naming the row in
+ *  the FILE after a sort re-orders the screen. */
+interface CsvRow {
+  n: number;
+  cells: string[];
+}
+
+const filtered = computed<CsvRow[]>(() => {
   const q = filter.value.trim().toLowerCase();
-  if (!q) return dataRows.value;
-  return dataRows.value.filter((r) =>
-    r.some((c) => (c || '').toLowerCase().includes(q)),
-  );
+  const all = dataRows.value.map((cells, i) => ({ n: i + 1, cells }));
+  if (!q) return all;
+  return all.filter((r) => r.cells.some((c) => (c || '').toLowerCase().includes(q)));
 });
+
+/**
+ * THE SORT, done here and handed to the table as CONTROLLED.
+ *
+ * ⚠⚠ Here and not in the table, because the table only ever holds one page
+ * (100 rows) of the parsed file, and a table that sorts the page it holds
+ * would call a re-ordered 100 of 1000 "sorted" — so it rightly closes its
+ * headers over a paged list. This component holds EVERY parsed row, so it can
+ * sort all of them and then page, which is the honest order.
+ */
+const sort = ref<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+
+function cellOf(r: CsvRow, key: string): string {
+  if (key === 'n') return String(r.n);
+  return r.cells[Number(key.slice(1))] ?? '';
+}
+
+const sorted = computed<CsvRow[]>(() => {
+  const s = sort.value;
+  if (!s) return filtered.value;
+  const dir = s.dir === 'asc' ? 1 : -1;
+  return [...filtered.value].sort((a, b) => {
+    if (s.key === 'n') return dir * (a.n - b.n);
+    const x = cellOf(a, s.key);
+    const y = cellOf(b, s.key);
+    // Empty cells last in both directions; numbers as numbers.
+    if (!x !== !y) return x ? -1 : 1;
+    const nx = Number(x);
+    const ny = Number(y);
+    if (x && y && Number.isFinite(nx) && Number.isFinite(ny)) return dir * (nx - ny) || a.n - b.n;
+    return dir * x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' }) || a.n - b.n;
+  });
+});
+
+function onSort(next: { key: string; dir: 'asc' | 'desc' }) {
+  sort.value = next;
+}
 
 const totalPages = computed(() =>
-  Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)),
+  Math.max(1, Math.ceil(sorted.value.length / PAGE_SIZE)),
 );
 
-const visibleRows = computed<string[][]>(() => {
+const visibleRows = computed<CsvRow[]>(() => {
   const start = (page.value - 1) * PAGE_SIZE;
-  return filtered.value.slice(start, start + PAGE_SIZE);
+  return sorted.value.slice(start, start + PAGE_SIZE);
 });
 
-watch(filter, () => {
+watch([filter, sort], () => {
   page.value = 1;
 });
+
+/** The file's columns, as THE table (DataTable — the explorer's own) draws
+ *  them. `#` is the lead: it is what names a row of a spreadsheet. */
+const columns = computed<DataColumn<CsvRow>[]>(() => [
+  {
+    id: 'n',
+    label: '#',
+    lead: true,
+    width: 64,
+    min: 48,
+    align: 'right',
+    sortable: true,
+    class: 'filex-viewer-csv__rownum',
+    format: (r) => r.n,
+  },
+  ...headers.value.map((h, i) => ({
+    id: `c${i}`,
+    label: h,
+    width: 140,
+    sortable: true,
+    format: (r: CsvRow) => r.cells[i] ?? '',
+  })),
+]);
 
 function tt(key: string, fallback: string, vars?: Record<string, string | number>): string {
   return props.t ? props.t(key, vars) : fallback;
@@ -177,20 +245,19 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
       ></span>
         <p>{{ tt('viewer.loading', 'Loading…') }}</p>
       </div>
-      <table v-else class="filex-viewer-csv__table">
-        <thead>
-          <tr>
-            <th class="filex-viewer-csv__rownum">#</th>
-            <th v-for="(h, i) in headers" :key="i">{{ h }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(row, ri) in visibleRows" :key="ri">
-            <td class="filex-viewer-csv__rownum">{{ (page - 1) * 100 + ri + 1 }}</td>
-            <td v-for="(c, ci) in row" :key="ci">{{ c }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <!-- ⚠ No table id: a spreadsheet's columns are whatever THIS file has
+           (`c0`, `c1`, …), so widths remembered against them would land on a
+           different file's different columns next time. The arrangement
+           lives for this preview. -->
+      <DataTable
+        v-else
+        :table-id="undefined"
+        :columns="columns"
+        :rows="visibleRows"
+        :row-key="(r: CsvRow) => r.n"
+        :sort="sort"
+        @sort="onSort"
+      />
     </div>
     <div v-if="!loading && !error && totalPages > 1" class="filex-viewer-csv__pager">
       <button
@@ -199,7 +266,7 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
         :disabled="page <= 1"
         @click="page--"
       >‹</button>
-      <span class="filex-viewer-csv__pageno">{{ page }} / {{ totalPages }} ({{ tt('viewer.csv_rows', `${filtered.length} rows`, { n: filtered.length }) }})</span>
+      <span class="filex-viewer-csv__pageno"><bdi dir="ltr">{{ page }} / {{ totalPages }}</bdi> ({{ tt('viewer.csv_rows', `${filtered.length} rows`, { n: filtered.length }) }})</span>
       <button
         type="button"
         class="filex-viewer-btn"
@@ -266,39 +333,18 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
   flex: 1;
   overflow: auto;
 }
-.filex-viewer-csv__table {
-  border-collapse: collapse;
-  width: max-content;
-  min-width: 100%;
-  font-size: 12px;
+.filex-viewer-csv__pane .fe-list__cell {
   font-family: var(--fe-font-mono, monospace);
+  font-size: 12px;
 }
-.filex-viewer-csv__table th,
-.filex-viewer-csv__table td {
-  padding: 4px 10px;
-  border: 1px solid var(--fe-border, #e2e6ed);
-  white-space: nowrap;
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.filex-viewer-csv__table th {
-  background: var(--fe-bg-elev, #f7f8fa);
-  position: sticky;
-  top: 0;
-  font-weight: 600;
-  text-align: left;
-}
-.filex-viewer-csv__table tbody tr:nth-child(even) {
-  background: var(--fe-bg-hover, rgba(0, 0, 0, 0.02));
-}
+/* The table itself is DataTable's (styles/base.css) — the product's one table.
+   ⚠ The row number used to pin itself (`position: sticky; left: 0`) because
+   this was a table of its own; it is the table's LEAD now, and the table
+   freezes its lead itself, only while there is room to (a pin written here
+   would fight that gate). What stays is the look of a row number. */
 .filex-viewer-csv__rownum {
   color: var(--fe-text-muted, #5a6475);
-  text-align: right;
-  background: var(--fe-bg-elev, #f7f8fa);
   font-variant-numeric: tabular-nums;
-  position: sticky;
-  left: 0;
 }
 .filex-viewer-csv__pager {
   display: flex;

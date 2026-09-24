@@ -2,16 +2,17 @@
   "app": {
     "name": "filex",
     "tagline": "Self-hosted dosya yöneticisi",
-    "admin": "Yönetim"
+    "admin": "Yönetim",
+    "footer": "filex · kendi sunucunuzda çalışan dosya yöneticisi"
   },
   "title": {
     "admin": "{name} Yönetim"
   },
   "install": {
     "title": "filex'i yükle",
-    "subtitle": "Uygulama gibi hızlı erişim için cihazına ekle.",
+    "subtitle": "Uygulama gibi hızlı erişim için cihazınıza ekleyin.",
     "install": "Yükle",
-    "iosInstructions": "Paylaş düğmesine dokun, ardından “Ana Ekrana Ekle”yi seç.",
+    "iosInstructions": "Paylaş düğmesine dokunun, ardından “Ana Ekrana Ekle”yi seçin.",
     "updateAvailable": "Yeni bir sürüm mevcut.",
     "reload": "Yenile",
     "desktopTitle": "filex masaüstü uygulamasını edinin",
@@ -34,6 +35,7 @@
     }
   },
   "common": {
+    "dismiss": "Vazgeç",
     "save": "Kaydet",
     "cancel": "İptal",
     "delete": "Sil",
@@ -59,16 +61,27 @@
     "refresh": "Yenile",
     "all": "Tümü",
     "none": "Yok",
-    "name": "İsim",
+    "name": "Ad",
+    "sampleFileName": "rapor-2026.pdf",
     "email": "E-posta",
-    "password": "Şifre",
-    "currentPassword": "Mevcut şifre",
-    "newPassword": "Yeni şifre",
+    "password": "Parola",
+    "currentPassword": "Mevcut parola",
+    "newPassword": "Yeni parola",
     "role": "Rol",
     "status": "Durum",
     "created": "Oluşturuldu",
     "updated": "Güncellendi",
     "actions": "İşlemler",
+    "path": "Yol",
+    "storage": "Depo",
+    "score": "Skor",
+    "match": "Eşleşme",
+    "when": "Zaman",
+    "changes": "Değişiklikler",
+    "folder": "Klasör",
+    "root": "Kök",
+    "notes": "Notlar",
+    "flags": "Bayraklar",
     "test": "Test",
     "testNow": "Şimdi test et",
     "enabled": "Aktif",
@@ -119,41 +132,45 @@
     "webhooks": "Webhook'lar",
     "about": "Hakkında",
     "adminFiles": "Dosya geçmişi",
-    "logout": "Çıkış yap",
+    "logout": "Oturumu kapat",
     "language": "Dil",
     "theme": "Tema",
     "themeAuto": "Otomatik",
     "themeLight": "Aydınlık",
     "themeDark": "Karanlık",
     "protection": "Koruma",
-    "branding": "Kurumsal Kimlik",
+    "branding": "Kurumsal kimlik",
     "updates": "Güncellemeler",
     "connections": "Bağlantılar",
     "plugins": "Eklentiler",
-    "usage": "Kullanım ve maliyet"
+    "usage": "Kullanım ve maliyet",
+    "apps": "Uygulamalar",
+    "appearance": "Görünüm"
   },
   "login": {
     "title": "Oturum aç",
-    "subtitle": "Bu sunucudaki hesabınla giriş yap",
+    "subtitle": "Bu sunucudaki hesabınızla oturum açın",
     "identifier": "E-posta ya da kullanıcı adı",
     "remember": "Oturumum açık kalsın",
-    "submit": "Giriş yap",
+    "submit": "Oturum aç",
     "or": "veya",
-    "oidc": "SSO ile giriş yap",
-    "local": "Parola ile giriş yap",
-    "recovery": "Yönetici kurtarma girişi",
-    "recoveryNote": "Bu sunucuda parolayla giriş kapalı. Burada yalnızca kurulumda oluşturulan yönetici, kurtarma amacıyla giriş yapabilir.",
-    "redirecting": "SSO girişine yönlendiriliyorsun…",
-    "totpHint": "Authenticator uygulamandaki 6 haneli kodu gir",
+    "oidc": "SSO ile oturum aç",
+    "local": "Parolayla oturum aç",
+    "recovery": "Kurtarma için yönetici oturumu",
+    "recoveryNote": "Bu sunucuda parolayla oturum açma kapalı. Burada yalnızca kurulumda oluşturulan yönetici, kurtarma amacıyla oturum açabilir.",
+    "redirecting": "SSO oturum açma sayfasına yönlendiriliyorsunuz…",
+    "totpHint": "Doğrulayıcı uygulamanızdaki 6 haneli kodu girin",
     "use2fa": "2FA kodu kullan",
     "hide2fa": "2FA kodunu gizle",
     "totpLabel": "2FA kodu",
     "showChars": "Yazılanları göster",
     "hideChars": "Yazılanları gizle",
-    "errInvalid": "E-posta, kullanıcı adı ya da şifre yanlış",
-    "errLocked": "Hesap kilitli. Yöneticiyle iletişime geç.",
-    "errGeneric": "Bir şeyler ters gitti. Tekrar dene.",
-    "errOidc": "SSO girişi başarısız oldu. Tekrar dene veya parola ile giriş yap."
+    "errInvalid": "E-posta, kullanıcı adı ya da parola yanlış",
+    "errLocked": "Hesap kilitli. Yöneticinizle iletişime geçin.",
+    "errGeneric": "Bir şeyler ters gitti. Tekrar deneyin.",
+    "errOidc": "SSO ile oturum açılamadı. Tekrar deneyin ya da parolayla oturum açın.",
+    "noProviders": "Etkin kimlik doğrulama sağlayıcısı yok. Ortam değişkenlerinde {env} ayarlayın.",
+    "signedOut": "Oturumunuz kapatıldı."
   },
   "dashboard": {
     "title": "Panel",
@@ -168,19 +185,20 @@
     },
     "recentActivity": "Son aktivite",
     "recentSyncs": "Son senkronlar",
-    "noStorages": "Henüz depo eklenmedi. Başlamak için bir tane ekle.",
+    "noStorages": "Henüz depo eklenmedi. Başlamak için bir tane ekleyin.",
     "noStoragesCta": "Depo ekle",
     "noActivity": "Henüz aktivite yok.",
     "lastSync": "Son senkron",
     "fileCount": "{n} dosya | {n} dosya",
     "added": "Eklendi",
     "deleted": "Silindi",
-    "updatedFiles": "Güncellendi"
+    "updatedFiles": "Güncellendi",
+    "lastSyncAt": "Son senkron: {when}"
   },
   "storages": {
     "title": "Depolar",
     "subtitle": "Üst düzey klasör olarak görünen mount noktaları",
-    "filesUnit": "dosya",
+    "fileCount": "{n} dosya | {n} dosya",
     "notYetSynced": "Henüz senkron çalışmadı",
     "modeLabel": {
       "fsnotify": "Canlı izleme",
@@ -203,7 +221,7 @@
     "advancedFields": "Gelişmiş ayarlar",
     "driverFieldsUnavailable": "\"{driver}\" sürücüsünün ayar alanları yüklenemedi.",
     "fields": {
-      "name": "Görünen isim",
+      "name": "Görünen ad",
       "namePlaceholder": "Kişisel fotoğraflar",
       "readOnly": "Salt okunur mount",
       "syncInterval": "Tarama aralığı (dakika)",
@@ -211,14 +229,16 @@
       "rbac": "Öğe bazlı erişim denetimi (RBAC)",
       "rbacHint": "Açıkken admin olmayanlar yalnızca izin panelinden kendilerine verilen dosya/klasörleri görür. Kapalıyken depo tüm kullanıcılara açıktır (yetki role göre).",
       "path": "Dizin yolu",
+      "followSymlinks": "Bu klasörün dışına çıkan sembolik bağları izle",
+      "scanExclude": "Taramadan hariç tutulacak yollar",
       "endpoint": "Endpoint",
       "region": "Bölge",
-      "bucket": "Bucket",
+      "bucket": "Kova",
       "prefix": "Önek (prefix)",
       "accessKey": "Access key",
       "secretKey": "Secret key",
       "pathStyle": "Path-style URL kullan (Hetzner, MinIO)",
-      "disablePresign": "İmzalı URL'leri kapat",
+      "disablePresign": "Aktarımları filex üzerinden geçir",
       "host": "Sunucu",
       "port": "Port",
       "user": "Kullanıcı",
@@ -235,14 +255,16 @@
       "url": "Temel URL",
       "share": "Paylaşım",
       "domain": "Etki alanı / çalışma grubu",
-      "dialTimeout": "Bağlantı zaman aşımı (saniye)",
+      "dialTimeout": "Bağlanma zaman aşımı (saniye)",
       "nameChangedWarning": "İstemciler bu depoya adıyla ulaşır. Adı değiştirmek WebDAV, SFTP, S3 ve NFS yollarını değiştirir — eski adı kullanan bir bağlama ya da yer imi, siz güncelleyene kadar 404 döner.",
       "stableAddress": "Değişmeyen adres",
       "stableAddressHint": "Bağlamalar ve betikler ad yerine bunu kullanabilir. Bir kez atanır ve hiç değişmez, böylece deponun adını değiştirmek onları bozmaz."
     },
     "fieldHelp": {
       "path": "Sunucudaki dizin. Yoksa oluşturulur; filex asla / dizinini mount etmez.",
-      "prefix": "Bucket içindeki alt klasör. Zorunlu: filex bucket kökünün sahipliğini asla almaz.",
+      "followSymlinks": "Bu klasörün İÇİNİ gösteren sembolik bağlar her zaman izlenir. Bu ayar yalnızca dışarıyı gösterenler içindir: kapalıyken listede neden açılamadıklarını söyleyen bir rozetle görünürler ve üzerlerinden açma, yazma ve silme yapılamaz; açıkken filex bağın ucundaki dosyaları deponun parçası sayar — indeksleme, virüs taraması, kota ve silme dâhil.",
+      "scanExclude": "Her satıra bir desen yazın; desenler deponun köküne göre okunur. * bir adın içinde, ** istenen sayıda klasör boyunca eşleşir; içinde / olmayan bir desen o adı her derinlikte bulur (.* tüm gizli dosya ve klasörleri atlar). Tarama eşleşen bir klasörün içine girmez; eşleşen dosyalar kataloğa alınmaz, indekslenmez, küçük resimleri üretilmez ve virüs taramasından geçmez. Bu iş yükünü azaltır, erişim denetimi değildir: dosyalar depoda kalır ve yoluyla, WebDAV/SFTP üzerinden ve yapay zekâ araçlarıyla erişilebilir. Desen eklenmeden önce kataloğa girmiş olanlar olduğu gibi kalır.",
+      "prefix": "Kova içindeki alt klasör. Zorunlu: filex kova kökünün sahipliğini asla almaz.",
       "root": "Arka uçtaki alt klasör. Zorunlu: filex hesabın kökünü asla mount etmez.",
       "region": "Boş bırakılırsa \"auto\" kullanılır.",
       "endpoint": "AWS S3 için boş bırakın. S3 uyumlu diğer tüm depolar kendi endpoint'ini ister.",
@@ -255,9 +277,9 @@
       "insecureSkipHostKey": "Her sunucu anahtarını kabul eder. Yalnızca geçici sunucular için.",
       "tls": "Düz FTP kimlik bilgilerini açık metin gönderir — sunucu destekliyorsa açın.",
       "passive": "Kapatmak aktif moda geçirir; bu, sunucunun bu makineye geri bağlanmasını gerektirir.",
-      "smbShare": "Yalnızca paylaşım adı, sunucu olmadan: `media`, `\\nas\\media` değil.",
-      "smbDomain": "Yalnızca Windows etki alanı hesapları için. NAS kullanıyorsanız boş bırakın.",
-      "smbRoot": "Paylaşımın içindeki alt klasör. Tüm paylaşım için boş bırakın."
+      "smbShare": "Sunucu adı olmadan yalnızca paylaşım adı: `\\\\nas\\media` değil, `media`.",
+      "smbDomain": "Yalnızca Windows etki alanı hesabı için. NAS kullanıyorsanız boş bırakın.",
+      "smbRoot": "Paylaşımın içindeki alt klasör. Paylaşımın tamamı için boş bırakın."
     },
     "actions": {
       "test": "Bağlantıyı test et",
@@ -286,7 +308,13 @@
     "deletedOk": "Depo silindi",
     "createdOk": "Depo oluşturuldu",
     "updatedOk": "Depo güncellendi",
-    "syncStarted": "Senkron başladı"
+    "syncStarted": "Senkron başladı",
+    "drift": {
+      "missingInDb": "Veritabanında yok",
+      "missingInStorage": "Depolamada yok",
+      "sizeMismatch": "Boyut uyuşmazlığı",
+      "hashMismatch": "Hash uyuşmazlığı"
+    }
   },
   "users": {
     "title": "Kullanıcılar",
@@ -295,8 +323,8 @@
     "newTitle": "Kullanıcı ekle",
     "editTitle": "Kullanıcı düzenle",
     "fields": {
-      "displayName": "Görünen isim",
-      "lastLogin": "Son giriş",
+      "displayName": "Görünen ad",
+      "lastLogin": "Son oturum açma",
       "sendInvite": "Davet e-postası gönder"
     },
     "roles": {
@@ -305,12 +333,12 @@
       "viewer": "İzleyici"
     },
     "deleteConfirm": "\"{email}\" kullanıcısını sil?",
-    "resetPasswordTitle": "Yeni şifre",
-    "resetPasswordSubtitle": "Şifreyi kopyala — bir daha gösterilmeyecek.",
-    "resetPasswordOk": "Şifre sıfırlandı",
-    "resetPassword": "Şifreyi sıfırla",
-    "resetPasswordConfirm": "\"{email}\" için yeni bir şifre oluşturulsun mu? Mevcut şifre geçersiz olur ve bu hesabın tüm oturumları kapanır.",
-    "passwordOptionalHint": "İsteğe bağlı — şifresi olmayan hesap SSO ile ya da API token'ıyla giriş yapar",
+    "resetPasswordTitle": "Yeni parola",
+    "resetPasswordSubtitle": "Bu parolayı kopyalayın — bir daha gösterilmeyecek.",
+    "resetPasswordOk": "Parola sıfırlandı",
+    "resetPassword": "Parolayı sıfırla",
+    "resetPasswordConfirm": "\"{email}\" için yeni bir parola oluşturulsun mu? Mevcut parola geçersiz olur ve bu hesabın tüm oturumları kapanır.",
+    "passwordOptionalHint": "İsteğe bağlı — parolası olmayan bir hesap SSO ile ya da bir API anahtarıyla oturum açar",
     "createdOk": "Kullanıcı oluşturuldu",
     "updatedOk": "Kullanıcı güncellendi",
     "deletedOk": "Kullanıcı silindi",
@@ -327,7 +355,7 @@
   },
   "profile": {
     "saved": "Profil kaydedildi",
-    "passwordChanged": "Şifre değiştirildi",
+    "passwordChanged": "Parola değiştirildi",
     "totp": {
       "title": "İki adımlı doğrulama",
       "enabled": "Aktif",
@@ -335,14 +363,14 @@
       "enable": "2FA'yı aç",
       "disable": "2FA'yı kapat",
       "code": "Doğrulama kodu",
-      "scanHint": "Bu QR kodu authenticator uygulamanla tara, sonra 6 haneli kodu gir.",
+      "scanHint": "Bu QR kodu doğrulayıcı uygulamanızla tarayın, sonra 6 haneli kodu girin.",
       "recoveryTitle": "Kurtarma kodları",
-      "recoveryHint": "Bunları şimdi kaydedin — doğrulayıcınızı kaybederseniz her biri bir kez giriş yapmanızı sağlar. Yalnızca bu sefer gösterilir."
+      "recoveryHint": "Bunları şimdi kaydedin — doğrulayıcınızı kaybederseniz her biri bir kez oturum açmanızı sağlar. Yalnızca bu sefer gösterilir."
     },
     "locale": "Dil",
     "username": {
       "label": "Kullanıcı adı",
-      "help": "Kısa giriş adınız. Girişte bunu da e-postanızı da kullanabilirsiniz — bağlantı istemcileri (SFTP, FTP) için ise bu ad gerekir, çünkü giriş adındaki {'@'} işareti onların ayar dosyalarında kaçış gerektirir."
+      "help": "Kullanıcı adınız. Oturum açarken bunu da e-postanızı da kullanabilirsiniz — bağlantı istemcileri (SFTP, FTP) için ise bu ad gerekir, çünkü oturum açtıkları addaki {'@'} işareti onların ayar dosyalarında kaçış gerektirir."
     },
     "avatar": {
       "label": "Profil fotoğrafı",
@@ -359,9 +387,43 @@
     "siteName": "Site adı",
     "envOnlyNote": "Genel URL, senkron aralığı, log seviyesi ve varsayılan dil bu sayfadan değil ortam değişkenlerinden ayarlanır (FILEX_PUBLIC_URL, FILEX_SYNC_INTERVAL, FILEX_LOG_LEVEL, FILEX_DEFAULT_LOCALE) — bkz. docs/CONFIGURATION.md.",
     "savedOk": "Ayarlar kaydedildi",
+    "folderView": {
+      "title": "Varsayılan klasör görünümü",
+      "help": "Bir klasörü hiç değiştirmemiş ve kendi varsayılanını seçmemiş biri için klasörün nasıl açılacağı (kendi hesabının Ayarlar → Tercihler bölümü). Kişilerin değiştirdiği klasörler kendi görünümünü korur; kişinin kendi varsayılanı da bunun önüne geçer.",
+      "view": "Görünüm",
+      "sort": "Sıralama",
+      "dir": "Yön",
+      "builtin": "filex varsayılanı ({value})",
+      "view_list": "Liste",
+      "view_grid": "Izgara",
+      "view_gallery": "Galeri",
+      "sort_name": "Ad",
+      "sort_type": "Tür",
+      "sort_modified": "Değiştirilme",
+      "sort_size": "Boyut",
+      "dir_asc": "Artan",
+      "dir_desc": "Azalan",
+      "hiddenTitle": "Listede varsayılan olarak gizli sütunlar",
+      "col_type": "Tür",
+      "col_location": "Konum",
+      "col_owner": "Sahibi",
+      "col_modified": "Değiştirilme",
+      "col_size": "Boyut"
+    },
     "smtp": {
+      "reason": {
+        "not_configured": "E-posta henüz ayarlanmadı — önce yukarıya sunucuyu, portu ve göndereni girip kaydedin.",
+        "host": "E-posta sunucusunun adı bulunamadı. Sunucu adını kontrol edin.",
+        "connect": "Bu sunucu ve portta yanıt veren olmadı. Sunucu adını, portu ve bağlantıyı bir güvenlik duvarının engelleyip engellemediğini kontrol edin.",
+        "tls": "E-posta sunucusuyla güvenli bağlantı kurulamadı. Şifreleme ayarını (TLS / STARTTLS) ve sunucunun sertifikasını kontrol edin.",
+        "starttls": "Sunucu STARTTLS sunmuyor. TLS’i ya da şifresiz bağlantıyı seçin veya bunu destekleyen portu kullanın.",
+        "auth": "E-posta sunucusu kullanıcı adını ya da parolayı kabul etmedi.",
+        "recipient": "E-posta sunucusu bu adresi kabul etmedi. Adresi kontrol edip yeniden deneyin.",
+        "rejected": "E-posta sunucusu iletiyi kabul etmedi.",
+        "other": "E-posta gönderilemedi."
+      },
       "title": "E-posta (SMTP)",
-      "help": "Davet / paylaşım bildirimleri buradan gönderilir. Doğrulanmadıysa linkler ekranda gösterilir.",
+      "help": "Davet / paylaşım bildirimleri buradan gönderilir. Doğrulanmadıysa bağlantılar ekranda gösterilir.",
       "host": "Sunucu",
       "port": "Port",
       "tls": "Şifreleme",
@@ -375,27 +437,23 @@
       "verified": "Doğrulandı",
       "unverified": "Doğrulanmadı",
       "testOk": "SMTP tamam",
-      "testFail": "SMTP hatası",
       "testTo": "Test e-postası gönderilecek adres",
       "send": "Gönder",
-      "enterEmail": "Geçerli bir e-posta adresi girin."
-    },
-    "customCss": {
-      "title": "Özel CSS",
-      "help": "Seçili temanın üstüne kendi stil dosyanızı yapıştırarak filex’in görünümünü değiştirin. Desteklenen yüzey --fe-* özel özellikleridir (aşağıdaki örneğe bakın); sınıf adları içeriye aittir ve sürümler arasında değişebilir.",
-      "scope": "Bu stil dosyası, bu kurulumu kullanan herkeste ve her sayfada geçerlidir — giriş ekranı dahil.",
-      "hint": "Sayfanın son stil dosyası olarak eklenir, böylece eşitlikte sizin kurallarınız kazanır. Kaldırmak için kutuyu boş bırakın.",
-      "count": "{used} / {max} bayt",
-      "tooBig": "Stil dosyası en fazla 64 KB olabilir."
+      "enterEmail": "Geçerli bir e-posta adresi girin.",
+      "encryptionNone": "Yok (şifresiz)"
     }
   },
   "external": {
+    "convertLegacy": "Eski — kullanımdan kalkıyor. Yerini Dönüştür uygulaması (Eklentiler → Uygulamalar) alıyor; uygulama kuruluyken dosya menüsü bu dönüştürücüyü sunmaz.",
+    "names": {
+      "convert": "Dönüştürücü"
+    },
     "title": "Dış servisler",
     "subtitle": "Opsiyonel editör ve render servisleri — sadece erişilebilirse mount edilir",
     "fields": {
       "url": "Servis URL",
       "jwtSecret": "JWT secret",
-      "jwtSecretHint": "Boş bırakırsan mevcut secret korunur",
+      "jwtSecretHint": "Boş bırakırsanız mevcut gizli anahtar korunur",
       "callbackUrl": "Geri dönüş adresi (doküman sunucusunun filex'e ulaştığı adres)",
       "callbackUrlHint": "Boş bırakılırsa filex'in genel adresi kullanılır. Doküman sunucusu o adresi çözemiyorsa burayı doldurun — http://filex:5212 gibi bir konteyner adı buraya yazılır, genel adrese asla: paylaşım bağlantıları da ondan üretiliyor."
     },
@@ -442,7 +500,7 @@
       "disagree": "filex bu adrese erişiyor, tarayıcınız erişemiyor. Container ağına özel bir ad tam da böyle görünür: editör tarayıcıda yüklendiği için orada başarısız olur.",
       "callbackOk": "filex'e ulaştı — doküman sunucusu bir deneme dosyasını indirdi",
       "callbackBad": "filex'e ULAŞAMADI. Belge açılır, kaydetme hiç geri dönmez.",
-      "callbackUnknown": "henüz ölçülmedi — Test'e basın",
+      "callbackUnknown": "henüz ölçülmedi — “Şimdi test et” düğmesine basın",
       "callbackUnchecked": "ölçülemedi; aşağıdaki uyarılar kesinlikle çalışamayacak biçimlerdir."
     },
     "browserStates": {
@@ -458,19 +516,24 @@
       "browser_bare_host": "“{host}” tek parçalı bir makine adı. filex ona container ağının içinden erişebilir, ama bu servisi doğrudan tarayıcınız yükler ve o adı çözemez. Tarayıcının açabileceği bir adres kullanın.",
       "browser_loopback_host": "Bu bir loopback adresi, ama filex {publicUrl} adresinde yayında — orayı açan kişiler bu makinede değil ve onların tarayıcısında “{host}” kendi bilgisayarları demektir.",
       "public_url_loopback": "Doküman sunucusu belgeyi filex'ten çeker ve kaydı {publicUrl} adresine geri gönderir. Kendi container'ının içinde o adres filex değil, doküman sunucusunun kendisidir.",
-      "public_url_bare_host": "filex'in genel adresi ({publicUrl}) container ağına ait bir ad. Doküman sunucusu ona erişebilir, ama bu adresten üretilen paylaşım linkleri ve e-postalar o ağın dışındaki bir tarayıcıda açılmaz.",
+      "public_url_bare_host": "filex'in genel adresi ({publicUrl}) container ağına ait bir ad. Doküman sunucusu ona erişebilir, ama bu adresten üretilen paylaşım bağlantıları ve e-postalar o ağın dışındaki bir tarayıcıda açılmaz.",
       "public_url_unresolved": "filex'in kendisi “{host}” adını çözemiyor. Doküman sunucunuz farklı bir DNS görünümü kullanıyorsa bu beklenen bir durumdur; değilse genel adres hiçbir yerde bulunamayan bir adı gösteriyor."
+    },
+    "noSecret": {
+      "title": "ONLYOFFICE için JWT secret tanımlı değil",
+      "body": "Secret olmadan filex gerçek bir kaydı sahtesinden ayıramaz: kaydetme adresine ulaşabilen herkes dosyalarınızın üzerine yazabilir. Bu yüzden secret tanımlanana kadar filex ONLYOFFICE ile belge açmaz ve kaydetmez. Doküman sunucusunun {env} değeriyle aynı secret'ı girin.",
+      "action": "“Dış servisler” sayfasında ayarlayın"
     }
   },
   "authProviders": {
     "title": "Kimlik sağlayıcılar",
-    "subtitle": "Kullanıcıların nasıl giriş yapacağını yapılandır",
+    "subtitle": "Bu sunucuda kimin, nasıl oturum açabileceği. Buradaki değişiklikler kaydedildiği anda geçerli olur.",
     "providers": {
-      "local": "Yerel (e-posta + şifre)",
+      "local": "Yerel (e-posta + parola)",
       "oidc": "OIDC (Keycloak, Auth0, Authentik…)",
       "ldap": "LDAP / Active Directory",
       "proxy-header": "Reverse-proxy header",
-      "api-token": "API token"
+      "api-token": "API anahtarı"
     },
     "fields": {
       "issuer": "Issuer URL",
@@ -483,28 +546,135 @@
       "url": "Sunucu URL",
       "base_dn": "Base DN",
       "bind_dn": "Bind DN (servis hesabı)",
-      "bind_password": "Bind şifresi",
+      "bind_password": "Bind parolası",
       "user_filter": "Kullanıcı filtresi",
       "email_attr": "E-posta attribute",
       "start_tls": "StartTLS",
       "trusted_proxies": "Güvenilen proxy'ler (CIDR)",
       "header_user": "Kullanıcı header'ı",
       "header_email": "E-posta header'ı",
-      "header_name": "İsim header'ı",
+      "header_name": "Ad başlığı",
       "header_roles": "Roller header'ı",
       "admin_role": "Admin rolü",
-      "auto_provision": "Otomatik kullanıcı oluştur"
+      "auto_provision": "Otomatik kullanıcı oluştur",
+      "ca_file": "CA sertifika dosyası",
+      "protocol_login": "Dizin parolalarını WebDAV, SFTP, FTPS, S3 ve NFS’te de kabul et"
     },
-    "secretSet": "Ayarlı — değiştirmek için yeni değer gir, boş bırakırsan korunur",
-    "noConfig": "Bu sağlayıcının ek yapılandırması yok; sadece aç/kapat.",
-    "required": "zorunlu",
-    "savedOk": "Sağlayıcı güncellendi",
-    "testOk": "Sağlayıcı tamam",
-    "testFail": "Sağlayıcı kontrolü başarısız"
+    "secretSet": "Ayarlı — değiştirmek için yenisini yazın; korumak için boş bırakın.",
+    "testOk": "Buradan denetlenebilen her adım geçti",
+    "testFail": "Deneme, geçemeyen bir adımda durdu",
+    "status": {
+      "ok": "Etkin",
+      "disabled": "Kapalı",
+      "misconfigured": "Hatalı yapılandırma"
+    },
+    "reasons": {
+      "refused": "bağlantı reddedildi (adres ya da port yanlış olabilir)",
+      "timeout": "yanıt gelmedi (güvenlik duvarı ya da ağ)",
+      "dns": "sunucu adı çözülemedi",
+      "tls": "TLS sertifikası doğrulanamadı",
+      "other": "beklenmeyen bir hata",
+      "credentials": "ad ya da parola kabul edilmedi",
+      "no_such_object": "dizinde böyle bir kayıt yok",
+      "access": "bu hesabın okuma izni yok",
+      "bad_url": "adres geçerli değil",
+      "status": "sunucu {status} yanıtı verdi",
+      "not_json": "yanıt bir keşif belgesi değil",
+      "public": "gizli anahtarı olmayan bir istemci ancak biri oturum açtığında doğrulanabilir",
+      "unclear": "sağlayıcının yanıtı ({status}) kesin bir sonuç vermiyor"
+    },
+    "checks": {
+      "required": {
+        "ok": "Zorunlu alanlar dolu.",
+        "fail": "Zorunlu ama boş: {fields}."
+      },
+      "address": {
+        "fail": "“{url}” bir LDAP adresi değil: ldap:// ya da ldaps:// ile başlamalı."
+      },
+      "connect": {
+        "ok": "{host} adresindeki dizin yanıt verdi.",
+        "fail": "{host} adresine bağlanılamadı: {reason}."
+      },
+      "starttls": {
+        "ok": "StartTLS ile bağlantı TLS’e geçti.",
+        "fail": "{host} adresinde StartTLS başarısız: {reason}."
+      },
+      "bind": {
+        "ok": "Hizmet hesabı ({dn}) parolasıyla bağlandı.",
+        "fail": "Hizmet hesabı ({dn}) bağlanamadı: {reason}."
+      },
+      "bind_anonymous": {
+        "ok": "Hizmet hesabı yok: dizine anonim olarak bağlanıldı."
+      },
+      "base": {
+        "ok": "Temel DN ({dn}) var ve okunabiliyor.",
+        "fail": "Temel DN ({dn}) okunamadı: {reason}."
+      },
+      "discovery": {
+        "ok": "Keşif belgesi alındı: {url}",
+        "fail": "Keşif belgesi alınamadı ({url}): {reason}."
+      },
+      "issuer": {
+        "ok": "Sağlayıcı aynı yayıncı adını bildiriyor.",
+        "fail": "Yayıncı adı uyuşmuyor: burada {configured}, sağlayıcının bildirdiği {announced}."
+      },
+      "endpoints": {
+        "ok": "Oturum açma, token ve anahtar uçları tanımlı.",
+        "fail": "Keşif belgesinde eksik: {missing}."
+      },
+      "client": {
+        "ok": "İstemci kimliği ({client}) ve gizli anahtarı kabul edildi.",
+        "fail": "İstemci ({client}) reddedildi: {reason}.",
+        "unchecked": "İstemci ({client}) buradan doğrulanamıyor: {reason}."
+      },
+      "redirect": {
+        "unchecked": "Dönüş adresini ({url}) sağlayıcı ancak gerçek bir oturum açmada denetler."
+      },
+      "trusted_proxies": {
+        "ok": "Güvenilen vekil adresleri geçerli.",
+        "fail": "Güvenilen vekil listesinde adres ya da aralık olmayan bir giriş var."
+      },
+      "via_proxy": {
+        "ok": "Bu istek güvenilen bir vekilden ({peer}) geldi.",
+        "unchecked": "Bu istek vekilden değil, doğrudan {peer} adresinden geldi; başlıkla oturum açma buradan görülemez."
+      },
+      "header": {
+        "ok": "Vekil {header} başlığını gönderiyor: {user}.",
+        "fail": "Vekil {header} başlığını göndermiyor."
+      },
+      "secret": {
+        "fail": "Bu sağlayıcı için saklanan gizli değer açılamıyor — {env} değişmiş olabilir. Onu yeniden yazın."
+      }
+    },
+    "lockoutNote": "Parolayla oturum açmayı ve kurulum yöneticisinin kurtarma amaçlı oturum açmasını bu sayfa değil ortam belirler — bu yüzden burada yapılan hiçbir şey sizi dışarıda bırakamaz. Burada açılan sağlayıcılar ortamınkilerden sonra eklenir ve kaydedildikleri anda geçerli olur.",
+    "passwordOn": "Parolayla oturum açma açık ({from}).",
+    "passwordOff": "Bu sunucuda parolayla oturum açma kapalı. Onu yalnızca ortam açabilir ({env}).",
+    "recoveryOn": "Kurulum yöneticisi kurtarma için yine de parolayla oturum açabilir ({env}).",
+    "recoveryOff": "Kurulum yöneticisinin kurtarma amaçlı oturum açması kapalı ({env} false).",
+    "apiTokenAlways": "API anahtarları her zaman kabul edilir; API / MCP sayfasında verilir.",
+    "noSecretKey": "Bu sunucuda {env} ayarlı değil; bu yüzden istemci gizli anahtarı ya da bağlanma parolası burada saklanamaz: gizli değerler yalnızca mühürlü tutulur.",
+    "envReadOnly": "Ortam tarafından yapılandırılmış: {from}. Orada değiştirip filex’i yeniden başlatın — bu sayfa onu geçersiz kılamaz.",
+    "shadowed": "Bu sayfada aynı adla kaydedilmiş bir yapılandırma saklanıyor, ama ortam bu sağlayıcıyı tanımladığı sürece kullanılmıyor.",
+    "legacy": "v0.43.0’dan önce, bu sayfa hiçbir şeyi uygulamazken kaydedildi — hiç kullanılmadı ve kapalı olarak içe aktarıldı. Her alanı gözden geçirin, sonra açın.",
+    "failedReason": "Açık, ama başlatılamadı: {reason}",
+    "secretSetShort": "ayarlı",
+    "redirectDefault": "Boş bırakırsanız bu sunucunun kendi adresi + /api/auth/oidc/callback kullanılır.",
+    "saveApply": "Kaydet ve uygula",
+    "savedApplied": "Kaydedildi ve uygulandı — yeniden başlatma gerekmiyor.",
+    "confirmTitle": "Deneme başarısız olduğu halde açılsın mı?",
+    "confirmBody": "{provider} denemesi şu adımlarda başarısız oldu:",
+    "confirmNote": "Böyle açılırsa sorun giderilene kadar kimsenin oturum açmasına izin vermeyebilir. Parolayla oturum açma ve kurtarma amaçlı oturum açma her durumda çalışmaya devam eder.",
+    "confirmEnable": "Yine de aç",
+    "origin": {
+      "environment": "Ortam tarafından ayarlı",
+      "page": "Bu sayfada ayarlı",
+      "builtin": "Yerleşik"
+    },
+    "technicalDetailIs": "Teknik ayrıntı: {detail}"
   },
   "grants": {
     "title": "İzinler",
-    "subtitle": "Dosya/klasör bazlı tüm yetkiler — kime, nerede, ne. İstediğini geri al.",
+    "subtitle": "Dosya/klasör bazlı tüm yetkiler — kime, nerede, ne. İstediğinizi geri alın.",
     "search": "Kullanıcı, yol, depo ara…",
     "user": "Kullanıcı",
     "storage": "Depo",
@@ -517,53 +687,60 @@
   },
   "apiMcp": {
     "title": "API / MCP",
-    "subtitle": "AI ajanları için erişim token'ları + MCP bağlantısı",
-    "newToken": "Yeni token",
+    "subtitle": "Yapay zekâ ajanları için API anahtarları ve MCP bağlantısı",
+    "newToken": "Yeni API anahtarı",
     "connectTitle": "MCP bağlantısı",
-    "connectHint": "Aşağıdaki uçlara, oluşturduğun token'ı X-Filex-Token (ya da Authorization: Bearer) header'ı ile gönder.",
+    "connectHint": "Oluşturduğunuz API anahtarını aşağıdaki uçlara X-Filex-Token (ya da Authorization: Bearer) başlığıyla gönderin.",
     "mcpEndpoint": "MCP endpoint (streamable HTTP)",
     "restBase": "REST taban URL",
     "addToClaude": "Claude'a ekle",
-    "tokenCreated": "Token oluşturuldu",
-    "tokenOnce": "Bu token yalnızca bir kez gösterilir — kopyala ve güvenli sakla.",
-    "createdOk": "Token oluşturuldu",
-    "updatedOk": "Token güncellendi",
-    "editToken": "Token'ı düzenle",
-    "deletedOk": "Token silindi",
-    "deleteConfirm": "\"{label}\" token'ı silinsin mi? Bu token'ı kullanan entegrasyonlar erişimini kaybeder.",
-    "empty": "Henüz token yok. AI/MCP erişimi için bir tane oluştur.",
+    "tokenOnce": "Bu API anahtarı yalnızca bir kez gösterilir — kopyalayın ve güvenli bir yerde saklayın.",
+    "createdOk": "API anahtarı oluşturuldu",
+    "updatedOk": "API anahtarı güncellendi",
+    "editToken": "API anahtarını düzenle",
+    "deletedOk": "API anahtarı silindi",
+    "deleteConfirm": "\"{label}\" API anahtarı silinsin mi? Onu kullanan entegrasyonlar erişimini kaybeder.",
+    "empty": "Henüz API anahtarı yok. AI/MCP erişimi için bir tane oluşturun.",
     "never": "süresiz",
-    "fullDisk": "tüm disk",
+    "fullDisk": "tüm depolar",
     "cols": {
-      "label": "Etiket",
+      "label": "Ad",
       "usernames": "Kullanıcı adları",
-      "scopes": "Yetkiler",
+      "scopes": "İzinler",
       "root": "Kök dizin",
       "lastUsed": "Son kullanım",
       "expires": "Bitiş",
       "created": "Oluşturuldu"
     },
     "fields": {
-      "label": "Etiket",
+      "label": "Ad",
       "labelPlaceholder": "ör. claude-ajan",
-      "scopes": "Yetkiler (scope)",
-      "scopesHint": "Hiçbiri seçilmezse tüm yetkiler verilir. Dosya MCP'si için 'mcp', admin paneli için 'admin' gerekir.",
-      "root": "Kök dizin kısıtı (opsiyonel)",
-      "rootNone": "— Tüm disk —",
+      "scopes": "İzinler",
+      "scopesHint": "En az bir izin seçin — hiçbir izni olmayan bir API anahtarı verilmez. “admin” yönetim panelinin tamamını verir ve siz seçmedikçe asla dahil edilmez; Dosya MCP’si için “mcp” gerekir.",
+      "root": "Kök dizin kısıtı (isteğe bağlı)",
+      "rootNone": "— Tüm depolar —",
       "rootPathPlaceholder": "alt/klasör (boş = depo kökü)",
-      "rootHint": "Bir depo + yol seçersen token yalnız o alt-ağacı görür/yazar; üstüne çıkamaz. Boş = tüm diske erişim.",
+      "rootHint": "Bir depo ve yol seçerseniz API anahtarı yalnızca o alt ağacı görür ve yazar; üstüne çıkamaz. Boş = tüm depolar.",
       "expiry": "Geçerlilik (gün)",
       "expiryHint": "0 veya boş = süresiz",
-      "usernames": "Kullanıcı adları (opsiyonel)",
+      "usernames": "Kullanıcı adları (isteğe bağlı)",
       "usernamesPlaceholder": "work, fishapp",
-      "usernamesHint": "Bu anahtarla kullanılabilecek kimlikler (virgülle ayır; İLKİ varsayılan). İstemci X-Filex-Token-User ile seçer; boş bırakırsan anahtar adı kullanılır."
+      "usernamesHint": "Bu API anahtarıyla kullanılabilecek kimlikler (virgülle ayırın; İLKİ varsayılandır). İstemci X-Filex-Token-User başlığıyla birini seçer; boş bırakırsanız anahtarın adı kullanılır."
     },
     "scopeDesc": {
       "read": "Dosya listele/oku/ara/indir",
       "write": "Dosya yükle/oluştur/taşı",
       "delete": "Dosya sil",
       "mcp": "MCP endpoint'ine bağlan (dosya tool'ları)",
-      "admin": "Admin paneli API + admin MCP tool'ları"
+      "admin": "Yönetim panelinin tamamı: kullanıcılar, depolar, ayarlar, kuyruk… (yönetim API’si ve yönetim MCP araçları). İşaretlenmedikçe asla verilmez."
+    },
+    "scopeAll": "Tümü",
+    "scopeName": {
+      "read": "Okuma",
+      "write": "Yazma",
+      "delete": "Silme",
+      "mcp": "MCP",
+      "admin": "Yönetim"
     }
   },
   "audit": {
@@ -582,9 +759,9 @@
     "resource": {
       "ai_file": "Dosya (AI)",
       "ai_share": "Paylaşım bağlantısı (AI)",
-      "ai_tokens": "AI token'ı",
+      "ai_tokens": "API anahtarı",
       "audit": "Denetim kaydı",
-      "auth_provider": "Giriş sağlayıcısı",
+      "auth_provider": "Kimlik sağlayıcısı",
       "duplicates": "Kopyalar",
       "embed": "Gömme",
       "external": "Harici servis",
@@ -608,7 +785,7 @@
       "storage": "Depo",
       "storages": "Depo",
       "sync": "Senkron",
-      "totp": "İki adımlı giriş",
+      "totp": "İki adımlı doğrulama",
       "trash": "Çöp kutusu",
       "update": "Güncelleme",
       "usage": "Kullanım raporu",
@@ -617,7 +794,12 @@
       "version": "Dosya sürümü",
       "versions": "Dosya sürümü",
       "webhook_config": "Webhook ayarları",
-      "webhooks": "Webhook"
+      "webhooks": "Webhook",
+      "app_plugins": "Uygulama",
+      "app_plugin": "Uygulama",
+      "auth_providers": "Giriş sağlayıcısı",
+      "quota": "Kota",
+      "themes": "Tema"
     },
     "verb": {
       "action": "değiştirildi",
@@ -630,8 +812,8 @@
       "enroll": "kuruldu",
       "mkdir": "klasör oluşturuldu",
       "move": "taşındı",
-      "password_change": "şifre değiştirildi",
-      "password_reset": "şifre sıfırlandı",
+      "password_change": "parola değiştirildi",
+      "password_reset": "parola sıfırlandı",
       "quota_recompute": "kota yeniden hesaplandı",
       "quota_set": "kota ayarlandı",
       "rebuild": "yeniden oluşturuldu",
@@ -646,10 +828,18 @@
       "upload": "yüklendi",
       "upload_abort": "yükleme iptal edildi",
       "verify": "doğrulandı",
-      "zip": "sıkıştırıldı"
+      "zip": "sıkıştırıldı",
+      "action_run": "eylem çalıştırıldı",
+      "page_job": "bağlantısından iş başlatıldı",
+      "share_create": "bağlantı oluşturuldu",
+      "unlock": "kilidi açıldı",
+      "signing_ca_import": "imza sertifikası içe aktarıldı",
+      "pin_locked": "PIN denemeleri kilitlendi",
+      "pin_revealed": "PIN gösterildi",
+      "tags": "etiketler değiştirildi"
     },
     "target": {
-      "auth_provider": "Giriş sağlayıcısı",
+      "auth_provider": "Kimlik sağlayıcısı",
       "external": "Harici servis",
       "node": "Dosya",
       "profile": "Profil",
@@ -661,8 +851,13 @@
       "trash": "Çöp kutusu",
       "upload": "Yükleme",
       "user": "Kullanıcı",
-      "version": "Sürüm"
-    }
+      "version": "Sürüm",
+      "app_plugin": "Uygulama",
+      "file": "Dosya"
+    },
+    "viaAi": "{resource} (AI)",
+    "filterResource": "Ne",
+    "rawRecord": "Ham kayıt"
   },
   "sync": {
     "title": "Senkron çalışmaları",
@@ -678,13 +873,23 @@
       "deleted": "Silindi",
       "duration": "Süre"
     },
-    "noResults": "Senkron kaydı yok"
+    "noResults": "Senkron kaydı yok",
+    "state": {
+      "ok": "Tamam",
+      "error": "Hata",
+      "running": "Çalışıyor",
+      "aborted": "Durduruldu",
+      "pending": "Bekliyor"
+    }
   },
   "shares": {
+    "revokedOn": "İptal edildi · {date}",
+    "revokeDo": "Paylaşımı iptal et",
+    "revokeTitle": "Bu paylaşım iptal edilsin mi?",
     "title": "Paylaşımlar",
-    "subtitle": "Kullanıcıların oluşturduğu public linkler",
+    "subtitle": "Kullanıcıların oluşturduğu herkese açık bağlantılar",
     "fields": {
-      "token": "Token",
+      "token": "Bağlantı kimliği",
       "storage": "Depo",
       "path": "Yol",
       "created": "Oluşturuldu",
@@ -693,30 +898,77 @@
       "creator": "Oluşturan",
       "pin": "PIN"
     },
-    "copyLink": "Paylaşım linkini kopyala",
-    "copyToken": "Sadece token'ı kopyala",
+    "copyLink": "Paylaşım bağlantısını kopyala",
+    "copyPin": "PIN'i kopyala",
+    "revoke": "İptal et",
+    "pinProtected": "PIN gerekli",
+    "pinHintRecoverable": "Ziyaretçinin bir PIN girmesi gerekir. Bu satırdan kopyalayabilirsiniz; her okuma denetim kaydına düşer.",
+    "pinHint": "Ziyaretçinin bir PIN girmesi gerekir. PIN'ler özetlenerek (hash) saklandığı için filex bunu bir daha gösteremez — yalnızca bağlantı oluşturulurken bir kez gösterildi.",
+    "pinHintApp": "Ziyaretçinin bir PIN girmesi gerekir. PIN'ler özetlenerek (hash) saklandığı için filex bunu bir daha gösteremez — {app} bunu bağlantıyı oluştururken bir kez gösterdi.",
+    "pinForbidden": "Bu bağlantının PIN'ini yalnızca bağlantıyı oluşturan kişi ya da bir yönetici okuyabilir.",
     "neverExpires": "Süresiz",
-    "revokeConfirm": "Bu paylaşımı iptal et? Mevcut linkler çalışmaz olacak.",
+    "revokeConfirm": "Bağlantıya sahip olan hiç kimse artık onu açamayacak. Kayıt bu listede kalır.",
     "deleteConfirm": "Bu paylaşım kalıcı olarak silinsin mi?",
     "revokedOk": "Paylaşım iptal edildi",
     "deletedOk": "Paylaşım silindi",
     "noResults": "Aktif paylaşım yok",
-    "linkCopied": "Paylaşım linki panoya kopyalandı"
+    "linkCopied": "Paylaşım bağlantısı panoya kopyalandı",
+    "pinCopied": "PIN panoya kopyalandı",
+    "copyFailed": "Tarayıcı bu sayfanın panoyu kullanmasına izin vermedi"
+  },
+  "appScreen": {
+    "back": "Dosyalara dön"
+  },
+  "myShares": {
+    "revoked": "İptal edildi",
+    "revokeDo": "Bağlantıyı iptal et",
+    "revokeTitle": "Bu bağlantı iptal edilsin mi?",
+    "title": "Paylaştıklarım",
+    "subtitle": "Oluşturduğunuz herkese açık bağlantılar. Bu sayfayı başkası görmez.",
+    "noResults": "Henüz bir şey paylaşmadınız",
+    "back": "Dosyalara dön",
+    "fields": {
+      "item": "Paylaşılan",
+      "storage": "Depo",
+      "pin": "PIN",
+      "expires": "Sona erer",
+      "downloads": "İndirme"
+    },
+    "copyLink": "Bağlantıyı kopyala",
+    "linkCopied": "Bağlantı panoya kopyalandı",
+    "copyPin": "PIN'i kopyala",
+    "pinCopied": "PIN panoya kopyalandı",
+    "pinProtected": "PIN gerekli",
+    "noPin": "PIN yok",
+    "pinHidden": "Gösterilemiyor",
+    "revoke": "İptal et",
+    "revokeConfirm": "Elinde bağlantı olan kimse artık açamayacak.",
+    "revokedOk": "Bağlantı iptal edildi",
+    "neverExpires": "Süresiz",
+    "expired": "Süresi doldu",
+    "copyFailed": "Tarayıcı bu sayfanın panoyu kullanmasına izin vermedi",
+    "pinReason": {
+      "no_pin": "Bu bağlantıda PIN yok.",
+      "not_recoverable": "Bu bağlantı, filex PIN'i saklayabilmeye başlamadan önce oluşturulmuş; artık gösterilemez. Görebileceğiniz bir PIN için yeni bir bağlantı oluşturun.",
+      "no_secret_key": "Bu sunucuda şifreleme anahtarı (FILEX_SECRET_KEY) tanımlı değil, bu yüzden PIN'ler saklanamaz ve gösterilemez. Yöneticinizden tanımlamasını isteyin."
+    }
   },
   "search": {
     "title": "Arama indeksi",
     "subtitle": "Gömülü Bleve indeksini incele ve yeniden oluştur",
     "stats": {
-      "documents": "İndekslenmiş döküman",
       "size": "İndeks boyutu",
-      "lastBuilt": "Son derleme"
+      "lastBuilt": "Son derleme",
+      "files": "İndekslenmiş dosya",
+      "foldersToo": "ve {n} klasör | ve {n} klasör"
     },
     "rebuild": "İndeksi yeniden oluştur",
     "rebuildHint": "Tüm depoları gezerek dosya metadata'sını yeniden indeksler. Milyon dosya başına birkaç dakika. Yükseltmeden sonra yeniden oluşturma önerildiğinde çalıştırın.",
     "rebuildStarted": "Yeniden oluşturma başladı",
     "queryPlaceholder": "Dosya ara… ada göre ya da tag:etiket",
     "noResults": "Eşleşme yok",
-    "scope": "Arama kapsamı",
+    "resultCount": "{n} sonuç | {n} sonuç",
+    "scope": "Nerede arasın",
     "scopeAll": "Tümü",
     "scopeName": "Ad",
     "scopeContent": "İçerik",
@@ -727,9 +979,14 @@
     "subtitle": "Dosyaları etikete göre gör",
     "noTags": "Henüz etiket yok",
     "noTagsHint": "Gezginden dosyaları etiketle, burada gruplanmış olarak görünsünler.",
-    "selectTag": "Dosyalarını listelemek için bir etiket seç",
+    "selectTag": "Dosyalarını listelemek için bir etiket seçin",
     "resultsFor": "\"{tag}\" etiketli dosyalar",
-    "noResults": "Bu etikete sahip dosya yok"
+    "resultsForKind": "{kind} \"{tag}\" etiketli dosyalar",
+    "noResults": "Bu etikete sahip dosya yok",
+    "personal": "Kişisel",
+    "team": "Ekip",
+    "personalHelp": "Bunları yalnızca siz görürsünüz",
+    "teamHelp": "Dosyayı görebilen ekibindeki herkes bunları görür"
   },
   "about": {
     "title": "Hakkında",
@@ -740,19 +997,28 @@
     "storage": "Depo",
     "auth": "Kimlik doğrulama",
     "db": "Veritabanı",
-    "thumbnails": "Thumbnail araçları",
+    "thumbnails": "Küçük resim araçları",
     "links": "Bağlantılar",
     "documentation": "Belgeler",
     "source": "Kaynak kod",
-    "license": "Lisans",
-    "donate": "Geliştirmeyi destekle"
+    "donate": "Geliştirmeyi destekle",
+    "search": "Arama indeksi",
+    "toolFound": "Bulundu",
+    "toolMissing": "Bulunamadı",
+    "licenseIs": "Lisans: {license}"
   },
   "errors": {
     "generic": "Bir şeyler ters gitti",
-    "network": "Ağ hatası — backend çalışıyor mu?",
-    "forbidden": "Bu işlem için yetkin yok",
+    "loadFailed": "Yüklenemedi. Yeniden deneyin.",
+    "saveFailed": "Değişiklikleriniz kaydedilemedi. Yeniden deneyin.",
+    "deleteFailed": "Silinemedi. Yeniden deneyin.",
+    "updateFailed": "Güncellenemedi. Yeniden deneyin.",
+    "installFailed": "Kurulum tamamlanamadı. Yeniden deneyin.",
+    "actionFailed": "Bu işlem yapılamadı. Yeniden deneyin.",
+    "network": "Sunucuya ulaşılamadı. Bağlantınızı kontrol edip yeniden deneyin.",
+    "forbidden": "Bu işlem için yetkiniz yok",
     "notFound": "Bulunamadı",
-    "validationFailed": "Lütfen işaretli alanları kontrol et"
+    "validationFailed": "Lütfen işaretli alanları kontrol edin"
   },
   "trash": {
     "title": "Çöp kutusu",
@@ -761,35 +1027,45 @@
     "empty": "Çöpü boşalt",
     "empty_title": "Çöp kutusu boş",
     "empty_description": "Hiçbir şey silinmemiş.",
-    "col_name": "İsim",
+    "col_name": "Ad",
     "col_storage": "Depo",
     "col_size": "Boyut",
     "col_deleted_at": "Silinme",
     "col_ttl": "Kalan süre",
-    "days_left": "gün",
     "restore": "Geri yükle",
     "purge": "Kalıcı sil",
     "restored": "{name} geri yüklendi",
     "restore_taken": "“{name}” geri yüklenmedi: aynı adla bir şey zaten var. Oradakinin adını değiştirip yeniden deneyin.",
     "purged": "{name} kalıcı olarak silindi",
-    "purge_confirm": "{name} kalıcı silinecek. Emin misin?",
+    "purge_confirm": "{name} kalıcı olarak silinecek. Emin misiniz?",
     "empty_modal_title": "Çöpü boşalt",
-    "empty_modal_body": "Bu işlem geri alınamaz. Tek bir depoyu seçtiysen sadece o etkilenir.",
+    "empty_modal_body": "Bu işlem geri alınamaz. Tek bir depoyu seçtiyseniz yalnızca o etkilenir.",
     "older_than_days": "Şundan eski (gün)",
     "all_ages": "tümü (boş bırak)",
     "empty_done": "{count} öğe silindi",
+    "older_than_days_invalid": "Tam bir gün sayısı yazın ya da her yaş için boş bırakın.",
+    "empty_running": "Çöp kutusu boşaltılıyor…",
+    "emptying_progress": "{done} / {total}",
+    "emptying_freed": "Şimdiye dek {size} boşaldı",
+    "emptying_note": "Bu sayfadan ayrılsanız da sürer.",
+    "empty_busy": "Çöp kutusu zaten boşaltılıyor.",
+    "empty_failed": "{count} öğe silinemedi — sunucu günlüğüne bakın",
+    "empty_stopped": "Çöp kutusunu boşaltma durdu: {error}",
+    "emptying_queued": "Çöp kutusu boşaltılıyor… başka bir temizliğin bitmesi bekleniyor",
+    "empty_stop": "Durdur",
+    "stopped_after": "{count} öğeden sonra durduruldu; kalanlar hâlâ çöp kutusunda.",
     "total_count": "Toplam: {n}"
   },
   "home": {
     "title": "Ana sayfa",
     "allFiles": "Tüm dosyalar",
-    "storagesEmpty": "Henüz sürücü yok"
+    "storagesEmpty": "Henüz depo yok"
   },
   "explore": {
     "tagline": "dosya yöneticisi",
     "loading": "Yükleniyor…",
     "noStorage": "Henüz depo eklenmedi.",
-    "noAccess": "Seninle henüz hiçbir şey paylaşılmadı. Erişim için sunucuyu yönetene sor.",
+    "noAccess": "Sizinle henüz hiçbir şey paylaşılmadı. Erişim için sunucuyu yönetene başvurun.",
     "addStorage": "Depo ekle",
     "gotoAdmin": "Admin paneli",
     "account": "Hesap",
@@ -800,23 +1076,11 @@
       "name": "Ad",
       "size": "Boyut",
       "mime": "Tür",
-      "modified": "Değiştirildi"
+      "modified": "Değiştirilme"
     },
     "myAccount": "Hesabım",
     "apiKeys": "API anahtarları",
-    "logout": "Çıkış yap"
-  },
-  "selfTokens": {
-    "title": "API anahtarlarım",
-    "viewerNote": "Hesabınız salt-okuma — anahtarlar yalnızca okuyabilir.",
-    "label": "Etiket (ör. dizüstüm)",
-    "rootPath": "Yola kısıtla (opsiyonel, ör. main://projeler/acme)",
-    "expiry": "Süre (gün)",
-    "create": "Anahtar oluştur",
-    "copyOnce": "Bu token'ı şimdi kopyalayın — yalnızca bir kez gösterilir.",
-    "copy": "Kopyala",
-    "empty": "Henüz anahtar yok.",
-    "keyword": "anahtar"
+    "logout": "Oturumu kapat"
   },
   "instance": {
     "publicUrlUnset": "FILEX_PUBLIC_URL ayarlı değil. Paylaşım bağlantıları, dosya isteme bağlantıları ve e-postadaki her bağlantı, bu örneğin açıldığı adresi girene kadar http://localhost:5212 üzerine kurulur.",
@@ -825,28 +1089,28 @@
   "demo": {
     "badge": "Canlı demo",
     "readOnly": "Genel demo — yönetim paneli salt okunur. Gezinme, yükleme, paylaşım ve etiketler çalışır; örneği ya da paylaşılan demo hesabını değiştirecek her şey reddedilir ve her gece sıfırlanır.",
-    "title": "filex — her yere gömülebilen, kendi sunucunda çalışan dosya yöneticisi",
-    "subtitle": "Tek bir Go binary'si: tam web arayüzü, takılabilir depolama/kimlik/veritabanı sürücüleri, gerçek zamanlı ortak çalışma, gömülebilir web bileşeni, arka planda klasör senkronu yapan masaüstü uygulaması ve yapay zekâ ajanlarının doğrudan kullanabilmesi için dahili MCP sunucusu.",
+    "title": "filex — her yere gömülebilen, kendi sunucunuzda çalışan dosya yöneticisi",
+    "subtitle": "Tek bir Go binary'si: tam web arayüzü, takılabilir depolama/kimlik/veritabanı sürücüleri, canlı güncellemeler ve kimin açık olduğu, gömülebilir web bileşeni, klasör eşitlemesi canlı çalışan masaüstü uygulaması, dosyalarla yeni işler yapan uygulamalar ve yapay zekâ ajanlarının doğrudan kullanabilmesi için dahili MCP sunucusu.",
     "openCta": "Demoyu aç",
-    "showSignIn": "Yönetici girişi",
-    "hideSignIn": "Yönetici girişini kapat",
-    "creds": "Demo hesabı: {email} · şifre: {password}",
-    "sandbox": "Ortak deneme alanı — her gece sıfırlanır; burada depolama ya da eklenti eklenemez.",
-    "adminHint": "Tam yönetici yetkisi için demo dışı bir hesapla giriş yap.",
-    "alsoIncluded": "Ayrıca: dosya ve klasör bazında yetkilerle RBAC · çok kiracılık · OIDC SSO ve LDAP / Active Directory · yerinde görüntüleyiciler ve düzenleyiciler, OnlyOffice ile Office belgeleri · + Yeni menüsünden belge oluşturma — Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise OnlyOffice bağlıyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
+    "showSignIn": "Yönetici olarak oturum aç",
+    "hideSignIn": "Yönetici oturum açma formunu gizle",
+    "creds": "Demo hesabı: {email} · parola: {password}",
+    "sandbox": "Ortak deneme alanı — her gece sıfırlanır; burada depolama, eklenti ve uygulamalar kapalıdır.",
+    "adminHint": "Tam yönetici yetkisi için demo dışı bir hesapla oturum açın.",
+    "alsoIncluded": "Ayrıca: uygulamalar — izin incelemesinden geçerek kurulan WebAssembly eklentileri, e-İmza ve Dönüştür ile birlikte · dil paketleri ve sağdan sola yerleşim · Görünüm ekranından kurum temaları · oluşturduğunuz bağlantılar, Paylaştıklarım'da · kişisel ve takım etiketleri · sembolik bağlantılı klasörler · klasör başına hatırlanan görünüm ve sıralama · dosya ve klasör bazında yetkilerle RBAC · çok kiracılık · OIDC SSO ve LDAP / Active Directory · yerinde görüntüleyiciler ve düzenleyiciler, ONLYOFFICE ile Office belgeleri · + Yeni menüsünden belge oluşturma — Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise ONLYOFFICE bağlıyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
     "features": {
       "storageTitle": "6 depolama sürücüsü, iki yönde",
-      "storageBody": "Yerel diskleri, S3'ü, SFTP'yi, WebDAV'ı, FTP/FTPS'i ve SMB/NAS paylaşımlarını tek bir ağaçta yan yana bağla — sonra aynı ağaca S3, SFTP, FTPS, NFSv3 ya da WebDAV olarak geri eriş.",
+      "storageBody": "Yerel diskleri, S3'ü, SFTP'yi, WebDAV'ı, FTP/FTPS'i ve SMB/NAS paylaşımlarını tek bir ağaçta yan yana bağlayın — sonra aynı ağaca S3, SFTP, FTPS, NFSv3 ya da WebDAV olarak geri erişin.",
       "searchTitle": "Yazım hatasını affeden arama",
-      "searchBody": "Tüm depolarda, yetkiye duyarlı tam metin araması. “budget 2026” yazın, Documents/Budget-2026.csv gelsin; “mian.go” yazın, tek harf hatasına rağmen Code/main.go gelsin. Bir dosyayı etiketleyin, tag:etiketiniz onu süzsün.",
+      "searchBody": "Tüm depolarda, yetkiye duyarlı tam metin araması. “budget 2026” yazın, Documents/Budget-2026.csv gelsin; “mian.go” yazın, tek harf hatasına rağmen Code/main.go gelsin. Bir dosyayı yalnız kendiniz görecek şekilde ya da takımla paylaşarak etiketleyin, tag:etiketiniz onu filtrelesin.",
       "shareTitle": "Paylaşım, dosya isteme · Uçtan uca şifreleme",
       "shareBody": "PIN'li, son kullanma tarihli ve indirme limitli genel bağlantılar, başkalarından dosya toplayan yükleme bağlantıları — ve sunucunun okuyamadığı, uçtan uca şifreli klasörler.",
-      "desktopTitle": "Masaüstü uygulaması + klasör senkronu",
-      "desktopBody": "Aynı gezgin, Windows, Linux ve macOS uygulaması olarak: aynı anda birden çok hesap, tepsiden arka planda çift yönlü senkron, yazılım kuramayacağınız makineler için her platformda kurulum gerektirmeyen bir sürüm ve uzak sunucuyu Linux'ta klasör, Windows'ta sürücü olarak bağlayan “filex mount”.",
+      "desktopTitle": "Masaüstü uygulaması + klasör eşitleme",
+      "desktopBody": "Aynı gezgin, Windows, Linux ve macOS uygulaması olarak: aynı anda birden çok hesap, tepsiden canlı çift yönlü eşitleme — iki taraftaki değişiklik yaklaşık bir saniyede karşıya geçer — yazılım kuramayacağınız makineler için her platformda kurulum gerektirmeyen bir sürüm ve uzak sunucuyu Linux'ta klasör, Windows'ta sürücü olarak bağlayan “filex mount”.",
       "embedTitle": "Gömülebilir · ajanlar için MCP",
-      "embedBody": "Gerçek dosya yöneticisini Vue 3, React ya da çatısız bir web bileşeni olarak kendi ürününe göm; yapay zekâ ajanlarına jeton kapsamlı REST yüzeyi ve dahili MCP sunucusu ver.",
+      "embedBody": "Gerçek dosya yöneticisini Vue 3, React ya da çatısız bir web bileşeni olarak kendi ürününüze gömün; yapay zekâ ajanlarına API anahtarıyla sınırlanan bir REST yüzeyi ve dahili MCP sunucusu verin.",
       "openTitle": "Açık kaynak · MIT",
-      "openBody": "MIT lisanslı — kod, döküman ve sürümler:"
+      "openBody": "MIT lisanslı — kod, doküman ve sürümler:"
     }
   },
   "queue": {
@@ -859,7 +1123,7 @@
       "type": "Tür",
       "status": "Durum",
       "attempts": "Denemeler",
-      "payload": "İçerik",
+      "payload": "Konu",
       "lastError": "Son hata",
       "enqueued": "Sıraya alındı"
     },
@@ -867,14 +1131,32 @@
       "pending": "Bekleyen",
       "running": "Çalışan",
       "failed": "Hatalı",
-      "done24h": "24s tamam",
+      "done24h": "Tamamlanan (son 24 saat)",
       "cancelled": "İptal"
     },
     "retry": "Yeniden",
     "cancel": "İptal et",
     "retried": "Yeniden kuyruğa alındı",
     "cancelled": "İptal edildi",
-    "empty": "Kuyrukta görünür iş yok"
+    "empty": "Kuyrukta görünür iş yok",
+    "status": {
+      "pending": "Bekliyor",
+      "running": "Çalışıyor",
+      "failed": "Başarısız",
+      "done": "Tamamlandı",
+      "cancelled": "İptal edildi"
+    },
+    "type": {
+      "content_index": "İçerik indeksleme",
+      "antivirus_scan": "Virüs taraması",
+      "thumb": "Küçük resim",
+      "copy": "Kopyalama",
+      "move": "Taşıma",
+      "delete": "Silme",
+      "replica_retry": "Kopya yeniden deneme",
+      "replica_report": "Kopya raporu",
+      "reconcile": "Kopya eşitleme"
+    }
   },
   "notifications": {
     "title": "Bildirimler",
@@ -892,13 +1174,18 @@
       "permDefault": "İzin henüz istenmedi",
       "permUnsupported": "Bu tarayıcı bildirim gösteremiyor",
       "desktopHandled": "Masaüstü uygulaması bunları kendisi gösteriyor",
-      "saved": "Tercih kaydedildi"
+      "saved": "Tercih kaydedildi",
+      "movedToSettings": "Kendi bildirim ayarlarınız — zil, tarayıcı bildirimleri, hangi olaylar — kullanıcı ayarlarınızda.",
+      "openSettings": "Bildirim ayarlarımı aç"
     },
-    "adminTitle": "Bildirim Yönetimi",
+    "adminTitle": "Bildirim yönetimi",
     "bell": "Bildirim çanı",
     "empty": "Henüz bildirim yok",
-    "viewAll": "Tümünü gör",
+    "viewAll": "Tüm bildirimleri gör",
+    "manageAdmin": "Bildirim yönetimi",
     "markAllRead": "Tümünü okundu işaretle",
+    "markRead": "Okundu işaretle",
+    "pageOf": "Sayfa {page} / {pages} · toplam {total}",
     "unreadOnly": "Sadece okunmamış",
     "unreadCount": "{n} okunmamış",
     "sendTest": "Test gönder",
@@ -909,7 +1196,7 @@
     "tokenSet": "Token ayarlı",
     "tokenUnset": "Token yok",
     "tokenPlaceholder": "Token (boş bırakılırsa silinir)",
-    "tokenHint": "Boş gönderirsen mevcut token silinir.",
+    "tokenHint": "Boş gönderirseniz mevcut token silinir.",
     "webhookSaved": "Webhook kaydedildi",
     "notConfigured": "yapılandırılmamış",
     "fields": {
@@ -917,7 +1204,7 @@
       "severity": "Önem",
       "title": "Başlık",
       "body": "İçerik",
-      "scope": "Kapsam",
+      "scope": "Alıcı",
       "webhook": "Webhook",
       "createdAt": "Oluşturuldu"
     },
@@ -926,7 +1213,49 @@
       "warning": "Uyarı",
       "error": "Hata",
       "critical": "Kritik"
-    }
+    },
+    "kinds": {
+      "file_uploaded": "Yeni dosya",
+      "file_updated": "Dosya değişti",
+      "file_upload_failed": "Yükleme başarısız",
+      "file_infected": "Virüs bulundu",
+      "file_deleted": "Dosya silindi",
+      "file_trashed": "Çöpe taşındı",
+      "file_moved": "Dosya taşındı",
+      "share_created": "Paylaşım bağlantısı oluşturuldu",
+      "drop_received": "Dosya geldi",
+      "comment_added": "Yeni yorum",
+      "e2e_escrow_used": "Emanet anahtarı kullanıldı",
+      "plugin_notice": "Uygulama bildirimi",
+      "update_available": "Güncelleme var",
+      "update_applied": "Güncelleme uygulandı",
+      "replica_fail": "Kopyaya yazılamadı",
+      "replica_fail_spike": "Kopya hataları artıyor",
+      "replica_reconcile_done": "Kopya yeniden denemeleri kuyrukta",
+      "replica_status_report": "Kopya raporu",
+      "primary_read_fail": "Kopyadan sunuldu",
+      "quota_near_full": "Depo dolmak üzere",
+      "quota_full": "Depo dolu",
+      "queue_stuck": "Kuyruk takıldı",
+      "auth_fail_spike": "Başarısız oturum açma denemeleri artıyor",
+      "disk_full": "Disk dolu",
+      "admin_test": "Test bildirimi",
+      "webhook_test": "Webhook testi"
+    },
+    "scopeEveryone": "Herkes",
+    "webhookStatus": {
+      "sent": "Gönderildi",
+      "failed": "Başarısız",
+      "skipped": "Gönderilmedi",
+      "pending": "Bekliyor"
+    },
+    "webhookNone": "tanımlı webhook yok",
+    "webhooksMoved": "Olayların nereye gönderileceği — varsayılan webhook ve tüm hedefler — Webhook'lar sayfasında ayarlanır.",
+    "webhooksLink": "Webhook'ları aç",
+    "unreadHere": "Bu listede {n} okunmamış",
+    "scopeAdmins": "Yöneticiler",
+    "scopeViewers": "Dosyayı görebilenler",
+    "scopeNobody": "Kimse (yalnızca geçmişte)"
   },
   "replica": {
     "title": "Replikasyon",
@@ -940,23 +1269,23 @@
       "title": "Eşleştirmeler",
       "primary": "Birincil depo (kaynak)",
       "replica": "Replika depo (hedef)",
-      "targetLabel": "Hedef replika",
       "current": "Şu anki çift",
       "none": "Henüz çift kurulmadı.",
       "save": "Eşleştirmeyi kaydet",
       "savedOk": "Eşleştirme kaydedildi.",
-      "noStorages": "Önce depo ekleyin (Depolar sayfası)."
+      "noStorages": "Önce depo ekleyin (Depolar sayfası).",
+      "targetIs": "Hedef replika: {name}"
     },
     "targets": {
       "title": "Replika hedefleri",
       "add": "Replika hedefi ekle",
       "newTitle": "Yeni replika hedefi",
-      "empty": "Henüz replika hedefi eklenmedi. Replikasyon yapacaksan önce buradan bir hedef tanımla.",
+      "empty": "Henüz replika hedefi eklenmedi. Replikasyon yapacaksanız önce buradan bir hedef tanımlayın.",
       "deleted": "Replika hedefi silindi.",
       "createdOk": "Replika hedefi eklendi.",
-      "confirmDelete": "{name} replika hedefini silmek istiyor musun?",
-      "modeAsync": "Asenkron (önce yazımı doğrula, replikayı kuyruğa al)",
-      "modeSync": "Senkron (replika yazımı doğrulanmadan başarı sayma)",
+      "confirmDelete": "{name} replika hedefini silmek istiyor musunuz?",
+      "modeAsync": "Eşzamansız (önce yazımı doğrula, replikayı kuyruğa al)",
+      "modeSync": "Eşzamanlı (replika yazımı doğrulanmadan başarı sayma)",
       "fields": {
         "name": "Hedef adı",
         "driver": "Sürücü",
@@ -984,7 +1313,7 @@
       "created": "Kural oluşturuldu",
       "updated": "Kural güncellendi",
       "deleted": "Kural silindi",
-      "confirmDelete": "Kural silinecek: {p}. Onaylıyor musun?"
+      "confirmDelete": "Kural silinecek: {p}. Onaylıyor musunuz?"
     },
     "failures": {
       "title": "Replikasyon hataları",
@@ -1010,7 +1339,7 @@
       "title": "Durum raporu",
       "runNow": "Şimdi çalıştır",
       "ran": "Rapor üretildi",
-      "empty": "Henüz rapor üretilmedi. \"Şimdi çalıştır\" ile manuel tetikleyebilir veya cron ayarlayabilirsin.",
+      "empty": "Henüz rapor üretilmedi. \"Şimdi çalıştır\" ile hemen üretebilir ya da Ayarlar’dan bir cron zamanlayabilirsiniz.",
       "fields": {
         "generatedAt": "Üretildi",
         "totalFiles": "Toplam dosya",
@@ -1024,7 +1353,7 @@
       "defaultMode": "Varsayılan mod (catch-all)",
       "cronPreset": "Hazır cron",
       "cronRaw": "Cron ifadesi",
-      "cronHint": "Standart 5-alan cron — örnek: '0 3 * * *' her gece 03:00. Hazır cron'u 'Özel' yaparsan sağdaki alanı kendin gir.",
+      "cronHint": "Standart 5 alanlı cron — örnek: '0 3 * * *' her gece 03:00. Kendi ifadenizi girmek için 'Özel'i seçin.",
       "saved": "Ayarlar kaydedildi"
     },
     "cron": {
@@ -1042,26 +1371,24 @@
     "percent": "Kullanım %",
     "unlimited": "Sınırsız",
     "tooltip": "{used} / {limit} kullanıldı ({percent})",
-    "unlimitedTooltip": "{used} kullanıldı · sınırsız"
+    "unlimitedTooltip": "{used} kullanıldı · sınırsız",
+    "usedIs": "Kullanılan: {used}",
+    "usedOf": "Kullanılan: {used} / {quota} ({percent})"
   },
   "adminFiles": {
     "title": "Dosya geçmişi",
-    "subtitle": "Bir dosyanın sürüm geçmişini node ID ile aç.",
-    "nodeIdLabel": "Node ID",
-    "nodeIdPlaceholder": "örn. 1024",
-    "viewVersions": "Sürümleri gör",
-    "invalidId": "Geçerli bir pozitif tam sayı node ID gir.",
-    "hint": "İpucu: node ID gezginin dosya bilgi panelinde görünür.",
-    "helperTitle": "Node ID nasıl bulunur",
-    "helperDescription": "Gezgini aç, bir dosya seç, bilgi panelinden veya manager API yanıtından ID'yi al."
+    "subtitle": "Sürüm geçmişini açmak için bir dosyayı adıyla bulun.",
+    "hint": "Sürümlerini görmek, birini geri yüklemek ya da silmek için sonuçlardan bir dosya seçin.",
+    "searchLabel": "Dosya adı",
+    "searchPlaceholder": "Dosya adının bir parçası, örn. fatura",
+    "needTerm": "Aramak için dosya adının bir parçasını yazın.",
+    "noMatch": "“{q}” ile eşleşen dosya yok."
   },
   "versions": {
     "title": "Sürüm geçmişi",
     "subtitle": "Yıkıcı yazımlardan önce otomatik anlık görüntü alınır.",
     "backToFiles": "Dosya aramaya dön",
-    "nodeLabel": "Node #{id}",
     "loadFailed": "Sürümler yüklenemedi",
-    "badNodeId": "URL'deki node ID geçersiz.",
     "newest": "(en yeni)",
     "empty": "Henüz sürüm kaydedilmedi",
     "emptyDescription": "Bir dosya düzenlenip üzerine yazıldığında burada sürümler görünür.",
@@ -1085,17 +1412,19 @@
       "size": "Boyut",
       "createdAt": "Oluşturuldu",
       "etag": "ETag"
-    }
+    },
+    "notFound": "Bu dosya bulunamadı."
   },
   "pendingOps": {
     "title": "Aktif işlemler",
     "verb": {
       "copy": "Kopyalanıyor",
       "move": "Taşınıyor",
-      "delete": "Siliniyor"
+      "delete": "Siliniyor",
+      "trash": "Çöp kutusu boşaltılıyor"
     },
-    "progress": "{done} / {total} dosya · %{percent}",
-    "progressBytes": "{done} / {total} · %{percent}",
+    "progress": "{done} / {total} dosya · {'%'}{percent}",
+    "progressBytes": "{done} / {total} · {'%'}{percent}",
     "progressBytesOpen": "{done} taşındı",
     "working": "Sürüyor…",
     "failed": "İşlem başarısız",
@@ -1126,10 +1455,10 @@
     "subtitle": "Dosya olaylarını (yükleme, düzenleme, silme, paylaşım, drop) dış uçlara POST'lar. Her gönderim X-Filex-Event ve X-Filex-Delivery başlıklarını taşır; secret tanımlı hedefler X-Filex-Signature (HMAC-SHA256) ile imzalanır.",
     "add": "Yeni webhook",
     "edit": "Webhook düzenle",
-    "empty": "Henüz webhook hedefi yok. Bildirimler sayfasındaki eski tekil webhook çalışmaya devam eder.",
+    "empty": "Henüz webhook hedefi yok. Yukarıdaki varsayılan webhook her olayı almaya devam eder.",
     "namePlaceholder": "örn. ops-alarmlari",
     "allEvents": "Tüm olaylar",
-    "eventsHint": "Hiçbirini işaretlemezsen tüm olaylar gönderilir.",
+    "eventsHint": "Hiçbirini işaretlemezseniz tüm olaylar gönderilir.",
     "events": {
       "file_uploaded": "Dosya yüklendi — yazma işlemi var olmayan bir dosyayı oluşturdu",
       "file_updated": "Dosya güncellendi — yazma işlemi var olan bir dosyanın içeriğini değiştirdi",
@@ -1141,12 +1470,13 @@
       "share_created": "Paylaşım bağlantısı oluşturuldu",
       "drop_received": "Herkese açık istek bağlantısından dosya alındı",
       "comment_added": "Bir dosyaya veya klasöre yorum eklendi",
-      "e2e_escrow_used": "Şifreli klasör parolası yerine emanet anahtarıyla açıldı"
+      "e2e_escrow_used": "Şifreli klasör parolası yerine emanet anahtarıyla açıldı",
+      "plugin_notice": "Uygulama bildirimi — kurulu bir uygulama mesaj gönderdi (imza isteği, biten iş, …)"
     },
     "secretSet": "Secret tanımlı",
     "secretUnset": "Secret yok",
     "secretPlaceholder": "İsteğe bağlı imza secret'ı",
-    "secretKeepPlaceholder": "Mevcut secret'ı korumak için boş bırak",
+    "secretKeepPlaceholder": "Mevcut gizli anahtarı korumak için boş bırakın",
     "secretHint": "Salt-yazılır: secret bir daha gösterilmez. Her gönderimi sha256=<hex HMAC-SHA256(gövde)> olarak imzalar.",
     "clearSecret": "Kayıtlı secret'ı temizle",
     "test": "Test",
@@ -1158,13 +1488,24 @@
     "saved": "Webhook kaydedildi",
     "deleted": "Webhook silindi",
     "deleteConfirm": "\"{name}\" webhook'u silinsin mi?",
-    "errNameUrl": "İsim ve URL zorunlu",
     "fields": {
       "events": "Olaylar",
       "secret": "Secret",
       "lastStatus": "Son gönderim",
       "enabled": "Etkin",
       "actions": "İşlemler"
+    },
+    "global": {
+      "title": "Varsayılan webhook",
+      "hint": "Her olayı alır; bir token belirlerseniz Bearer ile gönderilir. Aşağıdaki hedefler olaylarını ayrı ayrı seçebilir ve gönderimleri bir sırla imzalayabilir."
+    },
+    "errName": "Webhook’a bir ad verin.",
+    "errUrl": "Olayların gönderileceği adresi yazın.",
+    "errUrlScheme": "Adres http:// ya da https:// ile başlamalı.",
+    "offReason": {
+      "antivirus": "Virüs taraması kapalı (Koruma).",
+      "escrow": "Şifreli klasörler için emanet anahtarı kurulmamış.",
+      "appPlugins": "Bu sunucuda uygulamalar kapalı."
     }
   },
   "protection": {
@@ -1242,7 +1583,7 @@
     }
   },
   "branding": {
-    "title": "Kurumsal Kimlik",
+    "title": "Kurumsal kimlik",
     "subtitle": "Herkese açık paylaşım, yükleme ve PIN sayfaları ile oturum açma ekranında görünen kimlik",
     "name": "Görünen ad",
     "nameHelp": "Herkese açık sayfalarda logonun yanında, oturum açma ekranında logonun altında görünür.",
@@ -1255,7 +1596,7 @@
     "accentHelp": "Herkese açık sayfalarda buton ve bağlantılarda kullanılan hex renk (#rrggbb).",
     "accentInvalid": "#2f6ceb gibi geçerli bir hex renk girin.",
     "ssoLabel": "SSO düğmesi metni",
-    "ssoLabelHelp": "Giriş sayfasındaki tek oturum açma (SSO) düğmesinin metni. Boş bırakılırsa varsayılan kullanılır.",
+    "ssoLabelHelp": "Oturum açma sayfasındaki tek oturum açma (SSO) düğmesinin metni. Boş bırakılırsa varsayılan kullanılır.",
     "footerText": "Alt bilgi metni",
     "footerHelp": "Herkese açık sayfaların alt bilgisinde gösterilen serbest metin (örn. telif satırı).",
     "hidePoweredBy": "\"filex ile paylaşıldı\" satırını gizle",
@@ -1263,23 +1604,21 @@
     "reset": "Sıfırla",
     "resetOk": "Kurumsal kimlik varsayılanlara sıfırlandı",
     "preview": "Canlı önizleme",
-    "previewFile": "Paylaşılan dosya",
-    "previewDownload": "İndir",
-    "poweredByLine": "filex ile paylaşıldı",
-    "previewHelp": "Geçerli değerlerle herkese açık paylaşım sayfasının yaklaşık görünümü. Uygulamak için kaydedin."
+    "previewHelp": "Herkese açık paylaşım sayfası, yukarıdaki değerlerle, bir ziyaretçinin gördüğü gibi. Uygulamak için kaydedin.",
+    "logoPlaceholder": "https://… veya data:image/…",
+    "previewFileName": "rapor-2026.pdf"
   },
   "updates": {
+    "applyFailedWords": "Yükseltme tamamlanamadı; çalışan sürüm korundu.",
+    "checkFailedWords": "Yeni sürümü kontrol etmek için güncelleme sunucusuna ulaşılamadı. filex kendiliğinden yeniden deneyecek.",
     "title": "Güncellemeler",
     "subtitle": "Yayınlanan sürümleri izler; politikanın izin verdiği kadarını uygular",
     "current": "Çalışan sürüm",
     "available": "Yeni sürüm",
     "upToDate": "Güncel — yapılacak bir şey yok",
     "checkNow": "Şimdi kontrol et",
-    "checkedAt": "Son kontrol",
-    "checkFailed": "Kontrol başarısız",
     "applyNow": "Şimdi yükselt",
     "applied": "{version} kuruldu",
-    "applyFailed": "Yükseltme başarısız",
     "willAutoApply": "Politika gereği kendiliğinden yüklenecek (bakım penceresinde)",
     "restartRequired": "{version} diske kuruldu, ama çalışan süreç hâlâ eski sürüm — etkinleşmesi için filex'i yeniden başlatın.",
     "howTo": "Nasıl yükseltilir",
@@ -1287,7 +1626,6 @@
     "includes": "Bu yükseltme şunları da kapsıyor",
     "security": "güvenlik",
     "migrations": "şema değişikliği",
-    "policyLabel": "politika",
     "disabled": "Sürüm kontrolü kapalı",
     "unsupported": "Sunucu bu sürümü desteklemiyor — güncelleme API'si bulunamadı. Backend güncellemesinden sonra bu sayfa etkinleşir.",
     "step": {
@@ -1299,18 +1637,26 @@
     "mode": {
       "binary": "ikili kurulum",
       "docker": "container kurulumu"
-    }
+    },
+    "policyName": {
+      "off": "kapalı",
+      "manual": "yalnızca duyur",
+      "patch": "yamaları kur",
+      "minor": "ara sürümleri kur"
+    },
+    "policyIs": "Politika: {policy}",
+    "checkedAtWhen": "Son kontrol: {when}"
   },
   "desktop": {
     "handoff": "Masaüstü uygulamasına dönebilirsiniz — yetkilendirme tamamlandı.",
-    "handoffError": "Masaüstü uygulaması yetkilendirilemedi. Bu sekmeyi kapatıp uygulamadan tekrar giriş deneyin.",
+    "handoffError": "Masaüstü uygulaması yetkilendirilemedi. Bu sekmeyi kapatıp uygulamadan tekrar oturum açmayı deneyin.",
     "codeHint": "Uygulama açılmadıysa bu kodu bekleme ekranına yapıştırın:",
     "copy": "Kopyala",
     "copied": "Kopyalandı"
   },
   "connections": {
-    "subtitle": "Bu sunucuyu bir depoya bağlayın ve kendi bilgisayarınızdan ona nasıl erişeceğinizi görün.",
-    "advanced": "Gelişmiş depo ayarları"
+    "subtitle": "Bu sunucuya kendi bilgisayarınızdan nasıl erişilir — bağlayın ya da bir S3 istemcisi, SFTP veya filex uygulamasıyla erişin.",
+    "advanced": "Depoları yönet"
   },
   "plugins": {
     "title": "Eklentiler",
@@ -1375,6 +1721,7 @@
       "unverified": "Doğrulanmadı — sınama yapılmadı",
       "failed": "{count} sınama başarısız",
       "unverifiedHint": "Rapor yok: eklenti kendini sınayan bir uç sunmuyor ya da bu kurulumda doğrulama kapalı. Bir şey başarısız olmadı — hiçbir şey denetlenmedi.",
+      "view": "Uyumluluk raporu",
       "reportTitle": "Uygunluk raporu — {name}",
       "summary": "{pass} geçti, {fail} kaldı, {skip} atlandı",
       "ranAt": "{when} tarihinde sınandı",
@@ -1410,11 +1757,249 @@
       "errFile": "Yeni eklenti dosyasını seçin",
       "done": "{name} yükseltildi",
       "rollback": "Yükseltme başarısız oldu. Önceki ikili dosya geri kondu, hiçbir şey kaybolmadı.",
-      "restored": "Şu an çalışan: {state}, dosya {binary}."
+      "restored": "Önceki sürüme dönüldü: {state}, {binary}."
     },
     "signature": {
       "label": "İmza",
       "required": "Bu kurulum yalnızca imzalı eklenti kabul eder: ikili dosyanın SHA-256 özeti üzerine, işletmecinin güvendiği bir anahtarla üretilmiş ayrık imzayı (hex ya da base64) yapıştırın. İmza olmadan kurulum reddedilir."
+    }
+  },
+  "account": {
+    "errors": {
+      "emailRequired": "Bir e-posta adresi yazın.",
+      "emailInvalid": "Bu bir e-posta adresi değil. ad{'@'}ornek.com biçiminde yazın.",
+      "usernameEmpty": "Bir kullanıcı adı yazın.",
+      "usernameAt": "Kullanıcı adında {'@'} olamaz; {'@'} e-posta adresine aittir.",
+      "usernameShort": "Kullanıcı adı en az {min} karakter olmalı.",
+      "usernameLong": "Kullanıcı adı en çok {max} karakter olabilir.",
+      "usernameDigit": "Kullanıcı adı rakamla başlayamaz.",
+      "usernameChar": "Kullanıcı adında “{char}” kullanılamaz. a–z, 0–9, nokta, tire ya da alt çizgi kullanın.",
+      "usernameSpace": "Kullanıcı adında boşluk olamaz. a–z, 0–9, nokta, tire ya da alt çizgi kullanın.",
+      "usernameReserved": "“{name}” ayrılmış bir ad; başka bir kullanıcı adı seçin."
+    }
+  },
+  "appPlugins": {
+    "title": "Uygulamalar",
+    "tabs": {
+      "storage": "Depolama eklentileri",
+      "apps": "Uygulamalar"
+    },
+    "subtitle": "Dosya menüsüne satır ekleyen ve iş olarak çalışan WebAssembly uygulamaları — imzalama, dönüştürme, bir manifestin tarif ettiği her şey. Bir uygulama filex'in içinde, yalnızca istediği ve sizin verdiğiniz izinlerle çalışır.",
+    "install": "Uygulama kur",
+    "supertenantOnly": "Uygulamalar platform işletmeni tarafından yönetilir.",
+    "installed": "{name} kuruldu",
+    "upgraded": "{name} yükseltildi",
+    "deleted": "{name} kaldırıldı",
+    "deleteConfirm": "“{name}” uygulaması kaldırılsın mı? Modülü, ayarları ve işlem geçersiz kılmaları sunucudan silinir.",
+    "permissionsCount": "{count} izin | {count} izin",
+    "scheduledBadge": "Saatte bir uyanır",
+    "runtime": {
+      "on": "Uygulamalar açık",
+      "off": "Bu örnekte uygulamalar kapalı",
+      "archBad": "Bu sunucunun işlemcisi WebAssembly motorunu çalıştıramıyor; burada hiçbir uygulama başlayamaz.",
+      "signature": "Bu örnek yalnızca imzalı uygulamaları kabul ediyor.",
+      "engines": "Motorlar"
+    },
+    "fields": {
+      "name": "Ad",
+      "label": "Etiket",
+      "version": "Sürüm",
+      "state": "Durum",
+      "schedule": "Zamanlama",
+      "permissions": "İzinler",
+      "enabled": "Etkin",
+      "actions": "İşlemler"
+    },
+    "state": {
+      "running": "Çalışıyor",
+      "disabled": "Kapalı",
+      "refused": "Reddedildi",
+      "failed": "Başarısız"
+    },
+    "source": {
+      "upload": "Yüklendi",
+      "url": "URL'den",
+      "github": "GitHub",
+      "bundle": "Paketle geldi"
+    },
+    "actions": {
+      "details": "Ayrıntılar",
+      "upgrade": "Yükselt",
+      "remove": "Kaldır"
+    },
+    "empty": {
+      "title": "Kurulu uygulama yok",
+      "description": "Bir GitHub reposundan kurun: sahip/ad yazın; filex reponun filex-app.json dosyasını okur, adını verdiği modülü indirir ve hiçbir şey kurulmadan önce uygulamanın istediği her izni gösterir."
+    },
+    "wizard": {
+      "title": "Uygulama kur",
+      "upgradeTitle": "{name} yükselt",
+      "steps": {
+        "source": "Kaynak",
+        "review": "İnceleme",
+        "done": "Kurulum"
+      },
+      "source": {
+        "github": "GitHub reposu",
+        "file": "Dosya yükle",
+        "url": "URL'den"
+      },
+      "repo": "Repo",
+      "repoHint": "sahip/ad. filex, verilen ref’teki (boşsa varsayılan dal) filex-app.json dosyasını okur, manifestin adını verdiği modülü indirir ve SHA-256’sını doğrular.",
+      "ref": "Ref (etiket, dal ya da commit)",
+      "wasm": "Modül (.wasm) — dil paketi için boş bırakın",
+      "manifest": "Manifest (filex-app.json)",
+      "signature": "İmza",
+      "signatureHint": "İsteğe bağlı: modülün SHA-256'sı üzerinde ed25519 imzası, hex ya da base64.",
+      "signatureRequired": "Bu örnek yalnızca imzalı uygulamaları kabul ediyor: modülün SHA-256'sı üzerinde, işletmenin güvendiği bir anahtarla yapılmış ed25519 imzasını (hex ya da base64) yapıştırın.",
+      "url": "Modül URL'si — dil paketi için boş",
+      "manifestUrl": "Manifest URL'si",
+      "sha256": "SHA-256",
+      "shaHint": "Modül URL'siyle zorunlu: bir URL, baytlar hakkında söz vermez. filex modülü indirdikten sonra doğrular ve uyuşmazlığı reddeder. Dil paketinde isteğe bağlıdır ve manifesti sabitler.",
+      "next": "İzinleri incele",
+      "back": "Geri",
+      "install": "Kur",
+      "upgrade": "Yükselt",
+      "permissions": "Bu uygulamanın istediği izinler",
+      "noPermissions": "Bu uygulama hiçbir izin istemiyor.",
+      "noReason": "Uygulama gerekçe vermiyor.",
+      "understand": "Bu uygulamanın neler yapabileceğini anladım, kurulmasını istiyorum",
+      "doneInstall": "Uygulama kuruldu ve çalışıyor.",
+      "doneUpgrade": "Uygulama yükseltildi ve çalışıyor.",
+      "facts": {
+        "actions": "Menü işlemleri",
+        "views": "Görünümler",
+        "publicPages": "Herkese açık sayfalar",
+        "sha256": "Modül SHA-256",
+        "homepage": "Ana sayfa",
+        "manifestSha256": "Manifest SHA-256"
+      },
+      "errRepo": "Repoyu sahip/ad biçiminde yazın.",
+      "errFiles": "Manifesti (filex-app.json) seçin — uygulama bir dil paketi değilse modülü (.wasm) de.",
+      "errUrl": "Manifest URL'sini girin — modülü olan bir uygulama için modül URL'sini ve 64 karakterlik SHA-256'yı da.",
+      "errors": {
+        "permissions_incomplete": "Manifestteki her izin verilmek zorunda; eksik: {missing}. Listeyi yeniden inceleyip tekrar deneyin.",
+        "permissions_changed": "Yeni sürüm, kurulu sürüme verilmemiş izinler istiyor: {missing}. İnceleyip yeniden onaylayın.",
+        "sha256_mismatch": "Modülün SHA-256'sı verilenle uyuşmuyor. Özeti ve URL'yi denetleyin.",
+        "manifest_invalid": "Manifest geçerli bir filex-app.json değil: {message}",
+        "signature_required": "Bu örnek yalnızca imzalı uygulamaları kabul ediyor. İmzayı ekleyip tekrar deneyin.",
+        "signature_invalid": "İmza güvenilen hiçbir anahtarla doğrulanmıyor.",
+        "name_taken": "Bu adda bir uygulama zaten kurulu. İncelemeye dönüp orada sunulan yükseltmeyi seçin ya da satırındaki Yükselt’i kullanın.",
+        "describe_mismatch": "Modül kendini manifestten farklı tarif ediyor — derleme ile manifest birbirine ait değil.",
+        "sha256_required": "Modül bir SHA-256 ile sabitlenmemiş; indirilen bir modülün sabitlenmesi gerekir. Özeti girin ya da uygulamanın yazarından manifeste eklemesini isteyin.",
+        "too_large": "Modül bu sunucunun kabul ettiğinden büyük.",
+        "demo_refused": "Tanıtım örneğine uygulama kurulamaz.",
+        "not_found": "Bu uygulama artık kurulu değil.",
+        "fetch": {
+          "bad_repo": "Repoyu sahip/ad biçiminde yazın, örneğin BRF-Tech/filex-convert.",
+          "manifest_not_found": "{where} reposunda filex-app.json bulunamadı (denenen: {refs}). Reponun var ve herkese açık olduğunu, filex-app.json dosyasının kök dizinde durduğunu ve bir ref yazdıysanız o etiketin ya da dalın bulunduğunu kontrol edin.",
+          "module_not_found": "Manifest bulundu ama adını verdiği modül yok: {where}. Sürüme plugin.wasm henüz eklenmemiş olabilir; sürümü kontrol edin ya da başka bir ref yazın.",
+          "unreachable": "Sunucu {where} adresine ulaşamadı. İnternete (ya da o adrese) erişebildiğini kontrol edip yeniden deneyin.",
+          "http_status": "{where} HTTP {status} yanıtı verdi. Biraz sonra yeniden deneyin ya da adresi kontrol edin.",
+          "bad_url": "“{where}” filex’in indirebileceği bir adres değil: https:// kullanın (düz http:// yalnız bu makinenin kendisi için).",
+          "missing_url": "Hem modül URL’sini hem manifest URL’sini girin.",
+          "too_large": "{where} adresinden gelen, bu sunucunun kabul ettiğinden büyük."
+        }
+      },
+      "languagePackNote": "Yalnızca filex'in kendisi için diller — modül yok, hiçbir şey çalışmaz.",
+      "alreadyInstalled": "“{name}” burada zaten kurulu (sürüm {version}). İkinci kez kurulamaz; bunun yerine kurulu olanı aynı kaynaktan {next} sürümüne yükseltin.",
+      "upgradeInstead": "Bunun yerine {version} sürümüne yükselt",
+      "enginesMissing": "Bu sunucuda {engines} yok. Uygulama kurulur, ama bunlarla yaptığı işler bu motorlar kurulup filex yeniden başlatılana kadar çalışmaz."
+    },
+    "detail": {
+      "source": "Kaynak",
+      "signature": "İmza",
+      "signed": "İmzalı",
+      "unsigned": "İmzasız",
+      "sha256": "SHA-256",
+      "installed": "Kuruldu",
+      "updated": "Güncellendi",
+      "homepage": "Ana sayfa",
+      "settings": "Ayarlar",
+      "noSettings": "Bu uygulamanın ayarı yok.",
+      "settingsSaved": "Ayarlar kaydedildi",
+      "secretHint": "*** olarak görünen bir sır, yeni değer yazmadığınız sürece olduğu gibi kalır.",
+      "overrides": {
+        "title": "Menü işlemleri",
+        "empty": "Bu uygulama menüye işlem eklemiyor.",
+        "action": "İşlem",
+        "enabled": "Etkin",
+        "adminOnly": "Yalnızca yöneticiler",
+        "applies": "Uygulandığı yer",
+        "kind": "Tür",
+        "ext": "Uzantılar",
+        "engineOnly": "Yalnızca {engine} bu sunucudayken: {exts}",
+        "mime": "MIME türleri",
+        "multi": "Çoklu seçim",
+        "min": "En az",
+        "max": "En çok",
+        "manifestDefault": "Manifestin dediği gibi",
+        "customize": "Özelleştir",
+        "reset": "Manifeste döndür",
+        "saved": "Menü işlemleri kaydedildi",
+        "kinds": {
+          "file": "Dosyalar",
+          "dir": "Klasörler",
+          "any": "Dosyalar ve klasörler"
+        }
+      },
+      "locks": {
+        "title": "Dosya kilitleri",
+        "hint": "Kilitli dosya herkes için salt okunurdur, bu hesap dâhil",
+        "empty": "Bu uygulama hiçbir dosyayı kilitli tutmuyor.",
+        "path": "Dosya",
+        "storage": "Depo #{id}",
+        "reason": "Gerekçe",
+        "until": "Bitiş",
+        "noEnd": "Uygulama kaldırana kadar",
+        "unlock": "Kilidi kaldır",
+        "lifted": "{path} dosyasının kilidi kaldırıldı",
+        "confirmTitle": "Kilit kaldırılsın mı?",
+        "confirmText": "“{app}” uygulaması {path} dosyasını üzerinde çalışırken dondurdu ve kilidin kalktığından haberi olmayacak. Yalnızca uygulama durduysa ya da iş yarıda bırakıldıysa kaldırın."
+      },
+      "schedule": {
+        "title": "Zamanlama",
+        "next": "Sonraki uyanış {when}",
+        "decided": "son uyanış: {note}",
+        "neverWoken": "henüz hiç uyandırılmadı",
+        "woken": "{count} kez uyandırıldı",
+        "node": "{node} üzerinde",
+        "empty": "Son uyanış hiçbir iş istemedi.",
+        "action": "İş",
+        "due": "Zamanı",
+        "status": "Durum",
+        "job": "İş kaydı",
+        "openQueue": "Operasyon kuyruğunu aç",
+        "notQueued": "henüz kuyruğa verilmedi",
+        "statuses": {
+          "due": "Sırada",
+          "running": "Çalışıyor",
+          "queued": "Kuyruğa verildi",
+          "failed": "Başarısız",
+          "skipped": "Atlandı"
+        }
+      },
+      "logs": {
+        "title": "Günlük",
+        "empty": "Henüz günlük kaydı yok.",
+        "live": "Canlı — 2 saniyede bir yenilenir"
+      },
+      "grantedTitle": "Yapmasına izin verilenler"
+    },
+    "kind": {
+      "languagePack": "Dil paketi"
+    },
+    "lang": {
+      "heading": "filex'e eklediği diller",
+      "coverage": "{'%'}{percent} çevrilmiş",
+      "fallback": "gerisi İngilizce görünür",
+      "unknown": "bu filex sürümünde olmayan {count} metin | bu filex sürümünde olmayan {count} metin",
+      "strings": "{count} metin | {count} metin"
+    },
+    "page": {
+      "breadcrumb": "Uygulama ayrıntıları",
+      "back": "Uygulamalar",
+      "missing": "Bu sunucuda “{name}” adında kurulu bir uygulama yok."
     }
   },
   "usage": {
@@ -1445,10 +2030,10 @@
     "cost": {
       "title": "Tahmini maliyet",
       "storage": "Depolama",
-      "egress": "İndirme",
+      "egress": "İndirilen veri",
       "transactions": "İşlem",
       "covered": "Ücretsiz kotayla karşılandı",
-      "billableFree": "ücretsiz"
+      "billableAndFree": "{billable} / {free} ücretsiz"
     },
     "buckets": {
       "title": "Kova bazında",
@@ -1497,7 +2082,7 @@
       "timezoneHint": "Tarihler bir an olarak saklanır ve burada seçtiğiniz saatle gösterilir; böylece herkes aynı anı kendi saatiyle görür. Hesabınıza kaydedilir, başka bir tarayıcıda da geçerli olur.",
       "timezoneNow": "{zone} bölgesinde şu an: {time}",
       "startPage": "Açılış sayfası",
-      "startPage_home": "Giriş",
+      "startPage_home": "Ana sayfa",
       "startPage_files": "Dosyalar",
       "startPage_admin": "Yönetim paneli",
       "startPageHint": "Oturum açtığınızda ya da ana adrese geldiğinizde filex burayı açar. Doğrudan bir sayfanın bağlantısına tıkladığınızda yine o sayfaya gidersiniz.",
@@ -1506,8 +2091,25 @@
       "modeHint": "Hangi sürümün çizileceği. Otomatik, işletim sisteminizi izler.",
       "palette": "Renk paleti",
       "paletteHint": "O sürümün hangi renklerden oluştuğu. Her paletin aydınlık ve karanlık bir sürümü vardır; bu ayarla üstteki ayar birlikte çalışır.",
-      "folderMemory": "Her klasörün görünümünü hatırla",
-      "folderMemoryHint": "Bir klasör, onu en son bıraktığınız gibi açılır — liste ya da ızgara, ve sıralaması. Varsayılan kapalı; kapalıyken son seçiminiz her yerde geçerlidir.",
+      "folderView": "Varsayılan klasör görünümü",
+      "folderViewHint": "Hiç değiştirmediğiniz bir klasörün nasıl açılacağı. Değiştirdiğiniz klasörler kendi görünümünü korur — bu ayar onlara dokunmaz.",
+      "fvMode": "Görünüm",
+      "fvSort": "Sıralama",
+      "fvDir": "Yön",
+      "fvInherit": "Sunucu varsayılanı ({value})",
+      "fvView_list": "Liste",
+      "fvView_grid": "Izgara",
+      "fvView_gallery": "Galeri",
+      "fvSort_name": "Ad",
+      "fvSort_type": "Tür",
+      "fvSort_modified": "Değiştirilme",
+      "fvSort_size": "Boyut",
+      "fvDir_asc": "Artan",
+      "fvDir_desc": "Azalan",
+      "fvColumns": "Varsayılan sütunlarınız özelleştirilmiş (“Bunu tüm klasörler için varsayılanım yap” ile ayarlandı).",
+      "fvColumnsReset": "Sıfırla",
+      "fvKept": "{count} klasör kendi görünümünü koruyor.",
+      "fvForget": "Hepsini unut",
       "openTrigger": "Dosyaları açma",
       "openTriggerHint": "Farenin dosyayı nasıl açtığı. Dokunmatik ekranda tek dokunuş her zaman açar, kutucuk her zaman seçer.",
       "openTriggerDouble": "Çift tık",
@@ -1529,7 +2131,8 @@
         "share_created": "Biri paylaşım bağlantısı oluşturduğunda",
         "drop_received": "İstek bağlantısıyla bir dosya geldiğinde",
         "comment_added": "Biri bir dosyaya yorum yaptığında",
-        "e2e_escrow_used": "Şifreli bir klasör emanet anahtarıyla açıldığında"
+        "e2e_escrow_used": "Şifreli bir klasör emanet anahtarıyla açıldığında",
+        "plugin_notice": "Kurulu bir uygulama size mesaj gönderdiğinde"
       }
     },
     "security": {
@@ -1544,5 +2147,116 @@
       "soon": "Yakında",
       "body": "Bu sürümde kullanıcıya özel asistan ayarı yok. filex'in sunduğu AI özellikleri tüm kurulum için yönetici tarafından yapılandırılır; bu yüzden burada sizin açıp kapatacağınız bir şey henüz bulunmuyor."
     }
+  },
+  "appearance": {
+    "title": "Görünüm",
+    "subtitle": "Kendi renklerinizle bir tema oluşturun, herkes için varsayılan yapın ve gerçekten gerekiyorsa kendi CSS’inizi yapıştırın.",
+    "saved": "Kurulum temaları",
+    "noThemes": "Henüz tema yok. Aşağıda bir tane oluşturun; hazır paletlerin yanında herkese görünür.",
+    "new": "Yeni tema",
+    "import": "İçe aktar",
+    "export": "Dışa aktar",
+    "makeDefault": "Varsayılan yap",
+    "isDefault": "Varsayılan",
+    "composing": "Yeni tema",
+    "editing": "“{name}” düzenleniyor",
+    "name": "Ad",
+    "nameHelp": "Palet kartının altında görünen ad.",
+    "key": "Tanımlayıcı",
+    "keyHelp": "Küçük harf, rakam ve tire. Palet kimliği olur ve sonradan değiştirilemez.",
+    "keyInvalid": "1-40 karakter kullanın: a-z, 0-9 ve -",
+    "variant": "Varyant",
+    "light": "Açık",
+    "dark": "Koyu",
+    "radius": "Köşe yarıçapı (px)",
+    "radiusHelp": "Diğer üç yarıçap bundan türetilir.",
+    "font": "Yazı tipi ailesi",
+    "fontHelp": "Düz bir CSS yazı tipi yığını. url() kullanılamaz — yazı tipi gömmek için özel CSS bölümünü kullanın.",
+    "preview": "Canlı önizleme",
+    "previewHelp": "Ürünün kullandığı tema değişkenleriyle boyanır; göreceğiniz şey tam olarak budur.",
+    "previewUpload": "Yükle",
+    "previewNew": "Yeni",
+    "previewOk": "Eşitlendi",
+    "previewWarn": "Bekliyor",
+    "previewDanger": "Başarısız",
+    "sampleSlides": "sunum.pptx",
+    "sampleNotes": "notlar.txt",
+    "reset": "Baştan başla",
+    "savedOk": "Tema kaydedildi.",
+    "deletedOk": "Tema silindi.",
+    "defaultOk": "Kurulum varsayılanı ayarlandı.",
+    "deleteConfirm": "“{name}” teması silinsin mi? Kullanan herkes varsayılan palete döner.",
+    "deleteFallbackNote": "Bir temayı silmek, onu kullanan herkesi varsayılan palete döndürür — kimse artık var olmayan bir temada kalmaz.",
+    "importOk": "“{name}” içe aktarıldı.",
+    "importBad": "Bu dosya bir filex teması değil.",
+    "contrastTitle": "Bazı eşleşmeler okunabilirlik eşiğinin altında",
+    "col": {
+      "name": "Tema",
+      "id": "Palet kimliği"
+    },
+    "token": {
+      "bg": "Sayfa zemini",
+      "bgElev": "Yükseltilmiş zemin",
+      "border": "Kenarlıklar",
+      "text": "Metin",
+      "textMuted": "Soluk metin",
+      "primary": "Birincil renk",
+      "primaryHover": "Birincil, üzerine gelince",
+      "primarySoft": "Birincil tonu",
+      "primaryInk": "Ton üzerindeki mürekkep",
+      "danger": "Tehlike",
+      "warning": "Uyarı",
+      "ok": "Başarı"
+    },
+    "contrast": {
+      "text": "Sayfa zemini üzerinde metin",
+      "muted": "Sayfa zemini üzerinde soluk metin",
+      "ink": "Birincil ton üzerinde mürekkep",
+      "primary": "Sayfa zeminine karşı birincil renk",
+      "danger": "Sayfa zeminine karşı tehlike rengi"
+    },
+    "css": {
+      "title": "Özel CSS",
+      "help": "Tema değişkenlerinin anlatamadığı şeyler için kaçış kapısı. İstediğiniz neredeyse her şey yukarıdaki tema düzenleyicisinde var.",
+      "warnTitle": "Açmadan önce bunu okuyun",
+      "warnScope": "Oturum açma sayfasına ve bu ekrana asla uygulanmaz; kapatmak için buraya her zaman dönebilirsiniz.",
+      "warnNetwork": "{'@'}import silinir ve data: olmayan her url() etkisizleştirilir; bir stil dosyası dışarıya haber veremez.",
+      "warnLie": "Ulaştığı ekranlarda CSS hâlâ bir denetimi gizleyebilir, üstünü örtebilir ya da etiketini değiştirebilir — silme onayı dahil. Yalnızca kendi yazdığınız CSS’i yapıştırın.",
+      "warnOperator": "Yalnızca kurulum yöneticileri. Çok kiracılı bir kurulumda kiracı yöneticisi bunu ayarlayamaz.",
+      "enable": "Özel CSS uygula",
+      "enableHelp": "Varsayılan olarak kapalıdır. İstediğiniz an buradan yeniden kapatabilirsiniz.",
+      "field": "Stil dosyası",
+      "hint": "Düz CSS. Burada yapabileceğiniz en yumuşak şey --fe-* değişkenlerini ezmektir.",
+      "count": "{used} / {max} bayt",
+      "tooBig": "Stil dosyası boyut sınırının üzerinde.",
+      "remove": "Kaldır",
+      "removeConfirm": "Stil dosyası kaldırılsın ve özel CSS kapatılsın mı?",
+      "removedOk": "Stil dosyası kaldırıldı.",
+      "savedOk": "Stil dosyası kaydedildi."
+    },
+    "namePlaceholder": "Acme Bulut"
+  },
+  "language": {
+    "fromApp": "{app} uygulamasıyla geldi"
+  },
+  "editor": {
+    "missingPath": "{param} sorgu parametresi eksik."
+  },
+  "appLock": {
+    "refused": "{app} bu dosyayı kilitledi — uygulama bırakana kadar değiştirilemez.",
+    "refusedReason": "{app} bu dosyayı kilitledi ({reason}) — uygulama bırakana kadar değiştirilemez.",
+    "someApp": "Bir uygulama"
+  },
+  "forms": {
+    "required": "Bu alanı doldurun.",
+    "email": "ad{'@'}ornek.com gibi bir e-posta adresi girin.",
+    "url": "http:// ya da https:// ile başlayan tam bir adres girin.",
+    "number": "Bir sayı girin.",
+    "min": "{min} ya da daha büyük bir değer girin.",
+    "max": "{max} ya da daha küçük bir değer girin.",
+    "step": "Tam sayı girin.",
+    "minLength": "En az {n} karakter kullanın. | En az {n} karakter kullanın.",
+    "maxLength": "En çok {n} karakter kullanın. | En çok {n} karakter kullanın.",
+    "pattern": "Bu değer beklenen biçimde değil."
   }
 }

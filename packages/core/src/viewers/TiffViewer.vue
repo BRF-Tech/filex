@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { sayFailure } from '../lib/errorWords';
 /**
  * TiffViewer — multi-page TIFF preview via `utif`.
  *
@@ -56,9 +57,7 @@ async function load(): Promise<void> {
   const lib = await ensureUtif();
   if (myToken !== renderToken) return;
   if (!lib) {
-    error.value = props.t
-      ? props.t('viewer.peer_not_installed')
-      : 'TIFF viewer requires `utif` — install or use download.';
+    error.value = tt('viewer.peer_not_installed', 'This kind of file cannot be shown here. Download it to open it on your device.');
     loading.value = false;
     return;
   }
@@ -77,7 +76,7 @@ async function load(): Promise<void> {
     }
     paint();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'TIFF decode failed';
+    error.value = sayFailure(err, tt('viewer.failed_to_load', 'Failed to load file'), { t: props.t }).text;
   } finally {
     loading.value = false;
   }
@@ -209,7 +208,7 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
 .filex-viewer-tiff__pager {
   position: absolute;
   bottom: 12px;
-  left: 50%;
+  left: 50%; /* rtl-physical: centred by translate(-50%) — the same place in both directions */
   transform: translateX(-50%);
   display: flex;
   align-items: center;

@@ -350,9 +350,12 @@ Three things hold real state; back up **all three**:
    Back them up where they live.
 3. ⚠⚠ **`FILEX_SECRET_KEY`** — the key that seals the credentials filex has to
    be able to *recover* rather than merely compare. S3 access keys are the case
-   today: SigV4 verifies a request by recomputing an HMAC chain from the secret,
-   so it cannot be hashed the way an API token is, and it is stored sealed with
-   AES-GCM under this key.
+   that hurts most: SigV4 verifies a request by recomputing an HMAC chain from
+   the secret, so it cannot be hashed the way an API token is, and it is stored
+   sealed with AES-GCM under this key. The same key also seals a remote storage
+   plugin's token, an app's secret settings and signing authority, and the copy
+   of each share link's PIN that lets its creator read it back (the link itself
+   keeps working without it).
 
    **A restored database without the matching key is a database whose S3 access
    keys no longer verify** — every `aws s3`, `rclone` and `restic` job pointed
@@ -410,7 +413,10 @@ filex migrate down       # roll back exactly one migration
   self‑hosted GlitchTip. Empty DSN = off. See
   [CONFIGURATION.md → Error reporting](CONFIGURATION.md#error-reporting).
 - **Structured logs:** `FILEX_LOG_FORMAT=json` (with `FILEX_LOG_LEVEL=info|debug|…`)
-  emits JSON lines for Loki / ELK / Datadog ingestion.
+  emits JSON lines for Loki / ELK / Datadog ingestion. Each request's `msg=http`
+  line names its caller (`user_id`, `token_id`, `tenant`) and, on the file
+  manager, its verb (`action`) — never the query string; see
+  [CONFIGURATION.md → Logging](CONFIGURATION.md#logging).
 - **Operational surfaces** (admin session/token): the admin **Dashboard**, plus
   queue stats (`/api/admin/queue/stats`) and storage **sync‑runs / drift**
   (`/api/admin/storages/{id}/sync-runs`, `…/drift`) let you watch worker health

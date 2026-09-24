@@ -1,0 +1,9 @@
+{
+  "code": "es",
+  "strings": {
+    "appPlugins.title": "Aplicaciones",
+    "common.cancel": "Cancelar",
+    "ctx.download": "Descargar",
+    "ctx.rename": "Cambiar nombre"
+  }
+}

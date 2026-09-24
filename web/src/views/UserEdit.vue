@@ -10,7 +10,8 @@ import { useUsersStore } from '@/stores/users';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { User, UserRole } from '@/api/types';
-import { formatBytes } from '@/lib/format';
+import { formatBytes, formatPercent } from '@/lib/format';
+import { personName } from '@brftech/filex-core';
 
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -86,11 +87,13 @@ async function confirmDelete() {
   }
 }
 
-const roleOptions = [
+// ⚠ computed, not a plain array: a label built once at setup keeps the
+// language the page was opened in when the language changes.
+const roleOptions = computed(() => [
   { value: 'admin', label: t('users.roles.admin') },
   { value: 'user', label: t('users.roles.user') },
   { value: 'viewer', label: t('users.roles.viewer') },
-];
+]);
 
 // ── koru:k3 — storage quota card ─────────────────────────────────
 // GB inputs use the same 1000-base as formatBytes so "10 GB" here
@@ -178,8 +181,9 @@ onMounted(() => {
     <div class="flex items-center justify-between gap-4 flex-wrap">
       <div>
         <h1 class="text-xl font-semibold flex items-center gap-2">
-          {{ user.display_name || user.email }}
-          <Badge size="xs">{{ user.role }}</Badge>
+          {{ personName(user) }}
+          <!-- ⚠ The role in words (it printed "user" under the name). -->
+          <Badge size="xs" data-testid="user-edit-role">{{ t(`users.roles.${user.role}`) }}</Badge>
         </h1>
         <p class="text-sm text-zinc-500">{{ user.email }}</p>
       </div>
@@ -230,19 +234,23 @@ onMounted(() => {
           aria-hidden="true"
         >
           <span
-            class="absolute inset-y-0 left-0 transition-all duration-300"
+            class="absolute inset-y-0 start-0 transition-all duration-300"
             :class="quotaBarClass"
             :style="{ width: `${Math.min(100, quotaSnap.percent_used)}%` }"
           />
         </div>
         <p class="text-sm text-zinc-600 dark:text-zinc-300 tabular-nums">
           <template v-if="quotaSnap.unlimited">
-            {{ t('quota.used') }}: {{ formatBytes(quotaSnap.used_bytes, locale) }}
+            {{ t('quota.usedIs', { used: formatBytes(quotaSnap.used_bytes, locale) }) }}
           </template>
           <template v-else>
-            {{ t('quota.used') }}: {{ formatBytes(quotaSnap.used_bytes, locale) }} /
-            {{ formatBytes(quotaSnap.quota_bytes, locale) }}
-            ({{ quotaSnap.percent_used.toFixed(quotaSnap.percent_used < 10 ? 1 : 0) }}%)
+            {{
+              t('quota.usedOf', {
+                used: formatBytes(quotaSnap.used_bytes, locale),
+                quota: formatBytes(quotaSnap.quota_bytes, locale),
+                percent: formatPercent(quotaSnap.percent_used, locale),
+              })
+            }}
           </template>
         </p>
       </template>

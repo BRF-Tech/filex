@@ -3,7 +3,40 @@ import { computed, ref } from 'vue';
 import { AuthApi } from '@/api/auth';
 import type { LoginRequest, User } from '@/api/types';
 import { extractError } from '@/api/client';
-import { applyAccountLocale } from '@/i18n';
+import { attachViewPrefsHttp, detachViewPrefsStore, forgetPersonalPrefs } from '@brftech/filex-core';
+import { getApiBaseUrl, getBearerToken, getUseCredentials } from '@/api/runtimeConfig';
+
+/**
+ * The per-person view document (`@brftech/filex-core` → lib/viewPrefs) —
+ * attached the moment somebody is signed in, not only when the explorer
+ * mounts.
+ *
+ * ⚠ Two things in the admin panel read it now: every table keeps its columns
+ * and its sort there (lib/tablePrefs), and the person's settings hold their
+ * DEFAULT folder view. Left to the explorer, a person who went straight to
+ * /admin/users would resize a column into a session-only store and lose it on
+ * reload, and the settings modal would show no default at all.
+ *
+ * ⚠ Attached per ACCOUNT: signing in as somebody else detaches first, so the
+ * next person never sees the previous one's arrangements.
+ */
+let viewPrefsFor: number | null = null;
+function attachViewPrefsFor(userId: number | null): void {
+  if (userId === viewPrefsFor) return;
+  detachViewPrefsStore();
+  viewPrefsFor = userId;
+  if (userId === null) return;
+  const api = getApiBaseUrl().replace(/\/api\/?$/, '');
+  attachViewPrefsHttp({
+    apiBase: api,
+    headers: (): Record<string, string> => {
+      const bearer = getBearerToken();
+      return bearer ? { Authorization: `Bearer ${bearer}` } : {};
+    },
+    credentials: getUseCredentials() ? 'include' : 'omit',
+  });
+}
+import { applyAccountLocale, t } from '@/i18n';
 import { applyAccountTimeZone } from '@/lib/timezone';
 
 export const useAuthStore = defineStore('auth', () => {
@@ -33,6 +66,7 @@ export const useAuthStore = defineStore('auth', () => {
       // difference is a stale cache rather than a newer decision
       // (lib/timezone's header).
       applyAccountTimeZone(me.user?.timezone);
+      attachViewPrefsFor(me.user?.id ?? null);
       error.value = null;
       return me.user;
     } catch (e: unknown) {
@@ -59,23 +93,50 @@ export const useAuthStore = defineStore('auth', () => {
       await fetchMe();
       return true;
     } catch (e: unknown) {
-      error.value = extractError(e, 'Login failed');
+      error.value = extractError(e, t('login.errGeneric'));
       return false;
     } finally {
       loading.value = false;
     }
   }
 
-  async function logout(): Promise<void> {
+  /**
+   * Ends the session. Resolves to the IdP's end-session URL when signing out
+   * has to continue there (an SSO session whose IdP can end sessions), else
+   * null. Navigating is the caller's job — see lib/signOut.
+   */
+  async function logout(returnTo?: string): Promise<string | null> {
+    let idpLogout: string | null = null;
     try {
-      await AuthApi.logout();
+      const res = await AuthApi.logout(returnTo);
+      idpLogout = res?.logout_url || null;
     } catch {
       // ignore — we still clear local state
     } finally {
       user.value = null;
       permissions.value = [];
       sessionStorage.removeItem('filex.bearer');
+      attachViewPrefsFor(null);
+      // ⚠⚠ And this browser's copy of what the PERSON liked — the palette,
+      // light/dark, row density and language (`@brftech/filex-core` →
+      // lib/prefs). Owner, 2026-09-21: *"oturum kapanınca temizlersek
+      // localstorage'ı tamamız ya o kısımda"*. Somebody who has signed out has
+      // left, and a shared machine should not go on holding their taste.
+      //
+      // ⚠ Here as well as in `App.vue`'s no-session branch, and the pair is
+      // not redundant: this is the sign-out the app is TOLD about, that one is
+      // every way a session can end without anybody saying so. Neither is
+      // sufficient and the function is idempotent.
+      //
+      // ⚠ It writes `filex.session`, and that write is what carries the
+      // sign-out to the OTHER tabs on this origin: the `storage` event it
+      // raises is the only signal that crosses tabs, and `lib/instanceThemes`
+      // listens for exactly that key. The palette and mode listeners cannot
+      // do it — by the time they run `hasSession()` is already false and they
+      // refuse the event by design.
+      forgetPersonalPrefs();
     }
+    return idpLogout;
   }
 
   function can(perm: string): boolean {

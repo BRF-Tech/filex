@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/brf-tech/filex/backend/internal/httpx"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -52,11 +53,27 @@ type OIDCDriver interface {
 	HandleCallback(w http.ResponseWriter, r *http.Request) (*model.User, string, error)
 }
 
+// OIDCLogoutDriver is an optional capability of an OIDCDriver: RP-initiated
+// logout (OpenID Connect RP-Initiated Logout 1.0). EndSessionURL returns where
+// to send the browser so the IdP ends its own session too — idToken is the one
+// kept for the session being signed out — or "" to keep sign-out local.
+type OIDCLogoutDriver interface {
+	EndSessionURL(r *http.Request, idToken, postLogoutRedirect string) string
+}
+
 // userCtxKey is unexported to prevent collision.
 type userCtxKey struct{}
 
 // WithUser stores u on ctx.
+//
+// It also notes the account on the request's access-log holder, when there is
+// one (httpx.RequestLog): every door that authenticates a request passes
+// through here, so the access log learns who asked without each of them
+// having to remember to say so.
 func WithUser(ctx context.Context, u *model.User) context.Context {
+	if u != nil {
+		httpx.RequestLogFrom(ctx).NoteUser(u.ID)
+	}
 	return context.WithValue(ctx, userCtxKey{}, u)
 }
 

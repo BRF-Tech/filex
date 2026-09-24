@@ -1,30 +1,31 @@
 <script setup lang="ts">
 /**
- * ConnectionsPanel — storage connections, and how to connect to them.
+ * ConnectionsPanel — how to connect your computer to this server.
  *
  * ⚠⚠ This component is the reason the feature exists ONCE. The desktop
  * app, the web app and any embed mount this same file; none of them owns a
- * hand-written copy of the form, the list or the instructions. A fix here
+ * hand-written copy of the credential panels or the instructions. A fix here
  * lands everywhere on the next release of the package, which is precisely
  * the standing rule ("never write surface-specific behaviour") applied to a
  * feature that was asked for on three surfaces at once.
  *
- * Two halves, because they are two different questions:
+ * ONE question, answered for the protocol you pick: "connect my computer to
+ * filex". Generated from the live deployment — the real host, the storage
+ * name, the caller's own username — with the credential each protocol needs
+ * minted right above the commands that use it, and a copy button.
  *
- *   • INWARD  — "connect filex to a bucket / a share / a server". Rendered
- *     entirely from the backend's driver descriptors, so a driver added on
- *     the server needs no frontend release and no surface can drift.
- *   • OUTWARD — "connect my computer to filex". Generated from the live
- *     deployment: the real host, the storage name, the caller's own
- *     username, with a copy button.
- *
- * A user who may not manage storages is told so plainly and still gets the
- * outward half — which is the half they actually need. Rendering a form
- * whose every submit 403s would be the dishonest alternative.
+ * ⚠ There is NO storage form here, and there has not been one since v0.43.0.
+ * The owner, testing the release: "nasıl bağlanılır kısmında ve adminde
+ * bağlantılar sayfası … ikisinde de depolar gözüküyor bu depolar sekmesine
+ * hiç ihtiyaç yok. kaldıralım." Managing storages is a console job and it
+ * already had a console: Admin → Storages (create, edit, delete, plus sync
+ * mode, RBAC, drift — everything this panel's half never had). Browsing the
+ * storages you can see is the explorer's navigation panel. A second, poorer
+ * copy of the first in the screen that answers the OTHER question was the
+ * whole complaint; do not bring it back, extend Admin → Storages instead.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
-import type { StorageRow } from '../types/Connections';
 import { useLocale } from '../composables/useLocale';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import { useConnections, connectionsOrigin } from '../composables/useConnections';
@@ -35,7 +36,6 @@ import {
   hostOf,
   type ProtocolGuide,
 } from '../lib/connectionGuides';
-import StorageFields from './StorageFields.vue';
 import ConnectionGuideView from './ConnectionGuideView.vue';
 import S3KeysPanel from './S3KeysPanel.vue';
 import SSHKeysPanel from './SSHKeysPanel.vue';
@@ -45,15 +45,16 @@ import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
   config: ExplorerConfig;
-  /** Which half to open on. */
-  initialTab?: 'storages' | 'connect';
   /** Draw a close control — the desktop app opens this as a full surface
    *  and needs a way out; a page-embedded copy has the page's own chrome. */
   closable?: boolean;
 }>();
 
+/* ⚠ No `changed`. It existed for one reason — a storage added or removed in
+   this panel had to reach the host's own list — and this panel no longer
+   adds or removes one. An event that can never fire is worse than none: every
+   host wires a handler for it and then trusts a refresh that never comes. */
 const emit = defineEmits<{
-  (e: 'changed'): void;
   (e: 'close'): void;
   (e: 'error', err: { message: string }): void;
 }>();
@@ -64,27 +65,7 @@ const { t } = useLocale(locale);
 // Destructured on purpose: Vue only auto-unwraps refs that are top-level in
 // the setup scope, so `conn.storages` inside a template would render a Ref
 // object rather than its value.
-const {
-  drivers,
-  storages,
-  visible,
-  me,
-  publicUrl,
-  loading,
-  loaded,
-  error,
-  canManage,
-  denial,
-  load,
-  createStorage,
-  updateStorage,
-  deleteStorage,
-  testStorage,
-  descriptor,
-  fields,
-  defaults,
-  missingRequired,
-} = useConnections(props.config);
+const { visible, me, publicUrl, error, load } = useConnections(props.config);
 
 // ── theme ────────────────────────────────────────────────────────────
 // Resolved in JS rather than left to `prefers-color-scheme`, because the
@@ -104,177 +85,15 @@ const themeResolved = computed(() => {
   return osDark.value ? 'dark' : 'light';
 });
 
-// ── tabs ─────────────────────────────────────────────────────────────
-const tab = ref<'storages' | 'connect'>(props.initialTab ?? 'storages');
-
-// ── inward: the storage form ─────────────────────────────────────────
-type FormMode = { kind: 'none' } | { kind: 'new' } | { kind: 'edit'; row: StorageRow };
-const form = ref<FormMode>({ kind: 'none' });
-const fName = ref('');
-const fDriver = ref('');
-const fReadOnly = ref(false);
-const fEnabled = ref(true);
-const fConfig = ref<Record<string, unknown>>({});
-const fInvalid = ref<string[]>([]);
-const saving = ref(false);
-const testing = ref(false);
-const testResult = ref<{ ok: boolean; error?: string; object_count?: number } | null>(null);
+// ── outward: the guides ──────────────────────────────────────────────
+const protocols = guideProtocols();
+const protocol = ref(protocols[0] ?? 'webdav');
+const guideStorage = ref<string>('');
 
 /** What the NFS panel published: where to mount, and the path just minted. */
 const nfs = ref<{ host: string; port: number; enabled: boolean; path?: string; readOnly: boolean } | null>(
   null,
 );
-const formError = ref<string | null>(null);
-const confirmDelete = ref<number | null>(null);
-
-const driverOptions = computed(() =>
-  drivers.value.map((d) => {
-    const translated = t(d.i18n_key);
-    return { value: d.driver, label: translated === d.i18n_key ? d.label : translated };
-  }),
-);
-
-const formFields = computed(() => fields(fDriver.value));
-
-function openNew() {
-  const first = drivers.value[0]?.driver ?? '';
-  fDriver.value = first;
-  fName.value = '';
-  fReadOnly.value = false;
-  fEnabled.value = true;
-  fConfig.value = defaults(first);
-  fInvalid.value = [];
-  testResult.value = null;
-  formError.value = null;
-  form.value = { kind: 'new' };
-}
-
-function openEdit(row: StorageRow) {
-  fDriver.value = row.driver;
-  fName.value = row.name;
-  fReadOnly.value = !!row.read_only;
-  fEnabled.value = row.enabled !== false;
-  // A copy: editing must not mutate the list row under the user while
-  // they type, and cancelling must actually cancel.
-  fConfig.value = { ...(row.config ?? {}) };
-  fInvalid.value = [];
-  testResult.value = null;
-  formError.value = null;
-  form.value = { kind: 'edit', row };
-}
-
-function closeForm() {
-  form.value = { kind: 'none' };
-  testResult.value = null;
-  formError.value = null;
-}
-
-function onDriverChange(next: string) {
-  fDriver.value = next;
-  // Descriptor defaults, wholesale. Carrying keys over from the previous
-  // driver is how a config ends up with fields nothing reads.
-  fConfig.value = defaults(next);
-  fInvalid.value = [];
-  testResult.value = null;
-}
-
-function validate(): boolean {
-  const missing = missingRequired(fDriver.value, fConfig.value).map((f) => f.key);
-  fInvalid.value = missing;
-  if (!fName.value.trim()) formError.value = t('conn.form.nameRequired');
-  else if (missing.length) formError.value = t('conn.form.fillRequired');
-  else formError.value = null;
-  return !formError.value;
-}
-
-async function runTest() {
-  testing.value = true;
-  testResult.value = null;
-  try {
-    testResult.value = await testStorage({
-      driver: fDriver.value,
-      config: fConfig.value,
-    });
-  } finally {
-    testing.value = false;
-  }
-}
-
-async function save() {
-  if (!validate()) return;
-  saving.value = true;
-  formError.value = null;
-  try {
-    const body = {
-      name: fName.value.trim(),
-      driver: fDriver.value,
-      config: fConfig.value,
-      read_only: fReadOnly.value,
-      enabled: fEnabled.value,
-    };
-    if (form.value.kind === 'edit') await updateStorage(form.value.row.id, body);
-    else await createStorage(body);
-    closeForm();
-    emit('changed');
-  } catch (e) {
-    const msg = (e as { detail?: string; message?: string }) ?? {};
-    // The backend's own words beat a generic status line: "400" says
-    // nothing, `ROOT_PATH_FORBIDDEN` says exactly which field is wrong.
-    let detail = '';
-    try {
-      detail = msg.detail ? (JSON.parse(msg.detail) as { error?: string }).error ?? '' : '';
-    } catch {
-      detail = msg.detail ?? '';
-    }
-    formError.value = detail || msg.message || String(e);
-    emit('error', { message: formError.value });
-  } finally {
-    saving.value = false;
-  }
-}
-
-async function remove(row: StorageRow) {
-  if (confirmDelete.value !== row.id) {
-    confirmDelete.value = row.id;
-    return;
-  }
-  confirmDelete.value = null;
-  try {
-    await deleteStorage(row.id);
-    emit('changed');
-  } catch (e) {
-    emit('error', { message: (e as Error).message });
-  }
-}
-
-/** The one line under a storage's name: where it actually points. */
-function summaryOf(row: StorageRow): string {
-  const d = descriptor(row.driver);
-  const cfg = row.config ?? {};
-  const parts: string[] = [];
-  const rootField = d?.fields.find((f) => f.root);
-  const pick = (key: string, aliases: string[] = []): string => {
-    for (const k of [key, ...aliases]) {
-      const v = cfg[k];
-      if (typeof v === 'string' && v.trim()) return v;
-    }
-    return '';
-  };
-  const host = pick('endpoint') || pick('url') || pick('host');
-  if (host) parts.push(host);
-  const bucket = pick('bucket');
-  if (bucket) parts.push(bucket);
-  if (rootField) {
-    const r = pick(rootField.key, rootField.aliases ?? []);
-    if (r) parts.push(r);
-  }
-  return parts.join(' · ');
-}
-
-// ── outward: the guides ──────────────────────────────────────────────
-const protocols = guideProtocols();
-const protocol = ref(protocols[0] ?? 'webdav');
-const guideStorage = ref<string>('');
 
 const origin = computed(() => connectionsOrigin(props.config, publicUrl.value));
 
@@ -361,7 +180,6 @@ onBeforeUnmount(() => mq?.removeEventListener?.('change', onMq));
 watch(
   () => [props.config.apiBase, props.config.endpoint],
   () => {
-    closeForm();
     void load();
   },
 );
@@ -394,233 +212,13 @@ watch(
       </button>
     </header>
 
-    <nav class="fe-conn__tabs" role="tablist">
-      <button
-        type="button"
-        role="tab"
-        class="fe-conn__tab"
-        :class="{ 'is-active': tab === 'storages' }"
-        :aria-selected="tab === 'storages'"
-        data-testid="tab-storages"
-        @click="tab = 'storages'"
-      >
-        {{ t('conn.tab.storages') }}
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="fe-conn__tab"
-        :class="{ 'is-active': tab === 'connect' }"
-        :aria-selected="tab === 'connect'"
-        data-testid="tab-connect"
-        @click="tab = 'connect'"
-      >
-        {{ t('conn.tab.connect') }}
-      </button>
-    </nav>
+    <!-- ⚠ The server's own words when the storage list cannot be fetched. It
+         used to be printed by the storage half, which is gone; the guides
+         below are built from that same list, so swallowing the failure here
+         would leave a page of instructions quietly missing its storages. -->
+    <p v-if="error" class="fe-conn__error" data-testid="conn-error">{{ error }}</p>
 
-    <!-- ══ inward ════════════════════════════════════════════════ -->
-    <section v-if="tab === 'storages'" class="fe-conn__body" role="tabpanel">
-      <p v-if="loading && !loaded" class="fe-conn__muted">
-        {{ t('conn.loading') }}
-      </p>
-
-      <template v-else>
-        <!-- The honest non-admin state. Not a disabled form: a form you
-             cannot submit teaches the wrong thing about whose install this
-             is. -->
-        <div
-          v-if="canManage === false"
-          class="fe-conn__card fe-conn__card--notice"
-          data-testid="no-admin"
-        >
-          <strong>{{ t('conn.denied.title') }}</strong>
-          <p class="fe-conn__muted">
-            {{
-              denial === 'anonymous'
-                ? t('conn.denied.anonymous')
-                : denial === 'unreachable'
-                  ? t('conn.denied.unreachable', { error: error ?? '' })
-                  : t('conn.denied.none')
-            }}
-          </p>
-          <p class="fe-conn__muted">{{ t('conn.denied.guideHint') }}</p>
-          <button type="button" class="fe-conn__btn fe-conn__btn--primary" @click="tab = 'connect'">
-            {{ t('conn.denied.guideCta') }}
-          </button>
-        </div>
-
-        <!-- What they CAN see, even without admin: the storages they may
-             browse. Otherwise this half of the panel is blank for them. -->
-        <div v-if="canManage === false && visible.length" class="fe-conn__list">
-          <div v-for="name in visible" :key="name" class="fe-conn__card">
-            <div class="fe-conn__rowmain">
-              <strong class="fe-conn__name">{{ name }}</strong>
-              <span class="fe-conn__muted">{{ t('conn.visibleOnly') }}</span>
-            </div>
-          </div>
-        </div>
-
-        <template v-if="canManage">
-          <p v-if="error" class="fe-conn__error">{{ error }}</p>
-
-          <!-- ── the form ── -->
-          <div v-if="form.kind !== 'none'" class="fe-conn__card fe-conn__form" data-testid="storage-form">
-            <h3 class="fe-conn__formtitle">
-              {{ form.kind === 'edit' ? t('conn.form.editTitle', { name: fName }) : t('conn.form.newTitle') }}
-            </h3>
-
-            <div class="fe-cfield__row">
-              <label class="fe-cfield__label" for="fe-conn-name">
-                {{ t('conn.form.name') }}<span class="fe-cfield__req">*</span>
-              </label>
-              <input
-                id="fe-conn-name"
-                v-model="fName"
-                class="fe-cfield__input"
-                data-testid="storage-name"
-                :placeholder="t('conn.form.namePlaceholder')"
-              />
-              <p class="fe-cfield__help">{{ t('conn.form.nameHelp') }}</p>
-            </div>
-
-            <div class="fe-cfield__row">
-              <label class="fe-cfield__label" for="fe-conn-driver">{{ t('conn.form.driver') }}</label>
-              <select
-                id="fe-conn-driver"
-                class="fe-cfield__input"
-                data-testid="storage-driver"
-                :value="fDriver"
-                :disabled="form.kind === 'edit'"
-                @change="onDriverChange(($event.target as HTMLSelectElement).value)"
-              >
-                <option v-for="o in driverOptions" :key="o.value" :value="o.value">
-                  {{ o.label }}
-                </option>
-              </select>
-              <p v-if="form.kind === 'edit'" class="fe-cfield__help">
-                {{ t('conn.form.driverLocked') }}
-              </p>
-            </div>
-
-            <StorageFields
-              v-model="fConfig"
-              :fields="formFields"
-              :locale="locale"
-              :invalid="fInvalid"
-            />
-
-            <label class="fe-cfield__check">
-              <input v-model="fReadOnly" type="checkbox" data-testid="storage-readonly" />
-              <span>{{ t('conn.form.readOnly') }}</span>
-            </label>
-            <label class="fe-cfield__check">
-              <input v-model="fEnabled" type="checkbox" />
-              <span>{{ t('conn.form.enabled') }}</span>
-            </label>
-
-            <p v-if="formError" class="fe-conn__error" data-testid="form-error">{{ formError }}</p>
-            <p
-              v-if="testResult"
-              class="fe-conn__testresult"
-              :class="testResult.ok ? 'is-ok' : 'is-bad'"
-              data-testid="test-result"
-            >
-              {{
-                testResult.ok
-                  ? t('conn.form.testOk', { count: testResult.object_count ?? 0 })
-                  : t('conn.form.testFail', { error: testResult.error ?? '' })
-              }}
-            </p>
-
-            <div class="fe-conn__actions">
-              <button
-                type="button"
-                class="fe-conn__btn"
-                data-testid="storage-test"
-                :disabled="testing"
-                @click="runTest"
-              >
-                {{ testing ? t('conn.form.testing') : t('conn.form.test') }}
-              </button>
-              <button
-                type="button"
-                class="fe-conn__btn fe-conn__btn--primary"
-                data-testid="storage-save"
-                :disabled="saving"
-                @click="save"
-              >
-                {{ saving ? t('conn.form.saving') : t('conn.form.save') }}
-              </button>
-              <button type="button" class="fe-conn__btn" @click="closeForm">
-                {{ t('conn.form.cancel') }}
-              </button>
-            </div>
-          </div>
-
-          <!-- ── the list ── -->
-          <div v-else>
-            <div class="fe-conn__listhead">
-              <span class="fe-conn__muted">
-                {{ t('conn.list.count', { n: storages.length }) }}
-              </span>
-              <button
-                type="button"
-                class="fe-conn__btn fe-conn__btn--primary"
-                data-testid="storage-add"
-                @click="openNew"
-              >
-                + {{ t('conn.list.add') }}
-              </button>
-            </div>
-
-            <p v-if="!storages.length" class="fe-conn__empty">
-              {{ t('conn.list.empty') }}
-            </p>
-
-            <div class="fe-conn__list" data-testid="storage-list">
-              <div v-for="row in storages" :key="row.id" class="fe-conn__card">
-                <div class="fe-conn__rowmain">
-                  <div class="fe-conn__rowtext">
-                    <strong class="fe-conn__name">{{ row.name }}</strong>
-                    <span class="fe-conn__badge">{{ row.driver }}</span>
-                    <span v-if="row.read_only" class="fe-conn__badge fe-conn__badge--warn">
-                      {{ t('conn.list.readOnly') }}
-                    </span>
-                    <span v-if="row.enabled === false" class="fe-conn__badge">
-                      {{ t('conn.list.disabled') }}
-                    </span>
-                    <div v-if="summaryOf(row)" class="fe-conn__muted fe-conn__summary">
-                      {{ summaryOf(row) }}
-                    </div>
-                  </div>
-                  <div class="fe-conn__rowbtns">
-                    <button
-                      type="button"
-                      class="fe-conn__btn"
-                      :data-testid="`storage-edit-${row.name}`"
-                      @click="openEdit(row)"
-                    >
-                      {{ t('conn.list.edit') }}
-                    </button>
-                    <button
-                      type="button"
-                      class="fe-conn__btn fe-conn__btn--danger"
-                      @click="remove(row)"
-                    >
-                      {{ confirmDelete === row.id ? t('conn.list.confirm') : t('conn.list.remove') }}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </template>
-      </template>
-    </section>
-
-    <!-- ══ outward ═══════════════════════════════════════════════ -->
-    <section v-else class="fe-conn__body" role="tabpanel">
+    <section class="fe-conn__body">
       <div class="fe-conn__guidebar">
         <label v-if="protocols.length > 1" class="fe-conn__pick">
           <span class="fe-cfield__label">{{ t('conn.guide.protocol') }}</span>
@@ -747,145 +345,17 @@ watch(
   font-size: 13px;
   overflow-wrap: anywhere;
 }
-.fe-conn__tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--fe-border);
-}
-.fe-conn__tab {
-  font: inherit;
-  font-size: 13.5px;
-  border: 0;
-  background: none;
-  color: var(--fe-text-muted);
-  padding: 7px 12px;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-}
-.fe-conn__tab:hover {
-  color: var(--fe-text);
-}
-.fe-conn__tab.is-active {
-  color: var(--fe-primary);
-  border-bottom-color: var(--fe-primary);
-  font-weight: 600;
-}
 .fe-conn__body {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
 }
-.fe-conn__card {
-  border: 1px solid var(--fe-border);
-  border-radius: var(--fe-radius);
-  background: var(--fe-bg-elev);
-  padding: 12px 14px;
-}
-.fe-conn__card--notice {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
-}
-.fe-conn__form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.fe-conn__formtitle {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 650;
-}
-.fe-conn__list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.fe-conn__listhead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 4px;
-}
-.fe-conn__rowmain {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.fe-conn__rowtext {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.fe-conn__rowbtns {
-  display: flex;
-  gap: 6px;
-  flex: 0 0 auto;
-}
-.fe-conn__name {
-  font-size: 14px;
-}
-.fe-conn__summary {
-  flex-basis: 100%;
-  font-family: var(--fe-font-mono);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.fe-conn__badge {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border: 1px solid var(--fe-border-strong);
-  border-radius: 999px;
-  padding: 1px 8px;
-  color: var(--fe-text-muted);
-}
-.fe-conn__badge--warn {
-  color: var(--fe-danger);
-  border-color: var(--fe-danger);
-}
-.fe-conn__muted {
-  color: var(--fe-text-muted);
-  font-size: 12.5px;
-  margin: 0;
-  line-height: 1.5;
-}
-.fe-conn__empty {
-  border: 1px dashed var(--fe-border-strong);
-  border-radius: var(--fe-radius);
-  padding: 16px;
-  color: var(--fe-text-muted);
-  font-size: 13px;
-  margin: 0;
-}
 .fe-conn__error {
   margin: 0;
   color: var(--fe-danger);
   font-size: 13px;
   overflow-wrap: anywhere;
-}
-.fe-conn__testresult {
-  margin: 0;
-  font-size: 13px;
-  overflow-wrap: anywhere;
-}
-.fe-conn__testresult.is-ok {
-  color: #16a34a;
-}
-.fe-conn__testresult.is-bad {
-  color: var(--fe-danger);
-}
-.fe-conn__actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 .fe-conn__btn {
   font: inherit;
@@ -903,14 +373,6 @@ watch(
 .fe-conn__btn:disabled {
   opacity: 0.55;
   cursor: default;
-}
-.fe-conn__btn--primary {
-  background: var(--fe-primary);
-  border-color: var(--fe-primary);
-  color: #fff;
-}
-.fe-conn__btn--danger {
-  color: var(--fe-danger);
 }
 .fe-conn__guidebar {
   display: flex;

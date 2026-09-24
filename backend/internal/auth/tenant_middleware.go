@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/httpx"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 )
@@ -37,7 +38,11 @@ func TenantResolver(store db.Store, multiTenant bool) func(http.Handler) http.Ha
 				next.ServeHTTP(w, r)
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(tenant.WithScope(r.Context(), ScopeForUser(r.Context(), store, u))))
+			scope := ScopeForUser(r.Context(), store, u)
+			// The access log names the tenant (httpx.RequestLog). Noted here
+			// rather than in tenant.WithScope, which stays stdlib-only.
+			httpx.RequestLogFrom(r.Context()).NoteTenant(scope.Slug)
+			next.ServeHTTP(w, r.WithContext(tenant.WithScope(r.Context(), scope)))
 		})
 	}
 }

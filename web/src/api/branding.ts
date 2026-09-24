@@ -10,11 +10,14 @@ export interface BrandingConfig {
   /* issue #28 — the SSO button's own label (settings key `branding.sso_label`).
      Empty means the product's translated default. */
   sso_label?: string;
-  /* gorunum:v1 — the operator's own stylesheet (settings key `ui.custom_css`).
-     It rides this payload instead of getting an endpoint of its own because
-     this is the appearance fetch the SPA already makes on every page load,
-     before a session exists. `web/src/lib/customCss.ts` injects it. */
-  custom_css: string;
+  /* ⚠⚠ NO `custom_css` HERE, and the absence is the point. The operator
+     stylesheet used to ride this payload — which is public, fetched before a
+     session exists — so it reached anonymous visitors and the sign-in form
+     itself. It is served from `GET /api/me/custom-css` behind auth now
+     (`api/appearance.ts`, injected by `lib/customCss.ts`), and the server
+     DELETED the field rather than blanking it. Declaring it here again would
+     be a type promising a string the wire never sends: `undefined` typed as
+     `string`, and every reader of it silently styling nothing. */
 }
 
 export const BrandingApi = {
@@ -25,13 +28,16 @@ export const BrandingApi = {
   },
 
   /**
-   * The boot read, shared. Two callers need this payload as the page loads —
-   * the document title and the custom-stylesheet injector — and they must not
-   * each fire their own request: the response is `Cache-Control: max-age=60`,
-   * so two parallel cold requests both miss the cache and the server answers
-   * twice for one page load. Memoised per page load, never invalidated (a
-   * reload is a new page load; the Settings page applies its own save
-   * directly).
+   * The boot read, shared. The response is `Cache-Control: max-age=60`, so two
+   * parallel cold requests both miss the cache and the server answers twice
+   * for one page load; memoising per page load is what stops that. Never
+   * invalidated — a reload is a new page load, and the admin screens apply
+   * their own saves directly.
+   *
+   * ⚠ The custom-stylesheet injector used to be the second caller here. It is
+   * not any more: the sheet is authenticated and comes from
+   * `AppearanceApi.customCss()` (`lib/customCss.ts`), never from this public
+   * payload.
    */
   boot(): Promise<BrandingConfig> {
     bootPromise ??= BrandingApi.get();

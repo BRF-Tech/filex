@@ -39,6 +39,39 @@ const IS_WIN = process.platform === 'win32';
 export const RUN_MARKER = 'SHOTS_RUN_ID';
 const norm = (s) => String(s ?? '').split('/').join('\\').toLowerCase();
 
+/**
+ * PowerShell's `ConvertTo-Json` emits some control characters RAW inside a
+ * string instead of escaping them, and a control character is illegal there:
+ * `JSON.parse` then dies with "Bad control character in string literal" at an
+ * offset that says nothing about which process was to blame.
+ *
+ * ⚠ Measured 2026-09-23 on the maintainer's workstation: `pnpm shots` shot its
+ * scenes, then the cleanup sweep threw on exactly this and the run ended with
+ * an unhandled SyntaxError — after `capture.mjs` and before `sidenav.mjs`, so
+ * half the pictures were silently not taken and the sweep that is supposed to
+ * leave no process behind never ran. The offending command line belongs to
+ * some unrelated program on the machine; nothing in this repository can stop
+ * one existing, so the parser has to survive it.
+ *
+ * Every code point below 0x20 becomes a space. The payload is `-Compress`, so
+ * it is a single line and there is no legitimate raw control character
+ * anywhere in it — escaped ones are two characters (`backslash n`) and are
+ * untouched.
+ *
+ * ⚠ Written as a char-code loop on purpose: a regex for this range has to
+ * spell control characters as escapes, and an escape written through a tool
+ * that resolves them lands in the source as the invisible character itself
+ * (filex lessons #320, #330, #332).
+ */
+export function stripRawControlChars(text) {
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    out += code < 0x20 ? ' ' : text[i];
+  }
+  return out;
+}
+
 /** Every process visible to this user: { pid, ppid, name, exe, cmd, created, env? }. */
 export function listProcesses() {
   return IS_WIN ? listWindows() : listLinux();
@@ -59,7 +92,7 @@ function listWindows() {
   if (r.status !== 0 || !r.stdout.trim()) {
     throw new Error(`could not list processes: ${r.stderr || `exit ${r.status}`}`);
   }
-  const rows = JSON.parse(r.stdout);
+  const rows = JSON.parse(stripRawControlChars(r.stdout));
   return (Array.isArray(rows) ? rows : [rows]).map((p) => ({
     pid: p.pid,
     ppid: p.ppid,

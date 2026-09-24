@@ -52,6 +52,18 @@ export interface NotificationRow {
   target?: NotificationTarget;
 }
 
+/**
+ * One page of `GET /api/notifications` — the rows, and how many there are.
+ *
+ * ⚠ `total` is the count for the FILTER that was asked for. The poll asks
+ * `unread=true`, so its total is the unread count: the same number the web
+ * bell's badge shows, from the same server, without a second request.
+ */
+export interface NotificationPage {
+  items: NotificationRow[];
+  total: number;
+}
+
 export interface NotifyAccount {
   id: string;
   serverUrl: string;
@@ -77,7 +89,19 @@ export interface DesktopNotifierOptions {
   /** Where a click goes. Handed the resolved destination, never a raw target. */
   onOpen: (accountId: string, dest: NotificationDestination) => void;
   /** Reads the bell. main.ts passes Electron's `net.fetch`; tests pass rows. */
-  fetchRows: (acc: NotifyAccount, limit: number) => Promise<NotificationRow[]>;
+  fetchRows: (acc: NotifyAccount, limit: number) => Promise<NotificationPage>;
+  /**
+   * The unread count, whenever a poll learned it — the desktop's half of
+   * rule 3 (docs/NOTIFICATIONS.md: *the count lives ON the icon*). main.ts
+   * puts it on the dock / taskbar badge and in the tray tooltip.
+   *
+   * ⚠⚠ It costs NOTHING extra. `GET /api/notifications?unread=true`
+   * already answers `{items, total}` and this poll already makes that call;
+   * the count is the `total` it was throwing away. A second request every
+   * 15 s for a number we were already being handed would be a new cost for
+   * an old fact.
+   */
+  onUnread?: (accountId: string, count: number) => void;
   /**
    * The language THIS reader is using — main.ts passes `effectiveLocale()`.
    * Read per row rather than captured, so switching the app's language changes
@@ -94,6 +118,25 @@ export interface DesktopNotifierOptions {
    */
   show: (row: NotificationRow, text: NotificationText, onClick: () => void) => void;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
+  /**
+   * The server refused this account's token — twice in a row, so one odd
+   * answer from a proxy does not sign anybody out. main.ts marks the account
+   * and stops everything that uses the token; `account()` then returns null
+   * for it and polling stops. Called once per run of refusals.
+   *
+   * ⚠ This poll is often the only thing talking to the server at all: an
+   * account with no synced folders has no watcher to notice a revoked token.
+   */
+  onUnauthorized?: (accountId: string) => void;
+}
+
+/** How many refusals in a row mean "this token is dead". */
+export const UNAUTHORIZED_STREAK = 2;
+
+/** True for a failed fetch the server answered 401. Reads the `status` the
+ *  caller attaches, never the wording of the message. */
+export function isUnauthorized(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { status?: unknown }).status === 401;
 }
 
 /**
@@ -104,11 +147,30 @@ export interface DesktopNotifierOptions {
  * had. It is reset when the account changes, so switching servers on the rail
  * does not announce the new server's backlog either.
  */
+/**
+ * Does the app WINDOW carry this destination out? A folder (with the row to
+ * select and the app screen to open) and the Trash view do; a share goes to the
+ * system browser and `none` only brings the window forward.
+ *
+ * ⚠ This is not a second resolver: the destination still comes from the shared
+ * one. It is the desktop's half of the answer only — which of the resolved
+ * kinds this window knows how to show — kept here, beside the rules, so a new
+ * kind is a test away rather than a lambda in main.ts nobody runs. The Trash
+ * view arrived as a kind of its own (a `file.trashed` notice) and the window
+ * forwarded folders only, so clicking that toast raised the window and left it
+ * wherever it was.
+ */
+export function opensInWindow(dest: NotificationDestination): boolean {
+  return dest.kind === 'folder' || dest.kind === 'trash';
+}
+
 export class DesktopNotifier {
   private timer: ReturnType<typeof setInterval> | null = null;
   private since: number | null = null;
   private watching: string | null = null;
   private inFlight = false;
+  /** Consecutive 401s for the watched account. */
+  private refusals = 0;
   private readonly opts: DesktopNotifierOptions;
 
   constructor(opts: DesktopNotifierOptions) {
@@ -135,6 +197,7 @@ export class DesktopNotifier {
   reset(): void {
     this.since = null;
     this.watching = null;
+    this.refusals = 0;
   }
 
   async poll(): Promise<void> {
@@ -147,10 +210,18 @@ export class DesktopNotifier {
     if (this.watching !== acc.id) {
       this.watching = acc.id;
       this.since = null;
+      this.refusals = 0;
     }
     this.inFlight = true;
     try {
-      const rows = await this.opts.fetchRows(acc, 10);
+      const page = await this.opts.fetchRows(acc, 10);
+      this.refusals = 0;
+      const rows = page.items ?? [];
+      // ⚠ Reported BEFORE the baseline check below returns: the first poll
+      // announces nothing (it is establishing what "already seen" means) but
+      // the badge must still be right on the first tick, or the app sits
+      // there with no badge until something new arrives.
+      this.opts.onUnread?.(acc.id, Math.max(0, page.total ?? rows.length));
       const top = rows.reduce((m, r) => (r.id > m ? r.id : m), 0);
       if (this.since === null) {
         this.since = top;
@@ -171,9 +242,22 @@ export class DesktopNotifier {
         );
       }
     } catch (err) {
-      // A server that is asleep, a token that expired, no network: the app
-      // keeps working and says nothing. This is a courtesy channel.
+      // A server that is asleep, no network: the app keeps working and says
+      // nothing. This is a courtesy channel.
+      //
+      // ⚠ The badge is NOT cleared here. A number that vanishes on a dropped
+      // request reads as "you have read everything", which is a claim about
+      // the person's mail made by a failed network call. The last known count
+      // stands until a poll succeeds.
       this.opts.log?.('notifications: poll failed', { err: String(err) });
+      // …except for a token the server no longer accepts, which is not going
+      // to start working by being asked again every 15 seconds.
+      if (isUnauthorized(err)) {
+        this.refusals++;
+        if (this.refusals === UNAUTHORIZED_STREAK) this.opts.onUnauthorized?.(acc.id);
+      } else {
+        this.refusals = 0;
+      }
     } finally {
       this.inFlight = false;
     }

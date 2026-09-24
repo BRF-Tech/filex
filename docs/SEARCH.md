@@ -45,9 +45,9 @@ Each indexed document is one filesystem node, keyed by the node's database ID:
 | Field | Source | Used for |
 |---|---|---|
 | `storage_id` | mount the node lives on | scoping results to one storage |
-| `name` | filename, verbatim | the primary match target |
-| `path` | full path within the mount | substring matches on folders |
-| `name_norm` | the filename lower-cased, with every run of non-alphanumeric characters collapsed to one space (`invoice_2026.pdf` becomes `invoice 2026 pdf`) | separator-blind and typo-tolerant matching |
+| `name` | filename, composed ([NFC](#names-written-decomposed)) | the primary match target |
+| `path` | full path within the mount, composed | substring matches on folders |
+| `name_norm` | the filename [folded](#capital-letters-and-the-turkish-i) — composed, lower-cased, the four i's one letter — with every run of characters that are not letters, digits or combining marks collapsed to one space (`invoice_2026.pdf` becomes `invoice 2026 pdf`) | separator-blind and typo-tolerant matching |
 | `path_norm` | the same treatment applied to the path | separator-blind folder matches |
 | `mime` | detected mime type | stored, available to queries |
 | `type` | `file` / `dir` | stored |
@@ -105,7 +105,56 @@ A name search runs a **disjunction** of these:
 
 The term is lower-cased for the wildcard sides (Bleve stores tokens lower-cased
 but does **not** analyse wildcard queries, so an upper-case term would otherwise
-miss every row).
+miss every row), and each of the four i's in it is left open (`?`): Bleve's own
+lower-casing keeps `ı` apart from `i`, so `IŞI` would otherwise miss `ışık.txt`
+— the [one rule](#capital-letters-and-the-turkish-i) everything else follows
+calls them one letter.
+
+### Names written decomposed
+
+The same letter can be stored two ways. `ü` is one character when a keyboard
+types it (Unicode normalisation form C, **NFC**), and two — `u` followed by
+U+0308 COMBINING DIAERESIS — when a macOS client hands a filename over
+(form D, **NFD**). filex keeps a file's name exactly as it was uploaded, because
+the storage needs those bytes, so one catalogue routinely holds both: measured
+on a production catalogue of 169 471 files, 71 388 names were decomposed —
+about nine in ten of the names with a Turkish letter in them.
+
+Search compares names **composed**: the query, the indexed `name`/`path` and
+their normalised copies, and every row the fallback reads back are put in NFC
+before they are compared, so `Gürel` typed on a keyboard finds a `Gürel` a Mac
+uploaded, and a name pasted from a Finder window finds one uploaded from
+Windows. The stored name is never changed. A combining mark that survives
+composition (every Devanagari vowel sign is one) is part of its word, not a
+separator. One mark is dropped instead: a dot above on `i` or `j`, which have
+one already. Lower-casing `İ` the full Unicode way (JavaScript's
+`toLowerCase()`, Python's `lower()`) gives `i` followed by U+0307, and a query a
+client lower-cased like that would otherwise match nothing.
+
+Before this, every query word with `ü`, `ö`, `ç`, `ş`, `ğ` or `İ` in it matched
+only the composed names, and the normaliser cut each decomposed word in two at
+its mark (`gu rel`) — so a file's own name, typed as it is shown, found nothing.
+
+### Capital letters and the Turkish i
+
+The default lower case of `I` is `i`, which is wrong in Turkish, where it is
+`ı`; and the Turkish rule is wrong for everybody else, who expect `INVOICE` to
+be `invoice`. So `IŞIK` and `ışık` — one word — used to be two to search, and a
+Turkish name in capitals did not answer the word typed in lower case: `kış`
+missed `KIŞ LİSTESİ.xlsx`, with the index and without it.
+
+Search now treats the four Latin i's — `I`, `ı`, `İ`, `i` — as **one letter**,
+and lower-cases everything else the default way. It is the rule
+[tags](#what-the-same-tag-means) have used since v0.43.0, from one place in the
+code (`internal/namefold`), so a tag and the file name it was copied from are
+the same word to both. It applies to both sides of every comparison: the query,
+the index's normalised fields, the scorer, and the stored name in the
+[fallback](#how-it-works)'s database query. The explorer's name box ("Filter in
+this folder…") folds the same four letters.
+
+The price is that two Turkish words spelt apart only by the dot — `ılık` and
+`ilik` — are one word to a search. Accents stay significant: `musteri` does not
+find `Müşteri`.
 
 **Typo tolerance.** If that pass comes back with fewer **surviving** hits than
 the requested `limit`, a second, **fuzzy** pass runs: one edit-distance query per
@@ -152,20 +201,80 @@ rather than re-shuffling a window Bleve's raw scores had already chosen. Scoring
 that pool costs about **2 µs per candidate** — 0.4 ms for the default 200, 1.0 ms
 at the 500 cap — against the 7.8 ms the wildcard scans cost to produce it.
 
-**SQL LIKE fallback.** If the Bleve index is disabled or returns **zero** hits
+**SQL fallback.** If the Bleve index is disabled or returns **zero** hits
 *and* the request is scoped to a specific storage, filex falls back to the
 `nodes.name` column. The fallback is a different code path, not a different
-product, so it is separator-blind too: the most selective word of the query goes
-to the database as `LIKE '%word%'`, and every row that comes back is re-checked
+product, so it is separator-blind too: **every word** of the query goes to the
+database as a condition on the name, and every row that comes back is re-checked
 in Go by the **same scorer** the index path uses, and ranked into the same tiers.
 `invoice 2026` finds `invoice_2026.pdf` with the index switched off, and `Code
 main` drops the `Code` folder there exactly as it does with the index on.
 
+**The stored name goes through the same normaliser as the query.** A database
+compares the bytes it holds, and a name can be held [decomposed or
+composed](#names-written-decomposed), in any case, with any of the [four
+i's](#capital-letters-and-the-turkish-i). So the name is folded on the database's side
+the way the query was folded on filex's — one rule, spelt for each engine:
+
+| Engine | How the stored name is compared |
+|---|---|
+| SQLite | `fx_match` and `fx_rank`, two functions filex registers on the driver, run the name through the normaliser in Go |
+| PostgreSQL | `normalize(name, NFC)`, lower-cased by the database's locale, `ı` made `i` (needs PostgreSQL 13 or later, a UTF-8 database, and a locale that is not `C`) |
+| MySQL | its case- and accent-insensitive collation over both the composed and the decomposed form of each word, on the name with `ı` made `i` (it can compose nothing itself) |
+
+A word made only of letters every form stores as they are — `plan`, `2026`,
+`report` — needs none of that, and each engine looks for it with its own `LIKE`,
+which is cheap. A word with other letters also sends the run of letters all its
+forms share (`arch` for `archive`, `rel` for `gürel`), checked the cheap way
+first, so on SQLite the Go function only runs for the rows that pass it. The
+conditions are all on the name, which is in an index: SQLite rejects a row
+without reading it from the table. A query sends at most 32 conditions, and the
+words past them are still required by the scorer.
+
+⚠ The fallback used to send only the **longest** word to the database, and
+checked the others afterwards over the first 1000 rows by name. When that word
+was one most files share, the file being looked for was simply past row 1000:
+measured on a production catalogue, a name's longest word was the prefix on
+64 483 of 169 471 files, and the two files being looked for sat at rows 4 128
+and 33 623. The more of a name somebody typed, the less they found. With every
+word a condition, the limit counts rows that answer the whole query. On a
+170 000-file SQLite catalogue built the same way, the eleven-word name answers
+in less time than one scan of the names with SQLite's own `LIKE`, a person's
+name in about that time, and a word most files share in two to three times it.
+A query every name answers costs the most — every row is ranked, and a word of
+Turkish letters is compared through the normaliser row by row: about seven
+scans' worth for `günlük öğün`, which all 170 000 names held.
+
+**The fallback reads a window, and ranks it before the cut.** The database
+returns at most a fixed number of rows — the explorer's search box reads 1,000
+(its 250-hit page, four times over; 400 per storage when it searches every
+storage from the root), `/api/files/search` four times its `limit`. Which rows
+make that window is decided in SQL, before the `LIMIT`: names equal to the
+longest word (or to it plus an extension) first, then names starting with it,
+then the rest, shorter names first — compared the same folded way. Releases up
+to v0.42.2 took the first rows in `ORDER BY name` instead, so a word that
+matched more names than the window held could lose its exact match — a search
+for `report` among a thousand `a-report-…` files came back without
+`report.txt`. The rows are then re-ranked in Go by the whole query, as described
+above.
+
+**An answer that was cut says so.** Both search responses carry `truncated`:
+`true` when more rows matched than came back — the index filled its page, or the
+fallback filled its window (with the fallback, rows past the window were never
+read, so a window that was full is a cut answer even when few of its rows answer
+the whole query). The explorer shows *"More results than shown — narrow your
+search"* above such a list.
+
 Two things the fallback does not do. **Typo tolerance** — edit distance is not
 something a `LIKE` can express, and faking it with more patterns would turn one
-scan into many. And the LIKE itself runs against the **name** column only, so a
-query whose words appear solely in a folder name will not be *retrieved* this
-way — though once a row is retrieved, its folders are scored like anywhere else.
+scan into many. And **every word has to be in the file's own name**: a word that
+appears only in a folder name is found with the index, not without it. Matching
+the words against the path instead reads every candidate row from the table —
+1.06 s for an eleven-word query on the catalogue above.
+
+MySQL's collation ignores accents as well as case, so there the database can
+hand the scorer rows that differ from a word only by an accent (`gurel` for
+`gürel`); the scorer drops them, and the answer is the same on every engine.
 
 **RBAC filtering.** Whichever path produced the hits, results are filtered
 through the caller's [RBAC](RBAC.md) grants before they're returned — a user
@@ -197,13 +306,15 @@ A query is free text, optionally carrying tag filters.
 ### Filtering by tag
 
 Tags are the ones you apply from the explorer and browse on the **Tagged files**
-page; the API is `POST /api/files/manager/tags`. In a search they are a
-**filter**, not a search term: `main go tag:source` does not also look for files
-called "source".
+page; the API is `POST /api/files/manager/tags` ([Tags — personal and
+team](#tags--personal-and-team)). In a search they are a **filter**, not a
+search term: `main go tag:source` does not also look for files called "source".
+`tag:source` matches **your** tags called source — your personal one and your
+team's — and never another person's personal tag or another tenant's.
 
 | Rule | Behaviour |
 |---|---|
-| Case | Both the `tag:` prefix and the value are case-insensitive. Tags are stored lower-cased, so `TAG:Source` and `tag:source` are the same filter. |
+| Case | Both the `tag:` prefix and the value are case-insensitive, the Turkish way included: `tag:IŞIK`, `tag:ışık` and `tag:Işık` are one filter (see [what "the same tag" means](#what-the-same-tag-means)). A tag keeps the capitals it was created with; only matching ignores them. |
 | Several tags | ANDed. `tag:invoice tag:2026` is the files carrying **both**. A filter narrows. |
 | Exclusion | `-tag:archive` drops any file carrying that tag. Exclusions apply after inclusions. |
 | Spaces | Quote them: `tag:"quarterly report"`. |
@@ -226,6 +337,121 @@ Tag filtering is applied by `/api/files/search`, the explorer toolbar and the
 MCP `file_search` tool alike. Results are still passed through the caller's
 tenant scope and [RBAC](RBAC.md) grants afterwards, exactly like any other hit —
 a tag cannot be used to learn that a file exists.
+
+## Tags — personal and team
+
+> **v0.43.0.** Until then a tag was one label per file, shared with **every
+> account on the server** — across tenants — although the code introduced it as
+> per-user metadata, and nothing on screen said so. A tester found it: a
+> non-admin's "müşteri teklifi" showed in another user's and the admin's panel
+> and on the file, the other user could remove it, and the name had been
+> lower-cased. Tags now come in two kinds, and the screen always says which.
+
+| | **Personal** | **Team** |
+|---|---|---|
+| Who sees it | Only you — like a star | Everyone in your **tenant** who can see the file |
+| Who may add or remove it | You, on any file you can see | Anyone with **edit** permission on the file (`editor` or `owner`); a viewer sees team tags but cannot change them |
+| Across tenants | — | Never. Not even on a storage linked to two tenants: each tenant has its own team tags |
+| On a single-tenant install | Yours alone | The tenant is the instance |
+| When the account is deleted | Deleted with it | Stays |
+| In the explorer | Outlined chip, one-figure glyph, grouped under **Personal** | Filled chip, two-figure glyph, grouped under **Team** |
+
+**Tagged files** puts both kinds on one page, each under its own heading, and
+opening one lists every file carrying it — from every folder and every storage
+the person can reach:
+
+![Personal and team tags, with a team tag opened](screenshots/v0.43.0/tags/tags-kinds-1440.png)
+
+Rules that follow from it:
+
+- **A tag is only named to someone who can see a file carrying it.** A tag's
+  NAME is information ("Layoffs Q4"), so `tags/all`, the Tagged files page and
+  the navigation panel list a tag only if the person can see at least one live
+  file that carries it — tenant, token root and [RBAC](RBAC.md) included.
+- **Editing a team tag is judged on the permission, not on the storage's
+  read-only flag.** A tag is catalogue metadata, not a byte on the storage;
+  tagging an archive is exactly what tags are for. A file an app holds
+  read-only for signature is a viewer's file to everyone, so its team tags
+  freeze with it.
+- **A tag exists while it is on something.** Removing a tag from its last file
+  deletes it; the next file you tag makes it again, under the name you type
+  then.
+- **The platform operator** (the supertenant) reaches every storage and sees
+  every tenant's team tags on the files it can see. A team tag it adds lands in
+  the storage's tenant, so the customer sees it.
+
+### What "the same tag" means
+
+Names keep the capitals they were typed with — "Müşteri Teklifi" stays
+"Müşteri Teklifi". Two names are **one tag** when they are equal after:
+
+1. whitespace at the ends is dropped and inner runs become one space;
+2. Unicode NFC (a decomposed "ü" pasted from a macOS file name is the same "ü"),
+   with the dot a full Unicode lower-casing leaves on an `i` dropped;
+3. the four Latin i's — `I`, `ı`, `İ`, `i` — count as one letter;
+4. full Unicode case folding (`ß` = `ss`, `ς` = `σ`).
+
+Steps 2 and 3 are the rule a [file name search](#capital-letters-and-the-turkish-i)
+follows too — one place in the code, so a tag and the file name it was copied
+from are the same word to both. Step 4 is the tags' own: a search compares a
+typed word against a name letter by letter, so to it `ß` and `ss` stay two.
+
+Step 3 is why this is not `strings.EqualFold` or a locale's lower-casing. The
+default Unicode lower case of `I` is `i`, so "IŞIK" and "ışık" — one Turkish
+word — would be two tags; Turkish lower-casing turns `I` into `ı`, so "INVOICE"
+and "invoice" would be two tags for everyone else. Folding all four i's
+together is right for both keyboards. The cost is that two Turkish words that
+differ only by the dot ("ılık" and "ilik") are one tag — rare in a tag
+vocabulary, and the display name is never changed. **Accents stay
+significant**: "müşteri" and "musteri", "şık" and "sık" are different tags.
+
+The first spelling wins: typing "müşteri teklifi" on a second file adds the
+tag the first file already carries, still shown as "Müşteri Teklifi". A name is
+at most **64 characters**, and may not contain control characters.
+
+### The API
+
+`/api/files/manager/…`, session or API token.
+
+| Method | Path | Answer |
+|---|---|---|
+| GET | `/tags?node_id=` | `{node_id, tags:[names], items:[{name, kind}], can_edit_team}` — the tags **you** can see on the file |
+| GET | `/tags?storage_id=` | `{storage_id, tags, items}` — the tags you can see in use in one storage |
+| GET | `/tags/all` | `{tags, items}` — every tag you can see, both kinds, alphabetical (personal before team for one name) |
+| POST | `/tags` | `{node_id, items:[{name, kind}]}` — the tags you can see on the file become exactly this list. `403` if a team tag would be added or removed without edit permission; `400` for a bad kind or name |
+| GET | `/tagged?tag=&kind=` | `{nodes, tag, kind}` — live files carrying the tag, newest first. `kind` = `personal` or `team`; absent = both |
+
+`tags` (plain names) is still in every answer, one entry per name, for clients
+written before kinds existed.
+
+**What an old client gets.** A `POST {node_id, tags:[names]}` with no `kind` —
+the shape every client before v0.43.0 sends — makes **personal** tags:
+
+- a request that does not say who should see a label must not show it to
+  anyone else; the finding *was* an unintended audience;
+- it always works — anyone who can see a file may personal-tag it, while a team
+  default would turn a viewer's old client into a stream of `403`s;
+- it is what the code always claimed ("per-user").
+
+Names in that list that match a tag the file already carries keep that tag as
+it is (a team tag stays team), so an old client that round-trips the list it
+read changes nothing. A team tag it leaves **out** is a removal, and needs edit
+permission like any other. `{…, "kind": "team"}` makes the new names team tags.
+
+Agents have the same thing as `GET/POST /api/ai/tags` and the MCP `file_tags`
+tool ([MCP.md](MCP.md)) — with **no** default kind: an agent names the kind of
+every tag it writes.
+
+### Upgrading
+
+Migration `00055` turns every existing tag into a **team** tag — they were
+effectively shared, so nothing anybody could see disappears. Its tenant follows
+the file's storage: one team tag per tenant the storage is linked to (a storage
+linked to two tenants gives each its own copy), tenant 0 ("the instance") for a
+storage linked to none. Existing names were stored lower-cased by the old code
+and stay that way; new tags keep their capitals. Downgrading rebuilds the old
+shared tags from the team tags and drops personal ones — the old schema has
+nowhere private to put them.
 
 ---
 
@@ -257,7 +483,9 @@ tier, is reported once, and carries `matched: "both"` plus its snippet.
 The tier is internal; it is not on the wire. The response shape is unchanged.
 
 The SQL LIKE fallback applies the same tiers in Go, so an index-less deployment
-answers in the same order rather than in `ORDER BY name`.
+answers in the same order rather than in `ORDER BY name` — and the database
+already prefers exact and prefix names when it decides which rows reach Go (see
+[How it works](#how-it-works)).
 
 ### Scoring — how candidates are ordered and filtered
 
@@ -273,7 +501,9 @@ Three things follow from it, and all three were asked for in issue #15:
 
 - **Word order does not matter.** The query is split on spaces into pieces, and
   each piece is matched independently. `main code` and `Code main` both find
-  `Code/main.go`.
+  `Code/main.go` (with the index; the [fallback](#how-it-works) asks the
+  database for names holding every word, so without the index the folder
+  cannot answer one).
 - **The filename outweighs the folder.** The filename and the folders above it
   are scored *separately*, and a piece answered by the filename is worth an
   order of magnitude more than one answered by a folder. `Code/main.go` and
@@ -327,6 +557,18 @@ falling back to size+mtime) against what the index already holds. On drift, a
 reads the file from its storage driver, runs the matching extractor, and
 updates the node's document with the text — metadata fields are preserved.
 Unchanged files never re-extract; errors are logged and skipped.
+
+⚠ **An overwrite through filex did not move the fingerprint on S3 or WebDAV**
+until the write paths started recording the etag of what they had just written.
+A browser upload over an existing file, a save from the text editor, a file-drop
+submission, a new document over a stale row, and every protocol write (WebDAV,
+the S3 gateway, SFTP, FTPS, NFS, the agent API, archive extract) kept the
+*replaced* file's etag on the row while updating its size — so the fingerprint
+said "unchanged", the new text was not extracted, and search kept finding the
+old words until the next storage scan noticed the etag drift. Each of them now
+reads back the size, etag and modification time the backend reports for what
+landed; when the backend cannot be asked, the etag is left empty (which the next
+scan corrects), never the old one.
 
 ⚠ **On `local`, `sftp`, `smb` and `ftp` this never fired for a file changed
 outside filex, until v0.34.0.** The fingerprint falls back to size+mtime, but
@@ -448,9 +690,12 @@ curl -X POST https://files.example.com/api/files/search \
 | `limit` | int | `50` | Max results. |
 | `scope` | string | `all` | `name` \| `content` \| `all` — which fields to consult (see [Content search](#content-search)). |
 
-Response: `{ "results": [ { …node…, "snippet": "…«term»…", "matched": "name|content|both" }, … ] }`,
+Response: `{ "results": [ { …node…, "snippet": "…«term»…", "matched": "name|content|both" }, … ], "truncated": false }`,
 already RBAC-filtered and in [rank order](#ranking). `snippet` is `""` for
-name-only hits.
+name-only hits. `truncated` is `true` when more matched than came back: the
+index returned a full `limit`, or the LIKE fallback filled its window or still
+had more than `limit` rows after ranking. The explorer's own search
+(`/api/files/manager?action=search`) carries the same flag.
 
 Each hit also says what a bare node row cannot say about itself, so a client
 can open and label a hit from any storage without a second request:
@@ -492,8 +737,10 @@ curl -G https://files.example.com/api/files/search \
 ### `GET /api/ai/search?path=<adapter://>&q=…` — token / agent surface
 
 The programmatic search used by API tokens and the MCP/AI integration. Requires
-a token with the **`read`** scope. `path` addresses the adapter root to search
-within, `q` is the term. Results are confined to the token's root, so a scoped
+a token with the **`read`** permission — named `scopes` on the wire, and not to
+be confused with this endpoint's own `scope` parameter
+([MCP.md → Scopes](MCP.md#scopes)). `path` addresses the adapter root to search
+within, `q` is the term. Results are confined to the token's root, so a confined
 token can't enumerate outside its grant.
 
 ```bash
@@ -511,9 +758,12 @@ name search. `content=false` restores the pre-v0.2 name-only behavior.
 
 `q` on this surface speaks the **same query language** as the HTTP endpoints —
 separator-blind text and `tag:` / `-tag:` filters — so an agent does not have to
-learn a second, smaller syntax. Typo tolerance needs the index: with
-`content=false` or no live index, the tool answers from the same LIKE path the
-HTTP fallback uses, which is separator-blind but not fuzzy.
+learn a second, smaller syntax. The name matches always come from the
+database, the way the HTTP [fallback](#how-it-works) answers — every word in the
+file's own name, compared by the [same rule](#capital-letters-and-the-turkish-i)
+— so typo tolerance needs the index and `content=true`. A bare `tag:x` lists
+every file carrying the tag, as `/api/files/search` does (it used to be the
+first 200 files of the storage, filtered by the tag).
 
 ---
 
@@ -604,7 +854,12 @@ Both actions are also exposed to admin tokens as the MCP tools
 ## Upgrading an existing index
 
 The forgiving name matching added two indexed fields, `name_norm` and
-`path_norm`. Documents written by an older filex do not have them.
+`path_norm`. Documents written by an older filex do not have them. Schema 3
+(v0.43.0) indexes names [composed](#names-written-decomposed) and folds their
+normalised copies with [the four i's as one letter](#capital-letters-and-the-turkish-i):
+a schema-2 document holds a decomposed name's words in pieces, and `IŞIK` as a
+word no lower-case query reaches, so a schema-2 index is rebuilt the same way —
+automatically, in the background.
 
 **An upgrade needs no action, and search does not get worse.** The
 pre-existing sub-queries are still part of every query, precisely so that a
@@ -683,19 +938,39 @@ backend only appear after a sync. Normally the lag is sub-second. If a file is
 persistently missing, run a [storage sync](STORAGE.md#sync) or a
 `POST /api/admin/search/rebuild` and it will reappear.
 
+A file that was put on the storage **outside** filex under a path the storage
+[excludes from scanning](STORAGE.md#scan-exclusions) (`.*`, `*.tmp`,
+`downloads/incomplete/**`, …) is never catalogued, so it is never indexed
+either — that is what the exclusion is for. Check the storage's *Paths to
+exclude from scanning* before rebuilding.
+
 ### Search feels slow, or a typo finds nothing
 You're on the **SQL LIKE fallback**. That happens when `FILEX_SEARCH_ENABLED` is
 off, or the Bleve index failed to open at startup (check the logs for
 `search index open failed; falling back to SQL LIKE`). The fallback is
-separator-blind and handles multi-word queries, but it scans the `name` column
-only and cannot do typo tolerance. Fix the index (see next) to get the fast,
-multi-field, fuzzy path back.
+separator-blind and handles multi-word queries, but every word has to be in the
+file's name and it cannot do typo tolerance. Fix the index (see next) to get the
+fast, multi-field, fuzzy path back.
 
 ### `search index open failed` in the logs
 The Bleve directory is unreadable, corrupt, or **locked** by another process.
 Confirm only one filex instance points at that `index_path`, that filex can
 write it, then either restart, or delete the `search.bleve` directory and run a
 **rebuild** to recreate it cleanly.
+
+### A name with Turkish (or other accented) letters is not found
+Typing the name exactly as it is shown used to find nothing when the file was
+uploaded from a Mac, which writes such names decomposed — see
+[Names written decomposed](#names-written-decomposed) — and a name in capitals
+did not answer the word typed in lower case when it had an `I` in it (`kış` for
+`KIŞ LİSTESİ.xlsx`) — see [Capital letters and the Turkish
+i](#capital-letters-and-the-turkish-i). Both paths compare names through one
+normaliser now. With the index on, the documents already in it are fixed by the
+automatic rebuild (`needs_rebuild` on the stats endpoint says whether it has
+run); without the index there is nothing to rebuild. On PostgreSQL the fallback
+needs version 13 or later and a database whose locale is not `C` — with `C`,
+the database lower-cases only `A`–`Z`. An accent is still a difference:
+`musteri` does not find `Müşteri`.
 
 ### Substring, separator or typo searches miss rows
 Substring and case are handled by the wildcard sub-queries, separators by the
@@ -713,7 +988,9 @@ is simply **stale** — trigger a rebuild.
 That is what a filter matching nothing looks like, and it is deliberate — the
 alternative is answering a mistyped tag with the entire storage. Check the tag
 exists (`GET /api/files/manager/tags?storage_id=…`, or the **Tagged files**
-page) and remember that several tags in one query are ANDed.
+page) and remember that several tags in one query are ANDed — and that the
+filter sees only tags **you** can see: another person's personal tag, or
+another tenant's team tag, is not there for you to filter by.
 
 ### After a bulk import, lots of files are unsearchable
 Bulk imports that bypass filex's write path (rsync into a local mount, mass S3

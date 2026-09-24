@@ -28,9 +28,11 @@ import (
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -99,12 +101,27 @@ func (a *aiOps) attachSearchIndex(idx *search.Index) { a.index = idx }
 // from the index on delete, and moved a folder without its children. All three
 // were already solved in that package.
 func (a *aiOps) sync() *protocolsync.Syncer {
-	return protocolsync.New(a.store, a.index, a.thumbs, a.origin)
+	return protocolsync.New(a.store, a.index, a.thumbs, a.origin).WithResolver(a.resolver)
 }
 
 // allow reports whether the bound user has at least `need` on rel within s.
 // The AI surface bypasses confine.Middleware and manager gating, so every op
 // routes through resolveStorage / these asserts. nil resolver (unwired) allows.
+// gate is writegate.Check for the AI surface: names, then the storage's
+// live app locks. Asked BEFORE allow, whose level check reads a lock's
+// viewer cap as a plain "access denied" — an agent is told who froze the
+// document instead (aiStatus maps it to 423).
+func (a *aiOps) gate(ctx context.Context, s *model.Storage, targets ...writegate.Target) error {
+	return writegate.Check(a.lockView(ctx, s), 0, targets...)
+}
+
+func (a *aiOps) lockView(ctx context.Context, s *model.Storage) writegate.Locks {
+	if a.acl == nil || s == nil {
+		return nil
+	}
+	return a.acl.Locks(ctx, s.ID)
+}
+
 func (a *aiOps) allow(ctx context.Context, s *model.Storage, rel string, need acl.Level) bool {
 	if a.acl == nil {
 		return true
@@ -132,6 +149,51 @@ type aiEntry struct {
 	Size         int64  `json:"size"`
 	Mime         string `json:"mime,omitempty"`
 	LastModified int64  `json:"last_modified,omitempty"` // unix millis
+	// LeftBehind and SourceKept are set by a cross-storage move of a folder
+	// that held entries the transfer would not carry (ops.Skipped: links the
+	// source driver could not follow, a folder link back into the tree, a
+	// folder too deep). The copy at Path is complete WITHOUT them and the
+	// source was not deleted — a move deletes only what it carried. An agent
+	// that reads only `path` would tell its user the folder moved; these say
+	// it was copied and what stayed.
+	LeftBehind []aiLeftBehind `json:"left_behind,omitempty"`
+	SourceKept bool           `json:"source_kept,omitempty"`
+}
+
+// aiLeftBehind is one ops.Skipped, with the path spelled the way every other
+// path in an agent's answer is (adapter-qualified).
+type aiLeftBehind struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"` // broken | outside_root | unresolved | cycle | too_deep | link
+}
+
+// aiTypeOf is the ONE place the `type` field's two words are spelled.
+//
+// ⚠ It exists because the spelling is a wire contract an agent matches on, and
+// it used to be open-coded at each producer — which is how `Move` and
+// `moveAcross` came to hard-code `"file"` for everything, answering
+// `"type":"file"` for a folder they had just moved. The model then reasons
+// about a file: it calls file_read on a directory and gets "is a directory"
+// back from an answer filex itself had told it to trust. A second spelling
+// ("directory", "folder") would break the same clients just as quietly, so
+// every producer routes through here.
+func aiTypeOf(k storage.ObjectKind) string {
+	if k == storage.KindDirectory {
+		return "dir"
+	}
+	return "file"
+}
+
+// aiTypeOfNode is aiTypeOf for a catalogue row, whose kind is a model.NodeType
+// rather than a driver's ObjectKind. Same two words, deliberately from the same
+// four lines: the search producers here and in ai_mcp.go each carried their own
+// copy of this mapping, which is exactly how one of them would come to disagree
+// with the other about what a folder is called.
+func aiTypeOfNode(t model.NodeType) string {
+	if t == model.NodeTypeDirectory {
+		return "dir"
+	}
+	return "file"
 }
 
 // errAINoStorage is returned when no storage is configured / resolvable.
@@ -215,6 +277,15 @@ func (a *aiOps) resolveStorage(ctx context.Context, p string) (*model.Storage, s
 				return nil, "", errors.New("bad path")
 			}
 			clean := strings.Trim(rel, "/")
+			// filex's own directories are not files an agent works on, by any
+			// verb: not the trash, not the version history, not the desktop's
+			// open-with working copies (an agent that "tidied up" `.filex-open`
+			// would delete a document somebody has open). Every AI and MCP op
+			// comes through here, so this one line closes all of them, and the
+			// answer is the not-found an absent path gets.
+			if syspath.Hidden(clean) {
+				return nil, "", fmt.Errorf("%w: %s", storage.ErrNotFound, joinAdapterPath(s.Name, clean))
+			}
 			// RBAC read floor: the bound user needs ≥viewer on the path. This is
 			// the single chokepoint for the AI surface (it bypasses the /api/files
 			// confine + ACL gating), so reads are denied here and writes assert
@@ -302,22 +373,20 @@ func (a *aiOps) List(ctx context.Context, p string) ([]aiEntry, error) {
 	}
 	out := make([]aiEntry, 0, len(objs))
 	for _, o := range objs {
-		if o.Name == ".filex-trash" || strings.Contains(o.Path, ".filex-trash") ||
-			strings.Contains(o.Path, ".thumbs") || o.Name == ".keepdir" {
+		// ⚠ syspath.IsName, the one list. The hand-written check here did not
+		// know `.versions` or `.filex-open`, so `file_list` on a storage root
+		// handed an agent both.
+		if syspath.IsName(o.Name) {
 			continue
 		}
 		objRel := o.Path
 		if objRel == "" {
 			objRel = path.Join(rel, o.Name)
 		}
-		typ := "file"
-		if o.Kind == storage.KindDirectory {
-			typ = "dir"
-		}
 		e := aiEntry{
 			Path: joinAdapterPath(s.Name, objRel),
 			Name: o.Name,
-			Type: typ,
+			Type: aiTypeOf(o.Kind),
 			Size: o.Size,
 			Mime: o.Mime,
 		}
@@ -346,14 +415,10 @@ func (a *aiOps) Info(ctx context.Context, p string) (*aiEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	typ := "file"
-	if o.Kind == storage.KindDirectory {
-		typ = "dir"
-	}
 	e := &aiEntry{
 		Path: joinAdapterPath(s.Name, rel),
 		Name: path.Base(rel),
-		Type: typ,
+		Type: aiTypeOf(o.Kind),
 		Size: o.Size,
 		Mime: o.Mime,
 	}
@@ -457,6 +522,9 @@ func (a *aiOps) WriteStream(ctx context.Context, p string, src io.Reader, size i
 	}
 	if s.ReadOnly {
 		return nil, storage.ErrReadOnly
+	}
+	if err := a.gate(ctx, s, writegate.Writes(rel)); err != nil {
+		return nil, err
 	}
 	if !a.allow(ctx, s, rel, acl.LevelEditor) {
 		return nil, errAIForbidden
@@ -564,6 +632,9 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 	if s.ReadOnly {
 		return storage.ErrReadOnly
 	}
+	if err := a.gate(ctx, s, writegate.Writes(rel)); err != nil {
+		return err
+	}
 	if !a.allow(ctx, s, rel, acl.LevelEditor) {
 		return errAIForbidden
 	}
@@ -642,8 +713,10 @@ func (a *aiOps) dropCacheRow(ctx context.Context, s *model.Storage, rel string) 
 	a.sync().DeleteRows(ctx, s, rel)
 }
 
-// listAllFiles recursively returns every FILE object path under root (skipping
-// trash / thumbnail internals). Empty when root is a file or has no children.
+// listAllFiles recursively returns every FILE object path under root, stepping
+// over filex's own directories exactly as the transfer engine does
+// (syspath.IsDirName — ops.skipName). Empty when root is a file or has no
+// children.
 func (a *aiOps) listAllFiles(ctx context.Context, drv storage.Driver, root string) ([]string, error) {
 	var out []string
 	var walk func(dir string) error
@@ -653,7 +726,7 @@ func (a *aiOps) listAllFiles(ctx context.Context, drv storage.Driver, root strin
 			return err
 		}
 		for _, o := range objs {
-			if o.Name == ".filex-trash" || o.Name == ".thumbs" {
+			if syspath.IsDirName(o.Name) {
 				continue
 			}
 			switch o.Kind {
@@ -685,7 +758,14 @@ func (a *aiOps) trashRetagCache(ctx context.Context, s *model.Storage, rel, tras
 	a.sync().TrashRows(ctx, s, rel, trashRel)
 }
 
-// Move renames/moves src to dst within the same storage.
+// Move renames/moves src to dst — within one storage, or between two (the
+// bytes then travel, see moveAcross).
+//
+// ⚠⚠ Nothing is overwritten. When dst is already taken the item lands on a free
+// name beside it (`rapor-copy.txt`), exactly as a paste in the UI and the
+// queued worker do; the destination may end up holding both files. The returned
+// entry names where the file REALLY is, which is the path a caller must use —
+// not the one it asked for.
 func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	sSrc, relSrc, err := a.resolveStorage(ctx, src)
 	if err != nil {
@@ -700,6 +780,15 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	}
 	if sSrc.ReadOnly {
 		return nil, storage.ErrReadOnly
+	}
+	// The source leaves (a frozen document, or the folder around it, does not
+	// move) and the destination the caller named is judged as asked — the
+	// de-collided sibling picked below is a new name.
+	if err := a.gate(ctx, sSrc, writegate.Writes(relSrc)); err != nil {
+		return nil, err
+	}
+	if err := a.gate(ctx, sDst, writegate.Writes(relDst)); err != nil {
+		return nil, err
 	}
 	if !a.allow(ctx, sSrc, relSrc, acl.LevelEditor) || !a.allow(ctx, sDst, relDst, acl.LevelEditor) {
 		return nil, errAIForbidden
@@ -731,6 +820,59 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	if !ok {
 		return nil, storage.ErrUnsupported
 	}
+	// ⭐ Ask WHAT this is before it moves, because the answer has to say.
+	// Both returns below used to hard-code `Type: "file"`, so moving a folder
+	// answered `"type":"file"` — and an agent believes the surface: it reads
+	// "file", calls file_read on it and is told "is a directory" by the same
+	// server that had just described it as a file.
+	//
+	// ⚠ It has to happen HERE, before the rename: afterwards `relSrc` no
+	// longer exists. Best effort by design — a driver that cannot Stat is not
+	// a failed move, it just falls back to what this always said.
+	kind := "file"
+	if st, serr := drv.Stat(ctx, relSrc); serr == nil {
+		kind = aiTypeOf(st.Kind)
+	}
+	// ⚠⚠ De-collide BEFORE the driver is asked. `mv.Move` onto an occupied path
+	// REPLACES what is there — a local rename does it, and so does an object
+	// store's copy-then-delete — and the displaced file is not even in the
+	// trash, because nothing trashed it. Measured on this surface 2026-09-20:
+	// `file_move` of `a.txt` into a folder already holding an `a.txt` answered
+	// `ok`, and the file that had been there was gone. `ops.MoveDest` is the one
+	// rule every other move in the product already obeys (the queued worker and
+	// the manager's synchronous `?action=move` both call it): a free name beside
+	// the target — `a-copy.txt` — and `relSrc` itself when the move would put
+	// the item back where it already is.
+	//
+	// ⭐ From here on NOTHING may speak the path the caller asked for. The entry,
+	// the cache rows and the `file.moved` event all carry `relDst` as resolved,
+	// because a de-collided move that reports the requested name would send the
+	// agent — and the person reading its answer — to a path holding somebody
+	// else's bytes. That is a worse bug than the overwrite it replaces.
+	relDst, err = ops.MoveDest(ctx, drv, relSrc, relDst, liveRowTaken(ctx, a.store, sDst.ID))
+	if err != nil {
+		return nil, err
+	}
+	if relDst == relSrc {
+		// Moving something onto itself. The manager's move skips the item for
+		// the same reason: there is no rename to make, and announcing a
+		// `file.moved` from a path to that same path would have every listener
+		// re-home a row that never left.
+		return &aiEntry{
+			Path: joinAdapterPath(sDst.Name, relDst),
+			Name: path.Base(relDst),
+			Type: kind,
+		}, nil
+	}
+	// ⚠ The grant check at the top of Move asked about the path the CALLER
+	// named, and the de-collision has just retargeted the write to a sibling.
+	// Grants are path PREFIXES and a prefix may be a single file (acl.Set's
+	// effective()), so "editor on docs/a.txt" says nothing about
+	// docs/a-copy.txt. Re-assert here, or de-colliding would quietly convert a
+	// refused overwrite into a write nobody authorised.
+	if !a.allow(ctx, sDst, relDst, acl.LevelEditor) {
+		return nil, errAIForbidden
+	}
 	if err := mv.Move(ctx, relSrc, relDst); err != nil {
 		return nil, err
 	}
@@ -740,7 +882,7 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	return &aiEntry{
 		Path: joinAdapterPath(sDst.Name, relDst),
 		Name: path.Base(relDst),
-		Type: "file",
+		Type: kind,
 	}, nil
 }
 
@@ -767,13 +909,70 @@ func (a *aiOps) moveAcross(ctx context.Context, sSrc *model.Storage, relSrc stri
 	if !ok {
 		return nil, fmt.Errorf("%s cannot delete, so a move out of it would leave a duplicate: copy instead", sSrc.Name)
 	}
+	// ⭐ Same reason as the same-storage arm: read the kind off the source
+	// while it still exists, so the entry says "dir" for the tree it just
+	// carried instead of the flat `"file"` this used to answer. `ops.Transfer`
+	// branches on the very same Stat internally but keeps the answer to itself.
+	kind := "file"
+	if st, serr := srcDrv.Stat(ctx, relSrc); serr == nil {
+		kind = aiTypeOf(st.Kind)
+	}
+
+	// ⚠⚠ De-collide against the DESTINATION driver before a single byte travels.
+	// `ops.Transfer` writes exactly where it is told: a file already sitting at
+	// `relDst` is overwritten by the arriving bytes, and then the source is
+	// deleted — two files in, one file out, with no trash copy of the loser.
+	// Same measurement as the same-storage arm (2026-09-20). The queued
+	// cross-depo transfer has resolved through `UniqueDest` since the day it was
+	// written (ops/cross.go `crossTransfer`); this surface simply never got the
+	// rule, so the same gesture destroyed data through MCP and preserved it
+	// through the UI.
+	//
+	// ⭐ `UniqueDest`, not `MoveDest`: a self-move is impossible between two
+	// storages, so only a name clash can arise — which is exactly the half of
+	// the rule `UniqueDest` implements (an empty `src`).
+	//
+	// ⭐ Everything downstream reads this resolved `relDst`: the per-file/dir
+	// hooks below (Transfer hands them the paths it actually wrote, rooted
+	// here), and the returned entry. An answer naming the requested path would
+	// point the agent at the resident file it just refused to overwrite.
+	relDst, err = ops.UniqueDest(ctx, dstDrv, relDst, liveRowTaken(ctx, a.store, sDst.ID))
+	if err != nil {
+		return nil, err
+	}
+	// ⚠ Same reason as the same-storage arm: Move's grant check named the
+	// path the CALLER asked for, and a file-scoped grant does not extend to
+	// the sibling we just picked. Refused here, before a byte travels.
+	if !a.allow(ctx, sDst, relDst, acl.LevelEditor) {
+		return nil, errAIForbidden
+	}
 
 	hooks := ops.TransferHooks{
 		OnDir:  func(_, dst string) { a.cacheUpsertDir(ctx, sDst, dst) },
 		OnFile: func(_, dst string, size int64) { a.cacheUpsertFile(ctx, sDst, dst, size, "") },
 	}
-	if err := ops.Transfer(ctx, srcDrv, dstDrv, relSrc, relDst, hooks); err != nil {
+	skipped, err := ops.Transfer(ctx, srcDrv, dstDrv, relSrc, relDst, hooks)
+	if err != nil {
 		return nil, err
+	}
+	if len(skipped) > 0 {
+		// ⚠⚠ The queue's rule (ops/cross.go crossTransfer), for the same
+		// reason: the delete below is one call on the whole tree, a skipped
+		// entry was not carried, and a SkipTooDeep folder is real data. The
+		// source stays; the answer says so instead of failing, because the
+		// copy DID happen — an agent told "error" would retry and mint a
+		// second copy beside the first.
+		left := make([]aiLeftBehind, 0, len(skipped))
+		for _, sk := range skipped {
+			left = append(left, aiLeftBehind{Path: joinAdapterPath(sSrc.Name, sk.Path), Reason: sk.Reason})
+		}
+		return &aiEntry{
+			Path:       joinAdapterPath(sDst.Name, relDst),
+			Name:       path.Base(relDst),
+			Type:       kind,
+			LeftBehind: left,
+			SourceKept: true,
+		}, nil
 	}
 
 	// Cache rows for the source side go before the bytes: a row pointing at a
@@ -793,7 +992,7 @@ func (a *aiOps) moveAcross(ctx context.Context, sSrc *model.Storage, relSrc stri
 	return &aiEntry{
 		Path: joinAdapterPath(sDst.Name, relDst),
 		Name: path.Base(relDst),
-		Type: "file",
+		Type: kind,
 	}, nil
 }
 
@@ -808,6 +1007,9 @@ func (a *aiOps) Mkdir(ctx context.Context, p string) (*aiEntry, error) {
 	}
 	if s.ReadOnly {
 		return nil, storage.ErrReadOnly
+	}
+	if err := a.gate(ctx, s, writegate.Writes(rel)); err != nil {
+		return nil, err
 	}
 	if !a.allow(ctx, s, rel, acl.LevelEditor) {
 		return nil, errAIForbidden
@@ -836,25 +1038,56 @@ func (a *aiOps) Mkdir(ctx context.Context, p string) (*aiEntry, error) {
 	}, nil
 }
 
-// Search runs a name/content search scoped to one storage (or all when the
-// path has no adapter and multiple storages exist).
-func (a *aiOps) Search(ctx context.Context, p, query string) ([]aiEntry, error) {
+// Search runs the index-less name search of one storage (or all when the
+// path has no adapter and multiple storages exist): the plan's candidate
+// rows that pass the tag filter, confined to what the token and the user may
+// see. The rest of the query is re-checked by the caller (aiNameSearch).
+func (a *aiOps) Search(ctx context.Context, p string, plan search.Fallback, tags *search.Filter) ([]aiEntry, error) {
 	s, _, err := a.resolveStorage(ctx, p)
 	if err != nil {
 		return nil, err
 	}
+	rows, err := plan.Candidates(ctx, a.store, s.ID, 200)
+	if err != nil {
+		return nil, err
+	}
+	return a.visibleEntries(ctx, s, rows, tags), nil
+}
+
+// Listed is Search for a bare `tag:x`: the given (tagged) nodes that live in
+// the storage p names, through the same filters.
+func (a *aiOps) Listed(ctx context.Context, p string, nodes []*model.Node, tags *search.Filter) ([]aiEntry, error) {
+	s, _, err := a.resolveStorage(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]*model.Node, 0, len(nodes))
+	for _, n := range nodes {
+		if n != nil && n.StorageID == s.ID {
+			rows = append(rows, n)
+		}
+	}
+	return a.visibleEntries(ctx, s, rows, tags), nil
+}
+
+// visibleEntries turns rows of storage s into entries, dropping what is not a
+// result (deleted, filex's own directories, outside the tag filter) and what
+// the caller may not see (outside the token's root, the user's RBAC grants).
+func (a *aiOps) visibleEntries(ctx context.Context, s *model.Storage, rows []*model.Node, tags *search.Filter) []aiEntry {
 	root, confined := confine.RootFromToken(ctx)
 	var set *acl.Set
 	if a.acl != nil {
 		set, _ = a.acl.LoadSet(ctx, auth.UserFrom(ctx), s)
 	}
-	rows, err := a.store.SearchNodes(ctx, s.ID, "%"+query+"%", 200)
-	if err != nil {
-		return nil, err
-	}
 	out := make([]aiEntry, 0, len(rows))
 	for _, n := range rows {
 		if n.DeletedAt != nil {
+			continue
+		}
+		if syspath.Hidden(n.Path) {
+			continue // filex's own directories hold no search results
+		}
+		if !tagFilterAccepts(tags, n.ID) {
 			continue
 		}
 		if confined && !root.Within(s.Name, n.Path) {
@@ -863,14 +1096,10 @@ func (a *aiOps) Search(ctx context.Context, p, query string) ([]aiEntry, error) 
 		if set != nil && !set.CanSee(n.Path) {
 			continue // outside the user's RBAC grants
 		}
-		typ := "file"
-		if n.Type == model.NodeTypeDirectory {
-			typ = "dir"
-		}
 		e := aiEntry{
 			Path: joinAdapterPath(s.Name, n.Path),
 			Name: n.Name,
-			Type: typ,
+			Type: aiTypeOfNode(n.Type),
 			Size: n.Size,
 			Mime: n.Mime,
 		}
@@ -879,7 +1108,7 @@ func (a *aiOps) Search(ctx context.Context, p, query string) ([]aiEntry, error) 
 		}
 		out = append(out, e)
 	}
-	return out, nil
+	return out
 }
 
 // aiShareResult is the AI-surface share payload: a public link (+ optional PIN
@@ -987,6 +1216,9 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 	}
 	if sDest.ReadOnly {
 		return nil, storage.ErrReadOnly
+	}
+	if err := a.gate(ctx, sDest, writegate.Writes(relDest)); err != nil {
+		return nil, err
 	}
 	if !a.allow(ctx, sDest, relDest, acl.LevelEditor) {
 		return nil, errAIForbidden
@@ -1098,8 +1330,11 @@ func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, 
 			return nil
 		}
 		for _, o := range objs {
-			if o.Name == ".filex-trash" || strings.Contains(o.Path, ".filex-trash") ||
-				strings.Contains(o.Path, ".thumbs") || o.Name == ".keepdir" {
+			// syspath.IsName — the same members the share ZIP leaves out
+			// (sharezip.CollectFiles). This copy of the list did not know
+			// `.versions` or `.filex-open`, so zipping a storage root packed
+			// old versions and the desktop's working copies.
+			if syspath.IsName(o.Name) {
 				continue
 			}
 			childRel := o.Path
@@ -1211,6 +1446,7 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 
 	dest := strings.Trim(relDst, "/")
 	mkdirer, _ := drv.(storage.Mkdirer)
+	locks := a.lockView(ctx, sDst)
 	count := 0
 	for _, f := range zr.File {
 		safeRel, serr := sanitizeZipPath(f.Name)
@@ -1219,6 +1455,18 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 			continue
 		}
 		target := strings.Trim(path.Join(dest, safeRel), "/")
+		// resolveStorage refused a reserved DESTINATION; a member under one of
+		// filex's own names inside an ordinary destination is skipped here,
+		// and so is one that would land on a document an app has frozen
+		// (counted as refused: it is not the archive's fault, and nothing
+		// about retrying changes it while the freeze lasts).
+		if gerr := writegate.Check(locks, 0, writegate.Writes(target)); gerr != nil {
+			slog.Warn("ai unzip: skipped member", slog.String("name", f.Name), slog.String("why", gerr.Error()))
+			if errors.Is(gerr, writegate.ErrLocked) {
+				refused++
+			}
+			continue
+		}
 		// Defense in depth: the joined target must stay under destDir (which is
 		// itself within the confinement root, validated above).
 		if dest != "" && !strings.HasPrefix(target+"/", dest+"/") {

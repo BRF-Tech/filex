@@ -124,15 +124,15 @@ func clientLoginCmd(opts *clientOpts) *cobra.Command {
 			// through the same stdin must not swallow each other's lines.
 			rd := bufio.NewReader(cmd.InOrStdin())
 			if email == "" {
-				fmt.Fprint(cmd.ErrOrStderr(), "E-mail: ")
+				fmt.Fprint(cmd.ErrOrStderr(), "Email: ")
 				line, err := rd.ReadString('\n')
 				if err != nil && line == "" {
-					return fmt.Errorf("read e-mail: %w", err)
+					return fmt.Errorf("read email: %w", err)
 				}
 				email = strings.TrimSpace(line)
 			}
 			if email == "" {
-				return errors.New("empty e-mail")
+				return errors.New("empty email")
 			}
 			password, err := readPassword(cmd, rd)
 			if err != nil {
@@ -158,7 +158,7 @@ func clientLoginCmd(opts *clientOpts) *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&email, "email", "", "account e-mail (prompted when omitted)")
+	c.Flags().StringVar(&email, "email", "", "account email (prompted when omitted)")
 	c.Flags().StringVar(&totp, "totp", "", "two-factor code (accounts with TOTP enabled)")
 	return quiet(c)
 }
@@ -279,6 +279,8 @@ func runUploadTree(cmd *cobra.Command, api *cliclient.Client, opts *clientOpts, 
 			fmt.Fprintf(out, "Uploaded %s -> %s\n", ev.Local, ev.Remote.String())
 		case cliclient.TreeSymlink:
 			fmt.Fprintf(errw, "warning: skipping symlink %s\n", ev.Local)
+		case cliclient.TreeSpecial:
+			fmt.Fprintf(errw, "warning: skipping %s: not a regular file (named pipe, socket or device)\n", ev.Local)
 		case cliclient.TreeErr:
 			fmt.Fprintf(errw, "error: %s: %v\n", ev.Local, ev.Err)
 		}
@@ -298,8 +300,9 @@ func runUploadTree(cmd *cobra.Command, api *cliclient.Client, opts *clientOpts, 
 			Files           int       `json:"files"`
 			Dirs            int       `json:"dirs"`
 			SkippedSymlinks []string  `json:"skipped_symlinks,omitempty"`
+			SkippedSpecial  []string  `json:"skipped_special,omitempty"`
 			Errors          []jsonErr `json:"errors,omitempty"`
-		}{Local: local, Remote: remote, Files: rep.Files, Dirs: rep.Dirs, SkippedSymlinks: rep.Symlinks}
+		}{Local: local, Remote: remote, Files: rep.Files, Dirs: rep.Dirs, SkippedSymlinks: rep.Symlinks, SkippedSpecial: rep.Special}
 		for _, e := range rep.Errors {
 			summary.Errors = append(summary.Errors, jsonErr{Path: e.Local, Error: e.Err.Error()})
 		}

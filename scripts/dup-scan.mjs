@@ -727,7 +727,11 @@ export const CONCEPTS = [
      * carries no ladder literal at all — `'unit.bytes'` is what identifies it,
      * and it is also what a translated copy would have to write.
      */
-    tell: /\[\s*'B',\s*'KB'|\[\s*'K',\s*'M',\s*'G'|1024\s*\*\*|\/=\s*1024|>=\s*1024|1000\s*\*\*|\/=\s*1000|>=\s*1000|'unit\.bytes'/,
+    // ⚠ The fifth shape is a unit typed into a template literal (`${x} KB`):
+    // the zip preview's list had one — "1.9 KB" in 1024s and a dot, beside
+    // the explorer's "1,96 KB" (QA, 2026-09-21) — and none of the four
+    // alternatives above could see it.
+    tell: /\[\s*'B',\s*'KB'|\[\s*'K',\s*'M',\s*'G'|1024\s*\*\*|\/=\s*1024|>=\s*1024|1000\s*\*\*|\/=\s*1000|>=\s*1000|'unit\.bytes'|\}\s?[KMGT]B\b/,
     roots: ['packages/core/src', 'web/src', 'desktop/src'],
     ext: ['.ts', '.vue'],
     fix: 'call formatByteSize() (or formatSize() from useLocale / formatBytes() from web/src/lib/format, which both do)',
@@ -735,11 +739,17 @@ export const CONCEPTS = [
   {
     id: 'datetime-format',
     what: 'rendering an instant for a human',
+    /**
+     * ONE home, the way byte-size has one. `web/src/lib/format.ts` and
+     * `web/src/lib/timezone.ts` used to be homes as well, and format.ts built
+     * its own formatter with its own options — "21 Eyl 2026 15:02" and
+     * "02:51 PM" beside the explorer's "21 Eyl 2026, 14:50" and "2:50 PM"
+     * (QA, 2026-09-21). It calls core's `formatWhen` now; a formatter written
+     * there again is a stray like any other.
+     */
     home: [
       'packages/core/src/composables/useLocale.ts',
       'packages/core/src/lib/timezone.ts',
-      'web/src/lib/format.ts',
-      'web/src/lib/timezone.ts',
     ],
     tell: /toLocaleDateString|toLocaleTimeString|toLocaleString\(|new Intl\.DateTimeFormat/,
     roots: ['packages/core/src', 'web/src', 'desktop/src'],
@@ -758,7 +768,11 @@ export const CONCEPTS = [
   {
     id: 'brand-mark',
     what: 'the filex logo',
-    home: ['web/src/components/LogoMark.vue'],
+    // ⚠ The home moved into packages/core (2026-09-23): the public shell draws
+    // the mark for an instance that has not branded itself, and a package
+    // cannot import out of the web app. `web/src/components/LogoMark.vue` is a
+    // re-export and holds no path data.
+    home: ['packages/core/src/components/LogoMark.vue'],
     tell: /M7 11a2 2 0 0 1 2-2h5l2 2h7/,
     roots: ['packages/core/src', 'web/src', 'backend/internal', 'desktop/ui', 'site'],
     ext: ['.ts', '.vue', '.go', '.html', '.svg'],

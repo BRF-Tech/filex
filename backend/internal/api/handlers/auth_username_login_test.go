@@ -198,6 +198,11 @@ func TestProfileUsernameChange(t *testing.T) {
 	if code := patch("root"); code != http.StatusBadRequest {
 		t.Errorf("reserved name: code=%d, want 400", code)
 	}
+	// "admin" is the first administrator's name and nobody else's: no person
+	// can rename themselves to it (identity.ClaimBootstrap is the one door).
+	if code := patch("admin"); code != http.StatusBadRequest {
+		t.Errorf("renaming to admin: code=%d, want 400", code)
+	}
 	if code := patch("NOT valid"); code != http.StatusBadRequest {
 		t.Errorf("malformed name: code=%d, want 400", code)
 	}
@@ -208,12 +213,41 @@ func TestProfileUsernameChange(t *testing.T) {
 }
 
 // A reserved name is not a reason to refuse an account — the collision loop
-// simply moves past it. `admin@…` is the address every first install uses, so
-// this path runs on day one of every deployment.
+// simply moves past it. The first administrator of an install is named
+// "admin" by first run (identity.ClaimBootstrap); every LATER `admin@…`
+// account lands here and becomes "admin2".
 func TestReservedDerivedNameGetsASuffixInsteadOfFailing(t *testing.T) {
 	_, _, store := testutil.NewTestServer(t)
 	u := seedUser(t, store, "admin@example.com", "DualSidePass!1")
 	if u.Username != "admin2" {
 		t.Fatalf("username = %q, want admin2 (admin is reserved)", u.Username)
+	}
+}
+
+// The first administrator holds the reserved "admin". The settings form sends
+// the username with every save; keeping the name you hold is not claiming it,
+// so that account's profile saves must not be refused as "reserved".
+func TestProfileSave_KeepsTheReservedNameItHolds(t *testing.T) {
+	srv, client, store := testutil.NewTestServer(t)
+	const pw = "DualSidePass!1"
+	u := seedUser(t, store, "boss@example.com", pw)
+	if err := store.SetUserUsername(context.Background(), u.ID, "admin"); err != nil {
+		t.Fatalf("set admin: %v", err)
+	}
+	testutil.LoginAs(t, srv, client, "boss@example.com", pw)
+
+	body, _ := json.Marshal(map[string]string{"username": "admin", "display_name": "Burak"})
+	req, _ := http.NewRequest(http.MethodPatch, srv.URL+"/api/auth/profile", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("saving the profile with the name the account holds: code=%d, want 200", resp.StatusCode)
+	}
+	if code, email := login(t, srv.URL, "admin", pw); code != http.StatusOK || email != "boss@example.com" {
+		t.Errorf("the first administrator still signs in as admin: code=%d email=%q", code, email)
 	}
 }

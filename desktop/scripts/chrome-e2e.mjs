@@ -30,6 +30,24 @@ async function ensureNoTour() {
 }
 await ensureNoTour();
 
+// ⚠ ensureNoTour() cannot win a race it cannot see: the tour ENTERS a moment
+// after an explorer mounts (a new tab is a new explorer), so a dismissal that
+// finds nothing and returns is followed by a click the tour then swallows —
+// measured 2026-09-21, one run in two waited out Playwright's 30 s at the tab
+// close below. Clicks that can meet it retry past it instead.
+async function clickPastTour(locator) {
+  for (let i = 0; i < 6; i++) {
+    try {
+      await locator.click({ timeout: 2500 });
+      return;
+    } catch (e) {
+      if (!/fe-tour|intercepts pointer events/.test(String(e))) throw e;
+      await ensureNoTour();
+    }
+  }
+  await locator.click();
+}
+
 // ── the server's brand mark ──────────────────────────────────────────
 // GET /api/branding is public and fm.example.com serves a data: URI. The plate is
 // painted only once that request lands, so give it a moment.
@@ -95,12 +113,14 @@ check('…and it holds exactly one tab', (await tabs().count()) === 1);
 await ensureNoTour();
 
 // The + lives in the strip, so a hidden strip means no way to open a tab.
-await win.locator('.fe-tabs__new').click();
+await clickPastTour(win.locator('.fe-tabs__new'));
 await sleep(400);
 check('the + in the strip opens a second tab', (await tabs().count()) === 2);
 
 // Closing back down to one must NOT take the strip away again.
-await win.locator('.fe-tabs__tab').nth(1).locator('.fe-tabs__close').click();
+// ⚠ The new tab is a fresh explorer, and a fresh explorer can open the tour
+// again — see clickPastTour.
+await clickPastTour(win.locator('.fe-tabs__tab').nth(1).locator('.fe-tabs__close'));
 await sleep(400);
 check('closing back to one tab leaves the strip in place',
   (await tabs().count()) === 1 && (await strip().isVisible()));
@@ -119,7 +139,7 @@ await ensureNoTour();
 // on whatever screen the suite happens to run on.
 let overflowed = false;
 for (let i = 0; i < 60 && !overflowed; i++) {
-  await win.locator('.fe-tabs__new').click();
+  await clickPastTour(win.locator('.fe-tabs__new'));
   await sleep(80);
   overflowed = await win.evaluate(() => {
     const el = document.querySelector('.fe-tabs__scroll');
@@ -162,7 +182,7 @@ check('…with no vertical axis at all', stripBox?.overflowY === 'hidden' && str
 for (let i = 0; i < 30; i++) {
   const n = await tabs().count();
   if (n <= 1) break;
-  await win.locator('.fe-tabs__tab').nth(n - 1).locator('.fe-tabs__close').click();
+  await clickPastTour(win.locator('.fe-tabs__tab').nth(n - 1).locator('.fe-tabs__close'));
   await sleep(120);
 }
 
@@ -249,8 +269,34 @@ const mode = () =>
     };
   });
 
+// The window's close button turns the THEME's danger red on hover, with the
+// theme's on-colour glyph — the pair the product's own danger button uses. It
+// was a literal #e53935 on #fff that no theme could reach (0.42.0–0.42.2).
+// Hovered through Playwright (CDP), not the operator's mouse.
+const closeHover = async () => {
+  await win.hover('#winctl button.winctl--close');
+  await sleep(300); // the .12s background transition
+  const r = await win.evaluate(() => {
+    const b = document.querySelector('#winctl button.winctl--close');
+    const probe = document.createElement('div');
+    probe.style.background = 'var(--fe-danger)';
+    probe.style.color = 'var(--fe-text-on-primary)';
+    document.body.appendChild(probe);
+    const want = { bg: getComputedStyle(probe).backgroundColor, fg: getComputedStyle(probe).color };
+    probe.remove();
+    return { got: { bg: getComputedStyle(b).backgroundColor, fg: getComputedStyle(b).color }, want };
+  });
+  await win.mouse.move(400, 400);
+  return r;
+};
+
 await opts.nth(1).click(); // Night
 await sleep(400);
+if (process.platform !== 'darwin') {
+  const c = await closeHover();
+  check('Night: the close button hovers in the theme’s danger red, not a literal',
+    c.got.bg === c.want.bg && c.got.fg === c.want.fg && c.got.bg !== 'rgb(229, 57, 53)', JSON.stringify(c));
+}
 let m = await mode();
 check('Night paints the dark variant', m.dark && !m.light, JSON.stringify(m));
 check('…and the choice is remembered', m.stored === 'dark', String(m.stored));
@@ -262,6 +308,11 @@ check('…including the colour-scheme the window\u2019s own form controls follow
 
 await opts.nth(0).click(); // Day
 await sleep(400);
+if (process.platform !== 'darwin') {
+  const c = await closeHover();
+  check('Day: the close button hovers in the theme’s danger red, not a literal',
+    c.got.bg === c.want.bg && c.got.fg === c.want.fg && c.got.bg !== 'rgb(229, 57, 53)', JSON.stringify(c));
+}
 m = await mode();
 check('Day paints the light variant', m.light && !m.dark, JSON.stringify(m));
 check('…and the choice is remembered', m.stored === 'light', String(m.stored));

@@ -96,11 +96,37 @@ const (
 // and logged, because "there is an update but I am not taking it" is exactly
 // the state an operator needs explained.
 type Decision struct {
-	Action  Action
-	Step    Step
-	Target  Release
-	Reason  string
-	Skipped []Release // releases between current and target (informational)
+	Action Action
+	Step   Step
+	Target Release
+	// Reason is the decision in English, for the log and the webhook.
+	Reason string
+	// ReasonKey + ReasonVars are the same sentence as a key of the server
+	// catalogue (srvtext, `server.update.reason.*`): the admin page says it
+	// in the reader's language. ⚠ It printed Reason, so the Turkish panel read
+	// "policy is manual — updates are announced, not applied"
+	// (release-candidate sweep, 2026-09-21).
+	ReasonKey  string
+	ReasonVars map[string]string
+	Skipped    []Release // releases between current and target (informational)
+}
+
+// why is one reason: the catalogue key (under server.update.reason.), its
+// placeholders and the English the log keeps.
+type why struct {
+	key  string
+	vars map[string]string
+	en   string
+}
+
+func (d *Decision) because(w why) {
+	d.Reason, d.ReasonKey, d.ReasonVars = w.en, "server.update.reason."+w.key, w.vars
+}
+
+func decided(a Action, st Step, target Release, w why) Decision {
+	d := Decision{Action: a, Step: st, Target: target}
+	d.because(w)
+	return d
 }
 
 // Input is everything Decide needs. It takes no globals so the whole policy is
@@ -133,15 +159,15 @@ type Input struct {
 func Decide(in Input) Decision {
 	latest, ok := in.Manifest.Latest()
 	if !ok {
-		return Decision{Action: ActionNone, Step: StepNone, Reason: "no releases in manifest"}
+		return decided(ActionNone, StepNone, Release{}, why{key: "no_releases", en: "no releases in manifest"})
 	}
 	target, err := ParseVersion(latest.Version)
 	if err != nil {
-		return Decision{Action: ActionNone, Step: StepNone, Reason: "unparsable release version"}
+		return decided(ActionNone, StepNone, Release{}, why{key: "unparsable", en: "unparsable release version"})
 	}
 	step := in.Current.StepTo(target)
 	if step == StepNone {
-		return Decision{Action: ActionNone, Step: StepNone, Target: latest, Reason: "up to date"}
+		return decided(ActionNone, StepNone, latest, why{key: "up_to_date", en: "up to date"})
 	}
 
 	skipped := in.Manifest.Between(in.Current, target)
@@ -149,13 +175,16 @@ func Decide(in Input) Decision {
 
 	if latest.MinVersion != "" {
 		if min, err := ParseVersion(latest.MinVersion); err == nil && in.Current.Compare(min) < 0 {
-			d.Action, d.Reason = ActionInstruct, "install is older than this release's minimum ("+min.String()+"); upgrade in steps"
+			d.Action = ActionInstruct
+			d.because(why{key: "below_minimum", vars: map[string]string{"version": min.String()},
+				en: "install is older than this release's minimum (" + min.String() + "); upgrade in steps"})
 			return d
 		}
 	}
 
 	if step == StepMajor {
-		d.Action, d.Reason = ActionInstruct, "major release — read the upgrade notes first"
+		d.Action = ActionInstruct
+		d.because(why{key: "major", en: "major release — read the upgrade notes first"})
 		return d
 	}
 
@@ -164,46 +193,50 @@ func Decide(in Input) Decision {
 	switch {
 	case auto && !in.Mode.CanSelfApply():
 		d.Action = ActionInstruct
-		d.Reason = "container install cannot replace its own image — use an external updater or upgrade manually"
+		d.because(why{key: "container", en: "container install cannot replace its own image — use an external updater or upgrade manually"})
 	case auto:
-		d.Action, d.Reason = ActionAuto, reason
+		d.Action = ActionAuto
+		d.because(reason)
 	case !in.Mode.CanSelfApply():
-		d.Action, d.Reason = ActionInstruct, reason
+		d.Action = ActionInstruct
+		d.because(reason)
 	default:
-		d.Action, d.Reason = ActionConfirm, reason
+		d.Action = ActionConfirm
+		d.because(reason)
 	}
 	return d
 }
 
 // autoAllowed answers "may this move happen without asking?" plus the reason,
 // which is phrased for the operator either way.
-func autoAllowed(in Input, step Step, target Release, skipped []Release) (bool, string) {
+func autoAllowed(in Input, step Step, target Release, skipped []Release) (bool, why) {
+	pol := map[string]string{"policy": string(in.Policy)}
 	if in.Policy == PolicyOff || in.Policy == PolicyManual {
-		return false, "policy is " + string(in.Policy) + " — updates are announced, not applied"
+		return false, why{key: "announced_only", vars: pol, en: "policy is " + string(in.Policy) + " — updates are announced, not applied"}
 	}
 	if !target.AutoOK {
-		return false, "release is not marked auto_ok — apply it deliberately"
+		return false, why{key: "not_auto_ok", en: "release is not marked auto_ok — apply it deliberately"}
 	}
 	// A patch must not carry schema changes. If one does, it is a packaging
 	// mistake, and the safe reading is "this is not really a patch".
 	for _, r := range append(append([]Release{}, skipped...), target) {
 		if r.Migrations {
-			return false, "release changes the database schema — confirm so a backup is taken first"
+			return false, why{key: "migrations", en: "release changes the database schema — confirm so a backup is taken first"}
 		}
 	}
 	switch step {
 	case StepPatch:
-		return true, "patch release under policy " + string(in.Policy)
+		return true, why{key: "patch_auto", vars: pol, en: "patch release under policy " + string(in.Policy)}
 	case StepMinor:
 		if in.Policy != PolicyMinor {
-			return false, "minor release — policy " + string(in.Policy) + " applies patches only"
+			return false, why{key: "minor_needs_policy", vars: pol, en: "minor release — policy " + string(in.Policy) + " applies patches only"}
 		}
 		if in.Current.Major == 0 {
-			return false, "0.x minor releases may break compatibility — confirm required"
+			return false, why{key: "zero_minor", en: "0.x minor releases may break compatibility — confirm required"}
 		}
-		return true, "minor release under policy minor"
+		return true, why{key: "minor_auto", en: "minor release under policy minor"}
 	}
-	return false, "unhandled step"
+	return false, why{key: "unhandled", en: "unhandled step"}
 }
 
 // Window is a daily maintenance window, e.g. 03:00–05:00 local time. The zero

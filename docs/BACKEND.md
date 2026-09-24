@@ -11,12 +11,15 @@ All endpoints under `/api/*` return JSON. All write endpoints expect
 - [Uploads (multipart)](#uploads-multipart)
 - [Archives](#archives)
 - [Sharing](#sharing)
+- [The public surface](#the-public-surface)
+- [Interface preferences](#interface-preferences)
 - [Thumbnails](#thumbnails)
 - [Versions](#versions)
 - [Realtime (WebSocket)](#realtime-websocket)
 - [Operations (long-running)](#operations-long-running)
 - [Admin: storages](#admin-storages)
 - [Admin: plugins](#admin-plugins)
+- [App plugins](#app-plugins)
 - [Admin: users](#admin-users)
 - [Admin: quota](#admin-quota)
 - [Admin: external services](#admin-external-services)
@@ -62,7 +65,19 @@ embeds that prefer header auth.
 **Status codes:** `200` ok · `401` invalid creds · `429` rate-limited.
 
 ### `POST /api/auth/logout` ![user](https://img.shields.io/badge/-user-blue)
-Invalidates the session cookie / token.
+Deletes the session and clears the cookie.
+
+**Body** (optional): `{"return_to": "/admin/login" | "/drive/login"}` — the
+sign-in page of the front door the person was using. Anything else means
+`/admin/login`; the address is never taken from the request.
+
+**Response 200**: `{"ok": true}`, plus `"logout_url"` for an SSO session whose
+identity provider can end sessions — its end-session URL with `id_token_hint`,
+`client_id` and `post_logout_redirect_uri` (`<front door>?signed_out=1`). The
+web app sends the browser there so the provider's session ends too
+(RP-initiated logout, [SSO.md](SSO.md#signing-out)). Never present with
+`FILEX_OIDC_LOGOUT=local`, for a password session, or for a session signed in
+through a provider that has since been replaced.
 
 ### `GET /api/auth/oidc/start` ![public](https://img.shields.io/badge/-public-lightgrey)
 Redirects (302) the browser to the configured OIDC issuer authorise URL.
@@ -242,6 +257,45 @@ List the contents of a directory.
 
 **Status codes:** `200` ok · `403` forbidden · `404` path missing.
 
+### Names filex keeps for itself
+
+`.filex-trash`, `.versions`, `.thumbs`, the desktop app's `.filex-open` (at any
+depth) and the empty-folder marker `.keepdir` are filex's own
+(`backend/internal/syspath`). They are never listed or searched, and every
+write that names one — creating, uploading, renaming, moving, copying,
+extracting, saving, sharing, granting or restoring — answers:
+
+```json
+HTTP 403
+{ "error": "\".filex-trash\" is reserved for filex's own use", "code": "RESERVED_NAME", "name": ".filex-trash" }
+```
+
+An archive member under one of them is skipped, the way a zip-slip entry is.
+The single exception is the desktop's open-with round trip: `newfolder` of
+`.filex-open` at the storage root, `upload` of `.filex-open/<hex session>-<name>`
+(and the document editor's save of that copy), and `delete` of it.
+
+### `GET /api/files/manager?action=changes` ![user](https://img.shields.io/badge/-user-blue)
+Has anything under a folder changed since the caller last asked?
+
+| Param   | Notes |
+|---------|-------|
+| `path`  | `<storage>://<folder>` (a file path works too) |
+| `since` | the `cursor` from the previous answer; empty = never asked |
+
+**Response 200** `{ "cursor": "<opaque>", "changed": true }`
+
+Answered from an in-memory change log fed by the same event chain that
+refreshes open explorers and folder sizes — every write surface (explorer,
+WebDAV, S3, SFTP, FTPS, NFS, trash and version restores, the ops queue). Every
+doubt reads as `changed`: no `since`, a cursor from before a restart, one older
+than the log still holds (4,096 changes per storage), an event on the way to
+the folder that does not say what it touched. Changes the catalogue learns from
+a **storage scan** (bytes written straight into the backend) do not pass
+through the log, which is why sync clients keep a slower full walk as a safety
+net. `403` when the caller cannot see the folder; `400` on a `..` segment;
+`501` on servers without the log.
+
 ### Filenames in `Content-Disposition`
 
 Every endpoint that serves bytes (`action=download` / `preview`, share
@@ -284,7 +338,8 @@ Send it or don't.
 holds the name, the moved item lands beside it as `name-copy`, `name-copy-2`, …
 — within one storage exactly as between two. A move into the folder the item is
 already in changes nothing. (Before 0.41.0 a same-storage move replaced the
-file that held the name.)
+file that held the name.) A **rename** onto a taken name is refused instead —
+see `POST /api/files/manager?action=rename` below.
 
 ### `POST /api/files/copy` ![user](https://img.shields.io/badge/-user-blue)
 Same shape, same queued answer.
@@ -295,7 +350,10 @@ streams the bytes between the two drivers instead of asking one driver to
 rename — a whole tree, empty folders included, each file's mtime preserved where
 the target can hold one, and every file stat-checked on the far side before a
 move deletes anything. A cross-storage move removes the source outright (not to
-the trash); a name already taken becomes `name-copy`. Full behaviour:
+the trash); a name already taken becomes `name-copy`. A symlink the source
+cannot follow is left behind rather than read, a folder link back into the tree
+is walked once, and either ends the op **`partial`** with the skipped entries
+named in `error` — a **move** then keeps its source. Full behaviour:
 [Moving files between storages](STORAGE.md#moving-files-between-storages).
 
 **Refusals** are at submit time, not in the worker: `400` unknown target adapter
@@ -320,16 +378,39 @@ The unified form behind the three per-verb endpoints:
 { "path": "/storage1/new-folder" }
 ```
 
-### `POST /api/files/rename` ![user](https://img.shields.io/badge/-user-blue)
+### `POST /api/files/manager?action=rename` ![user](https://img.shields.io/badge/-user-blue)
 ```json
-{ "path": "/storage1/old.txt", "new_name": "new.txt" }
+{ "path": "alpha://reports", "item": "alpha://reports/old.txt", "name": "new.txt" }
 ```
+Renames one item inside its own folder and answers with the re-rendered
+listing. `name` is a leaf: empty, `/`, `\`, `.` and `..` are refused with `400`.
+
+**A rename never replaces what already has the name.** When a file or a folder
+already holds it — or the listing still shows a file there whose bytes have
+gone missing — the answer is `409 { "code": "NAME_TAKEN", "name": "new.txt" }`
+and nothing moves. When the backend cannot say whether the name is free, it is
+`503 { "code": "EXISTS_CHECK_FAILED" }`, never a rename on the chance. A rename
+that only changes the case (`a.txt` → `A.txt`) is allowed, also on a
+case-insensitive disk. Unlike a move, a rename is not given a `-copy` name: the
+person chose this one.
+
+⚠ Before this, the rename replaced the file that had the name — not into the
+trash — and its catalogue row was dropped with its version history, shares and
+comments. A folder renamed onto another folder's name on an object store was
+merged into it.
 
 ### `POST /api/files/delete` ![user](https://img.shields.io/badge/-user-blue)
 ```json
-{ "paths": ["/storage1/a.txt", "/storage1/sub/"] }
+{ "source": ["alpha://a.txt", "alpha://klasor"] }
 ```
-Returns `200 + { deleted: ["..."], failed: [{ path: "...", error: "..." }] }`.
+**Response 202** `{ "op": { "id": 13, "kind": "delete", … } }` — queued like a
+move; poll `GET /api/files/ops`. Every item goes to the trash.
+
+The items of one delete job are trashed several at a time
+(`FILEX_OPS_DELETE_WORKERS`, default 4 — [CONFIGURATION.md](CONFIGURATION.md)),
+and the job's `done`/`failed` counters are written about once a second while it
+runs. An item that lies inside another item of the same job is left to that one
+(it counts as done with it), so a folder goes to the trash whole.
 
 ### `GET /api/files/manager/shared-with-me` ![user](https://img.shields.io/badge/-user-blue)
 
@@ -582,8 +663,46 @@ List shares the caller owns.
 ### `DELETE /api/files/share/:id` ![user](https://img.shields.io/badge/-user-blue)
 Revokes a share.
 
+### `GET /api/shares` ![user](https://img.shields.io/badge/-user-blue)
+
+The links the **caller** created — the list behind **My shares**, for any
+signed-in person, administrator or not. `?limit=&offset=`, and `?active=true`
+for live links only. Answers `{"items": [...], "total", "page", "page_size"}`
+with the same rows and tenant filter as `GET /api/admin/shares`, minus the
+creator's address (on this list it is always the caller), and each row's
+`url` built server-side exactly as the share dialog's is — never from the
+browser's address. A `root:`-confined token sees only the links inside its
+folder.
+
+### `GET /api/shares/{id}/pin` ![user](https://img.shields.io/badge/-user-blue)
+
+One link's PIN, for the person who created it or an administrator — **403**
+for anybody else, and for an `app` token (`handlers.RequirePersonalCaller`: a
+PIN is a credential, and an app token has no person behind it). An allowed
+caller always gets **200**, carrying the PIN or one word saying why there is
+none:
+
+- `{"pin": "83459512"}`
+- `{"pin": null, "reason": "no_pin"}` — the link has no PIN;
+- `{"pin": null, "reason": "not_recoverable"}` — minted before migration
+  00049, or while the instance had no key, so only the bcrypt hash was kept;
+- `{"pin": null, "reason": "no_secret_key"}` — the instance has no
+  `FILEX_SECRET_KEY` to open the sealed copy with.
+
+The PIN is sealed with AES-256-GCM beside the bcrypt hash; the gate still
+checks only the hash. Every call writes an audit row, `share.pin_revealed`,
+whatever the answer. A link in another tenant, or outside a confined token's
+folder, is the **404** an unknown id gets.
+
 ### `GET /s/:token` ![public](https://img.shields.io/badge/-public-lightgrey)
-HTML viewer page (server-rendered Vue island).
+
+The link a stranger opens. **What it answers depends on who is asking** — see
+[The public surface](#the-public-surface) for the rule and the escape hatches.
+In short: a browser asking for HTML gets the SPA shell; anything else (curl,
+wget, a download manager, the PIN form's own POST) gets the bytes or the
+server-rendered no-JS page, exactly as before.
+
+`POST /s/:token` is what the no-JS PIN form submits to.
 
 ### `POST /api/share/:token/verify` ![public](https://img.shields.io/badge/-public-lightgrey)
 ```json
@@ -593,6 +712,313 @@ Returns short-lived `download_token` to be used with `/api/share/:token/download
 
 ### `GET /api/share/:token/download?dt=…` ![public](https://img.shields.io/badge/-public-lightgrey)
 Streams the file. Increments the download counter; rejects if exceeded.
+
+---
+
+## The public surface
+
+Everything a stranger reaches through a filex link — a download share, a file
+request, an app plugin's page — is **one surface**: one shell, one PIN gate,
+one expiry story, one set of branding. The JSON below is what that shell is
+built from; the server-rendered pages behind it are the no-JS fallback.
+
+⚠ Every answer under `/api/public/*` is `Cache-Control: no-store` and
+`X-Robots-Tag: noindex, nofollow`, except `/branding` and `/ui-locales/{code}`,
+which are the same for every visitor and revalidate (`public, no-cache` with an
+ETag, below). Nothing here is authenticated, and nothing here names the
+creator, the storage or the file's path.
+
+⚠ The same default holds for the whole API: every `/api` answer is
+`Cache-Control: no-store` unless its handler sets a policy of its own
+(`api.APINoStore`, PR #41 — a CDN rule that cached everything once served one
+administrator's `/api/auth/me` to every visitor). The four answers that say who
+the instance is — `/api/public/branding`, `/api/branding`, `/api/appearance`
+and `/api/public/ui-locales/{code}` — are the only `public` ones, and a test
+walks the route table to keep it that way.
+
+⚠ **The PIN gate.** Five wrong PINs shut the gate for ten minutes, counted on
+the share row — so it survives a restart and holds across two instances behind
+one address. The *right* PIN during a lock is refused too: a lock the correct
+answer lifts is no lock at all. Answering the PIN mints an HttpOnly cookie
+(`fxp_<first 16 of sha256(token)>`, an HMAC over the token's hash and an
+expiry, 12 h) that carries no PIN and opens only that one link. Before v3 this
+lock existed only on app-plugin pages; a PIN on a `/s/` link could be walked
+through at the speed of HTTP.
+
+### `GET /api/public/branding` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+Who this instance says it is — the same record the admin **Branding** page
+writes.
+
+`Cache-Control: public, no-cache` with a strong **ETag** over the body: a reader
+always asks whether its copy is current, and an unchanged answer is a `304`
+with no body. ⚠ Not `max-age`: the offered languages ride this answer, and
+while it was held for a minute an administrator who installed a language pack
+did not see the language until the minute was up (v0.43.0). The tag is the
+body’s hash, so it moves for an app installed, removed or upgraded, a theme
+saved or a logo changed, with no version stamp for anybody to bump.
+`Vary: Accept-Language`, because `locale` is resolved from the visitor’s own
+header.
+
+```json
+{
+  "name": "Acme Files",
+  "logo_url": "https://…/logo.svg",
+  "accent": "#2f6ceb",
+  "footer_text": "Acme Ltd · support@acme.example",
+  "hide_powered_by": false,
+  "theme": "system",
+  "locale": "tr",
+  "locales": ["en", "tr"],
+  "ui_locales": [{ "code": "es", "source": "plugin", "plugin": "lang-es", "rtl": false },
+                 { "code": "ar", "source": "plugin", "plugin": "lang-ar", "rtl": true }]
+}
+```
+
+`ui_locales` names the languages an installed **language pack** adds — the
+codes only, never their strings — and `rtl` says which way a language lays the
+interface out ([RTL](RTL.md)). One language's strings are
+`GET /api/public/ui-locales/{code}`, fetched when somebody picks it; it is
+cached the same way (a strong ETag with `no-cache`), which matters most there,
+because a complete catalogue is ~300 KB.
+
+`theme` is `system` | `light` | `dark`
+anything else reads as `system`). ⚠ Deliberately **not** the `/api/branding`
+payload: the SSO button label is not a stranger's business. (The operator's
+custom stylesheet is not on `/api/branding` either any more — it moved to
+`GET /api/me/custom-css`, behind auth, precisely so that no anonymous surface
+can receive it.)
+
+### `GET /api/public/s/{token}` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+```json
+{
+  "kind": "file",
+  "needs_pin": true,
+  "unlocked": false,
+  "expired": false,
+  "revoked": false,
+  "locked": false,
+  "expires_at": "2026-10-01T09:00:00Z",
+  "visits_left": 3,
+  "subject": "rapor.pdf",
+  "node": { "name": "rapor.pdf", "size": 51234, "mime": "application/pdf" },
+  "app":  { "plugin": "sign", "page": "signer", "title": {"tr": "…"},
+            "files": [{ "ref": "pub:0", "name": "sozlesme.pdf", "size": 9 }] }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `kind` | `file` · `folder` · `app` (the link carries an app plugin's page) |
+| `needs_pin` / `unlocked` | whether there is a gate, and whether this browser is through it |
+| `expired` | the clock ran out. An administrator's **Revoke** moves the expiry to the moment it happened, so it lands here too — there is no second column, and one that could disagree with this would be worse than one word doing both |
+| `revoked` | dead for a reason that is **not** the clock: the visit/download ceiling is spent, the file is gone, or the app that answers it was stopped or removed |
+| `locked` | the PIN gate is shut after five wrong answers. **Not** a reason the link is dead — it lifts by itself |
+| `visits_left` | `max_downloads − download_count`, or `null` when there is no ceiling |
+| `node` | present once unlocked, for `file` / `folder` only |
+| `app` | present for `kind: "app"`; `files` are the copies the app exposed, once unlocked |
+
+A live link has `expired` and `revoked` both false; "can I use this" is
+`expired || revoked`.
+
+**404** for an unknown token and for a token of the other kind (a `/d/` link
+asked for here) — the same body for both, so an anonymous caller cannot
+separate "no such link" from "somebody else's link". **410** for a link that
+existed and is gone, carrying the *same object shape* so a client renders it
+from what it already parses.
+
+⚠ For `kind: "app"` the `node` is **omitted**: the file behind an app link is
+the anchor its state and its follow-up job hang on, and the only bytes a
+visitor may have are the copies the app exposed. No storage driver is opened
+for an anonymous request.
+
+### `POST /api/public/s/{token}/pin` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+`{"pin": "1234"}` → **200** with the object above (`unlocked: true`) plus the
+unlock cookie · **401** `pin_wrong` · **429** `locked` (audited as
+`share.pin_locked`; the audit row carries the token's hash, never the token).
+
+### `POST /api/public/s/{token}/event` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+The app surface. `{state, event, action_id, data}`; an empty body means
+`{"event": "open"}`, which counts a visit. Answers `{surface}`, or **202**
+`{accepted: true, job_id}` when the surface asks for a job — the job runs as
+the **link's creator**, on the link's document, with that user's ACL, and the
+visitor never sees the queue row.
+
+**401** `pin_required` until unlocked (checked *before* the app is consulted,
+so a locked link never reports anything about the instance behind it) · **404**
+when the link is not an app link or the runtime is unavailable · **410** when
+the app is stopped or uninstalled, **or when the account that opened the link
+is disabled or deleted** — one answer for all of them, so a stranger holding a
+token cannot tell which. The same fact turns `revoked` on in
+`GET /api/public/s/{token}`, and it is reversible: re-enabling the account
+brings its links back untouched.
+
+A job asked for here passes the **same submit-time gate as an authenticated
+run** (handlers `enqueueAsCreator`): the action is resolved through the
+registry — so one the administrator disabled or reserved to administrators is
+refused, with the CREATOR's admin status deciding the reserved case, because
+the creator's rights are what the job spends — the creator's ACL on the anchor
+is re-read (viewer, editor when the job writes, higher on `min_role`), the
+encrypted-folder and read-only refusals apply, and `params` are capped at the
+same 64 KiB. **403** `no_access` / `permission_denied` · **409**
+`link_unavailable` · **413** `params too large`. ⚠ All three carry ONE
+sentence and no detail: which of the reasons it was would tell a stranger
+holding a token how this instance is configured.
+
+### `GET /api/public/s/{token}/file/{ref}` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+One copy an app link exposed (`pub:N`), Range-capable, `inline`, `nosniff`,
+RFC 6266 filename. Behind the same PIN gate.
+
+### `GET /api/public/d/{token}` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+The file request's state.
+
+```json
+{
+  "kind": "drop",
+  "needs_pin": false,
+  "unlocked": true,
+  "expired": false,
+  "revoked": false,
+  "locked": false,
+  "folder": "Gelen kutusu",
+  "expires_at": "2026-10-01T09:00:00Z",
+  "uploads_left": 18,
+  "limits": { "max_files": 20, "max_file_size_mb": 100, "allowed_ext": ["pdf"], "ask_name": true }
+}
+```
+
+⚠ `folder` is the destination's **name**. Its contents are never listed and
+never counted — a file request is a blind drop.
+
+### `POST /api/public/d/{token}/pin` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+The same gate, the same cookie and the same statuses as the `/s/` PIN.
+
+### `POST /api/public/d/{token}/upload` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+`multipart/form-data` with `file[]` (and `name` when `ask_name`). The PIN may
+be a form field or already answered on this browser (the cookie). Same ingest,
+limits, quota accounting and owner notification as the no-JS form — there is
+one upload path. **401** `bad_pin` · **429** `locked` / `rate_limited` ·
+**410** `expired` · **422** for a limit (`too_many_files`, `file_too_large`,
+`ext_not_allowed`).
+
+### Which answer `/s/` and `/d/` give
+
+A `GET` whose `Accept` names `text/html` (or `application/xhtml+xml`) is a
+browser navigating: it gets the **SPA shell**. Everything else gets the Go
+page or the bytes:
+
+- any other `Accept`, including `*/*` and an absent header — ⚠ this is what
+  keeps `curl -O https://host/s/<token>` downloading a file rather than
+  collecting an HTML page, and it is why every existing test keeps measuring
+  the server-rendered pages;
+- `POST` — the no-JS PIN form and the no-JS upload form submit to the same
+  address;
+- the `X-Filex-Pin` header;
+- any of these query parameters: `nojs` (what the shell's own `<noscript>`
+  points at), `zip`, `confirmed`, `pin`, `inline`, `download`, `thumb`.
+
+When the frontend is not bundled there is no shell and every visitor gets the
+Go pages, so nothing is ever unreachable.
+
+The no-JS body of an **app** link lists the copies the app exposed as plain
+links — an app surface cannot run without JavaScript, but a signer on a
+locked-down browser can still read the document they were sent. Those links
+point at `/api/public/s/{token}/file/{ref}`, behind the same gate.
+
+### Retired: `/p/*` and `/api/p/*`
+
+An app plugin's public page is a share now, so its link is `/s/<token>`.
+
+| Was | Now |
+|---|---|
+| `GET /p/{token}` | **301** → `/s/{token}` |
+| `GET /api/p/{token}` | **301** → `/api/public/s/{token}` |
+| `GET /api/p/{token}/view` | **301** → `/api/public/s/{token}` (the opening surface is an ordinary event) |
+| `POST /api/p/{token}/pin` · `/event` · `GET /file/{ref}` | **301** → the same leaf under `/api/public/s/{token}` |
+
+⚠ Pages created under the old table (migration 00043) **cannot** be carried
+over: it stored only `sha256(token)` while a share stores the token itself, so
+there is no way to turn an existing `/p/<token>` into a `/s/<token>`. Those
+pages are gone; the table shipped in no release.
+
+---
+
+## Interface preferences
+
+What a person chose about the interface itself — theme, palette, density,
+language — one JSON document per person **per surface** (migration 00047).
+
+⚠ In the database and not in `localStorage`, which is per BROWSER and never
+per person: a theme picked in one browser was simply not there in the other.
+Distinct from `GET /api/files/manager/view-prefs`, which is how each **folder**
+was left.
+
+### `GET /api/me/prefs?surface=web` ![user](https://img.shields.io/badge/-user-blue)
+
+`{"surface": "web", "prefs": { … }}`. `surface` is `web` or `desktop` (absent
+= `web`); anything else is **400** — an unknown surface is refused rather than
+folded into `web`, because a typo that silently wrote a desktop theme into the
+browser row would look exactly like the bug this table exists to fix. Nothing
+stored yet answers `{"prefs": {}}`, not a 404: it is every account's first day.
+`Cache-Control: private, no-store`.
+
+### `PUT /api/me/prefs?surface=web` ![user](https://img.shields.io/badge/-user-blue)
+
+`{"prefs": { … }}` → `{"ok": true, "surface": "web"}`. The document must be a
+JSON **object** and is capped at **64 KiB** (**413** past that). Its keys are
+the client's; the server validates and bounds it but does not interpret it.
+
+⚠ There is no user id in the path or the body. A caller only ever reaches
+their own row, on the surface they named.
+
+### `GET /api/me/custom-css` ![user](https://img.shields.io/badge/-user-blue)
+
+`{"css": "…", "enabled": true}` — the operator's stylesheet (settings key
+`ui.custom_css`), already sanitised and already wrapped in its
+`@scope (:root) to (.fe-css-immune)` guard, plus the state of the switch
+(`ui.custom_css_enabled`, **off** unless set), so a screen can tell "off" from
+"on but empty" in one call. `Cache-Control: no-store`.
+
+⚠⚠ **Behind auth, and that is the feature.** It used to ride the public
+`GET /api/branding` payload, which the sign-in page fetches before a session
+exists — so an operator stylesheet could repaint the sign-in form and every
+anonymous share visitor was handed it. An anonymous caller here gets **401**
+and cannot even download it. `/api/me/…` rather than `/api/admin/…` because
+every signed-in person wears the sheet; only *writing* it is an operator's
+privilege, enforced at the settings write (`allowSettingWrite` refuses every
+non-`branding.*` key to a confined tenant admin, and both keys are `ui.*`).
+
+Reading fails soft: an installation whose settings cannot be read answers
+`{}` — an unstyled panel, which is the same thing an installation with no
+custom CSS already sees. See
+[INTEGRATION.md → Operator custom CSS](INTEGRATION.md#operator-custom-css).
+
+### `GET /api/appearance` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+The operator's own themes and the instance default:
+`{"themes": [{"id": "custom:acme", "name": "…", "light": {…}, "dark": {…}}], "default_theme_id": "custom:acme"}`.
+Public, and cached the way `/api/public/branding` is — `no-cache` with an
+ETag, so a theme just composed is on the next page load and an unchanged one
+costs a `304`. It is public because the sign-in page and
+an anonymous share visitor are painted with it before any session exists —
+they wear the instance default, never a person's own palette. A signed-in
+person's choice is theirs, in [`/api/me/prefs`](#interface-preferences).
+
+They are composed on the **Appearance** screen (`/admin/appearance`) through
+`GET /api/admin/themes`, `PUT /api/admin/themes/{key}` (create or replace; the
+exported theme document is the body, so an export re-imports as it is) and
+`DELETE /api/admin/themes/{key}` — **supertenant only**, because themes have no
+tenant column and one tenant's theme would paint every other tenant's users.
+The default is the setting `ui.default_theme`; deleting the theme it names
+puts it back on the stock palette, and a person still pointing at a deleted
+theme simply gets the stock palette too.
 
 ---
 
@@ -701,7 +1127,8 @@ List the caller's ops, newest first (at most 200). `?status=running` filters.
   "ops": [
     {
       "id": 42, "kind": "move", "storage_id": 3, "dest_storage_id": 4,
-      "sources": ["videos/talk.mp4"], "dest": "archive",
+      "sources": ["videos/talk.mp4"], "source_count": 1, "source_dir": "videos",
+      "dest": "archive",
       "total": 1, "done": 0, "failed": 0,
       "bytes_total": 20983257, "bytes_done": 8388608,
       "status": "running", "created_at": "...", "started_at": "..."
@@ -719,15 +1146,33 @@ List the caller's ops, newest first (at most 200). `?status=running` filters.
   walk finishes, or when the tree is too large to measure; draw a moving
   indicator then, not a percentage. They are live counters in the worker's
   memory and are gone once the operation ends.
+- `sources` is a **preview** in this list: the first 5 paths, with
+  `sources_truncated: true` when there were more. `source_count` is the full
+  count, and `source_dir` the deepest folder holding every source (omitted at
+  the storage root). A queued bulk delete stores every path it was given, so
+  without the cut one row could weigh tens of KB and the list megabytes.
+  `GET /api/files/ops/:id` returns every source.
+- `kind: "trash-empty"` is an administrator's **empty the trash** (`POST
+  /api/admin/trash/empty`, [TRASH-VERSIONING](TRASH-VERSIONING.md#trash-endpoints)).
+  It names no files: no `sources`, no `dest`; `total` / `done` / `failed`
+  count trashed rows, and `bytes_total` / `bytes_done` the bytes their files
+  hold and the bytes freed so far. It is its tenant's — listed, read and
+  cancelled by the tenant that asked for it (a supertenant sees every one) —
+  and it runs beside the queue, never in the worker's line.
 
 ### `GET /api/files/ops/:id` ![user](https://img.shields.io/badge/-user-blue)
-Single op detail; same shape, plus `error` when it failed.
+Single op detail with **every** source (no `source_count` / `source_dir`),
+plus `error` when it failed.
 
-`status` is one of `pending | running | ok | failed | partial` — `partial` when
-some sources failed and others did not.
+`status` is one of `pending | running | ok | failed | partial | cancelled` —
+`partial` when some sources failed and others did not, `cancelled` when
+somebody stopped it.
 
 ### `POST /api/files/ops/:id/cancel` ![user](https://img.shields.io/badge/-user-blue)
-Best-effort cancel. Returns `200` regardless; check `status` afterwards.
+Stops an op: a pending one never runs, a running one stops at its next item
+(an item already under way is finished). `200` with the op; `409` when it has
+already ended; `403` for somebody else's op unless the caller is an
+administrator; `404` for an op the caller cannot see.
 
 ---
 
@@ -738,6 +1183,9 @@ The config contract every registered storage driver declares: its fields, their
 type, which one is the storage root, which hold credentials, defaults and an
 i18n key per label. Admin UIs render their storage forms from this instead of
 hardcoding a field list, and the root‑path guard reads the same declaration.
+`scan_fields` are the settings every storage has whatever its driver (today
+`scan_exclude`); the storage form draws them, the replication‑target dialog
+does not.
 **Response 200**
 ```json
 [
@@ -899,6 +1347,15 @@ Storages created on it are left in place.
 ```
 **Response 200** `{ "id": 7, "name": "Hetzner archive", ... }`
 
+`config.scan_exclude` — every driver — holds the storage's
+[scan exclusions](STORAGE.md#scan-exclusions): glob patterns, one per line (a
+JSON array of strings is accepted too). A pattern that would exclude
+everything, a `!`, a `..`, a broken glob or too many or too long patterns
+answers **400** `{"error": "SCAN_EXCLUDE_INVALID", "message": "…"}`, and an
+empty or `/` root **400** `{"error": "ROOT_PATH_FORBIDDEN", "message": "…"}` —
+the `message` names the pattern and is in the reader's language (server
+catalogue, `server.storage.*`). The same on `PATCH`.
+
 > ⚠ A storage on a **plugin** driver (`plugin:<name>`) is probed against this
 > exact configuration *before the row is written*: filex opens the driver,
 > exercises every capability the plugin declared inside a scratch folder
@@ -921,9 +1378,41 @@ Removes the storage and its DB cache rows. Files in the underlying backend
 are **not** deleted.
 
 ### `POST /api/admin/storages/:id/sync` ![admin](https://img.shields.io/badge/-admin-red)
-Triggers an immediate sync run. Returns `202 + { run_id: "..." }`; poll via
-`/api/admin/sync-runs/:id`, or read this storage's history at
-`GET /api/admin/storages/:id/sync-runs`.
+Triggers an immediate **full** scan of the storage. The scan runs in the
+background, so the answer comes at once:
+
+```json
+{ "ok": true, "status": "started", "note": "the sync runs in the background; watch its progress under sync runs" }
+```
+
+`status: "running"` (still `202`) means a scan was already walking this storage
+and no second one was started. There is no run id in the answer: watch the run
+under `GET /api/admin/storages/:id/sync-runs` or `GET /api/admin/sync-runs`.
+
+**`?path=<folder>` rescans one catalogued folder** instead of the whole storage
+— its subtree only, with the same rules as a full scan: new objects are
+catalogued, changed ones updated, a staged upload whose bytes landed is settled,
+and objects gone from inside the folder go to the trash, with the 70 % guard
+comparing what the listing saw against the folder's **own** size. A listing that
+failed part-way removes nothing. No sync-run row is written and the storage's
+`last_sync_at` does not move. It answers when it is done (at most ten minutes):
+
+```json
+{ "ok": true, "path": "/Müşteri/2026", "scanned": 412, "added": 3, "updated": 1, "removed": 2, "reconciled": 0 }
+```
+
+`reconciled` counts staged uploads settled as stored; `removal_skipped`, when
+present, says why nothing was removed (partial listing, or the guard tripped).
+
+| Answer | When |
+|---|---|
+| `200` | done — the counts above |
+| `202` `{status:"running"}` | a scan is already walking the storage; nothing was started |
+| `400` | the path climbs out with `..`, names filex's own trees (`.versions/`, `.thumbs/`, `.filex-trash/`), is excluded from scanning on this storage ([scan exclusions](STORAGE.md#scan-exclusions)), or is a file |
+| `404` | the storage is unknown, or the folder is not in the catalogue (rescan its parent, or run a full scan) |
+| `504` | ten minutes were not enough: the counts so far, the rows reached are updated, nothing was removed |
+
+`?path=` empty, `/`, or anything that cleans to the root is the full scan above.
 
 ### `POST /api/admin/storages/test` ![admin](https://img.shields.io/badge/-admin-red)
 Validates a connection without persisting. ⚠ The candidate configuration is in
@@ -931,6 +1420,122 @@ the body — there is no `:id` in this path, because the usual caller is the
 create form, which has no storage to name yet.
 
 ---
+
+## App plugins
+
+The sandboxed WebAssembly apps of [APP-PLUGINS.md](APP-PLUGINS.md). The admin
+routes are listed there; these are the ones the explorer and the public page
+call. All under the user block unless marked public. Every answer when the
+runtime is off: `404 app_plugins_disabled`.
+
+### `GET /api/files/plugins/actions` ![user](https://img.shields.io/badge/-user-blue)
+
+The rows this caller may see: `{actions: [{plugin, id, key, label, icon,
+applies, view, view_placement, confirm, min_role, danger, output_mode}],
+views: [{plugin, id, placement, label, icon, applies}]}`. `key` is
+`plugin:<plugin>/<action>`; `applies` is the manifest rule merged with the
+admin override; admin-only actions are absent for non-administrators, and
+`hidden` actions are absent for everyone (a surface starts those). The
+explorer mirrors `applies` client-side — including `state` / `no_state`,
+which it matches against the row's `app_state` — and the server re-checks on
+run. `view_placement` is `modal` (dialog) or `page` (the view opens as a full
+page in a new tab).
+
+### `POST /api/files/plugins/actions/{plugin}/{action}/run` ![user](https://img.shields.io/badge/-user-blue)
+
+`{"paths": ["docs://reports/nda.pdf"], "params": {…}}` (adapter-qualified,
+one storage; `{"storage_id", "paths"}` is accepted too). Checks, in order:
+storage ownership, ACL ≥ viewer per path (≥ editor when the action writes,
+`min_role` raises it; a file locked by THIS app is judged at the level the
+caller would have without the lock), read-only storage → `409 read_only`,
+encrypted folder → `403 encrypted`, the applies rule — state keys included —
+against the real files → `422 not_applicable`. A hidden action answers `404`
+here; only a surface may queue it. Answers `202 {op, job_id}` (queued; the `op` is an ops row
+with `kind: "plugin-action"`, `plugin`, `action`, `label`) or, when the action
+opens a screen and no `params` were sent, `200 {surface}`.
+
+### `GET /api/files/plugins/views/{plugin}/{view}?path=…` · `POST …/event` ![user](https://img.shields.io/badge/-user-blue)
+
+The opening surface, then events: `{"paths", "state", "event": "change" |
+"submit" | "action", "action_id", "data": {"values", "row_id"}}` → `200
+{surface}`, or `202 {op, job_id}` when the surface asked for a job (same
+checks as run). A queued job may carry `output: {mode, name}`, the screen's
+"new version / new file beside it / this name" choice, which replaces the
+action's manifest output for that job; the required ACL level is computed
+from the effective mode.
+
+### File locks ![user](https://img.shields.io/badge/-user-blue)
+
+An app holding `files:lock` may freeze one file (`file_lock` host function).
+While a lock is live every caller's effective level on that path is capped at
+viewer — administrators included — so listings carry `locked: true` and
+`lock: {plugin, reason?, until?}` with `perm: "viewer"`, and renaming, moving
+or deleting the file, or any folder above it, answers `423 {"error":
+"locked", "plugin", "path", "reason", "until"}`. An upload that would overwrite the locked file is refused the same
+way; uploads of OTHER names into the same folder and every sibling are
+unaffected, and the locking app's own jobs still write.
+It holds at **every** door, not only the explorer's: the document editor's
+save (a document opened before the freeze and saved after it is refused),
+WebDAV (423 Locked), SFTP, FTPS and NFS (their permission error — also for
+a session that was already open when the freeze was taken), the S3 gateway
+(AccessDenied), the AI/MCP write tools, archive extraction (a member that
+would land on the file is skipped and counted as `locked`), trash and
+version restores onto the path, and another app's output. One check does it
+for all of them (`backend/internal/writegate`), the same one that refuses
+filex's own folder names.
+Administrators list and lift locks at `GET /api/admin/app-plugins/locks` and
+`DELETE /api/admin/app-plugins/locks {storage_id, path}` (audited as
+`app_plugin.unlock`).
+
+### `GET /api/files/plugins/users?plugin=<name>&q=` ![user](https://img.shields.io/badge/-user-blue)
+
+The people-picker's search: `{users: [{user_id, email, name}]}`, tenant-scoped,
+at most 20, empty `q` lists nobody; `403 permission_denied` unless the plugin
+is running and holds `users:lookup`.
+
+### `POST /api/files/ops/{id}/cancel` ![user](https://img.shields.io/badge/-user-blue)
+
+Ends a pending or running op the caller may see (their own, or any as an
+administrator): `200 {op}` with status `cancelled`; `409` when it already
+finished. Applies to every op kind, not only plugin jobs.
+
+### Ops rows for plugin jobs
+
+`GET /api/files/ops` rows with `kind: "plugin-action"` carry `plugin`,
+`action`, `label` (in the caller's locale), `message` (the last progress
+message or the app's result) and, once committed, `outputs: [{path}]`
+(adapter-qualified). Progress rides on `bytes_done` / `bytes_total`.
+Statuses: `pending | running | ok | failed | cancelled`.
+
+### An app's public page IS a share
+
+`share_create` opens a **real share**, so the visitor's link is `/s/<token>`
+like every other public link — one revoke list, one expiry policy, one PIN
+implementation, one visit counter. The JSON a visitor's browser talks to is
+[The public surface](#the-public-surface); `/api/p/*` and `/p/*` are retired
+and **301** there.
+
+The share row carries `plugin_id`, `page_id`, `subject` and the app's own
+`state_json` + `files_json` (migration 00046). `share_revoke` is the share's
+revoke; `share_state` reads and replaces the app's record for one link.
+
+A share points at a node, and a job's **output** has none until `runJob`
+commits it — after the plugin has returned. So a `share_create` naming one of
+this job's outputs is *promised*: the token, PIN and expiry are decided and
+answered at once (`share.NewToken` + `CreateOpts.Token`), and the row is
+written by `keepPromisedShares` when the bytes are committed and the node
+resolved. A job that fails, or that never keeps the output, writes no row —
+the link is created late rather than bound late, so there is never a share
+pointing at nothing (`wasmplugin/public_promised.go` says why at length).
+
+### `GET /api/admin/app-plugins/shares` ![admin](https://img.shields.io/badge/-admin-red)
+
+The links apps opened — `?plugin=<name>` for one app's table, `?active=true`,
+`?limit=`, `?offset=`. Same rows, same envelope and same tenant filter as
+`GET /api/admin/shares`, which carries `plugin_name` and `share.page_id` on
+every row so the Shares table can show a plugin/page column without a lookup
+per row. An app that is not installed answers an empty page, never a 404, so a
+panel polling one app keeps working through an uninstall.
 
 ## Admin: users
 
@@ -953,7 +1558,7 @@ List users. In multi-tenant mode the list is confined to the caller's tenant
 ```
 `password` is optional. An account created without one has no local password:
 every password check refuses it (login form, recovery login, `/dav`, SFTP, FTP)
-and it signs in through SSO, where the account is matched by e-mail, or with an
+and it signs in through SSO, where the account is matched by email, or with an
 API token. `POST /api/admin/users/{id}/reset-password` gives it one later; the
 answer carries the value once, as `new_password`.
 
@@ -1204,23 +1809,38 @@ write that overwrote an existing file — is in
 ## Admin: sync runs
 
 ### `GET /api/admin/sync-runs` ![admin](https://img.shields.io/badge/-admin-red)
-**Query**: `?storage_id=…&limit=50&offset=0`
+**Query**: `?storage_id=…&status=…&limit=50&offset=0` — runs of the last five
+days, newest first. A tenant admin sees its own storages' runs only.
 
 **Response 200**
 ```json
 {
-  "runs": [
+  "entries": [
     {
-      "id": 12, "storage_id": 1, "status": "completed",
+      "id": 12, "storage_id": 1, "status": "ok",
       "started_at": "...", "finished_at": "...",
-      "added": 4, "updated": 2, "removed": 1, "errors": 0
+      "seen_count": 1840, "added": 4, "updated": 2, "deleted": 1
     }
-  ]
+  ],
+  "total": 1, "limit": 50, "offset": 0
 }
 ```
 
+`status` is one of:
+
+| Status | Meaning |
+|---|---|
+| `running` | the run is walking the storage now (`finished_at` is absent) |
+| `ok` | the run finished |
+| `failed` | the run stopped on an error of its own — a backend that did not answer, a listing that failed; `error` says which |
+| `aborted` | the run was cut short: its context was cancelled (shutdown, a storage edit restarting the syncer) or ran past its time limit, or the server stopped in the middle of it and closed the row when it next started (`error`: `interrupted: the server stopped during the scan`). The catalogue is behind the backend until a run finishes |
+
+`seen_count` of the last run that finished `ok` is the tombstone guard's
+baseline ([STORAGE.md → Sync](STORAGE.md#sync)). The same rows are listed per
+storage at `GET /api/admin/storages/:id/sync-runs` (`entries`, `total`).
+
 ### `GET /api/admin/sync-runs/:id` ![admin](https://img.shields.io/badge/-admin-red)
-Includes per-error detail array.
+`{run, conflicts}`: the run above plus the sync conflicts detected during it.
 
 ---
 
@@ -1244,7 +1864,8 @@ Includes per-error detail array.
         "ip": "1.2.3.4",
         "created_at": "2026-09-05T10:11:12Z"
       },
-      "user_email": "admin@local"
+      "user_email": "admin@local",
+      "user_name": "admin"
     }
   ],
   "total": 1,
@@ -1263,8 +1884,14 @@ which carries the same rows. An ordinary install is untouched; see
 
 ⚠ Both the envelope and the action list on this page used to be invented. The
 key is `entries` (not `events`), each row wraps the entry under `entry` with
-`user_email` beside it, and the fields are `target_type` / `target_id` /
+`user_email` and `user_name` beside it, and the fields are `target_type` / `target_id` /
 `metadata` / `created_at` — not `resource` / `meta` / `ts` / `ua`.
+
+`user_name` is the person as every screen names them — display name, else
+username, else email (`model.PersonLabel`, the Owner column's rule). The admin
+Shares list carries the same for a link's creator as `creator_name`, the
+dashboard's `recent_activity` rows as `user_name`, and permission grants as
+`user_name`.
 
 `action` values are produced by exactly one place,
 `internal/auth/audit_middleware.go`, and this is the whole set:

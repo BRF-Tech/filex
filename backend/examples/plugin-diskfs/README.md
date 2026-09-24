@@ -15,8 +15,8 @@ against, without which a plugin is installed *unverified*.
 
 ```bash
 chmod +x plugin.py
-# Admin → Plugins → Install a plugin → upload plugin.py
-# Then: Connections → Add a storage → "Disk (Python example)"
+# Admin → Plugins → Storage plugins → Install a plugin → upload plugin.py
+# Then: Admin → Storages → Add storage → "Disk (Python example)"
 ```
 
 The file is executed directly, so the shebang decides the interpreter: filex

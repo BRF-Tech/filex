@@ -362,6 +362,10 @@ const EXT_TYPE_KEYS: Record<string, string> = {
   // is a decision for the GLYPH, not for the word) — naming them still beats
   // printing "FIG".
   fig: 'ftype.figma',
+  // ⚠ Named, not "DRAWIO": the uppercased extension was a fourth spelling of
+  // draw.io beside "Drawio", "drawio" and "diagrams.net" (QA, 2026-09-21).
+  drawio: 'ftype.drawio',
+  dio: 'ftype.drawio',
   sketch: 'ftype.design',
   xd: 'ftype.design',
   psd: 'ftype.design',

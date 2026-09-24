@@ -17,9 +17,8 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import StatCard from '@/components/ui/StatCard.vue';
-import EmptyState from '@/components/ui/EmptyState.vue';
-import Spinner from '@/components/ui/Spinner.vue';
 import Badge from '@/components/ui/Badge.vue';
+import { DataTable, type DataColumn } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
 const toast = useToastStore();
@@ -73,7 +72,6 @@ async function rebuild() {
   }
 }
 
-const haveResults = computed(() => results.value.items.length > 0);
 
 const scopeOptions = computed(() => [
   { value: 'all', label: t('search.scopeAll') },
@@ -82,6 +80,63 @@ const scopeOptions = computed(() => [
 ]);
 
 onMounted(loadStats);
+
+/* ⚠ The results were a `<ul class="card divide-y divide-zinc-200 …">`: one
+   line for the name, one for the path, one for the snippet and one for the
+   metadata, which is four columns wearing a list's clothes — and two frozen
+   zinc hexes the palette cannot move. The explorer's table now (DataTable,
+   remembered under `admin.search`), with the file name frozen on the left so
+   a sideways scroll still says which hit each row is. The snippet keeps its
+   «»-to-<mark> TEXT segments; nothing here renders HTML from the index.
+
+   ⚠ Sorting: the rows are the server's top 25, in RANK order. `:total` is
+   handed to the table (with no page size, so no pager is drawn) precisely so
+   that while there are more hits than rows on screen the headers close and
+   say why — sorting 25 of 300 by size would show the "smallest" of an
+   arbitrary 25. When every hit is on screen, sorting them is honest, and
+   Score (descending) puts the ranking back. */
+const columns = computed<DataColumn<SearchHitEx>[]>(() => [
+  { id: 'filename', label: t('explore.cols.name'), sortable: true, width: 220 },
+  { id: 'path', label: t('common.path'), sortable: true, width: 240 },
+  { id: 'snippet', label: t('common.match'), width: 260 },
+  { id: 'storage_name', label: t('common.storage'), sortable: true, width: 130 },
+  {
+    id: 'mime',
+    label: t('explore.cols.mime'),
+    sortable: true,
+    width: 150,
+    format: (h) => h.mime || '\u2014',
+    sortValue: (h) => h.mime || null,
+  },
+  {
+    id: 'size',
+    label: t('explore.cols.size'),
+    align: 'right',
+    sortable: true,
+    width: 100,
+    format: (h) => formatBytes(h.size, locale.value),
+    sortValue: (h) => h.size,
+  },
+  {
+    id: 'modified_at',
+    label: t('explore.cols.modified'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 160,
+    format: (h) => formatDate(h.modified_at, locale.value),
+    sortValue: (h) => (h.modified_at ? Date.parse(h.modified_at) : null),
+  },
+  {
+    id: 'score',
+    label: t('common.score'),
+    align: 'right',
+    sortable: true,
+    sortDir: 'desc',
+    width: 90,
+    format: (h) => h.score.toFixed(3),
+    sortValue: (h) => h.score,
+  },
+]);
 </script>
 
 <template>
@@ -98,11 +153,18 @@ onMounted(loadStats);
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <!-- ⚠ FILES, the way the Panel counts them — the bare document count
+           includes every folder, so the two pages disagreed about the same
+           index ("İNDEKSLENMİŞ DOSYA 28" on the Panel, "İNDEKSLENMİŞ
+           DÖKÜMAN 37" here: 28 files and 9 folders; release-candidate sweep,
+           2026-09-21). The folders are said, not hidden. -->
       <StatCard
-        :label="t('search.stats.documents')"
-        :value="stats ? formatNumber(stats.document_count, locale) : '—'"
+        :label="t('search.stats.files')"
+        :value="stats ? formatNumber(stats.file_count ?? stats.document_count, locale) : '—'"
+        :hint="stats?.folder_count != null ? t('search.stats.foldersToo', { n: formatNumber(stats.folder_count, locale) }, stats.folder_count) : undefined"
         :icon="Database"
         icon-tone="brand"
+        data-testid="search-stat-files"
       />
       <StatCard
         :label="t('search.stats.size')"
@@ -144,51 +206,54 @@ onMounted(loadStats);
       </Button>
     </form>
 
-    <div v-if="searching" class="card card-body text-center text-zinc-500"><Spinner /></div>
-
-    <div v-else-if="haveResults" class="space-y-2">
-      <p class="text-xs text-zinc-500">
-        {{ formatNumber(results.total, locale) }} results
-      </p>
-      <ul class="card divide-y divide-zinc-200 dark:divide-zinc-800">
-        <li v-for="hit in results.items" :key="hit.id" class="px-4 py-3 text-sm">
-          <div class="flex items-center justify-between gap-2">
-            <span class="truncate font-medium">
-              {{ hit.filename }}
-              <!-- bul:s3 — content-match badge -->
-              <Badge
-                v-if="hit.matched === 'content' || hit.matched === 'both'"
-                tone="amber"
-                size="xs"
-                class="ml-1 align-middle"
-              >{{ t('search.inContent') }}</Badge>
-            </span>
-            <Badge tone="zinc" size="xs">{{ hit.storage_name }}</Badge>
-          </div>
-          <p class="text-xs font-mono text-zinc-500 truncate">{{ hit.path }}</p>
-          <!-- bul:s3 — «»-highlighted snippet, rendered as text segments (no v-html) -->
-          <p v-if="hit.snippet" class="text-xs text-zinc-600 dark:text-zinc-300 mt-0.5 truncate">
-            <template v-for="(seg, si) in snippetSegments(hit.snippet)" :key="si">
-              <mark
-                v-if="seg.match"
-                class="rounded-sm bg-amber-200/70 dark:bg-amber-500/30 px-0.5 font-medium text-inherit"
-              >{{ seg.text }}</mark>
-              <template v-else>{{ seg.text }}</template>
-            </template>
-          </p>
-          <p class="text-xs text-zinc-500 mt-0.5">
-            {{ hit.mime || '—' }} · {{ formatBytes(hit.size, locale) }} ·
-            {{ formatDate(hit.modified_at, locale) }} · score {{ hit.score.toFixed(3) }}
-          </p>
-        </li>
-      </ul>
-    </div>
-
-    <EmptyState
-      v-else-if="q && !searching"
-      :icon="Search"
-      :title="t('search.noResults')"
-      size="sm"
-    />
+    <DataTable
+      v-if="searching || q"
+      table-id="admin.search"
+      :columns="columns"
+      :rows="results.items"
+      :total="results.total"
+      :loading="searching"
+      :empty="t('search.noResults')"
+      row-key="id"
+      data-testid="search-results"
+    >
+      <template #toolbar>
+        <span class="text-xs">{{ t('search.resultCount', { n: formatNumber(results.total, locale) }, results.total) }}</span>
+      </template>
+      <template #cell-filename="{ row }">
+        <!-- ONE root: a Badge beside a name that wraps is squeezed below its
+             own label and spills under it (web/tests/ui/tablePinnedActions →
+             "a Badge shares its cell with nothing"). -->
+        <div>
+          <span class="font-medium">{{ row.filename }}</span>
+          <!-- bul:s3 — content-match badge -->
+          <Badge
+            v-if="row.matched === 'content' || row.matched === 'both'"
+            tone="amber"
+            size="xs"
+            class="ms-1 align-middle"
+          >{{ t('search.inContent') }}</Badge>
+        </div>
+      </template>
+      <template #cell-path="{ row }">
+        <span class="tbl-mono tbl-clamp" :title="row.path">{{ row.path }}</span>
+      </template>
+      <!-- bul:s3 — «»-highlighted snippet, rendered as text segments (no v-html) -->
+      <template #cell-snippet="{ row }">
+        <span v-if="row.snippet" class="tbl-clamp">
+          <template v-for="(seg, si) in snippetSegments(row.snippet)" :key="si">
+            <mark
+              v-if="seg.match"
+              class="rounded-sm bg-amber-200/70 dark:bg-amber-500/30 px-0.5 font-medium text-inherit"
+            >{{ seg.text }}</mark>
+            <template v-else>{{ seg.text }}</template>
+          </template>
+        </span>
+        <template v-else>—</template>
+      </template>
+      <template #cell-storage_name="{ row }">
+        <Badge tone="zinc" size="xs">{{ row.storage_name }}</Badge>
+      </template>
+    </DataTable>
   </div>
 </template>

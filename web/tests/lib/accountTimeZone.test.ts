@@ -30,20 +30,15 @@ describe('applyAccountTimeZone', () => {
     expect(localStorage.getItem(TIMEZONE_ACCOUNT_LS_KEY)).toBeNull();
 
     const at = new Date('2026-09-13T20:18:00Z');
-    const device = new Intl.DateTimeFormat('en', {
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(at);
+    // The explorer's format (core formatWhen), on the device's own clock.
+    const device = `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(at)}, ${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(at)}`;
     expect(formatDate(at, 'en')).toBe(device);
   });
 
   it('a zone the person chose is applied', () => {
     applyAccountTimeZone('Asia/Tokyo');
     expect(coreActiveTimeZone()).toBe('Asia/Tokyo');
-    expect(formatDate(new Date('2026-09-13T20:18:00Z'), 'en')).toContain('05:18');
+    expect(formatDate(new Date('2026-09-13T20:18:00Z'), 'en')).toContain('5:18');
   });
 
   it('no opinion in the payload (null / absent) touches nothing', () => {

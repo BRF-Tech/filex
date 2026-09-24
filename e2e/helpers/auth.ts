@@ -54,11 +54,11 @@ export async function loginAs(page: Page, email = ADMIN_EMAIL, password = ADMIN_
   await dismissInstallBanner(page);
   await page.goto('/admin/login');
   await page.getByLabel(/e-?mail|kullanıcı adı/i).fill(email);
-  await page.getByLabel(/password|şifre/i).fill(password);
+  await page.getByLabel(/password|parola/i).fill(password);
   // `exact` per name, so neither matches "Sign in with SSO".
   const submit = page
     .getByRole('button', { name: 'Sign in', exact: true })
-    .or(page.getByRole('button', { name: 'Giriş yap', exact: true }));
+    .or(page.getByRole('button', { name: 'Oturum aç', exact: true }));
   await submit.first().click();
   // ⚠ No hand-rolled budget here: this inherits the project's
   // `navigationTimeout` (15s), and the 10s it used to hardcode was TIGHTER

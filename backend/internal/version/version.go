@@ -7,6 +7,8 @@
 //	          -X github.com/brf-tech/filex/backend/internal/version.Date=2026-04-28T12:34:56Z'
 package version
 
+import "strings"
+
 var (
 	// Version is the semver string baked in at link time.
 	Version = "0.1.0-dev"
@@ -16,7 +18,19 @@ var (
 	Date = "unknown"
 )
 
-// String returns a "v0.1.0 (abc1234, 2026-04-28T…)"-style summary.
+// String returns a "v0.1.0 (abc1234, 2026-04-28T…)"-style summary. A part
+// the build did not stamp is left out rather than printed: a development
+// build read "0.1.0-dev (unknown, unknown)" on the login page and the About
+// page — English placeholder words in every language (QA #41, #35).
 func String() string {
-	return Version + " (" + Commit + ", " + Date + ")"
+	var parts []string
+	for _, p := range []string{Commit, Date} {
+		if p != "" && p != "unknown" {
+			parts = append(parts, p)
+		}
+	}
+	if len(parts) == 0 {
+		return Version
+	}
+	return Version + " (" + strings.Join(parts, ", ") + ")"
 }

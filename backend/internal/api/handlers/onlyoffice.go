@@ -20,6 +20,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
 // OnlyOffice exposes the editor config + fetch + callback endpoints.
@@ -153,6 +154,17 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 		node = n
 	}
 
+	// ⚠⚠ No mode IS edit. The document server's config builder treats anything
+	// but "" or "edit" as view (onlyoffice.Service.Config), so a request that
+	// simply left `mode` out was handed an editing session — and the two
+	// downgrades below only looked for the literal "edit": a viewer, or a
+	// trashed file, opened without `mode` came back editable, with a save
+	// callback (found 2026-09-21 while adding the second downgrade). Spell the
+	// default out once so every check below sees what the service will do.
+	if mode == "" {
+		mode = "edit"
+	}
+
 	// Whose node is it? Both id-taking shapes above (POST body `node_id`, GET
 	// query `id`) call GetNode, which tenantstore does not confine, so a
 	// client-supplied node id crossed tenants. The `path` shape is safe and
@@ -197,6 +209,15 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 		if mode == "edit" && !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelEditor) {
 			mode = "view"
 		}
+	}
+	// ⚠⚠ The desktop's open-with working copy IS edited here — its editor
+	// window opens `.filex-open/<session>-<name>` and this save is how the
+	// edit gets back to the person's own file (syspath.PutWorkCopy).
+	// Anything else among filex's own (a trashed file, a version) opens
+	// read-only, the same downgrade a viewer gets: a save would write into
+	// the bin or the history behind their back.
+	if node != nil && mode == "edit" && syspath.Refused(syspath.PutWorkCopy, node.Path) {
+		mode = "view"
 	}
 
 	/* wiring:e2 — E2E-encrypted files can never open in OnlyOffice: the DS

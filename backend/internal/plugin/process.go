@@ -44,6 +44,13 @@ type Process struct {
 	stopped  chan struct{}
 	restarts int
 	lastErr  error
+	// cameUp is set by runOnce once the handshake and OnUp succeeded, so the
+	// loop can tell "ran and later died" from "never started" — only the
+	// second counts toward giving up.
+	cameUp bool
+	// restartBackoff is the first restart delay (0 → one second; doubled up
+	// to a minute). Tests shorten it to drive the loop to its end.
+	restartBackoff time.Duration
 }
 
 // Errors reported through OnDown / Err.
@@ -51,7 +58,18 @@ var (
 	ErrHandshake = errors.New("plugin did not print its handshake line")
 	ErrRefused   = errors.New("plugin refused by host")
 	ErrStopped   = errors.New("plugin stopped")
+	// ErrGaveUp is reported once the supervisor has seen maxConsecutiveFailures
+	// starts in a row that never came up. It stops restarting: a binary that
+	// fails ten times will fail an eleventh, and a loop that keeps trying
+	// forever is a loop that keeps a broken plugin looking "starting". The
+	// admin's Restart button begins a fresh count.
+	ErrGaveUp = errors.New("plugin failed to start 10 times in a row; not restarting until Restart")
 )
+
+// maxConsecutiveFailures is how many starts in a row may fail before the
+// supervisor gives up. Counted per START, and reset the moment a start comes
+// up: a plugin that runs for a day and then crashes has failed once.
+const maxConsecutiveFailures = 10
 
 // Client is the live client, or nil while the plugin is not up.
 func (p *Process) Client() *Client {
@@ -110,10 +128,15 @@ func (p *Process) loop(ctx context.Context) {
 		}
 		p.mu.Unlock()
 	}()
-	backoff := time.Second
+	backoff := p.restartBackoff
+	if backoff <= 0 {
+		backoff = time.Second
+	}
+	failures := 0
 	for {
 		p.mu.Lock()
 		stopping := p.stopping
+		p.cameUp = false
 		p.mu.Unlock()
 		if stopping || ctx.Err() != nil {
 			return
@@ -122,13 +145,29 @@ func (p *Process) loop(ctx context.Context) {
 		p.mu.Lock()
 		p.client = nil
 		p.cmd = nil
-		p.lastErr = err
 		stopping = p.stopping
+		cameUp := p.cameUp
+		p.mu.Unlock()
+		if cameUp {
+			failures = 0
+		} else {
+			failures++
+		}
+		giveUp := !stopping && ctx.Err() == nil && !errors.Is(err, ErrRefused) && failures >= maxConsecutiveFailures
+		if giveUp {
+			err = fmt.Errorf("%w (last: %v)", ErrGaveUp, err)
+		}
+		p.mu.Lock()
+		p.lastErr = err
 		p.mu.Unlock()
 		if p.OnDown != nil {
 			p.OnDown(err)
 		}
 		if stopping || ctx.Err() != nil || errors.Is(err, ErrRefused) {
+			return
+		}
+		if giveUp {
+			p.Log.Error("plugin gave up restarting", slog.String("plugin", p.Name), slog.Int("failures", failures), slog.Any("err", err))
 			return
 		}
 		p.mu.Lock()
@@ -154,12 +193,12 @@ func (p *Process) runOnce(ctx context.Context) error {
 	}
 	cmd := exec.Command(p.Binary)
 	cmd.Dir = filepath.Dir(p.Binary)
-	cmd.Env = append(os.Environ(),
-		"FILEX_PLUGIN_TOKEN="+p.Token,
-		"FILEX_PLUGIN_SOCKET_DIR="+p.SockDir,
-		"FILEX_PLUGIN_NAME="+p.Name,
+	cmd.Env = buildEnv(os.Environ(), []string{
+		"FILEX_PLUGIN_TOKEN=" + p.Token,
+		"FILEX_PLUGIN_SOCKET_DIR=" + p.SockDir,
+		"FILEX_PLUGIN_NAME=" + p.Name,
 		"FILEX_PLUGIN_PROTOCOL=1",
-	)
+	})
 	// Its own process group and resource ceilings — see limits_unix.go for
 	// what these are and, more importantly, what they are not.
 	applyLimits(cmd)
@@ -261,6 +300,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 	p.mu.Lock()
 	p.client = client
 	p.lastErr = nil
+	p.cameUp = true
 	p.mu.Unlock()
 
 	select {
@@ -282,6 +322,43 @@ func (p *Process) runOnce(ctx context.Context) error {
 		client.Close()
 		return ErrStopped
 	}
+}
+
+// envAllowed is the whole of what a plugin inherits from filex's environment.
+//
+// ⚠⚠ A plugin used to be started with os.Environ() — filex's ENTIRE
+// environment: FILEX_SECRET_KEY, the database DSN, SMTP credentials, every
+// secret the operator handed filex through the environment, all readable by
+// a process somebody uploaded. Now the child gets what a process needs to run
+// (path, temp, locale, and on Windows the handful the loader itself wants),
+// the FILEX_PLUGIN_* variables filex sets on purpose, and nothing else. In
+// particular no host variable beginning with FILEX_ ever crosses.
+var envAllowed = map[string]bool{
+	"PATH": true, "HOME": true, "TMPDIR": true, "TMP": true, "TEMP": true,
+	"LANG": true, "TZ": true,
+	"SYSTEMROOT": true, "USERPROFILE": true, "PROGRAMDATA": true, "COMSPEC": true, "PATHEXT": true,
+}
+
+// buildEnv filters host (KEY=value pairs, os.Environ shape) down to the
+// allowed set and appends own — filex's FILEX_PLUGIN_* variables — last, so
+// they win. Names are compared case-insensitively: Windows treats Path and
+// PATH as the same variable, and the allow-list must too.
+func buildEnv(host, own []string) []string {
+	out := make([]string, 0, len(own)+len(envAllowed))
+	for _, kv := range host {
+		key, _, ok := strings.Cut(kv, "=")
+		if !ok || key == "" {
+			continue
+		}
+		upper := strings.ToUpper(key)
+		if strings.HasPrefix(upper, "FILEX_") {
+			continue
+		}
+		if envAllowed[upper] || strings.HasPrefix(upper, "LC_") {
+			out = append(out, kv)
+		}
+	}
+	return append(out, own...)
 }
 
 // relay copies a plugin's output into filex's log, RATE LIMITED.

@@ -74,9 +74,7 @@ async function load(): Promise<void> {
   const lib = await ensureAgPsd();
   if (myToken !== renderToken) return;
   if (!lib) {
-    error.value = props.t
-      ? props.t('viewer.peer_not_installed')
-      : 'PSD viewer requires `ag-psd` — install or use download.';
+    error.value = tt('viewer.peer_not_installed', 'This kind of file cannot be shown here. Download it to open it on your device.');
     loading.value = false;
     return;
   }
@@ -222,7 +220,7 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
 }
 .filex-viewer-psd__layers {
   width: 240px;
-  border-right: 1px solid var(--fe-border, #e2e6ed);
+  border-inline-end: 1px solid var(--fe-border, #e2e6ed);
   overflow-y: auto;
   padding: 8px 0;
   background: var(--fe-bg-elev, #f7f8fa);

@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import { AuditApi, type AuditListParams } from '@/api/audit';
 import type { AuditEntry, PaginatedResponse } from '@/api/types';
 import { extractError } from '@/api/client';
+import { t } from '@/i18n';
 
 const EMPTY: PaginatedResponse<AuditEntry> = { items: [], total: 0, page: 1, page_size: 25 };
 
@@ -17,7 +18,7 @@ export const useAuditStore = defineStore('audit', () => {
     try {
       page.value = await AuditApi.list(params);
     } catch (e: unknown) {
-      error.value = extractError(e, 'Failed to load audit log');
+      error.value = extractError(e, t('errors.loadFailed'));
     } finally {
       loading.value = false;
     }

@@ -1,0 +1,43 @@
+-- +goose Up
+-- A SHARE'S PIN BECOMES RECOVERABLE — BY ITS OWNER AND BY AN ADMINISTRATOR.
+--
+-- Until now `shares.pin_hash` was the only record of a link's PIN: bcrypt on
+-- the way in (internal/share/service.go Create), `json:"-"` on the way out.
+-- That is right for VERIFYING a visitor and useless for the question the
+-- person who MINTED the link actually asks a week later — "what was the PIN I
+-- sent them?" The honest answer was "nobody can know", so the PIN was re-set,
+-- and the link already in somebody's inbox stopped working.
+--
+-- Owner's decision, 2026-09-20: *"paylaşımın sahibi ve admin alabilir
+-- şifreyi."* So the PIN is now ALSO stored in a form the server can read back,
+-- and handed to those two principals through one audited endpoint
+-- (GET /api/shares/{id}/pin).
+--
+-- ⚠ SEALED, NOT PLAIN. `pin_enc` holds what internal/secretbox produces —
+-- AES-256-GCM under FILEX_SECRET_KEY, prefixed `enc:v1:` — which is the very
+-- same mechanism the app-plugin secret settings (wasmplugin/registry.go) and
+-- the S3 access keys already use. One scheme, one key, one thing to get right.
+-- Read internal/secretbox's package comment for what that does and does not
+-- buy: a leaked DATABASE (a Backrest snapshot, an S3 mirror, a DR restore) no
+-- longer carries live PINs; an attacker who already owns the HOST gains
+-- nothing, because the process must be able to decrypt.
+--
+-- ⚠ pin_hash STAYS and stays authoritative for the gate. The visitor's PIN is
+-- still checked with bcrypt.CompareHashAndPassword (share/pin.go CheckPIN) and
+-- the five-strikes lock is untouched — making the PIN recoverable must not make
+-- it cheaper to GUESS. Nothing verifies against pin_enc.
+--
+-- ⚠ NULLABLE, no default, in all three dialects — the reason 00039 and 00046
+-- spell out: MySQL cannot give a TEXT column an ordinary DEFAULT and the
+-- schema-parity gate (internal/db/schema_parity_test.go) compares nullability
+-- across engines. Every reader COALESCEs, so NULL and '' mean the same here.
+--
+-- ⚠ NO BACKFILL IS POSSIBLE. Existing rows keep pin_enc NULL because the only
+-- record of their PIN is a bcrypt hash, and that is the point of a bcrypt hash.
+-- Those links keep working exactly as before; the endpoint answers
+-- `{"pin":null,"reason":"not_recoverable"}` for them and the screen says so in
+-- words rather than showing an empty box.
+ALTER TABLE shares ADD COLUMN pin_enc TEXT;
+
+-- +goose Down
+ALTER TABLE shares DROP COLUMN pin_enc;

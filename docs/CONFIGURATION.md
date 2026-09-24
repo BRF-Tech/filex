@@ -176,7 +176,7 @@ and what makes losing the private key unrecoverable.
 ### Public URL
 
 `FILEX_PUBLIC_URL` is the one address filex hands to other people: every share
-link and file-request link, the links inside every e-mail, the OIDC redirect
+link and file-request link, the links inside every email, the OIDC redirect
 and the address OnlyOffice fetches documents from. Set it to what a browser
 types to reach this instance — `https://files.example.com`, no trailing slash,
 the proxy's hostname rather than the container's.
@@ -204,6 +204,27 @@ tenant's own host; `FILEX_PUBLIC_URL` is the operator's fallback.
 |---|---|---|
 | `FILEX_LOG_LEVEL` | `info` | `debug` · `info` · `warn` · `error` |
 | `FILEX_LOG_FORMAT` | `text` | `text` · `json` |
+
+Every HTTP request writes one `info` line, `msg=http`:
+
+| Field | Always | Meaning |
+|---|---|---|
+| `method`, `path`, `status`, `ip`, `dur_us` | yes | the request, its answer, and how long it took (µs) |
+| `user_id` | when signed in | the account the request acted as |
+| `token_id` | when an API token was used | the token's row id (as listed on the API keys page), never its secret |
+| `tenant` | multi-tenant only | the tenant (provider) slug the request was scoped to |
+| `action` | `/api/files/manager` only | the file manager's verb — `index`, `search`, `upload`, `rename`, `move`, `delete`… — or `other` for anything it does not have |
+
+```
+time=2026-09-22T10:04:12.345Z level=INFO msg=http method=POST path=/api/files/manager status=500 ip=10.0.0.5 dur_us=812 user_id=12 token_id=34 action=upload
+```
+
+⚠ The **query string is never logged**. It carries thumbnail and OnlyOffice
+signatures, WebSocket tickets, share PINs, OIDC codes, S3 presigned credentials
+and people's search text. `action` is the only value read from it, and only as
+one of the manager's own verbs. The **path** is logged as sent, and share and
+drop links carry their token in it (`/s/…`, `/d/…`), so treat the access log as
+you would the database.
 
 ---
 
@@ -234,6 +255,16 @@ which also explains why the queue driver follows the database.
 Pick drivers with `FILEX_AUTH_DRIVERS` (comma list, tried in order, first match
 wins). The **API‑token driver is always on** regardless.
 
+**Precedence (v0.43.0).** OIDC, LDAP and the proxy header can also be set up on
+**Admin → Identity providers**, applied without a restart. The environment
+wins: a driver listed in `FILEX_AUTH_DRIVERS` — or, when that variable is
+unset, in the config file's `auth.drivers`, or else the built-in default
+(`local`) — is built from the environment's settings only and shown on the page
+read-only with where it is defined; the page's providers are added after the
+environment's. `local` and the recovery sign-in are the environment's alone, so
+the page can never lock the instance out. See
+[SSO.md → Managing providers on the Identity providers page](SSO.md#managing-providers-on-the-identity-providers-page).
+
 | Env var | Default | Description |
 |---|---|---|
 | `FILEX_AUTH_DRIVERS` | `local` | e.g. `local,oidc`, `local,ldap`, `proxy_header` |
@@ -249,7 +280,8 @@ wins). The **API‑token driver is always on** regardless.
 | `FILEX_OIDC_REDIRECT_URL` | `<public>/api/auth/oidc/callback` |
 | `FILEX_OIDC_ROLE_CLAIM` | Claim carrying roles/groups |
 | `FILEX_OIDC_ADMIN_GROUP` | Value that elevates to admin. Applied at **every** sign-in since 0.41.1 — added to the group → admin, removed → `user`; the setup account and the last admin are never demoted ([SSO.md](SSO.md#roles--admin-access)) |
-| `FILEX_OIDC_AUTO_REDIRECT` | **SSO-first login** (default `false`): the login page starts the OIDC flow immediately instead of showing the password form. Local login stays available behind a "Sign in with password" link (`/admin/login?local=1`) for break-glass/`admin@local`. The redirect is skipped on `?local=1`, after a failed IdP round-trip (`?error=oidc`) and on `?maintenance=1`, so a broken IdP can never cause a redirect loop. Requires `oidc` in `FILEX_AUTH_DRIVERS`. Multi-tenant: the flag is instance-global; the flow itself already dispatches per request host to the right tenant realm. |
+| `FILEX_OIDC_AUTO_REDIRECT` | **SSO-first login** (default `false`): the login page starts the OIDC flow immediately instead of showing the password form. Local login stays available behind a "Sign in with password" link (`/admin/login?local=1`) for break-glass/`admin@local`. The redirect is skipped on `?local=1`, after a failed IdP round-trip (`?error=oidc`), on `?maintenance=1` and right after signing out (`?signed_out=1`), so a broken IdP can never cause a redirect loop and a sign-out is never undone by the next page. Requires `oidc` in `FILEX_AUTH_DRIVERS`. Multi-tenant: the flag is instance-global; the flow itself already dispatches per request host to the right tenant realm. |
+| `FILEX_OIDC_LOGOUT` | What **Sign out** ends for an SSO session (default `idp`): `idp` — filex's session **and** the IdP's (RP-initiated logout, when the IdP's discovery has an `end_session_endpoint`); the IdP must allow `https://<host>/admin/login?signed_out=1` and `https://<host>/drive/login?signed_out=1` (or `https://<host>/*`) as post-logout redirect URIs. `local` — filex's session only; the person stays signed in at the IdP. See [SSO.md](SSO.md#signing-out). |
 
 **LDAP** (enable with `FILEX_AUTH_DRIVERS=local,ldap`):
 
@@ -305,7 +337,7 @@ so are configured in [Authentication](#authentication), not here.)
 
 | Env var | Default | Description |
 |---|---|---|
-| `FILEX_ADMIN_EMAIL` | `admin@local` | Email of the seeded admin account. |
+| `FILEX_ADMIN_EMAIL` | `admin@local` | Email of the seeded admin account. Its username is `admin` either way (reserved for this one account). |
 | `FILEX_ADMIN_PASSWORD` | *(random, printed once)* | Password for that admin. Omit both to get a random `admin@local` (see [INSTALLATION.md → first run](INSTALLATION.md#first-run)). |
 
 **SMTP** (mailer) — seeded when host, port and from are all set:
@@ -418,13 +450,29 @@ Drivers that live outside the binary — see [PLUGINS.md](PLUGINS.md).
 |---|---|---|
 | `FILEX_PLUGINS_DISABLED` | `0`, **`1` in demo mode** | Turns the whole subsystem off: nothing under `<data-dir>/plugins` is launched, no remote plugin is contacted, and the admin API answers 503 saying so. The subsystem is on by default, because a plugin is only ever installed by an admin — but an operator hardening a shared instance may not want the admin role to include “run a program on the server”. ⚠⚠ **`FILEX_DEMO_MODE` moves the default to `1`, so plugins are off on a demo.** A demo publishes an admin login — that is what a demo is — and this API is admin-only, so on a demo "admin-only" means anybody; installing a plugin runs an uploaded program on the host. Setting the variable yourself wins in either direction: `FILEX_PLUGINS_DISABLED=0` turns them back on for a demo, deliberately. |
 | `FILEX_PLUGIN_CONFORMANCE` | `enforce` | `enforce` · `warn` · `off`. filex **probes every capability a plugin declares** — at install against the plugin's own throwaway area, and again when a storage on it is saved, against that real configuration. `enforce` refuses a plugin that fails its own claims and refuses to save a storage on it. `warn` registers it anyway and keeps the report — for somebody *writing* a plugin, never for a shared instance: the cost of a broken claim is paid by the user, who meets an operation the UI offered and reads the failure as filex being broken. `off` skips both gates. Anything unrecognised falls back to `enforce`. |
-| `FILEX_PLUGIN_TRUSTED_KEYS` | — | Comma-separated ed25519 **public** keys (hex or standard base64) allowed to sign a plugin. Set any key and an unsigned or badly signed binary is refused at install *and* at upgrade, and the admin API reports `requires_signature: true` so the UI asks for the signature up front. Left empty, no signature is asked for and the recorded sha256 is all an install carries. See [PLUGINS.md → Signed plugins](PLUGINS.md#signed-plugins). |
+| `FILEX_PLUGIN_TRUSTED_KEYS` | — | Comma-separated ed25519 **public** keys (hex or standard base64) allowed to sign a plugin. Set any key and an unsigned or badly signed binary is refused at install *and* at upgrade, the signature is kept beside the binary (`<binary>.sig`) and **verified again at every start** — a plugin installed before the keys were set is refused at its next start until it is reinstalled with a signature — and the admin API reports `requires_signature: true` so the UI asks for the signature up front. Left empty, no signature is asked for and the recorded sha256 is all an install carries. See [PLUGINS.md → Signed plugins](PLUGINS.md#signed-plugins). |
 | `FILEX_PLUGIN_MAX_INFLIGHT` | `10` | Concurrent operations allowed **per plugin**. A caller that waits 5 s for a slot is refused rather than queued, and counted as `outcome="busy"` in [the metrics](METRICS.md#storage-plugins) — a sizing signal, not a bug. Raise it for a fast local plugin, lower it to keep a slow remote one from occupying the server. `0` or nonsense keeps the default. |
+| `FILEX_APP_PLUGINS_DISABLED` | `0`, **`1` in demo mode** | Turns the [app plugin](APP-PLUGINS.md) runtime off: nothing under `<data-dir>/app-plugins` is loaded, the file menu shows no app rows, the admin tab explains why. Demo mode moves the default to `1` for the same reason as storage plugins; `FILEX_APP_PLUGINS_DISABLED=0` turns them back on deliberately. |
+| `FILEX_APP_PLUGIN_MAX_INPUT_MB` | `256` | Per-file ceiling on what one app job may read. |
+| `FILEX_APP_PLUGIN_MAX_OUTPUT_MB` | `512` | Per-file ceiling on what one app job may produce. |
+| `FILEX_APP_PLUGIN_MAX_WASM_MB` | `64` | Largest module an app install accepts. `FILEX_PLUGIN_TRUSTED_KEYS` applies to app modules too. |
 | `FILEX_SECRET_KEY` | — | Also seals a **remote** plugin's bearer token. Without it, registering a remote plugin is refused rather than stored in plaintext (binary plugins get a token minted per start, which is never stored). |
 
-Installed binaries live in `<data-dir>/plugins/<name>/`, and a plugin's socket
-in `<data-dir>/plugins/<name>/run/` (mode 0600). In multi-tenant mode the admin
-surface is supertenant-only.
+Installed binaries live in `<data-dir>/plugins/<name>/` (with the detached
+signature beside each as `<binary>.sig`, when one was supplied), and a plugin's
+socket in `<data-dir>/plugins/<name>/run/` (directory mode 0700, socket 0600).
+A launched plugin does **not** inherit filex's environment: it sees `PATH`,
+`HOME`, the temp and locale variables (plus the handful Windows needs) and the
+`FILEX_PLUGIN_*` variables filex sets for it — never `FILEX_SECRET_KEY`, the
+database DSN or anything else filex itself was configured with. In multi-tenant
+mode the admin surface is supertenant-only.
+
+Two network rules apply to plugins that are not uploaded: a plugin installed
+**from a URL** may only be fetched from a public host (private, loopback and
+link-local targets are refused after DNS and on every redirect), and a
+**remote** plugin is spoken to over TLS unless its address is on the private
+network — plain `http://` is accepted only for loopback, link-local, RFC 1918
+and ULA targets. See [PLUGINS.md → Install one](PLUGINS.md#install-one).
 
 What is **not** configurable from the environment, and is cheaper to read here
 than to search for:
@@ -439,6 +487,9 @@ than to search for:
 > ⚠ Signature enforcement is **off until you set `FILEX_PLUGIN_TRUSTED_KEYS`**.
 > Until then a plugin is accepted on the strength of its sha256, which proves
 > only that the file has not changed since it arrived — never who it came from.
+> Once a key is set it applies to what is already installed too: a binary with
+> no stored signature is refused at its next start (`signature required …
+> reinstall`).
 
 ---
 
@@ -490,6 +541,27 @@ work on every driver. See [UPLOADS.md](UPLOADS.md).
 > ⚠ The whole object passes through the staging directory — put it on a
 > filesystem with room for the largest upload you expect. `begin` refuses when
 > less than `size × 1.2` is free.
+
+---
+
+## File operations (copy · move · delete)
+
+Copy, move and delete from the explorer (`POST /api/files/copy`, `/move`,
+`/delete`, `/api/files/ops`) are queued jobs, run one at a time in the order
+they were submitted.
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_OPS_DELETE_WORKERS` | `4` | How many items of **one delete job** are put in the trash at the same time. Below 1 means the default. |
+
+Only the items inside a delete job overlap; jobs still run one after another,
+so a paste queued behind a delete still waits for it — it just waits much less.
+On an object store every trashed file is several round trips, so a delete is
+almost all waiting on the network: one item at a time, a job of tens of
+thousands of files ran for hours. Raise the value when the backend takes it;
+lower it (to `1` for the old behaviour) when it answers with throttling errors.
+An item inside another item of the same job (a file and its folder) is left to
+the folder, so the folder goes to the trash whole.
 
 ---
 
@@ -678,7 +750,7 @@ regenerable, and a single folder-share archive can be tens of gigabytes.
 |---|---|---|
 | `FILEX_THUMBS_ENABLED` | `true` | Master switch. |
 | `FILEX_THUMB_BACKFILL_ON_BOOT` | — | Set `once` to backfill missing thumbnails on startup. |
-| `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | How often cached thumbnails whose node no longer exists are deleted (also once at boot). `0` disables it. |
+| `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | How often cached thumbnails whose node no longer exists are deleted (also once at boot). Once per boot the same worker also scales down pages cached at full size by a version before 0.41.0. `0` disables both. |
 | `FILEX_THUMBS_URL_TTL` | `24h` | How long a stamped `thumb_url` (`?exp=&sig=`) stays valid. The stamp is what lets a bare `<img src>` fetch a preview with no header and no cookie; an authenticated caller never needs one. ⚠ `0` means *use the default*, not "never expires". See [thumbnails.md → Serving](thumbnails.md#serving). |
 
 Kinds and their tool requirements (auto‑detected on `PATH`; the default Docker
@@ -783,8 +855,10 @@ See [NOTIFICATIONS.md](NOTIFICATIONS.md).
 | `FILEX_CORS_ALLOWED_ORIGINS` | `*` | Comma list. Restrict when embedding the component from specific origins. |
 
 `allowed_methods` / `allowed_headers` are `config.yaml` only. Default allowed
-headers: `Authorization, Content-Type, X-Filex-Pin, Content-Range`. If you use
-API‑token root confinement from a browser, add `X-Filex-Token` / `X-Filex-Root`.
+headers: `Authorization, Content-Type, X-Filex-Pin, Content-Range, Range,
+X-Filex-Accept-Prepare`. If you use API‑token root confinement from a browser,
+add `X-Filex-Token` / `X-Filex-Root`. `Content-Range` and `Retry-After` are
+exposed to the page.
 
 ⚠ If you set `allowed_headers` yourself, keep **`Content-Range`** in it: every
 chunk of an upload larger than the chunk size (8 MiB by default) is a `PUT`
@@ -873,7 +947,7 @@ FILEX_UPDATE_PRE_COMMAND='pg_dump -Fc filex > /backups/filex-pre-$FILEX_UPDATE_T
 "admin-only" means "public" on that instance, so the whole admin surface goes
 **read-only**: every write under `/api/admin/…` and `/api/ai/admin/…` is
 refused with 403, as are changes to the shared account itself (password,
-e-mail, TOTP). Reads still work — a demo exists to show the operator surfaces —
+email, TOTP). Reads still work — a demo exists to show the operator surfaces —
 and audit-log IPs are masked. Nothing here runs unless `FILEX_DEMO_MODE` is on.
 Full list: [DEMO.md](DEMO.md).
 
@@ -931,6 +1005,7 @@ cors:
   allowed_methods: [GET, POST, PUT, DELETE, PATCH, OPTIONS]
   allowed_headers: [Authorization, Content-Type, X-Filex-Pin]
 queue:  { driver: sqlite, dsn: "", workers: 4, enabled: true }
+ops:    { delete_workers: 4 }        # items of one delete job trashed at once
 notify: { enabled: true, webhook_url: "", webhook_token: "" }
 demo:   { mode: false, user: demo@demo.com, pass: demo }
 sentry: { dsn: "", environment: "" }

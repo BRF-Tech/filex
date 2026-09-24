@@ -29,7 +29,10 @@ import (
 // worker-driven copies/moves/deletes emit the same canonical file events
 // (and, for copies, the same antivirus enqueue) the synchronous manager
 // paths do. The ops worker runs on a background context with no request
-// actor — the events simply carry no actor, like other system activity.
+// user; the person who queued the op comes back through the context
+// (`pending_ops.actor_id` → quotastore.WithActor in ops.execute), and the
+// gate addresses the event to them exactly as it would a synchronous one. A row
+// queued by nobody (SYSTEM) still carries no actor.
 //
 // ⚠ They also emit the realtime change frame, which they did not until the
 // write-announce audit. Missing it here is not a small thing: an explorer with

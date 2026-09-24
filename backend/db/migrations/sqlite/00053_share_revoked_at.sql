@@ -1,0 +1,31 @@
+-- +goose Up
+-- A REVOKED LINK IS NOT AN EXPIRED ONE.
+--
+-- Revoking a link (My shares, the admin Shares page, an app ending its own
+-- page, the MCP `share_revoke` tool) has always been done by setting
+-- `expires_at` to now: the link stops working through the one check every
+-- public path already makes, and the row stays for the history. What that
+-- left out was the WORD. Nothing recorded that a person ended the link, so
+-- every screen could only read the past expiry — My shares said "Süresi
+-- doldu" beside a link the owner had revoked a minute earlier, and the admin
+-- page listed it with "expires 21 Sep 2026 15:55 · 9 seconds ago", while its
+-- `revoked` badge waited for a field no server ever sent (QA, 2026-09-21).
+--
+-- `revoked_at` is that record. It is written together with `expires_at`, so
+-- nothing that decides whether a link WORKS changes: enforcement stays on the
+-- expiry. It is read by the listings (`shareMetaCols`) — the screens that have
+-- to tell the two apart.
+--
+-- ⚠ NULLABLE, no default, in all three dialects (the schema-parity gate
+-- compares nullability). NO BACKFILL: a link revoked before this migration is
+-- indistinguishable from one that expired, and guessing would put the wrong
+-- word on some of them. They keep reading as expired.
+--
+-- ⚠⚠ THE NUMBER: 00053, measured across the WORKING TREES on disk (the method
+-- 00051_custom_themes.sql describes) — 00052 is `share_visits` in the signing
+-- tree. If another branch has taken 00053 by the time these merge, renumber
+-- THIS file; goose refuses to boot with two files of one version.
+ALTER TABLE shares ADD COLUMN revoked_at DATETIME;
+
+-- +goose Down
+ALTER TABLE shares DROP COLUMN revoked_at;

@@ -70,7 +70,12 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 	if d.store == nil {
 		return errors.New("proxyheader: nil store")
 	}
+	return d.load(cfg)
+}
 
+// load reads a configuration into the driver — everything Init does except
+// needing a store, so Probe tests a configuration the way it would run.
+func (d *Driver) load(cfg map[string]any) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -241,11 +246,21 @@ func boolOr(cfg map[string]any, key string, def bool) bool {
 	return def
 }
 
-// stringSlice accepts either []string or []any (yaml may decode lists as
-// []any) under cfg[key] and returns a []string.
+// stringSlice accepts []string, []any (yaml may decode lists as []any) or a
+// comma-separated string (what the admin panel's form sends and the settings
+// table stores) under cfg[key] and returns a []string.
 func stringSlice(cfg map[string]any, key string) []string {
 	if v, ok := cfg[key].([]string); ok {
 		return v
+	}
+	if v, ok := cfg[key].(string); ok {
+		var out []string
+		for _, s := range strings.Split(v, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
 	}
 	if v, ok := cfg[key].([]any); ok {
 		out := make([]string, 0, len(v))

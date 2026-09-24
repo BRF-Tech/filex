@@ -20,6 +20,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
@@ -104,6 +105,8 @@ type catalogueState interface {
 //   - a sync is running → the rows it has not reached yet do not exist, so a
 //     backfill now leaves exactly those files without a thumbnail (the
 //     shots run: `{processed: 22, ok: 22}` and a grid of generic icons);
+//   - the last sync was interrupted (`aborted`) → the same half-built
+//     catalogue, with nothing left running to finish it;
 //   - never synced, the catalogue holds no file, and the backend's root is
 //     not empty → there is literally nothing to render.
 //
@@ -112,11 +115,23 @@ type catalogueState interface {
 // installing ffmpeg" is exactly this command's job there. It is logged,
 // because files placed on its backend directly would still be missed.
 func catalogueGap(ctx context.Context, store catalogueState, st *model.Storage, drv storage.Driver) string {
-	if run, err := store.GetLastSyncRun(ctx, st.ID); err == nil && run != nil && run.Status == "running" {
-		return fmt.Sprintf("a sync is still running (started %s UTC): the files it has not reached "+
-			"are not in the catalogue yet, so they would get no thumbnail. Wait for it to finish and run "+
-			"backfill again (if the server restarted mid-sync and nothing is running, start a new sync)",
-			run.StartedAt.UTC().Format("2006-01-02 15:04:05"))
+	if run, err := store.GetLastSyncRun(ctx, st.ID); err == nil && run != nil {
+		switch run.Status {
+		case "running":
+			return fmt.Sprintf("a sync is still running (started %s UTC): the files it has not reached "+
+				"are not in the catalogue yet, so they would get no thumbnail. Wait for it to finish and run "+
+				"backfill again (if the server restarted mid-sync and nothing is running, start a new sync)",
+				run.StartedAt.UTC().Format("2006-01-02 15:04:05"))
+		case "aborted":
+			// ⚠ The same half-built catalogue as a running sync, with nothing
+			// left to finish it: the run was cut short (closed as aborted when
+			// the server next started). Until this was said out loud, the
+			// closed row read "not running" and a backfill went ahead over it.
+			return fmt.Sprintf("the last sync was interrupted (started %s UTC) and never finished: the files "+
+				"it had not reached are not in the catalogue, so they would get no thumbnail. Start a new sync "+
+				"(Storages → Sync, or POST /api/admin/storages/%d/sync), wait for it to finish, then run backfill again",
+				run.StartedAt.UTC().Format("2006-01-02 15:04:05"), st.ID)
+		}
 	}
 	if st.LastSyncAt != nil {
 		return ""
@@ -151,12 +166,13 @@ func catalogueGap(ctx context.Context, store catalogueState, st *model.Storage, 
 
 // internalBackendEntry reports the backend-root names filex keeps for itself,
 // which say nothing about whether the storage holds anybody's files.
+//
+// ⚠ syspath.IsName — this was the one hand-written copy that DID know
+// `.filex-open`, and that is exactly how the others went on missing it since
+// open-with shipped (0.29.0) without anyone noticing: there was no single list
+// to compare them with.
 func internalBackendEntry(name string) bool {
-	switch strings.TrimPrefix(name, "/") {
-	case ".filex-trash", ".thumbs", ".versions", ".keepdir", ".filex-open":
-		return true
-	}
-	return false
+	return syspath.IsName(strings.TrimPrefix(name, "/"))
 }
 
 // BackfillThumbs walks every file node in scope and (re)dispatches the
@@ -339,9 +355,12 @@ func (w *backfillWalker) walk(ctx context.Context, storageID int64, parentID *in
 		if n.DeletedAt != nil {
 			continue
 		}
-		// Skip the trash bucket — same heuristic used by projectFileNodes
-		// (manager.go) so backfill matches what the UI sees.
-		if strings.HasPrefix(n.Path, "/.filex-trash") || strings.HasPrefix(n.Path, ".filex-trash") || n.Name == ".filex-trash" {
+		// Skip filex's own directories — the same syspath.Hidden rule the
+		// listing projectors (manager.go) apply, so backfill renders for what
+		// the UI shows and nothing else. (It used to skip only the trash, so a
+		// backfill also rendered thumbnails for version snapshots and for the
+		// desktop's open-with working copies, which nobody can ever see.)
+		if syspath.Hidden(n.Path) {
 			continue
 		}
 		switch n.Type {

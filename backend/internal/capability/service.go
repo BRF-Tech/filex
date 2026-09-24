@@ -25,6 +25,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/antivirus"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/enginebin"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search/extract"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -59,6 +60,7 @@ type Service struct {
 	defaultLocale    string
 	oidcAutoRedirect bool
 	recoveryLogin    bool
+	appPlugins       model.AppPluginsCapabilities
 }
 
 // New constructs a Service.
@@ -97,11 +99,29 @@ func (s *Service) SetStaticInventory(
 	s.mu.Unlock()
 }
 
+// SetAuthDrivers records the sign-in methods the login page offers. The
+// Identity providers page changes them without a restart
+// (internal/authsetup), so this is set on every swap, not only at boot.
+func (s *Service) SetAuthDrivers(names []string) {
+	s.mu.Lock()
+	s.authDrivers = append(s.authDrivers[:0], names...)
+	s.cached = nil
+	s.mu.Unlock()
+}
+
 // SetRecoveryLogin records whether recovery sign-in is active (see
 // model.Capabilities.AuthRecoveryLogin).
 func (s *Service) SetRecoveryLogin(on bool) {
 	s.mu.Lock()
 	s.recoveryLogin = on
+	s.cached = nil
+	s.mu.Unlock()
+}
+
+// SetAppPlugins records the app-plugin runtime state for the snapshot.
+func (s *Service) SetAppPlugins(v model.AppPluginsCapabilities) {
+	s.mu.Lock()
+	s.appPlugins = v
 	s.cached = nil
 	s.mu.Unlock()
 }
@@ -176,6 +196,15 @@ func (s *Service) ProbeExternal(ctx context.Context, name string) (*model.Extern
 }
 
 func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
+	// ⚠⚠ A refresh is SHARED work: whatever it finds is what every caller
+	// reads until the cache expires (okTTL, an hour). It must not run on the
+	// context of the one request that happened to trigger it — a browser that
+	// navigated away cancelled that request, ListExternalServices failed with
+	// "context canceled", and `external` was cached EMPTY for an hour: no
+	// ONLYOFFICE, no draw.io, for everybody (found by the v0.43.0 e2e suite,
+	// 2026-09-22). Detached, with a bound of its own.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
 	caps := &model.Capabilities{
 		Upload:   true,
 		Move:     true,
@@ -211,23 +240,24 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	caps.DefaultLocale = s.defaultLocale
 	caps.OIDCAutoRedirect = s.oidcAutoRedirect
 	caps.AuthRecoveryLogin = s.recoveryLogin
+	caps.AppPlugins = s.appPlugins
 	s.mu.RUnlock()
-	if has("magick") || has("convert") {
-		caps.Thumbs.ImageMagick = true
-	}
-	if has("ffmpeg") {
+	// ⚠⚠ The engines are enginebin's ONE answer — the same one Apps and the
+	// converter read (wasmplugin.probeEngines). This block used to ask
+	// `has("magick") || has("convert")` itself, and on Windows `convert` is
+	// C:\Windows\System32\convert.exe, the disk converter: the About page
+	// said "ImageMagick: OK" while Apps said it was not installed and the
+	// converter greyed every ImageMagick format (release-candidate sweep,
+	// 2026-09-21). Nothing here may probe a binary of its own again.
+	engines := enginebin.Probe()
+	caps.Thumbs.ImageMagick = engines.Has(enginebin.ImageMagick)
+	if engines.Has(enginebin.FFmpeg) {
 		caps.Thumbs.Video = true
 		caps.Thumbs.Audio = true
 	}
-	if has("gs") || has("pdftoppm") {
-		caps.Thumbs.PDF = true
-	}
-	if has("libreoffice") || has("soffice") {
-		caps.Thumbs.Office = true
-	}
-	if has("rsvg-convert") {
-		caps.Thumbs.SVG = true
-	}
+	caps.Thumbs.PDF = engines.Has(enginebin.Ghostscript) || engines.Has(enginebin.Poppler)
+	caps.Thumbs.Office = engines.Has(enginebin.LibreOffice)
+	caps.Thumbs.SVG = engines.Has(enginebin.RSVG)
 	// Optional OCR for content search — resolution shared with the
 	// extractor (FILEX_TESSERACT_BIN authoritative, else $PATH) so the
 	// advertised flag and the actual pipeline can never disagree.
@@ -250,7 +280,14 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 
 	// External services from DB.
 	probeFailed := false
-	if list, err := s.store.ListExternalServices(ctx); err == nil {
+	list, listErr := s.store.ListExternalServices(ctx)
+	if listErr != nil {
+		// A snapshot that could not read the table says nothing about the
+		// services; keep it only as long as a failed probe (failTTL).
+		probeFailed = true
+		slog.Warn("capability: list external services", slog.String("err", listErr.Error()))
+	}
+	if listErr == nil {
 		for _, es := range list {
 			st := model.ExternalServiceState{
 				Enabled:   es.Enabled,

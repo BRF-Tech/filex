@@ -52,6 +52,11 @@ Create a **confidential** OIDC client with:
 
 - **Redirect URI:** `https://files.example.com/api/auth/oidc/callback`
   (exactly `FILEX_PUBLIC_URL` + `/api/auth/oidc/callback`).
+- **Post-logout redirect URIs:** `https://files.example.com/admin/login?signed_out=1`
+  and `https://files.example.com/drive/login?signed_out=1` — or simply
+  `https://files.example.com/*`. Where the IdP sends the browser back after
+  [signing out](#signing-out); without them sign-out ends on the IdP's "invalid
+  redirect URI" page.
 - **Grant type:** Authorization Code (standard flow).
 - **Client authentication:** on (you'll get a client secret).
 
@@ -59,7 +64,9 @@ Note the **issuer URL**, **client ID**, and **client secret**.
 
 > **Keycloak:** the issuer is `https://id.example.com/realms/<realm>`. Create the
 > client under that realm, enable "Client authentication", set the redirect URI,
-> and copy the secret from the **Credentials** tab.
+> and copy the secret from the **Credentials** tab. Put the post-logout URIs in
+> **Valid post logout redirect URIs** — left empty, Keycloak allows only the
+> *Valid redirect URIs*, which for filex is the callback alone.
 
 ### 2. Configure filex
 
@@ -155,6 +162,54 @@ first boot — see
 
 ---
 
+## Signing out
+
+An SSO session has two halves: filex's own session and the IdP's. **Sign out**
+ends both (OpenID Connect RP-Initiated Logout 1.0):
+
+1. filex deletes its session and clears the cookie, as always;
+2. `POST /api/auth/logout` answers with the IdP's end-session URL
+   (`logout_url`) — its `end_session_endpoint` from discovery, with the
+   `id_token_hint` kept from sign-in, `client_id`, and
+   `post_logout_redirect_uri`;
+3. the web app sends the browser there; the IdP ends its session and sends the
+   browser back to the sign-in page of the front door it came from
+   (`/admin/login?signed_out=1` or `/drive/login?signed_out=1`);
+4. that page says "You are signed out." and does **not** start SSO by itself,
+   even with `FILEX_OIDC_AUTO_REDIRECT` — whoever signs in next picks the
+   account.
+
+Why both: ending only filex's half was not signing out. With
+`FILEX_OIDC_AUTO_REDIRECT` the sign-in page went straight back to the IdP, whose
+session was still open, and the IdP issued a new code without a form — the same
+account was signed in again half a second later, and on a shared computer the
+next person got the previous one's files.
+
+Sign-out stays filex-only when:
+
+- `FILEX_OIDC_LOGOUT=local` — the operator wants people to stay signed in at
+  the IdP (other apps on the same SSO keep working);
+- the IdP's discovery document has no `end_session_endpoint`;
+- the session did not come from SSO (password, LDAP), or was signed in before
+  the upgrade that added this (no id_token was kept; it expires within 12 h).
+
+The id_token is kept on the session row (`sessions.id_token`) only when the IdP
+can end sessions, and leaves with the session. It is never handed to a
+different IdP: one whose `iss` does not match the tenant's issuer is ignored.
+
+Multi-tenant: the end-session URL is the tenant's own IdP, resolved from the
+request host exactly like sign-in, and each tenant's client needs its own
+post-logout redirect URIs.
+
+The IdP is the one filex runs **now**: an OIDC provider configured or changed
+on the [Identity providers page](#managing-providers-on-the-identity-providers-page)
+takes effect without a restart for sign-out exactly as for sign-in. A session
+signed in through a provider that has since been replaced keeps the old
+issuer's id_token, which is not handed to the new one — that session signs out
+of filex only.
+
+---
+
 ## Configuration reference
 
 | Env var | Required | Description |
@@ -165,6 +220,7 @@ first boot — see
 | `FILEX_OIDC_CLIENT_SECRET` | yes* | Client secret (confidential client). |
 | `FILEX_OIDC_REDIRECT_URL` | no | Defaults to `FILEX_PUBLIC_URL` + `/api/auth/oidc/callback`. Whatever it resolves to must match the IdP exactly. |
 | `FILEX_OIDC_AUTO_REDIRECT` | no | `true` makes the login page start the OIDC flow straight away instead of showing the password form; `?local=1` still reaches the form. See [CONFIGURATION.md](CONFIGURATION.md#authentication). |
+| `FILEX_OIDC_LOGOUT` | no | What **Sign out** ends: `idp` (default) — filex's session and the IdP's, when the IdP supports it; `local` — filex's session only. See [Signing out](#signing-out). |
 | `FILEX_OIDC_ROLE_CLAIM` | no | Claim holding roles/groups (string or array). |
 | `FILEX_OIDC_ADMIN_GROUP` | no | Value within that claim that elevates a user to admin. |
 
@@ -192,6 +248,11 @@ logs the error at ERROR followed by `oidc: SSO disabled until restart`. Nothing
 retries after that: fix the issuer and restart. Verify `FILEX_OIDC_ISSUER` (for
 Keycloak it **includes** `/realms/<realm>`, no trailing slash) and that filex's
 network can reach the IdP.
+
+That is the environment's OIDC. One configured on **Admin → Identity
+providers** is re-tried in the background after a start (for about two
+minutes) and shows on its card why it is not running; a save on the page tries
+again at once.
 
 ### The identity provider is down and nobody can sign in
 
@@ -229,6 +290,20 @@ scope — make sure it's assigned and the user has an email.
 The IdP's registered redirect URI must equal `FILEX_OIDC_REDIRECT_URL` **exactly**
 (scheme, host, path). Update the client in the IdP or the env var so they match.
 
+### Sign-out ends on the IdP's "invalid redirect URI" page
+The IdP does not allow the post-logout redirect. Add
+`https://<host>/admin/login?signed_out=1` and `https://<host>/drive/login?signed_out=1`
+(or `https://<host>/*`) to the client's post-logout redirect URIs — on Keycloak,
+**Valid post logout redirect URIs**. Or set `FILEX_OIDC_LOGOUT=local` to keep
+sign-out inside filex.
+
+### Signing out and back in lands on the same account without a form
+The IdP's session survived the sign-out. Check that the IdP advertises
+`end_session_endpoint` in `/.well-known/openid-configuration` and that
+`FILEX_OIDC_LOGOUT` is not `local`. A session signed in before the upgrade has
+no id_token to end the IdP session with — sign in again once. Until then the
+sign-in page at least waits after a sign-out instead of starting SSO by itself.
+
 ### User logs in but isn't admin
 The mapping is applied at every sign-in, so the person has to sign in again after
 being added to the group — an already open session keeps the role it started
@@ -241,7 +316,8 @@ was read only at account creation; set the role in **Admin → Users** there.
 
 ## Other auth drivers
 
-filex ships more than OIDC. Each is enabled by adding it to `FILEX_AUTH_DRIVERS`:
+filex ships more than OIDC. Each is enabled by adding it to `FILEX_AUTH_DRIVERS`
+(or, for all but `local`, on **Admin → Identity providers**):
 
 - **`local`** — built-in email/password with optional TOTP 2FA.
 - **`ldap`** — bind against an LDAP/Active Directory server, on the same password
@@ -254,10 +330,86 @@ Drivers can be combined. For the two that read a password — `local` and `ldap`
 order is the order they are **tried**: the first to accept wins, so keep `local` first
 and `admin@local` stays answerable while the directory is unreachable.
 
-⚠ Driver configuration (`/api/admin/auth-providers`) is **instance-wide**: the
-`auth.*` settings rows decide who can sign in to filex at all. In multi-tenant
-mode the surface is therefore **supertenant-only**, reads included — a tenant
-admin gets `403 supertenant_only`. ⚠ On a multi-tenant install, `ldap` and `proxy-header` home a just-in-time
+OIDC, LDAP and the proxy header can also be configured on **Admin → Identity
+providers**, without a restart — see the next section.
+
+## Managing providers on the Identity providers page
+
+Since v0.43.0 the **Identity providers** page really manages sign-in. (Before
+it, the page saved settings no server ever read: sign-in came from the
+environment alone, and the page's "restart the server" changed nothing.)
+
+What the page does:
+
+- **OIDC, LDAP and the proxy header** can be configured and switched on here.
+  A save is applied at once — no restart — through exactly the code the
+  environment's configuration goes through, and the login page offers a
+  provider the moment it runs.
+- **Every save runs the real test first** ("Test now": connect, bind, read the
+  base DN; fetch the discovery document, check the issuer and ask the token
+  endpoint about the client). Switching a provider **on** while its test fails
+  needs a confirmation that names the steps that failed; a provider saved
+  **off** saves whatever its test says. A provider that is on but cannot start
+  says so on its card, with the reason, and is simply not offered — it takes
+  nothing else down with it.
+- **Secrets** (the OIDC client secret, the LDAP bind password) are stored
+  sealed with `FILEX_SECRET_KEY` — the same sealing the app settings use — and
+  never sent back to the browser: the box says *set — type a new one to
+  replace it*. Without `FILEX_SECRET_KEY` a secret cannot be stored at all (the
+  page says so), and none is ever logged.
+- **Every change is audited** (`auth_provider.update`): who, which provider,
+  on/off before and after, the *names* of the fields that changed, and — when
+  a failing test was confirmed — which steps failed. Never a value.
+- **Instance-wide.** Only the platform operator (a supertenant administrator)
+  sees or changes it; a tenant administrator gets `403 supertenant_only`, reads
+  included — the instance's sign-in, and its secrets, are not a tenant's. A
+  tenant's own sign-in lives on its provider row.
+
+### The environment wins, visibly
+
+A provider listed in `FILEX_AUTH_DRIVERS` (or `auth.drivers` in the config
+file) is **configured by the environment**: the page shows it read-only, with
+where it is defined — `FILEX_AUTH_DRIVERS`, the config file's path, or the
+built-in default — and refuses a change (`409 environment_managed`). If the
+page also holds a configuration under the same name, it is kept but not used,
+and the card says so. There is never a silent conflict: the environment's is
+the one that runs.
+
+Providers switched on here are **added after** the environment's. A directory
+configured on the page is therefore never tried before `local`, so the
+administrator's password is judged before any network round trip.
+
+### Why nothing on this page can lock you out
+
+- **Password sign-in and the recovery sign-in are the environment's.** The
+  page has no switch for `local`, and none for the installation
+  administrator's recovery sign-in (`FILEX_AUTH_RECOVERY_LOGIN`, on by default
+  when `local` is not enabled). Changing either needs access to the host —
+  which is exactly the person who can repair a broken identity provider. That
+  is the break-glass, and it is deliberately out of the page's reach: the page
+  is where an identity provider gets broken, so it must not also be where the
+  way back is switched off.
+- **The last way in stays on.** Switching off a provider is refused
+  (`409 last_sign_in_method`) when it is the last way an administrator can sign
+  in: no password sign-in an administrator can use (every administrator came
+  in through SSO and has no password), no recovery sign-in, and no other
+  running provider.
+- **A misconfigured OIDC or LDAP never stops the local administrator.** A page
+  provider that fails is left out; `local` stays first; a directory that cannot
+  be reached is logged and the chain moves on.
+
+### Upgrading from before v0.43.0
+
+Settings saved on this page by an earlier version were **never applied**. On
+the first start of v0.43.0 they are imported **switched off** and marked
+*"saved before v0.43.0, never applied — review and enable"*, so nothing an
+operator typed there long ago and forgot is switched on by the upgrade. A
+client secret or bind password among them is sealed with `FILEX_SECRET_KEY`;
+without the key it is cleared (it was never used) and the log names the
+provider and the field. Review the page after upgrading and switch on what you
+want.
+
+⚠ On a multi-tenant install, `ldap` and `proxy-header` home a just-in-time
 account in the tenant whose host the login arrived on, and **refuse to create
 one** when no host can decide it (an SFTP/FTPS/NFS login) unless a tenant is
 named explicitly — see
@@ -279,7 +431,7 @@ the `reason=`:
 | Log line | What happened |
 |---|---|
 | `local: login refused` `reason="password mismatch"` (debug) | The account exists, the password is wrong. |
-| `local: login refused` `reason="no such account"` (debug) | No account with that e-mail or username — including an identifier that is not a well-formed username, which is reported the same way on purpose. |
+| `local: login refused` `reason="no such account"` (debug) | No account with that email or username — including an identifier that is not a well-formed username, which is reported the same way on purpose. |
 | `local: login refused` `reason="account has no local password"` (info) | The account exists but carries no local hash — a directory or OIDC account. No password will ever work on the `local` driver; it has to sign in the way it was created, or be given a password. |
 | `local: could not judge the credentials` `reason="user lookup failed"` (**error**) | The *server* failed, not the caller — a locked sqlite file, a dropped connection. The caller still sees a plain 401, so without this line "the database is down" is indistinguishable from a typo. It is also returned as a real error rather than `unauthorized`, which is what lets a multi-driver chain report it. |
 | `local: stored password hash is unusable` `reason="bad password hash"` (**error**) | `users.password_hash` is not a bcrypt hash — truncated, or written by something else. That account can never sign in until its password is reset. |

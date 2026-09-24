@@ -10,12 +10,13 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/db"
-	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
+	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
 
 // SharesAdmin handles /api/admin/shares.
@@ -26,6 +27,9 @@ type SharesAdmin struct {
 	// relative "/s/<token>" links, which every existing test constructing this
 	// handler by hand gets.
 	Tenants tenanturl.Resolver
+	// Apps is told when a link an app opened is revoked or deleted here, so
+	// the app wakes and finds out (appLinkEnded). nil: app plugins are off.
+	Apps *wasmplugin.Registry
 }
 
 // NewSharesAdmin constructs the handler.
@@ -34,8 +38,28 @@ func NewSharesAdmin(store db.Store) *SharesAdmin { return &SharesAdmin{Store: st
 // AttachTenants wires the shared per-request origin resolver (internal/tenanturl).
 func (h *SharesAdmin) AttachTenants(rv tenanturl.Resolver) { h.Tenants = rv }
 
-// List returns all shares with optional creator/active filters.
+// AttachApps wires the app-plugin registry (nil = app plugins disabled).
+func (h *SharesAdmin) AttachApps(reg *wasmplugin.Registry) { h.Apps = reg }
+
+// List returns all shares with optional creator/active filters. Rows carry
+// `plugin_name` / `page_id` when an app plugin opened the link (00046), so the
+// Shares table can show a "plugin / page" column without a lookup per row.
 func (h *SharesAdmin) List(w http.ResponseWriter, r *http.Request) {
+	h.list(w, r, false)
+}
+
+// ListAppPluginShares is the same rows, narrowed to the links APPS opened, so
+// an app's own admin panel can draw its table (`?plugin=sign`). It is the same
+// query, the same tenant filter and the same envelope as List — there is no
+// second listing to keep in step.
+//
+// ⚠ `?plugin=` takes the app's NAME, not its row id: a panel drawn for an app
+// knows what the app is called and should not have to look its id up first.
+func (h *SharesAdmin) ListAppPluginShares(w http.ResponseWriter, r *http.Request) {
+	h.list(w, r, true)
+}
+
+func (h *SharesAdmin) list(w http.ResponseWriter, r *http.Request, appsOnly bool) {
 	q := r.URL.Query()
 
 	var creatorID *int64
@@ -46,20 +70,37 @@ func (h *SharesAdmin) List(w http.ResponseWriter, r *http.Request) {
 	}
 	activeOnly := q.Get("active") == "true"
 
-	limit := 50
-	if v := q.Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
-			limit = n
-		}
-	}
-	offset := 0
-	if v := q.Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
+	// ⚠ ONE reader for both share listings (shares_mine.go → sharePaging), so
+	// the admin page and a person's own page cannot come to disagree about
+	// what `limit=0` or an out-of-range page means.
+	limit, offset := sharePaging(q)
 
-	rows, total, err := h.Store.ListAllShares(r.Context(), creatorID, activeOnly, limit, offset)
+	var (
+		rows  []*db.ShareWithMeta
+		total int64
+		err   error
+	)
+	if appsOnly {
+		var pluginID int64
+		if name := strings.TrimSpace(q.Get("plugin")); name != "" {
+			p, perr := h.Store.GetAppPluginByName(r.Context(), name)
+			if perr != nil || p == nil {
+				// An app that is not installed has no links. Answering an
+				// empty page rather than 404 keeps a panel that polls one app
+				// working through an uninstall.
+				pluginID = -1
+			} else {
+				pluginID = p.ID
+			}
+		}
+		if pluginID < 0 {
+			rows, total = []*db.ShareWithMeta{}, 0
+		} else {
+			rows, total, err = h.Store.ListAppPluginShares(r.Context(), pluginID, activeOnly, limit, offset)
+		}
+	} else {
+		rows, total, err = h.Store.ListAllShares(r.Context(), creatorID, activeOnly, limit, offset)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -70,21 +111,8 @@ func (h *SharesAdmin) List(w http.ResponseWriter, r *http.Request) {
 	// resolvable storage name stays hidden (fail closed). Total is recomputed
 	// from the filtered page — approximate across pages, acceptable for a
 	// name-level admin view.
-	if scope, ok := tenant.FromContext(r.Context()); ok && !scope.IsSupertenant {
-		allowed := map[string]bool{}
-		if sts, err := h.Store.ListStorages(r.Context()); err == nil {
-			for _, st := range sts {
-				allowed[st.Name] = true
-			}
-		}
-		kept := rows[:0]
-		for _, row := range rows {
-			if row.StorageName != "" && allowed[row.StorageName] {
-				kept = append(kept, row)
-			}
-		}
-		rows = kept
-		total = int64(len(rows))
+	if kept, narrowed := sharesInTenant(r, h.Store, rows); narrowed {
+		rows, total = kept, int64(len(kept))
 	}
 	// An empty result must serialise as `[]`, never `null`. A nil Go slice
 	// marshals to JSON null, and both envelopes below promise arrays — every
@@ -100,10 +128,23 @@ func (h *SharesAdmin) List(w http.ResponseWriter, r *http.Request) {
 	// FILEX_PUBLIC_URL set — and on a proxied or multi-tenant host, the wrong
 	// origin. The share dialog has always used the server's answer; now so
 	// does this list.
+	creators := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row != nil && row.Share != nil && row.Share.CreatedBy != nil {
+			creators = append(creators, *row.Share.CreatedBy)
+		}
+	}
+	names := personNames(r.Context(), h.Store, creators)
 	base := h.Tenants.FromRequest(r)
 	for _, row := range rows {
+		if row != nil && row.Share != nil && row.Share.CreatedBy != nil {
+			row.CreatorName = names[*row.Share.CreatedBy]
+		}
 		if row != nil && row.Share != nil && row.Share.Token != "" {
 			row.URL = base + "/s/" + row.Share.Token
+		}
+		if row != nil && h.Apps != nil {
+			row.App = h.Apps.LinkOf(row.Share)
 		}
 	}
 	// Dual envelope: `items/total/page/page_size` is what the admin
@@ -136,10 +177,12 @@ func (h *SharesAdmin) Revoke(w http.ResponseWriter, r *http.Request) {
 	if !h.ownsShare(w, r, id) {
 		return
 	}
+	sh, _ := h.Store.GetShareByID(r.Context(), id)
 	if err := h.Store.RevokeShare(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	appLinkEnded(r.Context(), h.Apps, sh, "revoked")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -153,10 +196,14 @@ func (h *SharesAdmin) Delete(w http.ResponseWriter, r *http.Request) {
 	if !h.ownsShare(w, r, id) {
 		return
 	}
+	// Read BEFORE the delete: afterwards there is no row to say which app,
+	// if any, opened this link.
+	sh, _ := h.Store.GetShareByID(r.Context(), id)
 	if err := h.Store.DeleteShare(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	appLinkEnded(r.Context(), h.Apps, sh, "deleted")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

@@ -42,6 +42,11 @@ func issueToken(t *testing.T, store db.Store, userID int64, scopes string, expir
 	return plain
 }
 
+// fullScopes is every verb scope, named. ⚠ Tests used to pass "" for "full
+// access"; since v0.43.0 an empty list grants NOTHING (model.APIToken.HasScope
+// fails closed) and no door issues one (apitoken.ParseIssued).
+const fullScopes = "read,write,delete,mcp,admin"
+
 func randToken(t *testing.T) string {
 	t.Helper()
 	b := make([]byte, 16)
@@ -96,7 +101,7 @@ func TestAITokens_UpdateUsernames(t *testing.T) {
 	email, pw := testutil.SeedAdmin(t, store)
 	testutil.LoginAs(t, srv, client, email, pw)
 
-	body, _ := json.Marshal(map[string]any{"label": "entegrasyon", "usernames": []string{"work", "fishapp"}})
+	body, _ := json.Marshal(map[string]any{"label": "entegrasyon", "scopes": "read,mcp", "usernames": []string{"work", "fishapp"}})
 	resp, err := client.Post(srv.URL+"/api/admin/ai-tokens", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()

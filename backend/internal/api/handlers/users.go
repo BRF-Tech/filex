@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -137,8 +138,15 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 	// The password is optional (issue #25): an account added ahead of its
 	// first SSO sign-in has none, and an empty hash is refused by every
 	// password check (local login, recovery login, /dav, SFTP, FTP).
-	if req.Email == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email required"})
+	//
+	// ⚠ The address is checked the way the profile checks it
+	// (account_rules.go): missing, malformed and already taken are three
+	// different sentences in the reader's language. "email required" in
+	// English, behind the dialog's backdrop, was the whole answer before
+	// (release-candidate sweep, 2026-09-21), and a taken address surfaced as
+	// the database driver's unique-constraint text with a 500.
+	if p := emailProblem(r.Context(), h.Store, req.Email, 0); p != nil {
+		p.write(w, r)
 		return
 	}
 	if req.Role == "" {
@@ -174,6 +182,10 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := h.Store.CreateUser(r.Context(), req.Email, hash, req.Role, req.Locale, req.Timezone)
 	if err != nil {
+		if isUniqueViolation(err) {
+			emailTaken(req.Email).write(w, r)
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -201,6 +213,7 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 			u.DisplayName = name
 		}
 	}
+	auth.SetAuditTarget(r.Context(), strconv.FormatInt(u.ID, 10), u.Email)
 	writeJSON(w, http.StatusOK, u)
 }
 
@@ -348,6 +361,8 @@ func (h *Users) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// The row is gone once the log is read: keep who it was.
+	auth.SetAuditTarget(r.Context(), "", target.Email)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

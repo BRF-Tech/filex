@@ -25,7 +25,7 @@
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const SHOTS_RELEASE = 'v0.42.2';
+export const SHOTS_RELEASE = 'v0.43.0';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -37,3 +37,21 @@ export const SHOTS_ROOT = join(REPO, 'docs', 'screenshots', SHOTS_RELEASE);
 
 /** This release's folder for one shot script's set (`driveshell`, `sidenav`, …). */
 export const shotsDir = (sub = '') => (sub ? join(SHOTS_ROOT, sub) : SHOTS_ROOT);
+
+/**
+ * The linker flags every filex a shot script photographs is built with.
+ *
+ * ⚠⚠ The sign-in page prints `caps.data.version`, and an unstamped build says
+ * `0.1.0-dev` (backend/internal/version/version.go). That line is IN the
+ * README from v0.43.0 on — `appearance/themed-signin-1440.png` — so the shop
+ * window would state a version of filex that does not exist. Stamping it the
+ * way goreleaser does (.goreleaser.yml, same symbol path: `-X main.version`
+ * silently no-ops) makes the picture true.
+ *
+ * ⚠ It also makes the pictures QUIETER rather than noisier: the update check
+ * is on by default, `0.1.0-dev` parses and sits below every published release,
+ * and the release being cut does not. Scenes that must not reach the network
+ * at all still set `FILEX_UPDATE_CHECK=0` themselves.
+ */
+export const SHOTS_LDFLAGS =
+  `-s -w -X github.com/brf-tech/filex/backend/internal/version.Version=${SHOTS_RELEASE.replace(/^v/, '')}`;

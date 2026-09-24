@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { QueueApi } from '@/api/queue';
 import type { QueueOp, QueueOpStatus, QueueStats } from '@/api/types';
 import { extractError } from '@/api/client';
+import { t } from '@/i18n';
 
 export const useQueueStore = defineStore('queue', () => {
   const stats = ref<QueueStats>({ pending: 0, running: 0, failed: 0, done_24h: 0, cancelled: 0 });
@@ -21,7 +22,7 @@ export const useQueueStore = defineStore('queue', () => {
     try {
       stats.value = await QueueApi.stats();
     } catch (e: unknown) {
-      error.value = extractError(e, 'Failed to load queue stats');
+      error.value = extractError(e, t('errors.loadFailed'));
     }
   }
 
@@ -37,7 +38,7 @@ export const useQueueStore = defineStore('queue', () => {
       items.value = res.items ?? [];
       total.value = res.total;
     } catch (e: unknown) {
-      error.value = extractError(e, 'Failed to load queue');
+      error.value = extractError(e, t('errors.loadFailed'));
     } finally {
       loading.value = false;
     }

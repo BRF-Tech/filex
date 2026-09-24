@@ -62,7 +62,14 @@ func Resolve(ctx context.Context, l Lookup, identifier string) (*model.User, err
 		// input was structurally invalid would distinguish "you typed
 		// nonsense" from "that account does not exist", and on a login form
 		// those must look identical.
-		if Validate(id) != nil {
+		//
+		// ⚠ A RESERVED name is looked up all the same: the reservation is a
+		// rule about claiming a name, not about finding one. No account can
+		// claim one — except the first administrator, who holds "admin"
+		// (ClaimBootstrap) and must be able to sign in with it on every
+		// surface; refusing reserved names here left it answering only to its
+		// e-mail.
+		if p := Check(id); p != nil && p.Kind != ProblemReserved {
 			return nil, ErrNotFound
 		}
 		u, err = l.GetUserByUsername(ctx, id)
@@ -182,4 +189,42 @@ func trimTrailingSeparators(s string) string {
 		break
 	}
 	return s
+}
+
+// BootstrapUsername is the login name of the administrator filex creates at
+// first run — the one account allowed to hold a reserved name.
+const BootstrapUsername = "admin"
+
+// ClaimBootstrap gives the first-run administrator the username "admin".
+//
+// ⚠ The owner's decision (2026-09-22): the first administrator of a new
+// install is "admin", not "admin2". "admin" is reserved so that nobody else
+// can take it — a later `admin@…` account still becomes "admin2" through
+// EnsureUsername, and no person can rename themselves to it (Check refuses
+// it) — but the bootstrap account is the one the reservation was made FOR.
+// Every screen named it "admin2" because EnsureUsername's collision loop
+// stepped past the reserved name.
+//
+// Only server.FirstRun calls this, on an install with no accounts. Existing
+// installs are not touched: an "admin2" stays "admin2" (no migration). A name
+// already held by another account is left alone and reported.
+func ClaimBootstrap(ctx context.Context, c Claimer, u *model.User) error {
+	if u == nil {
+		return ErrNotFound
+	}
+	if u.Username == BootstrapUsername {
+		return nil
+	}
+	existing, err := c.GetUserByUsername(ctx, BootstrapUsername)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if existing != nil && existing.ID != u.ID {
+		return fmt.Errorf("%w: %q already belongs to account %d", ErrReservedUsername, BootstrapUsername, existing.ID)
+	}
+	if err := c.SetUserUsername(ctx, u.ID, BootstrapUsername); err != nil {
+		return err
+	}
+	u.Username = BootstrapUsername
+	return nil
 }

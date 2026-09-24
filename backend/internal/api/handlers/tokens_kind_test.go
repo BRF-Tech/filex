@@ -42,7 +42,10 @@ func seedKindToken(t *testing.T, store db.Store, userID int64, kind string) stri
 		UserID:    userID,
 		Label:     kind + "-token",
 		TokenHash: apitoken.HashToken(plain),
-		Kind:      kind,
+		// An explicit list, as every token has since migration 00054: an
+		// empty one grants nothing — and mints nothing (token_ceiling.go).
+		Scopes: "read,write,delete",
+		Kind:   kind,
 	})
 	require.NoError(t, err)
 	return plain
@@ -131,7 +134,7 @@ func TestSelfTokens_UserTokenUnchanged(t *testing.T) {
 	require.Len(t, list.Tokens, 1)
 	assert.Equal(t, model.TokenKindUser, list.Tokens[0].Kind, "kind must reach the client")
 
-	st, body = callWithToken(t, http.MethodPost, srv.URL+"/api/tokens", userTok, `{"label":"my cli"}`)
+	st, body = callWithToken(t, http.MethodPost, srv.URL+"/api/tokens", userTok, `{"label":"my cli","scopes":"read,write"}`)
 	require.Equal(t, http.StatusCreated, st, "body: %s", body)
 	var created struct {
 		Row *model.APIToken `json:"row"`
@@ -159,7 +162,7 @@ func TestSelfTokens_SessionUnchanged(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	resp2, err := client.Post(srv.URL+"/api/tokens", "application/json",
-		bytes.NewBufferString(`{"label":"session-minted"}`))
+		bytes.NewBufferString(`{"label":"session-minted","scopes":"read"}`))
 	require.NoError(t, err)
 	defer resp2.Body.Close()
 	require.Equal(t, http.StatusCreated, resp2.StatusCode)
@@ -263,14 +266,14 @@ func TestAdminTokens_DefaultKindIsApp(t *testing.T) {
 		return out.Row
 	}
 
-	assert.Equal(t, model.TokenKindApp, mint(`{"label":"host proxy"}`).Kind)
-	assert.Equal(t, model.TokenKindUser, mint(`{"label":"a laptop","kind":"user"}`).Kind)
+	assert.Equal(t, model.TokenKindApp, mint(`{"label":"host proxy","scopes":"read,mcp"}`).Kind)
+	assert.Equal(t, model.TokenKindUser, mint(`{"label":"a laptop","kind":"user","scopes":"read"}`).Kind)
 
 	// A typo is refused, not folded into "app": silently downgrading "users"
 	// would mint a credential whose owner cannot manage their own keys and
 	// give them nothing to read.
 	resp, err := client.Post(srv.URL+"/api/admin/ai-tokens", "application/json",
-		bytes.NewBufferString(`{"label":"typo","kind":"users"}`))
+		bytes.NewBufferString(`{"label":"typo","kind":"users","scopes":"read"}`))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
@@ -292,7 +295,7 @@ var credentialSurfaces = []struct {
 	path string
 	body string
 }{
-	{"api-tokens", "/api/tokens", `{"label":"mine"}`},
+	{"api-tokens", "/api/tokens", `{"label":"mine","scopes":"read"}`},
 	{"s3-keys", "/api/auth/s3-keys", `{"label":"mine"}`},
 	{"ssh-keys", "/api/auth/ssh-keys", `{"label":"mine","public_key":"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJexample x@y"}`},
 	{"nfs-exports", "/api/auth/nfs-exports", `{"label":"mine"}`},

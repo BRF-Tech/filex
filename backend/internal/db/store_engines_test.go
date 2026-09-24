@@ -79,8 +79,13 @@ func TestStoreWritePathsOnEveryEngine(t *testing.T) {
 				NodeID: node.ID, State: "ready", Width: 320, Height: 200, GeneratedAt: &now,
 			}), "update thumbnail")
 
-			require.NoError(t, store.SetNodeTags(ctx, node.ID, []string{"reports", "q3"}), "set tags")
-			require.NoError(t, store.SetNodeTags(ctx, node.ID, []string{"reports"}), "replace tags")
+			// Tags: the vocabulary row and the link (00055). The full rules are
+			// in tags_engines_test.go; this is the first-five-minutes write.
+			tid := int64(0)
+			tag, err := store.CreateTag(ctx, &model.Tag{Kind: model.TagTeam, TenantID: &tid, Name: "Reports", Key: "reports"})
+			require.NoError(t, err, "create tag")
+			require.NoError(t, store.LinkNodeTags(ctx, node.ID, []int64{tag.ID}, nil), "link tag")
+			require.NoError(t, store.LinkNodeTags(ctx, node.ID, []int64{tag.ID}, nil), "re-link tag")
 
 			require.NoError(t, store.SetUserNodeMeta(ctx, user.ID, node.ID, "star", "1"), "insert user meta")
 			require.NoError(t, store.SetUserNodeMeta(ctx, user.ID, node.ID, "star", "0"), "update user meta")

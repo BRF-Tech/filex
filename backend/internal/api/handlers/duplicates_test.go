@@ -6,6 +6,7 @@ package handlers_test
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -183,4 +184,39 @@ func TestAdminDuplicates_AdminOnly(t *testing.T) {
 	require.NoError(t, err)
 	defer resp2.Body.Close()
 	assert.Equal(t, http.StatusForbidden, resp2.StatusCode)
+}
+
+// A version snapshot is a byte-identical copy of the file as it once was, and
+// a desktop open-with working copy is one of the document it came from: filex
+// keeps both on purpose, and the report must not offer either as waste — an
+// operator acting on it would delete a file's history. A pair that is only
+// "duplicate" because of one of them is no group at all.
+func TestAdminDuplicates_IgnoresFilexOwnCopies(t *testing.T) {
+	srv, client, store := testutil.NewTestServer(t)
+	email, pw := testutil.SeedAdmin(t, store)
+	testutil.LoginAs(t, srv, client, email, pw)
+	stID := seedDupStorage(t, store)
+
+	seed := func(p string, etag string) {
+		_, err := store.CreateNode(context.Background(), &model.Node{
+			StorageID: stID, Name: p[strings.LastIndex(p, "/")+1:], Path: p, PathHash: "hash-" + p,
+			Type: model.NodeTypeFile, Size: 300, Etag: etag, SyncState: model.SyncStateSynced,
+		})
+		require.NoError(t, err)
+	}
+	seed("/Documents/report.docx", "vvv")
+	seed("/.versions/7/1", "vvv")
+	seed("/Documents/plan.docx", "ooo")
+	seed("/.filex-open/0123456789ab-plan.docx", "ooo")
+	seed("/Photos/a.jpg", "ppp")
+	seed("/Photos/copy-of-a.jpg", "ppp")
+
+	resp, err := client.Get(srv.URL + "/api/admin/duplicates")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var got dupReportJSON
+	testutil.ReadJSON(t, resp, &got)
+	require.Len(t, got.Groups, 1, "only the person's own duplicate pair is a group")
+	assert.Equal(t, "300-ppp", got.Groups[0].Key)
 }

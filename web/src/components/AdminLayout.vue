@@ -59,7 +59,7 @@ function toggleSidebar() {
       @close="sidebarOpen = false"
     />
 
-    <div class="flex min-w-0 flex-1 flex-col lg:pl-64">
+    <div class="flex min-w-0 flex-1 flex-col lg:ps-64">
       <TopNav @toggle-sidebar="toggleSidebar" />
 
       <main class="flex-1 px-4 py-4 sm:px-6 lg:px-8">
@@ -97,7 +97,7 @@ function toggleSidebar() {
 
       <footer class="px-4 sm:px-6 lg:px-8 py-3 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500 dark:text-zinc-400">
         <div class="mx-auto max-w-7xl flex flex-wrap items-center justify-between gap-2">
-          <span>filex · self-hosted file manager</span>
+          <span>{{ t('app.footer') }}</span>
           <a
             href="https://github.com/BRF-Tech/filex"
             class="hover:text-brand-600 dark:hover:text-brand-400"

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/identity"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -73,6 +75,12 @@ func FirstRun(ctx context.Context, store db.Store, dataDir, adminEmail, adminPas
 	// changed in user settings, and the recovery account must not change with it.
 	if err := local.RecordBootstrapAdmin(ctx, store, admin.ID); err != nil {
 		return FirstRunCredentials{}, fmt.Errorf("firstrun: record bootstrap administrator: %w", err)
+	}
+	// The bootstrap administrator's login name is "admin" — the one account
+	// the reservation lets hold it (identity.ClaimBootstrap). Not fatal: the
+	// account already exists with the name EnsureUsername derived.
+	if err := identity.ClaimBootstrap(ctx, store, admin); err != nil {
+		slog.Warn("firstrun: could not name the first administrator \"admin\"", slog.Any("err", err))
 	}
 
 	if preset {

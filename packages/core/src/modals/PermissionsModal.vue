@@ -41,16 +41,19 @@ import {
 } from '../lib/shareTtl';
 import { EXPLORER_CLOCK } from '../lib/timezone';
 import { resolveLocale } from '../locales/resolve';
-import { formatByteSize, useLocale } from '../composables/useLocale';
+import { localeTag, useLocale } from '../composables/useLocale';
+import { personInitial, personName } from '../lib/personName';
+import { splitList } from '../lib/listInput';
 import { actionIconSvg } from '../lib/actionIcons';
 import { fileIconTile } from '../lib/fileIcons';
+import { gateOnService } from '../lib/serviceGate';
 
 const props = defineProps<{
   api: FileApi;
   path: string; // adapter://rel of the target item
   isDir?: boolean; // folder → grants cascade; file → no `/…` inheritance hint
   size?: number; // bytes, for the share-mail body (files only)
-  locale?: 'tr' | 'en';
+  locale?: string;
   /** Server ceiling on a new link's life in days (capabilities.share_max_ttl_days).
    *  undefined/0 = no ceiling. The expiry choices are derived from it. */
   shareMaxTtlDays?: number;
@@ -67,15 +70,36 @@ const props = defineProps<{
    * theirs to see.
    */
   initialTab?: 'perms' | 'share' | 'drop';
+  /**
+   * Can outgoing mail be sent right now (`capabilities.mail.ready`)? `false`
+   * only when the server SAID so — absent (an older server) keeps the "Send
+   * by email" rows exactly as they were.
+   */
+  mailReady?: boolean;
+  /** Could this person set mail up (`capabilities.caller_admin`)? */
+  canConfigure?: boolean;
+  /**
+   * The caller's level on this item, when the host already knows it (the
+   * listing row's `perm`). Anything below `owner` cannot read the grant list,
+   * so the dialog does not ask: it used to send the request anyway, swallow
+   * the 403 and quietly draw no people section — a question the host had
+   * already answered, asked again on every open. Absent = ask.
+   */
+  perm?: string;
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
+/**
+ * "Send by email", when mail cannot be sent — the owner's rule for a missing
+ * service (2026-09-21, lib/serviceGate): an administrator sees the row greyed
+ * with where to set mail up; everybody else is not offered it. It used to be
+ * offered to everyone and answer only after the click.
+ */
+const mailMissing = computed(() => props.mailReady === false);
+const mailRowShown = computed(() => !mailMissing.value || props.canConfigure === true);
+
 const localeCode = computed(() => resolveLocale(props.locale));
-const { t } = useLocale(() => localeCode.value);
-const tr = computed(() => localeCode.value !== 'en');
-function L(t: string, e: string): string {
-  return tr.value ? t : e;
-}
+const { t, formatSize } = useLocale(() => localeCode.value);
 
 // Split adapter://rel for a friendlier path chip.
 const pathParts = computed(() => {
@@ -120,14 +144,32 @@ const suggestions = ref<UserSuggestion[]>([]);
 const showSuggest = ref(false);
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-const levels: Array<{ v: 'viewer' | 'editor' | 'owner'; l: string; d: string }> = [
-  { v: 'viewer', l: L('Görüntüleyen', 'Viewer'), d: L('görüntüle + indir', 'view + download') },
-  { v: 'editor', l: L('Düzenleyen', 'Editor'), d: L('oku + yaz + sil', 'read + write + delete') },
-  { v: 'owner', l: L('Sahip', 'Owner'), d: L('düzenle + izin yönet', 'edit + manage access') },
-];
+// ⚠ computed, not a plain array: labels built once at setup kept the language
+// the dialog was opened in.
+const levels = computed<Array<{ v: 'viewer' | 'editor' | 'owner'; l: string; d: string }>>(() => [
+  { v: 'viewer', l: t('access.ui.level_viewer'), d: t('access.ui.level_viewer_desc') },
+  { v: 'editor', l: t('access.ui.level_editor'), d: t('access.ui.level_editor_desc') },
+  { v: 'owner', l: t('access.ui.level_owner'), d: t('access.ui.level_owner_desc') },
+]);
 function levelLabel(v: string): string {
-  return levels.find((o) => o.v === v)?.l ?? v;
+  return levels.value.find((o) => o.v === v)?.l ?? v;
 }
+
+/**
+ * Per-item access with RBAC OFF on the storage.
+ *
+ * ⚠ The add-people form used to work there while a box above it said grants
+ * do not apply (QA, 2026-09-21): a form that succeeds at something that has no
+ * effect. It is the same case as a missing service (lib/serviceGate): an
+ * administrator — who can switch RBAC on — sees the section with the form
+ * greyed and where to switch it on; anybody else is not offered the section.
+ * Grants that already exist stay listed, so they can still be removed.
+ */
+const rbacGate = computed(() =>
+  storageRbac.value ? {} : gateOnService(false, props.canConfigure === true, t('access.ui.rbac_off_here')),
+);
+const peopleShown = computed(() => canManage.value && rbacGate.value.hidden !== true);
+const addBlocked = computed(() => rbacGate.value.disabled === true);
 
 // ── share state ──
 const shares = ref<ShareInfo[]>([]);
@@ -163,11 +205,10 @@ const dropShares = computed(() => shares.value.filter((s) => shareKind(s) === 'd
 // on a server that keeps links for 7 would show a choice that is not one.
 // The same helper drives every surface (see lib/shareTtl.ts).
 function expiryLabel(days: number): string {
-  if (days === 0) return L('Süresiz', 'Never');
-  return tr.value ? `${days} gün` : `${days} day${days === 1 ? '' : 's'}`;
+  return days === 0 ? t('access.ui.never') : t('access.ui.days', { days });
 }
 const expiryOptions = computed(() => clampExpiryOptions(STOCK_EXPIRY_DAYS, props.shareMaxTtlDays, expiryLabel));
-const ttlHint = computed(() => ttlCeilingHint(props.shareMaxTtlDays, tr.value ? 'tr' : 'en'));
+const ttlHint = computed(() => ttlCeilingHint(props.shareMaxTtlDays, localeCode.value));
 watch(
   () => props.shareMaxTtlDays,
   () => {
@@ -185,14 +226,10 @@ watch(
 // rather than a number box: "let this be opened three times" is the whole use
 // case, and typing a number to say it is friction.
 const shareMaxDl = ref(0); // 0 = unlimited
-const maxDlOptions = [
-  { v: 0, l: L('Sınırsız', 'Unlimited') },
-  { v: 1, l: L('1 indirme', '1 download') },
-  { v: 3, l: L('3 indirme', '3 downloads') },
-  { v: 5, l: L('5 indirme', '5 downloads') },
-  { v: 10, l: L('10 indirme', '10 downloads') },
-  { v: 25, l: L('25 indirme', '25 downloads') },
-];
+const maxDlOptions = computed(() => [
+  { v: 0, l: t('access.ui.unlimited') },
+  ...[1, 3, 5, 10, 25].map((count) => ({ v: count, l: t('access.ui.downloads', { count }) })),
+]);
 
 // ⚠ The one-line curl went missing the same way the download cap did: it was
 // part of the old standalone share dialog, and link creation moved here
@@ -229,10 +266,11 @@ const dropMailNotice = ref('');
 
 // splitEmails turns a free-text recipient field into a deduped address list —
 // comma / semicolon / whitespace separated, so one input handles many people.
+// ⚠ lib/listInput: an Arabic keyboard's "،" and "؛" separate addresses too.
 function splitEmails(raw: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const part of raw.split(/[,;\s]+/)) {
+  for (const part of splitList(raw, { spaces: true, semicolons: true })) {
     const e = part.trim().toLowerCase();
     if (e && e.includes('@') && !seen.has(e)) {
       seen.add(e);
@@ -246,13 +284,19 @@ function splitEmails(raw: string): string[] {
 function mailResultNotice(res: { sent?: string[]; failed?: string[] }): string {
   const sent = res.sent?.length ?? 0;
   const failed = res.failed?.length ?? 0;
-  if (failed === 0) return L(`E-posta gönderildi ✓ (${sent})`, `Email sent ✓ (${sent})`);
-  return L(`${sent} gönderildi, ${failed} başarısız`, `${sent} sent, ${failed} failed`);
+  if (failed === 0) return t('access.ui.mail_sent', { sent });
+  return t('access.ui.mail_partial', { sent, failed });
 }
 
 async function reload() {
   loading.value = true;
   err.value = '';
+  if (props.perm && props.perm !== 'owner') {
+    canManage.value = false;
+    open.value = { ...open.value, people: false };
+    loading.value = false;
+    return;
+  }
   try {
     const r = await props.api.listPermissions(props.path);
     direct.value = r.direct ?? [];
@@ -331,6 +375,7 @@ function onEmailInput() {
   }, 180);
 }
 async function pickUser(u: UserSuggestion) {
+  if (addBlocked.value) return;
   showSuggest.value = false;
   email.value = u.email;
   let lvl = level.value;
@@ -342,7 +387,7 @@ async function pickUser(u: UserSuggestion) {
     email.value = '';
     suggestions.value = [];
     await reload();
-    notice.value = L('Yetki verildi.', 'Access granted.');
+    notice.value = t('access.ui.access_granted');
   } catch (e) {
     notice.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -350,9 +395,10 @@ async function pickUser(u: UserSuggestion) {
   }
 }
 async function submitEmail() {
+  if (addBlocked.value) return;
   const addr = email.value.trim().toLowerCase();
   if (!addr || !addr.includes('@')) {
-    notice.value = L('Geçerli bir e-posta girin.', 'Enter a valid email.');
+    notice.value = t('access.ui.enter_a_valid_email');
     return;
   }
   showSuggest.value = false;
@@ -367,7 +413,7 @@ async function submitEmail() {
       await props.api.addPermission({ path: props.path, user_id: res.user.id, level: lvl, is_dir: !!props.isDir });
       email.value = '';
       await reload();
-      notice.value = L('Yetki verildi.', 'Access granted.');
+      notice.value = t('access.ui.access_granted');
     } else {
       noAccount.value = true;
     }
@@ -388,8 +434,8 @@ async function inviteCreateUser() {
     });
     inviteResult.value = { tempPassword: r.temp_password };
     notice.value = r.emailed
-      ? L('Kullanıcı açıldı, davet e-postası gönderildi.', 'User created, invite emailed.')
-      : L('Kullanıcı açıldı. Geçici parolayı iletin.', 'User created. Share the temp password.');
+      ? t('access.ui.user_created_invite_emailed')
+      : t('access.ui.user_created_share_the_temp_password');
     noAccount.value = false; email.value = '';
     await reload();
   } catch (e) {
@@ -420,11 +466,13 @@ async function removeGrant(g: Grant) {
   catch (e) { notice.value = e instanceof Error ? e.message : String(e); }
   finally { busy.value = false; }
 }
+/* One rule for naming a person (lib/personName): the server's name, the
+   display name, the username, the address. */
 function glabel(g: Grant): string {
-  return g.user_display_name || g.user_email || `#${g.user_id}`;
+  return personName({ name: g.user_name, display_name: g.user_display_name, email: g.user_email }) || `#${g.user_id}`;
 }
 function ginitial(g: Grant): string {
-  return (g.user_display_name || g.user_email || '?').charAt(0).toUpperCase();
+  return personInitial({ name: g.user_name, display_name: g.user_display_name, email: g.user_email }, localeTag(localeCode.value)) || '?';
 }
 
 // ── share actions ──
@@ -432,12 +480,23 @@ function expiresAtISO(): string | null {
   if (!shareExpiry.value) return null;
   return new Date(Date.now() + shareExpiry.value * 86400000).toISOString();
 }
+/**
+ * Make THE link with the options as they stand.
+ *
+ * ⚠⚠ ONE download link per item, whichever control made it. The switch at the
+ * top mints one; this button used to mint ANOTHER beside it, so a person who
+ * turned the link on and then picked a PIN walked away with two live links —
+ * the old one without the PIN (QA, 2026-09-21). When a link is on, the button
+ * REPLACES it (its label and the note under it say so): the old address stops
+ * working and the new one carries the new options.
+ */
 async function createLink() {
   shareBusy.value = true;
   shareErr.value = '';
-  shareResult.value = null;
   shareMailNotice.value = '';
   try {
+    for (const s of downloadShares.value) await props.api.revokeShare(s.uuid);
+    shareResult.value = null;
     const r = await props.api.createShare({
       path: props.path,
       password: sharePwd.value,
@@ -495,7 +554,7 @@ async function toggleLink() {
 async function sendShareMail() {
   const list = splitEmails(shareMailTo.value);
   if (!list.length) {
-    shareMailNotice.value = L('Geçerli bir e-posta girin.', 'Enter a valid email.');
+    shareMailNotice.value = t('access.ui.enter_a_valid_email');
     return;
   }
   if (!shareResult.value?.url) return;
@@ -514,9 +573,9 @@ async function sendShareMail() {
   } catch (e) {
     const detail = (e as { detail?: string }).detail ?? '';
     if (detail.includes('not_configured')) {
-      shareMailNotice.value = L('SMTP ayarlı/doğrulanmış değil — linki elle iletin.', 'SMTP not set up/verified — share the link manually.');
+      shareMailNotice.value = t('access.ui.smtp_not_set_up_verified_share_the_link');
     } else if (detail.includes('send_failed')) {
-      shareMailNotice.value = L('Gönderilemedi (geçici hata) — tekrar deneyin.', 'Send failed (temporary) — please retry.');
+      shareMailNotice.value = t('access.ui.send_failed_temporary_please_retry');
     } else {
       shareMailNotice.value = e instanceof Error ? e.message : String(e);
     }
@@ -539,7 +598,7 @@ async function createDropLink() {
     const drop_settings: Record<string, unknown> = { ask_name: dropAskName.value };
     if (dropMaxFiles.value) drop_settings.max_files = Number(dropMaxFiles.value);
     if (dropMaxSizeMB.value) drop_settings.max_file_size_mb = Number(dropMaxSizeMB.value);
-    const exts = dropAllowedExt.value.split(/[,\s]+/).map((s) => s.trim().replace(/^\./, '')).filter(Boolean);
+    const exts = splitList(dropAllowedExt.value, { spaces: true }).map((s) => s.replace(/^\./, '')).filter(Boolean);
     if (exts.length) drop_settings.allowed_ext = exts;
     const r = await props.api.createShare({
       path: props.path,
@@ -564,7 +623,7 @@ async function createDropLink() {
 async function sendDropMail() {
   const list = splitEmails(dropMailTo.value);
   if (!list.length) {
-    dropMailNotice.value = L('Geçerli bir e-posta girin.', 'Enter a valid email.');
+    dropMailNotice.value = t('access.ui.enter_a_valid_email');
     return;
   }
   if (!dropResult.value?.url) return;
@@ -583,7 +642,7 @@ async function sendDropMail() {
   } catch (e) {
     const detail = (e as { detail?: string }).detail ?? '';
     if (detail.includes('not_configured')) {
-      dropMailNotice.value = L('SMTP ayarlı/doğrulanmış değil — linki elle iletin.', 'SMTP not set up/verified — share the link manually.');
+      dropMailNotice.value = t('access.ui.smtp_not_set_up_verified_share_the_link');
     } else {
       dropMailNotice.value = e instanceof Error ? e.message : String(e);
     }
@@ -619,28 +678,24 @@ function copy(text: string, tag = 'url') {
 const canShare = computed(() => typeof navigator !== 'undefined' && typeof navigator.share === 'function');
 
 /**
- * The size line in the share message, spelled the way the SERVER spells it.
+ * The size line in the share message — the product's one byte format, in the
+ * viewer's language.
  *
- * ⚠ This one really does have to mirror `humanSize()` in
- * backend/internal/api/handlers/mail_templates.go — the same file forwarded
- * by e-mail and by the OS share sheet must not carry two different sizes. So
- * the mirroring is stated as arguments to the one formatter (1024, always one
- * decimal, a dot and English letters, because that is what Go's `%.1f %cB`
- * prints) instead of being a fifth private copy of the arithmetic.
- *
- * ⚠ It is therefore the one place in the UI that is NOT decimal, so a share
- * message reads "1.4 MB" where the listing row reads "1.5 MB". The register
- * entry for this was right about the real fix: the e-mail should render from
- * one source rather than the UI copying its rounding.
+ * ⚠ It used to mirror the server's `humanSize()` (base 1024, always one
+ * decimal, a dot and English letters) so that the message forwarded by the OS
+ * share sheet and the one e-mailed would agree — and both disagreed with the
+ * listing: "1.4 MB" in the message, "1.5 MB" on the row. The server writes
+ * sizes with the interface's rules now (srvtext.Bytes), so this is simply the
+ * listing's formatter.
  */
 function humanSize(b?: number): string {
   if (!b || b <= 0) return '';
-  return formatByteSize(b, { base: 1024, digits: 'fixed1', numberLocale: null });
+  return formatSize(b);
 }
 
 function expiryLine(days: number): string {
-  if (days > 0) return L(`Bu bağlantı ${days} gün geçerlidir.`, `This link is valid for ${days} day(s).`);
-  return L('Bu bağlantının süresi yoktur.', 'This link does not expire.');
+  if (days > 0) return t('access.ui.valid_for', { days });
+  return t('share.ttl.never');
 }
 // What the server actually stored — shown under a fresh link so the real
 // expiry is visible even when the server shortened the request.
@@ -648,7 +703,7 @@ function expiryLine(days: number): string {
 const clock = inject(EXPLORER_CLOCK, undefined);
 
 function validUntil(r: { expiresAt?: string | null } | null): string {
-  return validUntilLine(r?.expiresAt ?? null, tr.value ? 'tr' : 'en', clock);
+  return validUntilLine(r?.expiresAt ?? null, localeCode.value, clock);
 }
 
 /* ── the top tier: one switch, one sentence, one link ──────────────────── */
@@ -656,6 +711,15 @@ function validUntil(r: { expiresAt?: string | null } | null): string {
 /** The link the header row shows: the one just minted, else the oldest live one. */
 const primaryLink = computed(() => shareResult.value?.url ?? downloadShares.value[0]?.url ?? '');
 const linkOn = computed(() => !!primaryLink.value);
+
+/**
+ * The links the header does NOT already show. ⚠ The header's link used to be
+ * listed again right under it, with a second Copy button — one link, two
+ * places (QA, 2026-09-21). What is left is an older extra link, kept listed
+ * so it can still be copied or revoked.
+ */
+const otherDownloadShares = computed(() => downloadShares.value.filter((s) => s.url !== primaryLink.value));
+const otherDropShares = computed(() => dropShares.value.filter((s) => s.url !== dropResult.value?.url));
 
 /**
  * The plain sentence. It says who can open the item RIGHT NOW, which is the
@@ -678,12 +742,12 @@ const linkDetail = computed(() => {
   const bits: string[] = [];
   if (shareResult.value) {
     bits.push(validUntil(shareResult.value));
-    if (shareResult.value.clamped) bits.push(L('(sunucu sınırı uygulandı)', '(server limit applied)'));
-    if (shareMaxDl.value) bits.push(maxDlOptions.find((o) => o.v === shareMaxDl.value)?.l ?? '');
+    if (shareResult.value.clamped) bits.push(t('access.ui.server_limit_applied'));
+    if (shareMaxDl.value) bits.push(maxDlOptions.value.find((o) => o.v === shareMaxDl.value)?.l ?? '');
   } else if (downloadShares.value[0]) {
     const s = downloadShares.value[0];
     bits.push(validUntil({ expiresAt: s.expires_at ?? null }));
-    if (s.max_downloads) bits.push(maxDlOptions.find((o) => o.v === s.max_downloads)?.l ?? String(s.max_downloads));
+    if (s.max_downloads) bits.push(maxDlOptions.value.find((o) => o.v === s.max_downloads)?.l ?? String(s.max_downloads));
   }
   return shareDetailLine(bits);
 });
@@ -694,7 +758,7 @@ const linkSummary = computed(() => {
   const bits: string[] = [];
   bits.push(sharePwd.value ? t('access.sum.pin_on') : t('access.sum.pin_off'));
   bits.push(expiryLabel(shareExpiry.value));
-  if (shareMaxDl.value) bits.push(maxDlOptions.find((o) => o.v === shareMaxDl.value)?.l ?? '');
+  if (shareMaxDl.value) bits.push(maxDlOptions.value.find((o) => o.v === shareMaxDl.value)?.l ?? '');
   return bits.filter(Boolean).join(' · ');
 });
 const peopleSummary = computed(() => {
@@ -710,22 +774,21 @@ function shareBody(): { title: string; text: string } {
   const name = pathParts.value.name;
   const url = shareResult.value?.url ?? '';
   const pin = shareResult.value?.pin ?? '';
-  const kind = props.isDir ? L('klasör', 'folder') : L('dosya', 'file');
-  const title = tr.value
-    ? `${name} ${props.isDir ? 'klasörü' : 'dosyası'} sizinle paylaşıldı`
-    : `${name} has been shared with you`;
+  // ⚠ A sentence per kind, not "a {kind}": a word dropped into another
+  // sentence cannot agree with it in a language with gender or case.
+  const title = t(props.isDir ? 'access.ui.mail_title_folder' : 'access.ui.mail_title_file', { name });
   const lines: string[] = [];
-  lines.push(L('Merhaba,', 'Hello,'), '');
-  lines.push(L(`Sizinle bir ${kind} paylaşıldı:`, `A ${kind} has been shared with you:`), '');
+  lines.push(t('access.ui.mail_hello'), '');
+  lines.push(t(props.isDir ? 'access.ui.mail_shared_folder' : 'access.ui.mail_shared_file'), '');
   if (props.isDir) {
-    lines.push(L(`Klasör: ${name}`, `Folder: ${name}`));
+    lines.push(t('access.ui.mail_folder', { name }));
   } else {
-    lines.push(L(`Dosya: ${name}`, `File: ${name}`));
+    lines.push(t('access.ui.mail_file', { name }));
     const sz = humanSize(props.size);
-    if (sz) lines.push(L(`Boyut: ${sz}`, `Size: ${sz}`));
+    if (sz) lines.push(t('access.ui.mail_size', { size: sz }));
   }
-  lines.push('', L('İndirmek için:', 'Download it here:'), url);
-  if (pin) lines.push('', L(`PIN (erişim kodu): ${pin}`, `PIN (access code): ${pin}`));
+  lines.push('', t('access.ui.mail_download_here'), url);
+  if (pin) lines.push('', t('access.ui.mail_pin', { pin }));
   lines.push('', expiryLine(shareExpiry.value));
   return { title, text: lines.join('\n') };
 }
@@ -737,18 +800,18 @@ function dropBody(): { title: string; text: string } {
   const pin = dropResult.value?.pin ?? '';
   const maxFiles = Number(dropMaxFiles.value) || 20;
   const maxMB = Number(dropMaxSizeMB.value) || 500;
-  const exts = dropAllowedExt.value.split(/[,\s]+/).map((s) => s.trim().replace(/^\./, '')).filter(Boolean);
-  const title = L(`${folder} adlı klasöre dosya eklemeniz istendi`, `You've been asked to add files to ${folder}`);
+  const exts = splitList(dropAllowedExt.value, { spaces: true }).map((s) => s.replace(/^\./, '')).filter(Boolean);
+  const title = t('access.ui.drop_title', { folder });
   const lines: string[] = [];
-  lines.push(L('Merhaba,', 'Hello,'), '');
-  lines.push(L('Dosya yüklemeniz istendi.', "You've been invited to upload files."), '');
-  lines.push(L(`Klasör: ${folder}`, `Folder: ${folder}`));
-  lines.push(L(`Sınır: en fazla ${maxFiles} dosya, dosya başına ${maxMB} MB.`, `Limit: up to ${maxFiles} file(s), ${maxMB} MB per file.`));
+  lines.push(t('access.ui.mail_hello'), '');
+  lines.push(t('access.ui.drop_invited'), '');
+  lines.push(t('access.ui.mail_folder', { name: folder }));
+  lines.push(t('access.ui.drop_limit', { files: maxFiles, mb: maxMB }));
   lines.push(exts.length
-    ? L(`İzinli türler: ${exts.join(', ')}`, `Allowed types: ${exts.join(', ')}`)
-    : L('İzinli türler: tüm türler', 'Allowed types: all'));
-  lines.push('', L('Dosyalarınızı buradan yükleyebilirsiniz:', 'Upload your files here:'), url);
-  if (pin) lines.push('', L(`PIN (erişim kodu): ${pin}`, `PIN (access code): ${pin}`));
+    ? t('access.ui.drop_types', { types: exts.join(', ') })
+    : t('access.ui.drop_types_all'));
+  lines.push('', t('access.ui.drop_upload_here'), url);
+  if (pin) lines.push('', t('access.ui.mail_pin', { pin }));
   lines.push('', expiryLine(dropExpiry.value));
   return { title, text: lines.join('\n') };
 }
@@ -772,7 +835,7 @@ async function nativeShare(body: { title: string; text: string }) {
         <span class="fe-share__tile" aria-hidden="true" v-html="titleTile"></span>
         <div class="fe-share__headtext">
           <h3 class="fe-share__title">{{ t('access.title', { name: pathParts.name }) }}</h3>
-          <span class="fe-share__path" :title="path">{{ pathParts.adapter }}</span>
+          <span class="fe-share__path" :title="path"><bdi>{{ pathParts.adapter }}</bdi></span>
         </div>
         <button type="button" class="fe-share__close" :aria-label="t('access.close')" :title="t('access.close')" @click="emit('close')">
           <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
@@ -810,8 +873,9 @@ async function nativeShare(body: { title: string; text: string }) {
             <div v-if="shareResult?.pin" class="fe-share__pinrow">
               <span class="fe-share__pinlabel">PIN</span>
               <code class="fe-share__pin">{{ shareResult?.pin }}</code>
-              <button type="button" class="fe-share__mini" @click="copy(shareResult?.pin ?? '', 'sharepin')">
-                {{ copied === 'sharepin' ? t('access.copied') : t('access.copy') }}
+              <button type="button" class="fe-share__copy" @click="copy(shareResult?.pin ?? '', 'sharepin')">
+                <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                <span>{{ copied === 'sharepin' ? t('access.copied') : t('access.copy') }}</span>
               </button>
             </div>
           </template>
@@ -837,72 +901,97 @@ async function nativeShare(body: { title: string; text: string }) {
             </button>
             <div v-if="open.link" class="fe-share__panel">
               <div class="fe-share__opts">
-                <label class="fe-share__check">
-                  <input type="checkbox" v-model="sharePwd" />
-                  <span>{{ L('PIN ile koru', 'Protect with a PIN') }}</span>
+                <!-- ⚠ ONE on/off control in this dialog: the switch. The PIN
+                     used to be a native checkbox under a switch — two shapes
+                     for one kind of answer (QA, 2026-09-21). -->
+                <label class="fe-share__togglerow">
+                  <span class="fe-share__togglelabel">{{ t('access.ui.protect_with_a_pin') }}</span>
+                  <button
+                    type="button"
+                    class="fe-share__switch"
+                    role="switch"
+                    :aria-checked="sharePwd ? 'true' : 'false'"
+                    data-testid="share-pin-switch"
+                    @click="sharePwd = !sharePwd"
+                  ><span class="fe-share__knob"></span></button>
                 </label>
                 <label class="fe-share__field">
-                  <span class="fe-share__fieldlabel">{{ L('Süre', 'Expiry') }}</span>
+                  <span class="fe-share__fieldlabel">{{ t('access.ui.expiry') }}</span>
                   <select v-model.number="shareExpiry" class="fe-share__select" data-testid="share-expiry">
                     <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
                   </select>
                 </label>
                 <label class="fe-share__field">
-                  <span class="fe-share__fieldlabel">{{ L('İndirme limiti', 'Download limit') }}</span>
+                  <span class="fe-share__fieldlabel">{{ t('access.ui.download_limit') }}</span>
                   <select v-model.number="shareMaxDl" class="fe-share__select">
                     <option v-for="o in maxDlOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
                   </select>
                 </label>
               </div>
               <p v-if="ttlHint" class="fe-share__hint" data-testid="share-ttl-hint">{{ ttlHint }}</p>
-              <button type="button" class="fx-perm-create fe-share__btn fe-share__btn--primary fe-share__btn--wide" :disabled="shareBusy" @click="createLink">
-                {{ L('Bağlantı oluştur', 'Create link') }}
+              <button
+                type="button"
+                class="fx-perm-create fe-share__btn fe-share__btn--primary fe-share__btn--wide"
+                data-testid="share-create"
+                :disabled="shareBusy"
+                @click="createLink"
+              >
+                {{ linkOn ? t('access.ui.replace_link') : t('access.ui.create_link') }}
               </button>
+              <p v-if="linkOn" class="fe-share__hint" data-testid="share-replace-hint">{{ t('access.ui.replace_link_hint') }}</p>
 
+              <!-- ⚠ One message with the address IN it: the sentence used to
+                   be two halves around a <strong>, which put a space before
+                   the English full stop and could not be ordered by a
+                   language that puts the address elsewhere. -->
               <p v-if="!shareResult && shareMailTo" class="fe-share__hint">
-                {{ L('Bir bağlantı oluşturun, ardından', 'Create a link, then it will be sent to') }}
-                <strong>{{ shareMailTo }}</strong> {{ L('adresine gönderin.', '.') }}
+                {{ t('access.ui.create_then_send', { email: shareMailTo }) }}
               </p>
 
               <template v-if="shareResult">
                 <!-- one-line download command, for pulling the file onto a server -->
                 <div class="fx-perm-cli fe-share__cli">
-                  <span class="fe-share__fieldlabel">{{ L('Komut satırı', 'Command line') }}</span>
+                  <span class="fe-share__fieldlabel">{{ t('access.ui.command_line') }}</span>
                   <div class="fe-share__clirow">
                     <code class="fe-share__clicmd" :title="shareCli">{{ shareCli }}</code>
-                    <button type="button" class="fe-share__mini" @click="copy(shareCli, 'sharecli')">
-                      {{ copied === 'sharecli' ? t('access.copied') : t('access.copy') }}
+                    <button type="button" class="fe-share__copy" @click="copy(shareCli, 'sharecli')">
+                      <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                      <span>{{ copied === 'sharecli' ? t('access.copied') : t('access.copy') }}</span>
                     </button>
                   </div>
                 </div>
 
                 <!-- send by email (one or more, comma/space separated) -->
-                <div class="fe-share__mailrow">
+                <div v-if="mailRowShown" class="fe-share__mailrow" data-testid="share-mail-row">
                   <input v-model="shareMailTo" type="text" class="fe-share__input" autocomplete="off"
-                    :placeholder="L('e-posta(lar) — virgülle ayırın', 'email(s) — comma separated')" @keyup.enter="sendShareMail" />
-                  <button type="button" class="fe-share__btn" :disabled="shareMailBusy" @click="sendShareMail">
-                    {{ L('Gönder', 'Send') }}
+                    :disabled="mailMissing"
+                    :placeholder="t('access.ui.emails_comma_separated')" @keyup.enter="sendShareMail" />
+                  <button type="button" class="fe-share__btn" :disabled="shareMailBusy || mailMissing" @click="sendShareMail">
+                    {{ t('access.ui.send') }}
                   </button>
+                </div>
+                <div v-if="mailRowShown && mailMissing" class="fe-share__notice" data-testid="share-mail-unavailable">
+                  {{ t('access.ui.mail_not_set_up') }}
                 </div>
                 <div v-if="shareMailNotice" class="fe-share__notice">{{ shareMailNotice }}</div>
 
                 <!-- native share (OS share sheet) — same as the fishapp Share button -->
                 <button v-if="canShare" type="button" class="fe-share__btn fe-share__btn--wide" @click="nativeShare(shareBody())">
                   <span aria-hidden="true" v-html="actionIconSvg('access')"></span>
-                  <span>{{ L('Paylaş', 'Share') }}</span>
+                  <span>{{ t('access.ui.share') }}</span>
                 </button>
               </template>
 
-              <div class="fe-share__list">
-                <h4 class="fe-share__listhead">{{ L('Mevcut bağlantılar', 'Existing links') }}</h4>
-                <p v-if="!downloadShares.length" class="fe-share__empty">{{ L('Yok', 'None') }}</p>
-                <div v-for="s in downloadShares" :key="s.uuid" class="fe-share__row">
+              <div v-if="otherDownloadShares.length" class="fe-share__list" data-testid="share-other-links">
+                <h4 class="fe-share__listhead">{{ t('access.ui.other_links') }}</h4>
+                <div v-for="s in otherDownloadShares" :key="s.uuid" class="fe-share__row">
                   <span class="fe-share__url" :title="s.url">{{ s.url }}</span>
-                  <button type="button" class="fe-share__mini" @click="copy(s.url, s.uuid)">
-                    {{ copied === s.uuid ? t('access.copied') : t('access.copy') }}
+                  <button type="button" class="fe-share__copy" @click="copy(s.url, s.uuid)">
+                    <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                    <span>{{ copied === s.uuid ? t('access.copied') : t('access.copy') }}</span>
                   </button>
-                  <button type="button" class="fe-share__del" :disabled="shareBusy" :title="L('İptal', 'Revoke')"
-                    :aria-label="L('İptal', 'Revoke')" @click="revoke(s)">
+                  <button type="button" class="fe-share__del" :disabled="shareBusy" :title="t('access.ui.revoke')"
+                    :aria-label="t('access.ui.revoke')" @click="revoke(s)">
                     <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
                   </button>
                 </div>
@@ -911,7 +1000,7 @@ async function nativeShare(body: { title: string; text: string }) {
           </section>
 
           <!-- People with access: the per-user / inherited grants -->
-          <section v-if="canManage" class="fe-share__section">
+          <section v-if="peopleShown" class="fe-share__section" data-testid="share-people">
             <button
               type="button"
               class="fe-share__sechead"
@@ -926,59 +1015,60 @@ async function nativeShare(body: { title: string; text: string }) {
               <span class="fe-share__secmeta">{{ peopleSummary }}</span>
             </button>
             <div v-if="open.people" class="fe-share__panel">
-              <div v-if="!storageRbac" class="fe-share__warn">
-                {{ L('Bu diskte RBAC kapalı — izinler yalnızca RBAC açık disklerde geçerli.', 'RBAC is off on this storage — grants only apply when RBAC is enabled.') }}
+              <div v-if="addBlocked" class="fe-share__warn" data-testid="share-rbac-off">
+                {{ t('access.ui.rbac_off_here') }}
               </div>
               <div v-if="err" class="fe-share__warn">{{ err }}</div>
-              <p v-if="loading" class="fe-share__hint">{{ L('Yükleniyor…', 'Loading…') }}</p>
+              <p v-if="loading" class="fe-share__hint">{{ t('access.ui.loading') }}</p>
               <template v-else>
-                <div class="fe-share__add">
+                <div class="fe-share__add" data-testid="share-add-person">
                   <div class="fe-share__emailwrap">
                     <input v-model="email" type="email" class="fe-share__input" autocomplete="off"
-                      :placeholder="L('İsim veya e-posta', 'Name or email')"
+                      :disabled="addBlocked"
+                      :placeholder="t('access.ui.name_or_email')"
                       @input="onEmailInput" @keyup.enter="submitEmail" @focus="onEmailInput" />
                     <ul v-if="showSuggest" class="fe-share__suggest">
                       <li v-for="u in suggestions" :key="u.id" @mousedown.prevent="pickUser(u)">
-                        <span class="fe-share__av fe-share__av--sm">{{ (u.display_name || u.email).charAt(0).toUpperCase() }}</span>
+                        <span class="fe-share__av fe-share__av--sm">{{ personInitial(u, localeTag(localeCode)) }}</span>
                         <span class="fe-share__suggesttxt">
-                          <span class="fe-share__suggestname">{{ u.display_name || u.email }}</span>
-                          <span class="fe-share__suggestmeta">{{ u.email }} · {{ u.role }}</span>
+                          <span class="fe-share__suggestname">{{ personName(u) }}</span>
+                          <span class="fe-share__suggestmeta"><bdi>{{ u.email }}</bdi> · {{ u.role }}</span>
                         </span>
                       </li>
                     </ul>
                   </div>
-                  <select v-model="level" class="fe-share__select" :title="levels.find(o => o.v === level)?.d">
+                  <select v-model="level" class="fe-share__select" :disabled="addBlocked" :title="levels.find(o => o.v === level)?.d">
                     <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
                   </select>
-                  <button type="button" class="fe-share__btn fe-share__btn--primary" :disabled="busy" @click="submitEmail">
-                    {{ L('Ekle', 'Add') }}
+                  <button type="button" class="fe-share__btn fe-share__btn--primary" :disabled="busy || addBlocked" @click="submitEmail">
+                    {{ t('access.ui.add') }}
                   </button>
                 </div>
 
                 <div v-if="noAccount" class="fe-share__invite">
-                  <p class="fe-share__hint">{{ L('Bu e-postada hesap yok. Ne yapmak istersiniz?', 'No account for this email — what next?') }}</p>
+                  <p class="fe-share__hint">{{ t('access.ui.no_account_for_this_email_what_next') }}</p>
                   <div class="fe-share__inviterow">
                     <select v-model="createRole" class="fe-share__select">
-                      <option value="user">{{ L('Kullanıcı', 'User') }}</option>
-                      <option value="viewer">{{ L('Görüntüleyen', 'Viewer') }}</option>
+                      <option value="user">{{ t('access.ui.user') }}</option>
+                      <option value="viewer">{{ t('access.ui.viewer') }}</option>
                     </select>
                     <button type="button" class="fe-share__btn fe-share__btn--primary" :disabled="busy" @click="inviteCreateUser">
-                      {{ L('Kullanıcı oluştur + yetki ver', 'Create user + grant') }}
+                      {{ t('access.ui.create_user_grant') }}
                     </button>
                   </div>
                   <button type="button" class="fe-share__linkbtn" :disabled="busy" @click="gotoShareWithMail">
-                    {{ L('Sadece paylaşım linki gönder →', 'Just send a share link →') }}
+                    {{ t('access.ui.just_send_a_share_link') }}
                   </button>
                 </div>
                 <div v-if="notice" class="fe-share__notice">{{ notice }}</div>
                 <div v-if="inviteResult?.tempPassword" class="fe-share__notice">
-                  {{ L('Geçici parola:', 'Temp password:') }} <code class="fe-share__pin">{{ inviteResult.tempPassword }}</code>
+                  {{ t('access.ui.temp_password') }} <code class="fe-share__pin">{{ inviteResult.tempPassword }}</code>
                 </div>
 
                 <div class="fe-share__list">
-                  <h4 class="fe-share__listhead">{{ L('Erişimi olanlar', 'People with access') }}</h4>
+                  <h4 class="fe-share__listhead">{{ t('access.ui.people_with_access') }}</h4>
                   <p v-if="!direct.length && !inherited.length" class="fe-share__empty">
-                    {{ L('Henüz kimseyle paylaşılmadı.', 'Not shared with anyone yet.') }}
+                    {{ t('access.ui.not_shared_with_anyone_yet') }}
                   </p>
                   <div v-for="g in direct" :key="'d' + g.id" class="fe-share__row">
                     <span class="fe-share__av">{{ ginitial(g) }}</span>
@@ -987,8 +1077,8 @@ async function nativeShare(body: { title: string; text: string }) {
                       @change="changeLevel(g, ($event.target as HTMLSelectElement).value)">
                       <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
                     </select>
-                    <button type="button" class="fe-share__del" :disabled="busy" :title="L('Kaldır', 'Remove')"
-                      :aria-label="L('Kaldır', 'Remove')" @click="removeGrant(g)">
+                    <button type="button" class="fe-share__del" :disabled="busy" :title="t('access.ui.remove')"
+                      :aria-label="t('access.ui.remove')" @click="removeGrant(g)">
                       <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
                     </button>
                   </div>
@@ -996,7 +1086,7 @@ async function nativeShare(body: { title: string; text: string }) {
                     <span class="fe-share__av fe-share__av--dim">{{ ginitial(g) }}</span>
                     <span class="fe-share__person" :title="g.user_email">{{ glabel(g) }}</span>
                     <span class="fe-share__badge">{{ levelLabel(g.level) }}</span>
-                    <span class="fe-share__from" :title="L('Üst klasörden gelir', 'Inherited from') + ': ' + (g.path_prefix || '/')">
+                    <span class="fe-share__from" :title="t('access.ui.inherited_from') + ': ' + (g.path_prefix || '/')">
                       {{ g.path_prefix || '/' }}
                     </span>
                   </div>
@@ -1022,15 +1112,22 @@ async function nativeShare(body: { title: string; text: string }) {
             </button>
             <div v-if="open.drop" class="fe-share__panel">
               <p class="fe-share__hint">
-                {{ L('Bu klasöre herkesin dosya YÜKLEYEBİLECEĞİ herkese açık bir bağlantı. Yükleyenler klasördeki mevcut dosyaları göremez.', 'A public link that lets anyone UPLOAD files into this folder. Uploaders never see the folder\'s existing files.') }}
+                {{ t('access.ui.a_public_link_that_lets_anyone_upload_fi') }}
               </p>
               <div class="fe-share__opts">
-                <label class="fe-share__check">
-                  <input type="checkbox" v-model="dropPwd" />
-                  <span>{{ L('PIN ile koru', 'Protect with a PIN') }}</span>
+                <label class="fe-share__togglerow">
+                  <span class="fe-share__togglelabel">{{ t('access.ui.protect_with_a_pin') }}</span>
+                  <button
+                    type="button"
+                    class="fe-share__switch"
+                    role="switch"
+                    :aria-checked="dropPwd ? 'true' : 'false'"
+                    data-testid="drop-pin-switch"
+                    @click="dropPwd = !dropPwd"
+                  ><span class="fe-share__knob"></span></button>
                 </label>
                 <label class="fe-share__field">
-                  <span class="fe-share__fieldlabel">{{ L('Süre', 'Expiry') }}</span>
+                  <span class="fe-share__fieldlabel">{{ t('access.ui.expiry') }}</span>
                   <select v-model.number="dropExpiry" class="fe-share__select" data-testid="drop-expiry">
                     <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
                   </select>
@@ -1038,28 +1135,35 @@ async function nativeShare(body: { title: string; text: string }) {
               </div>
               <p v-if="ttlHint" class="fe-share__hint">{{ ttlHint }}</p>
               <button type="button" class="fe-share__btn fe-share__btn--primary fe-share__btn--wide" data-testid="drop-create" :disabled="dropBusy" @click="createDropLink">
-                {{ L('Bağlantı oluştur', 'Create link') }}
+                {{ t('access.ui.create_link') }}
               </button>
 
               <button type="button" class="fe-share__linkbtn" :aria-expanded="dropShowAdv ? 'true' : 'false'" @click="dropShowAdv = !dropShowAdv">
-                {{ dropShowAdv ? L('Yükleme sınırlarını gizle', 'Hide upload limits') : L('Yükleme sınırları', 'Upload limits') }}
+                {{ dropShowAdv ? t('access.ui.hide_upload_limits') : t('access.ui.upload_limits') }}
               </button>
               <div v-if="dropShowAdv" class="fe-share__adv">
                 <label class="fe-share__advrow">
-                  <span class="fe-share__fieldlabel">{{ L('En fazla dosya', 'Max files') }}</span>
+                  <span class="fe-share__fieldlabel">{{ t('access.ui.max_files') }}</span>
                   <input v-model="dropMaxFiles" type="number" min="1" class="fe-share__input fe-share__input--sm" placeholder="20" />
                 </label>
                 <label class="fe-share__advrow">
-                  <span class="fe-share__fieldlabel">{{ L('Dosya başı MB', 'MB / file') }}</span>
+                  <span class="fe-share__fieldlabel">{{ t('access.ui.mb_file') }}</span>
                   <input v-model="dropMaxSizeMB" type="number" min="1" class="fe-share__input fe-share__input--sm" placeholder="500" />
                 </label>
                 <label class="fe-share__advrow">
-                  <span class="fe-share__fieldlabel">{{ L('İzinli türler', 'Allowed types') }}</span>
-                  <input v-model="dropAllowedExt" type="text" class="fe-share__input fe-share__input--sm" :placeholder="L('hepsi (örn. pdf, jpg)', 'all (e.g. pdf, jpg)')" />
+                  <span class="fe-share__fieldlabel">{{ t('access.ui.allowed_types') }}</span>
+                  <input v-model="dropAllowedExt" type="text" class="fe-share__input fe-share__input--sm" :placeholder="t('access.ui.all_e_g_pdf_jpg')" />
                 </label>
-                <label class="fe-share__check">
-                  <input type="checkbox" v-model="dropAskName" />
-                  <span>{{ L('Yükleyenin adını sor', 'Ask uploader name') }}</span>
+                <label class="fe-share__togglerow">
+                  <span class="fe-share__togglelabel">{{ t('access.ui.ask_uploader_name') }}</span>
+                  <button
+                    type="button"
+                    class="fe-share__switch"
+                    role="switch"
+                    :aria-checked="dropAskName ? 'true' : 'false'"
+                    data-testid="drop-askname-switch"
+                    @click="dropAskName = !dropAskName"
+                  ><span class="fe-share__knob"></span></button>
                 </label>
               </div>
 
@@ -1075,43 +1179,48 @@ async function nativeShare(body: { title: string; text: string }) {
                 </div>
                 <p class="fe-share__detail">
                   {{ validUntil(dropResult) }}
-                  <span v-if="dropResult.clamped">{{ L('(sunucu sınırı uygulandı)', '(server limit applied)') }}</span>
+                  <span v-if="dropResult.clamped">{{ t('access.ui.server_limit_applied') }}</span>
                 </p>
                 <div v-if="dropResult.pin" class="fe-share__pinrow">
                   <span class="fe-share__pinlabel">PIN</span>
                   <code class="fe-share__pin">{{ dropResult.pin }}</code>
-                  <button type="button" class="fe-share__mini" @click="copy(dropResult.pin, 'droppin')">
-                    {{ copied === 'droppin' ? t('access.copied') : t('access.copy') }}
+                  <button type="button" class="fe-share__copy" @click="copy(dropResult.pin, 'droppin')">
+                    <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                    <span>{{ copied === 'droppin' ? t('access.copied') : t('access.copy') }}</span>
                   </button>
                 </div>
 
                 <!-- email the upload link to one or more people -->
-                <div class="fe-share__mailrow">
+                <div v-if="mailRowShown" class="fe-share__mailrow">
                   <input v-model="dropMailTo" type="text" class="fe-share__input" autocomplete="off"
-                    :placeholder="L('e-posta(lar) — virgülle ayırın', 'email(s) — comma separated')" @keyup.enter="sendDropMail" />
-                  <button type="button" class="fe-share__btn" :disabled="dropMailBusy" @click="sendDropMail">
-                    {{ L('Gönder', 'Send') }}
+                    :disabled="mailMissing"
+                    :placeholder="t('access.ui.emails_comma_separated')" @keyup.enter="sendDropMail" />
+                  <button type="button" class="fe-share__btn" :disabled="dropMailBusy || mailMissing" @click="sendDropMail">
+                    {{ t('access.ui.send') }}
                   </button>
+                </div>
+                <div v-if="mailRowShown && mailMissing" class="fe-share__notice">
+                  {{ t('access.ui.mail_not_set_up') }}
                 </div>
                 <div v-if="dropMailNotice" class="fe-share__notice">{{ dropMailNotice }}</div>
 
                 <!-- native share (OS share sheet) — same as the fishapp Share button -->
                 <button v-if="canShare" type="button" class="fe-share__btn fe-share__btn--wide" @click="nativeShare(dropBody())">
                   <span aria-hidden="true" v-html="actionIconSvg('access')"></span>
-                  <span>{{ L('Paylaş', 'Share') }}</span>
+                  <span>{{ t('access.ui.share') }}</span>
                 </button>
               </template>
 
-              <div class="fe-share__list">
-                <h4 class="fe-share__listhead">{{ L('Mevcut bağlantılar', 'Existing links') }}</h4>
-                <p v-if="!dropShares.length" class="fe-share__empty">{{ L('Yok', 'None') }}</p>
-                <div v-for="s in dropShares" :key="s.uuid" class="fe-share__row">
+              <div v-if="otherDropShares.length" class="fe-share__list" data-testid="drop-other-links">
+                <h4 class="fe-share__listhead">{{ dropResult ? t('access.ui.other_links') : t('access.ui.existing_links') }}</h4>
+                <div v-for="s in otherDropShares" :key="s.uuid" class="fe-share__row">
                   <span class="fe-share__url" :title="s.url">{{ s.url }}</span>
-                  <button type="button" class="fe-share__mini" @click="copy(s.url, s.uuid)">
-                    {{ copied === s.uuid ? t('access.copied') : t('access.copy') }}
+                  <button type="button" class="fe-share__copy" @click="copy(s.url, s.uuid)">
+                    <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                    <span>{{ copied === s.uuid ? t('access.copied') : t('access.copy') }}</span>
                   </button>
-                  <button type="button" class="fe-share__del" :disabled="shareBusy" :title="L('İptal', 'Revoke')"
-                    :aria-label="L('İptal', 'Revoke')" @click="revoke(s)">
+                  <button type="button" class="fe-share__del" :disabled="shareBusy" :title="t('access.ui.revoke')"
+                    :aria-label="t('access.ui.revoke')" @click="revoke(s)">
                     <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
                   </button>
                 </div>

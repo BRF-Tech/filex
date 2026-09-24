@@ -28,6 +28,7 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 import Dashboard from '@/views/Dashboard.vue';
 import Breadcrumbs from '@/components/Breadcrumbs.vue';
 import en from '@/locales/en.json';
+import tr from '@/locales/tr.json';
 
 const gets: Array<{ url: string; params?: Record<string, unknown> }> = [];
 const NOW = Date.now();
@@ -45,7 +46,8 @@ vi.mock('@/api/client', () => ({
             total_users: 4,
             queue_depth: 0,
             recent_activity: [
-              { id: 141, user_id: 1, action: 'user.delete', target_type: 'user', target_id: '14', created_at: iso(120_000) },
+              { id: 141, user_id: 1, action: 'user.delete', target_type: 'user', target_id: '14', created_at: iso(120_000), target_name: 'gone@example.com' },
+              { id: 142, user_id: 1, action: 'app-plugins.create', target_type: 'app-plugins', target_id: '', created_at: iso(130_000) },
             ],
           },
         };
@@ -128,17 +130,26 @@ describe('admin dashboard', () => {
     const w = mount(Dashboard, { global: { plugins: [createPinia(), await router('/dashboard'), i18n()] } });
     await flushPromises();
     await flushPromises();
-    const card = w.findAll('p').find((p) => p.text().includes('local'));
+    const card = w.findAll('p').find((p) => p.text().includes('12 files'));
     expect(card, 'no storage line').toBeTruthy();
     expect(card!.text()).toMatch(/· 12 files$/);
-    expect(card!.text()).not.toMatch(/^\S+\s*·/);
+    // The driver by NAME, in the same tags every storage list draws
+    // (StorageTags, QA #34) — it printed the raw id ("local") behind an emoji.
+    const tags = card!.find('[data-testid="storage-tags"]');
+    expect(tags.exists(), 'the storage line names its driver with StorageTags').toBe(true);
+    expect(tags.text()).not.toBe('local');
+    expect(tags.find('[data-testid="storage-tag-driver"]').attributes('title')).toBe('local');
   });
 
   it('prints a time in Recent activity, not a dash', async () => {
     const w = mount(Dashboard, { global: { plugins: [createPinia(), await router('/dashboard'), i18n()] } });
     await flushPromises();
     await flushPromises();
-    const activity = w.findAll('li').find((li) => li.text().includes('User: deleted'));
+    // ⚠ `.fe-list__row`, not `li` and not `tbody tr`: Recent activity was a
+    // `<ul class="divide-y divide-zinc-200 …">`, then the imitation admin
+    // table's `<tr>`, and is DataTable now — the explorer's own table, whose
+    // row is `.fe-list__row` (role=row) everywhere in the product.
+    const activity = w.findAll('.fe-list__row').find((tr) => tr.text().includes('User: deleted'));
     expect(activity, 'no activity row').toBeTruthy();
     expect(activity!.text()).toMatch(/minutes? ago/);
     // The wire name is what the row used to print; it stays in the title only.
@@ -173,5 +184,40 @@ describe('breadcrumbs', () => {
   it('every other trail is unchanged', async () => {
     expect(await crumbs('/storages')).toEqual(['Dashboard', 'Storages']);
     expect(await crumbs('/storages/8')).toEqual(['Dashboard', 'Storages', 'Edit storage']);
+  });
+});
+
+// ── release-candidate sweep, 2026-09-21 ──────────────────────────────────
+
+describe('admin dashboard says things in words', () => {
+  function trI18n() {
+    return createI18n({ legacy: false, locale: 'tr', fallbackLocale: 'en', messages: { en, tr } });
+  }
+
+  // QA #29: "Kullanıcı: silindi — Kullanıcı" said the kind of thing and not
+  // the thing; "app plugins: oluşturuldu" was a resource the catalogue lacked.
+  it('names the thing a row is about, and every resource in words', async () => {
+    const w = mount(Dashboard, { global: { plugins: [createPinia(), await router('/dashboard'), trI18n()] } });
+    await flushPromises();
+    await flushPromises();
+    const targets = w.findAll('[data-testid="dashboard-activity-target"]').map((x) => x.text());
+    expect(targets).toContain('Kullanıcı “gone@example.com”');
+    const actions = w.findAll('[data-testid="dashboard-activity-action"]').map((x) => x.text());
+    expect(actions).toContain('Uygulama: oluşturuldu');
+    expect(actions.join(' ')).not.toContain('app plugins');
+  });
+
+  // The storage card's badge and the Recent syncs chip printed the wire value
+  // ("ok") in the Turkish panel; "Last sync" glued its colon on in the
+  // template, which a French space before it could never survive.
+  it('says a sync state in words and keeps the colon in the message', async () => {
+    const w = mount(Dashboard, { global: { plugins: [createPinia(), await router('/dashboard'), trI18n()] } });
+    await flushPromises();
+    await flushPromises();
+    expect(w.find('[data-testid="dashboard-storage-state"]').text()).toBe('Tamam');
+    const chips = w.findAll('[data-testid="dashboard-sync-state"]').map((x) => x.text());
+    expect(chips.length).toBeGreaterThan(0);
+    expect(chips.every((c) => c === 'Tamam'), chips.join(',')).toBe(true);
+    expect(w.text()).toMatch(/Son senkron: \d+ saniye önce/);
   });
 });

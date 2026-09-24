@@ -11,7 +11,7 @@
 // that throws in SSR or in a locked-down browser would take the explorer down
 // over a language choice.
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { resolveLocale, detectLocale } from '@brftech/filex-core';
+import { resolveLocale, detectLocale, resetLocales, setLocalesFromBranding } from '@brftech/filex-core';
 
 /** Replace `navigator` for one case. Restored in afterEach. */
 function withNavigator(value: unknown) {
@@ -20,6 +20,7 @@ function withNavigator(value: unknown) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetLocales();
 });
 
 describe('locale resolution', () => {
@@ -74,8 +75,33 @@ describe('locale resolution', () => {
     expect(detectLocale()).toBe('en');
   });
 
-  it('ignores a locale it has no catalogue for and asks the browser', () => {
+  it('ignores a locale NOTHING OFFERS once the list is known, and asks the browser', () => {
+    setLocalesFromBranding({ locales: ['en', 'tr'] });
     withNavigator({ languages: ['tr'], language: 'tr' });
-    expect(resolveLocale('de' as never)).toBe('tr');
+    expect(resolveLocale('de')).toBe('tr');
+  });
+});
+
+// ⚠⚠ A language pack's language. `resolveLocale` used to accept `en` and `tr`
+// only, so the explorer — its listing, its dialogs, some twelve call sites —
+// turned a pack's `es` into the browser's guess while the admin panel around
+// it spoke Spanish (measured with the Spanish pack, 2026-09-21).
+describe('a language pack', () => {
+  it("resolves to the pack's language once it is offered", () => {
+    setLocalesFromBranding({ locales: ['en', 'es', 'tr'], ui_locales: [{ code: 'es', source: 'plugin', plugin: 'lang-es' }] });
+    withNavigator({ languages: ['tr'], language: 'tr' });
+    expect(resolveLocale('es')).toBe('es');
+  });
+
+  it('HOLDS a plausible language while the list is still in flight — no flash of the browser language', () => {
+    withNavigator({ languages: ['tr'], language: 'tr' });
+    expect(resolveLocale('es')).toBe('es');
+  });
+
+  it('a browser that asks for the pack language gets it', () => {
+    setLocalesFromBranding({ locales: ['en', 'es', 'tr'], ui_locales: [{ code: 'es', source: 'plugin', plugin: 'lang-es' }] });
+    withNavigator({ languages: ['es-MX', 'en'], language: 'es-MX' });
+    expect(detectLocale()).toBe('es');
+    expect(resolveLocale(undefined)).toBe('es');
   });
 });

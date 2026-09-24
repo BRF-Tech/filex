@@ -22,6 +22,7 @@ import StatCard from '@/components/ui/StatCard.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import Badge from '@/components/ui/Badge.vue';
+import { DataTable, type DataColumn } from '@brftech/filex-core';
 
 interface DupNode {
   id: number;
@@ -83,6 +84,23 @@ const totalCopies = computed(() =>
 );
 const hasGroups = computed(() => groups.value.length > 0);
 
+/* The explorer's table (DataTable). Every group's member table shares ONE
+ * arrangement (`admin.duplicates.members`): they are the same kind of table,
+ * and widening Path in one group and finding it narrow in the next would read
+ * as a bug. A group's members are all on screen, so sorting them is honest. */
+const nodeColumns = computed<DataColumn<DupNode>[]>(() => [
+  { id: 'name', label: t('duplicates.colPath'), sortable: true, width: 300 },
+  {
+    id: 'storage_id',
+    label: t('duplicates.colStorage'),
+    sortable: true,
+    width: 150,
+    sortValue: (n) => storageName(n.storage_id),
+  },
+  { id: 'size', label: t('duplicates.colSize'), sortable: true, align: 'right', width: 110 },
+  { id: 'etag', label: t('duplicates.colEtag'), sortable: true, width: 220 },
+]);
+
 onMounted(async () => {
   // Best-effort — storage names are cosmetic; the report renders without them.
   try {
@@ -143,56 +161,68 @@ onMounted(async () => {
     />
 
     <div v-else-if="hasGroups" class="space-y-2">
-      <div
-        v-for="g in groups"
-        :key="g.key"
-        class="rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden"
-      >
+      <!-- ⚠ ONE card per group: the summary is the card's own header row and
+           the members are the shared table inside it, so an expanded group
+           reads as the same table as every other listing in the panel rather
+           than as a second, quieter one. -->
+      <div v-for="g in groups" :key="g.key" class="card overflow-hidden">
         <button
           type="button"
-          class="w-full flex items-center gap-3 px-4 py-3 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
+          class="tbl-bar w-full text-start"
+          :class="!expanded.has(g.key) && 'border-b-0'"
           :aria-expanded="expanded.has(g.key)"
           @click="toggle(g.key)"
         >
-          <component :is="expanded.has(g.key) ? ChevronDown : ChevronRight" class="h-4 w-4 shrink-0 text-zinc-400" />
+          <component :is="expanded.has(g.key) ? ChevronDown : ChevronRight" class="h-4 w-4 shrink-0" />
           <span class="truncate font-medium flex-1">
             {{ g.nodes[0]?.name ?? g.key }}
           </span>
           <Badge tone="zinc" size="xs">{{ t('duplicates.copies', { n: formatNumber(g.count, locale) }, g.count) }}</Badge>
-          <span class="text-xs tabular-nums text-zinc-500 whitespace-nowrap">{{ formatBytes(g.size, locale) }}</span>
+          <span class="text-xs tabular-nums whitespace-nowrap">{{ formatBytes(g.size, locale) }}</span>
           <span class="text-xs tabular-nums whitespace-nowrap text-rose-600 dark:text-rose-400 font-medium">
             {{ t('duplicates.wasted', { size: formatBytes(g.total_waste, locale) }) }}
           </span>
         </button>
 
-        <div v-if="expanded.has(g.key)" class="border-t border-zinc-200 dark:border-zinc-800 tbl-scroll">
-          <table class="w-full text-sm">
-            <thead class="bg-zinc-50 dark:bg-zinc-900 text-left text-xs text-zinc-500">
-              <tr>
-                <th class="px-4 py-2 font-medium">{{ t('duplicates.colPath') }}</th>
-                <th class="px-4 py-2 font-medium">{{ t('duplicates.colStorage') }}</th>
-                <th class="px-4 py-2 font-medium">{{ t('duplicates.colSize') }}</th>
-                <th class="px-4 py-2 font-medium">{{ t('duplicates.colEtag') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="n in g.nodes"
-                :key="n.id"
-                class="border-t border-zinc-100 dark:border-zinc-800"
-              >
-                <td class="px-4 py-2">
-                  <div class="font-medium">{{ n.name }}</div>
-                  <div class="text-xs font-mono text-zinc-500 truncate max-w-[480px]" :title="n.path">{{ n.path }}</div>
-                </td>
-                <td class="px-4 py-2 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">{{ storageName(n.storage_id) }}</td>
-                <td class="px-4 py-2 tabular-nums whitespace-nowrap">{{ formatBytes(n.size, locale) }}</td>
-                <td class="px-4 py-2 font-mono text-xs text-zinc-500"><div class="truncate max-w-[160px]" :title="n.etag">{{ n.etag || '—' }}</div></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          v-if="expanded.has(g.key)"
+          table-id="admin.duplicates.members"
+          :columns="nodeColumns"
+          :rows="g.nodes"
+          row-key="id"
+          class="fx-dup-table"
+        >
+          <template #cell-name="{ row }">
+            <span class="font-medium">{{ row.name }}</span>
+            <span class="tbl-sub tbl-mono tbl-clamp" :title="row.path">{{ row.path }}</span>
+          </template>
+          <template #cell-storage_id="{ row }">
+            <span class="whitespace-nowrap">{{ storageName(row.storage_id) }}</span>
+          </template>
+          <template #cell-size="{ row }">
+            <span class="tabular-nums whitespace-nowrap">{{ formatBytes(row.size, locale) }}</span>
+          </template>
+          <template #cell-etag="{ row }">
+            <span class="tbl-mono tbl-clamp" :title="row.etag">{{ row.etag || '—' }}</span>
+          </template>
+        </DataTable>
       </div>
     </div>
   </section>
 </template>
+
+<style scoped>
+/* The shared table brings its own card. Inside a group's card that is a second
+   border and a second radius drawn a pixel inside the first — so the table
+   here is the card's BODY and gives both up. Nothing else about it changes:
+   the header, the rows, the gutters and the palette are the panel's.
+   ⚠ `:global` and two classes: DataTable has two roots (the table and its
+   teleported column menu), so Vue does not stamp this component's scope
+   attribute on it and a plain scoped `.fx-dup-table` would match nothing;
+   `.fe-table.fx-dup-table` out-weighs the core's one-class
+   `.fe-table--framed` whichever stylesheet loads last. */
+:global(.fe-table.fx-dup-table) {
+  border: 0;
+  border-radius: 0;
+}
+</style>

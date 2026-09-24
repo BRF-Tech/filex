@@ -15,10 +15,10 @@ import Select from '@/components/ui/Select.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
 import CopyButton from '@/components/ui/CopyButton.vue';
-import Spinner from '@/components/ui/Spinner.vue';
-import TableScroll from '@/components/ui/TableScroll.vue';
+import { DataTable, splitList, type ContextAction, type DataColumn } from '@brftech/filex-core';
+import { driverName } from '@/lib/storageWords';
 
-const { t, locale } = useI18n();
+const { t, te, locale } = useI18n();
 const toast = useToastStore();
 
 const tokens = ref<AIToken[]>([]);
@@ -79,6 +79,10 @@ function scopeList(s: string): string[] {
 function verbScopes(s: string): string[] {
   return scopeList(s).filter((x) => !x.startsWith('root:'));
 }
+/** A scope by name; one this build does not know is shown as its id. */
+function scopeName(s: string): string {
+  return (SCOPES as readonly string[]).includes(s) ? t(`apiMcp.scopeName.${s}`) : s;
+}
 function rootScope(s: string): string | null {
   const r = scopeList(s).find((x) => x.startsWith('root:'));
   return r ? r.slice('root:'.length) : null;
@@ -98,13 +102,14 @@ async function load() {
 async function loadStorages() {
   try {
     const list = await StoragesApi.list();
-    storages.value = list.map((s) => ({ value: s.name, label: `${s.name} (${s.driver})` }));
+    storages.value = list.map((s) => ({ value: s.name, label: `${s.name} (${driverName(s.driver, t, te)})` }));
   } catch {
     /* tolerated — root selection simply stays empty (full disk) */
   }
 }
 
 function openCreate() {
+  createFailure.value = '';
   newLabel.value = '';
   newScopes.value = { read: true, write: true, delete: false, mcp: true, admin: false };
   newExpiry.value = null;
@@ -115,7 +120,33 @@ function openCreate() {
   showCreate.value = true;
 }
 
+/*
+ * ⚠⚠ At least one permission, and `admin` only when it is ticked (owner's
+ * decision, v0.43.0). This form used to say "If none are selected, all
+ * scopes are granted", and a token minted with nothing ticked read
+ * /api/ai/admin/users — the whole admin surface (release-candidate sweep,
+ * 2026-09-21). The server refuses an empty list on every door
+ * (apitoken.ParseIssued); here Create is not offered until something is
+ * ticked, and a refusal is said inside the dialog, not in a toast behind it.
+ *
+ * ⚠ ONE sentence under the checkboxes, said in red when nothing is ticked
+ * and in grey once something is. It used to be two keys with the same
+ * content in two wordings (`apiMcp.errScopes` + `fields.scopesHint`), which
+ * every translator had to write twice and which could drift apart
+ * (v0.43.0 translation sweep).
+ */
+const noScope = computed(() => !SCOPES.some((s) => newScopes.value[s]));
+const createFailure = ref('');
+
 async function submitCreate() {
+  createFailure.value = '';
+  // Enter in a box reaches here too (the form's hidden submit button), where
+  // the disabled Create button does not guard.
+  if (!newLabel.value.trim() || creating.value) return;
+  if (noScope.value) {
+    createFailure.value = t('apiMcp.fields.scopesHint');
+    return;
+  }
   creating.value = true;
   try {
     const parts: string[] = SCOPES.filter((s) => newScopes.value[s]);
@@ -133,7 +164,7 @@ async function submitCreate() {
     toast.success(t('apiMcp.createdOk'));
     await load();
   } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.generic')));
+    createFailure.value = extractError(e, t('errors.generic'));
   } finally {
     creating.value = false;
   }
@@ -145,11 +176,9 @@ function closeCreate() {
 }
 
 // "work, fishapp" → ["work","fishapp"] (comma/space separated; first = default).
+// ⚠ The shared splitter (core lib/listInput): "،" and "，" separate too.
 function parseUsernames(raw: string): string[] {
-  return raw
-    .split(/[,\s]+/)
-    .map((u) => u.trim())
-    .filter(Boolean);
+  return splitList(raw, { spaces: true });
 }
 
 function usernameList(tok: AIToken): string[] {
@@ -158,6 +187,66 @@ function usernameList(tok: AIToken): string[] {
     .map((u) => u.trim())
     .filter(Boolean);
 }
+
+/** An ISO timestamp as a sortable number; absent sorts last (DataTable). */
+function stamp(v: string | null | undefined): number | null {
+  if (!v) return null;
+  const n = Date.parse(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/* The explorer's table (DataTable): every column resizes, hides, moves and
+ * sorts, remembered on the account under `admin.api-mcp`. The endpoint
+ * answers every token at once, so the table's own client sort is honest. */
+const columns = computed<DataColumn<AIToken>[]>(() => [
+  { id: 'label', label: t('apiMcp.cols.label'), sortable: true, width: 180 },
+  {
+    id: 'usernames',
+    label: t('apiMcp.cols.usernames'),
+    sortable: true,
+    width: 180,
+    sortValue: (tok) => usernameList(tok)[0] ?? tok.label ?? '',
+  },
+  {
+    id: 'scopes',
+    label: t('apiMcp.cols.scopes'),
+    sortable: true,
+    width: 180,
+    /* Tokens with no scope list can do everything ("all") — they sort as the
+       broadest, ahead of any narrowed set. */
+    sortValue: (tok) => (scopeList(tok.scopes).length ? verbScopes(tok.scopes).join(',') : ''),
+  },
+  {
+    id: 'root',
+    label: t('apiMcp.cols.root'),
+    sortable: true,
+    width: 180,
+    sortValue: (tok) => rootScope(tok.scopes) || '',
+  },
+  {
+    id: 'last_used_at',
+    label: t('apiMcp.cols.lastUsed'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 130,
+    sortValue: (tok) => stamp(tok.last_used_at),
+  },
+  {
+    id: 'expires_at',
+    label: t('apiMcp.cols.expires'),
+    sortable: true,
+    width: 130,
+    sortValue: (tok) => stamp(tok.expires_at),
+  },
+  {
+    id: 'created_at',
+    label: t('apiMcp.cols.created'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 130,
+    sortValue: (tok) => stamp(tok.created_at),
+  },
+]);
 
 function openEdit(tok: AIToken) {
   showEdit.value = tok;
@@ -202,6 +291,22 @@ onMounted(() => {
   load();
   loadStorages();
 });
+
+/** The row's verbs. They were two unlabelled icon buttons — a pencil and a
+ *  bin whose only names were `title` attributes; they are now named entries
+ *  behind the row's one pinned `Actions` control. Delete keeps its
+ *  confirmation dialog (`showDelete`), which is where it always was. */
+function rowActions(_row: AIToken): ContextAction[] {
+  return [
+    { key: 'edit', label: t('common.edit'), icon: 'rename' },
+    { key: 'delete', label: t('common.delete'), icon: 'delete', danger: true },
+  ];
+}
+
+function onRowAction(key: string, row: AIToken) {
+  if (key === 'edit') openEdit(row);
+  else if (key === 'delete') showDelete.value = row;
+}
 </script>
 
 <template>
@@ -216,7 +321,7 @@ onMounted(() => {
           <RefreshCcw class="h-4 w-4" />
           {{ t('common.refresh') }}
         </Button>
-        <Button @click="openCreate">
+        <Button data-testid="ai-token-new" @click="openCreate">
           <Plus class="h-4 w-4" />
           {{ t('apiMcp.newToken') }}
         </Button>
@@ -253,109 +358,114 @@ onMounted(() => {
     </div>
 
     <!-- Tokens table -->
-    <div v-if="loading" class="card card-body text-center text-zinc-500"><Spinner /></div>
-    <TableScroll v-else class="card">
-      <table class="w-full text-sm">
-        <thead class="bg-zinc-50 dark:bg-zinc-800 text-left text-xs text-zinc-500">
-          <tr>
-            <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.label') }}</th>
-            <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.usernames') }}</th>
-            <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.scopes') }}</th>
-            <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.root') }}</th>
-            <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.lastUsed') }}</th>
-            <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.expires') }}</th>
-            <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.created') }}</th>
-            <th class="px-4 py-2 text-right tbl-actions"><span class="sr-only">{{ t('common.actions') }}</span></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
-          <tr v-for="tok in tokens" :key="tok.id">
-            <td class="px-4 py-2 font-medium">{{ tok.label || '—' }}</td>
-            <td class="px-4 py-2">
-              <div class="flex flex-wrap items-center gap-1">
-                <!-- first entry = default identity; no list → the label doubles as it -->
-                <Badge
-                  v-for="(u, i) in usernameList(tok)"
-                  :key="u"
-                  :tone="i === 0 ? 'violet' : 'zinc'"
-                  size="xs"
-                >{{ u }}</Badge>
-                <span v-if="!usernameList(tok).length" class="text-xs text-zinc-400">
-                  {{ tok.label || '—' }}
-                </span>
-              </div>
-            </td>
-            <td class="px-4 py-2">
-              <div class="flex flex-wrap gap-1">
-                <Badge v-if="!scopeList(tok.scopes).length" tone="amber" size="xs">all</Badge>
-                <Badge
-                  v-for="s in verbScopes(tok.scopes)"
-                  :key="s"
-                  :tone="s === 'admin' ? 'rose' : 'zinc'"
-                  size="xs"
-                >{{ s }}</Badge>
-              </div>
-            </td>
-            <td class="px-4 py-2 text-xs">
-              <span v-if="rootScope(tok.scopes)" class="inline-block max-w-xs font-mono text-violet-600 dark:text-violet-400 break-all">
-                📁 {{ rootScope(tok.scopes) }}
-              </span>
-              <span v-else class="text-zinc-400">{{ t('apiMcp.fullDisk') }}</span>
-            </td>
-            <td class="px-4 py-2 text-xs text-zinc-500">
-              {{ tok.last_used_at ? formatRelative(tok.last_used_at, locale) : '—' }}
-            </td>
-            <td class="px-4 py-2 text-xs text-zinc-500">
-              {{ tok.expires_at ? formatRelative(tok.expires_at, locale) : t('apiMcp.never') }}
-            </td>
-            <td class="px-4 py-2 text-xs text-zinc-500">
-              {{ formatRelative(tok.created_at, locale) }}
-            </td>
-            <td class="px-4 py-2 text-right whitespace-nowrap tbl-actions">
-              <Button size="xs" variant="ghost" @click="openEdit(tok)" :title="t('common.edit')">
-                <Pencil class="h-3.5 w-3.5 text-zinc-500" />
-              </Button>
-              <Button size="xs" variant="ghost" @click="showDelete = tok" :title="t('common.delete')">
-                <Trash2 class="h-3.5 w-3.5 text-rose-500" />
-              </Button>
-            </td>
-          </tr>
-          <tr v-if="!tokens.length">
-            <td colspan="8" class="px-4 py-8 text-center text-zinc-500 text-sm">
-              {{ t('apiMcp.empty') }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </TableScroll>
+    <DataTable
+      table-id="admin.api-mcp"
+      :columns="columns"
+      :rows="tokens"
+      :loading="loading"
+      :empty="t('apiMcp.empty')"
+      row-key="id"
+      :row-actions="(row: AIToken) => rowActions(row)"
+      :row-actions-test-id="(row: AIToken) => `ai-token-actions-${row.id}`"
+      @row-action="(key: string, row: AIToken) => onRowAction(key, row)"
+    >
+      <template #cell-label="{ row }">
+        <span class="font-medium">{{ row.label || '—' }}</span>
+      </template>
+
+      <template #cell-usernames="{ row }">
+        <div class="flex flex-wrap items-center gap-1">
+          <!-- first entry = default identity; no list → the label doubles as it -->
+          <Badge
+            v-for="(u, i) in usernameList(row)"
+            :key="u"
+            :tone="i === 0 ? 'violet' : 'zinc'"
+            size="xs"
+            >{{ u }}</Badge
+          >
+          <span v-if="!usernameList(row).length" class="tbl-sub">{{ row.label || '—' }}</span>
+        </div>
+      </template>
+
+      <template #cell-scopes="{ row }">
+        <div class="flex flex-wrap gap-1">
+          <!-- ⚠ By name, in the panel's language — the chips printed the
+               scope ids ("read", "write", "all") in the Turkish panel
+               (release-candidate sweep, 2026-09-21). The id is the tooltip:
+               it is what an API client sends. -->
+          <Badge v-if="!scopeList(row.scopes).length" tone="amber" size="xs">{{ t('apiMcp.scopeAll') }}</Badge>
+          <Badge
+            v-for="s in verbScopes(row.scopes)"
+            :key="s"
+            :tone="s === 'admin' ? 'rose' : 'zinc'"
+            size="xs"
+            :title="s"
+            data-testid="ai-token-scope-chip"
+            >{{ scopeName(s) }}</Badge
+          >
+        </div>
+      </template>
+
+      <template #cell-root="{ row }">
+        <span v-if="rootScope(row.scopes)" class="tbl-mono tbl-clamp text-violet-600 dark:text-violet-400">
+          📁 {{ rootScope(row.scopes) }}
+        </span>
+        <span v-else>{{ t('apiMcp.fullDisk') }}</span>
+      </template>
+
+      <template #cell-last_used_at="{ row }">
+        <span class="whitespace-nowrap">{{ row.last_used_at ? formatRelative(row.last_used_at, locale) : '—' }}</span>
+      </template>
+      <template #cell-expires_at="{ row }">
+        <span class="whitespace-nowrap">{{
+          row.expires_at ? formatRelative(row.expires_at, locale) : t('apiMcp.never')
+        }}</span>
+      </template>
+      <template #cell-created_at="{ row }">
+        <span class="whitespace-nowrap">{{ formatRelative(row.created_at, locale) }}</span>
+      </template>
+    </DataTable>
 
     <!-- Create / reveal modal -->
     <Modal
       :model-value="showCreate"
-      :title="createdToken ? t('apiMcp.tokenCreated') : t('apiMcp.newToken')"
+      :title="createdToken ? t('apiMcp.createdOk') : t('apiMcp.newToken')"
       size="md"
       :prevent-close="creating"
       @update:model-value="(v) => (v ? null : closeCreate())"
     >
       <!-- Step 1: form -->
-      <form v-if="!createdToken" class="space-y-3" @submit.prevent="submitCreate">
+      <!-- ⚠ novalidate: the boxes are marked `required` for the star and for
+           assistive tech, but the checking is ours (said in the panel's
+           language, inside the dialog). Without it the browser intercepts
+           Enter / a submit button with its own bubble, in the BROWSER's
+           language, and our check never runs (seen in the RC re-test,
+           2026-09-21: an empty New webhook save showed no message of ours). -->
+      <form v-if="!createdToken" class="space-y-3" novalidate @submit.prevent="submitCreate">
         <Input v-model="newLabel" :label="t('apiMcp.fields.label')" :placeholder="t('apiMcp.fields.labelPlaceholder')" required />
         <div>
-          <p class="label-base mb-1">{{ t('apiMcp.fields.scopes') }}</p>
-          <div class="grid grid-cols-2 gap-2">
+          <p class="label-base mb-1">
+            {{ t('apiMcp.fields.scopes') }}
+            <span class="text-rose-500" aria-hidden="true">*</span>
+          </p>
+          <div class="grid grid-cols-2 gap-2" role="group" :aria-label="t('apiMcp.fields.scopes')">
             <label
               v-for="s in SCOPES"
               :key="s"
               class="flex items-start gap-2 rounded-md border border-zinc-200 dark:border-zinc-700 p-2 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
             >
-              <input type="checkbox" v-model="newScopes[s]" class="mt-0.5" />
+              <input type="checkbox" v-model="newScopes[s]" class="mt-0.5" :data-testid="`ai-token-scope-${s}`" />
               <span>
-                <span class="text-sm font-mono">{{ s }}</span>
+                <span class="text-sm font-medium">{{ scopeName(s) }}</span>
+                <span class="ms-1 text-xs font-mono text-zinc-500">{{ s }}</span>
                 <span class="block text-xs text-zinc-500">{{ t(`apiMcp.scopeDesc.${s}` as any) }}</span>
               </span>
             </label>
           </div>
-          <p class="help-text mt-1">{{ t('apiMcp.fields.scopesHint') }}</p>
+          <p
+            :class="noScope ? 'error-text mt-1' : 'help-text mt-1'"
+            data-testid="ai-token-scopes-required"
+          >{{ t('apiMcp.fields.scopesHint') }}</p>
         </div>
 
         <!-- Root confinement (optional) -->
@@ -388,6 +498,14 @@ onMounted(() => {
           :label="t('apiMcp.fields.expiry')"
           :hint="t('apiMcp.fields.expiryHint')"
         />
+        <p v-if="createFailure && !noScope" class="error-text" role="alert" data-testid="ai-token-create-error">{{ createFailure }}</p>
+        <!-- ⚠ Enter in a box submits: the form's visible buttons sit in the
+             dialog footer, OUTSIDE this <form>, and a form with more than one
+             field and no submit button of its own ignores Enter (implicit
+             submission needs one). Visually hidden, not display:none — some
+             engines skip a display:none default button. RC re-test,
+             2026-09-21: Enter in the Add user e-mail box did nothing. -->
+        <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true" data-testid="ai-token-create-submit">{{ t('common.create') }}</button>
       </form>
 
       <!-- Step 2: reveal -->
@@ -413,7 +531,7 @@ onMounted(() => {
       <template #footer>
         <template v-if="!createdToken">
           <Button variant="ghost" @click="closeCreate">{{ t('common.cancel') }}</Button>
-          <Button :loading="creating" :disabled="!newLabel.trim()" @click="submitCreate">
+          <Button :loading="creating" :disabled="!newLabel.trim() || noScope" data-testid="ai-token-create" @click="submitCreate">
             {{ t('common.create') }}
           </Button>
         </template>

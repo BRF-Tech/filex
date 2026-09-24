@@ -162,7 +162,7 @@ function onAux(id: string, ev: MouseEvent) {
         @dragend="onDragEnd"
       >
         <span v-if="tab.split" class="fe-tabs__splitdot" aria-hidden="true"></span>
-        <span class="fe-tabs__label">{{ tab.label }}</span>
+        <span class="fe-tabs__label"><bdi>{{ tab.label }}</bdi></span>
         <!-- ⚠ Not drawn when this is the only tab. Owner's decision,
              2026-09-13, verbatim: *"tek kalan tab'de x gözükmemeli, onu da
              kaldırırsın."* It is not a style choice — `useTabs.closeTab()`

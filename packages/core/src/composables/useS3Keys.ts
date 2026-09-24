@@ -17,6 +17,7 @@ import type { ExplorerConfig } from '../types/ExplorerConfig';
 import type { S3AccessKey, S3Connection, S3KeyCreated, S3KeyRequest } from '../types/S3Keys';
 import { connectionsBase } from './useConnections';
 import { useFileApi } from './useFileApi';
+import { serverWords } from '../lib/errorWords';
 
 export function useS3Keys(config: ExplorerConfig) {
   const api = useFileApi(config);
@@ -28,6 +29,9 @@ export function useS3Keys(config: ExplorerConfig) {
   const loading = ref(false);
   const loaded = ref(false);
   const error = ref<string | null>(null);
+  /** The fix, when the server told THIS caller one (`admin_hint`: only an
+   *  administrator who can act on it is sent it). */
+  const errorHint = ref<string | null>(null);
   /**
    * null until the first load answers. False means the caller may not mint
    * keys (anonymous, or a token without the right to) — the guide is still
@@ -38,19 +42,15 @@ export function useS3Keys(config: ExplorerConfig) {
   /** The secret, held in memory for exactly as long as the user is looking. */
   const revealed = ref<S3KeyCreated | null>(null);
 
+  /** A refusal, said — lib/errorWords `serverWords`, the one rule every
+   *  connection panel shares (it used to print the server's `error` field as
+   *  it came: an environment variable, to a regular user). ⚠ The locale is
+   *  passed because what comes back may be the SERVER's own sentence: it
+   *  never met a translator, and an Arabic panel needs its machine runs
+   *  isolated (lib/direction `foreignText`). */
   function messageOf(e: unknown): string {
-    const err = e as { message?: string; detail?: string } | null;
-    // The backend's own words beat a status line: "access keys are not
-    // available on this install" tells an operator what to fix; "503" does not.
-    if (err?.detail) {
-      try {
-        const parsed = JSON.parse(err.detail) as { error?: string };
-        if (parsed?.error) return parsed.error;
-      } catch {
-        /* not JSON — fall through */
-      }
-    }
-    return err?.message || String(e);
+    errorHint.value = (e as { hint?: string } | null)?.hint ?? null;
+    return serverWords(e, config.locale);
   }
 
   function statusOf(e: unknown): number | undefined {
@@ -60,6 +60,7 @@ export function useS3Keys(config: ExplorerConfig) {
   async function load(): Promise<void> {
     loading.value = true;
     error.value = null;
+    errorHint.value = null;
     try {
       const body = await api.jsonFetch<{ keys: S3AccessKey[] } & S3Connection>(
         url('/api/auth/s3-keys'),
@@ -93,6 +94,7 @@ export function useS3Keys(config: ExplorerConfig) {
    */
   async function create(req: S3KeyRequest): Promise<S3KeyCreated | null> {
     error.value = null;
+    errorHint.value = null;
     try {
       const body = await api.jsonFetch<S3KeyCreated>(url('/api/auth/s3-keys'), {
         method: 'POST',
@@ -117,6 +119,7 @@ export function useS3Keys(config: ExplorerConfig) {
 
   async function setDisabled(id: number, disabled: boolean): Promise<void> {
     error.value = null;
+    errorHint.value = null;
     try {
       await api.jsonFetch(url(`/api/auth/s3-keys/${id}/state`), {
         method: 'POST',
@@ -131,6 +134,7 @@ export function useS3Keys(config: ExplorerConfig) {
 
   async function remove(id: number): Promise<void> {
     error.value = null;
+    errorHint.value = null;
     try {
       await api.jsonFetch(url(`/api/auth/s3-keys/${id}`), { method: 'DELETE' });
       // A revealed secret belonging to the key just revoked must go with it.
@@ -163,6 +167,7 @@ export function useS3Keys(config: ExplorerConfig) {
     loading,
     loaded,
     error,
+    errorHint,
     canMint,
     revealed,
     guideKey,

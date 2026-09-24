@@ -116,6 +116,43 @@ try {
       fs.readFileSync(localCopy, 'utf8') === 'written on the server');
   }
 
+  // ── live: an edit arrives while it is fresh, not on the next lap ───
+  // The engine polls every 30 s as a safety net; everything below has to beat
+  // that by an order of magnitude, or it arrived by the poll and the live
+  // path is broken. Measured before v0.43 (same machine, local server): a
+  // browser save took 6–25 s to reach the synced file, a local save 9–29 s to
+  // reach the server.
+  const LIVE_BUDGET_MS = 5000;
+  const timed = async (cond) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < 20000) {
+      if (await cond()) return Date.now() - t0;
+      await sleep(25);
+    }
+    return null;
+  };
+  const edited = `saved in the browser ${Date.now()}`;
+  const tEdit = Date.now();
+  await api('/api/files/save-text', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: `${REMOTE}/from-server.txt`, content: edited }),
+  }, adminToken);
+  const webLag = await timed(() => {
+    try { return fs.readFileSync(localCopy, 'utf8') === edited; } catch { return false; }
+  });
+  check('a browser edit reaches the PC live', webLag !== null && Date.now() - tEdit < LIVE_BUDGET_MS + 1000,
+    webLag === null ? 'never arrived' : `${webLag} ms`);
+
+  const localEdit = `saved on the PC ${Date.now()}`;
+  fs.writeFileSync(path.join(syncFolder, 'from-desktop.txt'), localEdit);
+  const localLag = await timed(async () => {
+    const r = await api(`/api/files/manager?action=download&path=${encodeURIComponent(`${REMOTE}/from-desktop.txt`)}`, {}, adminToken);
+    return r.ok && (await r.text()) === localEdit;
+  });
+  check('a local edit reaches the server live', localLag !== null && localLag < LIVE_BUDGET_MS,
+    localLag === null ? 'never arrived' : `${localLag} ms`);
+
   // ── the panel reports what happened ───────────────────────────────
   await sync.evaluate(() => window.filexApp.getState());
   await sync.waitForTimeout(600);
@@ -123,6 +160,15 @@ try {
   const status = (st2.syncStatuses ?? [])[0];
   check('the panel shows a live watcher', status?.running === true,
     status ? `${status.lastLine}` : 'no status at all');
+  // The state word: the engine said it is subscribed to the change stream,
+  // and the settings card says so in words.
+  check('the engine reports the live change stream', status?.live === 'connected',
+    status ? `live=${status.live} (${status.liveDetail ?? ''})` : 'no status at all');
+  const liveWord = await sync.evaluate(() => {
+    const el = document.querySelector('[data-live]');
+    return el ? `${el.getAttribute('data-live')}: ${el.textContent}` : null;
+  });
+  check('the sync card shows the live state', /^connected: /.test(liveWord ?? ''), liveWord ?? 'no state word rendered');
   await sync.screenshot({ path: path.join(REPO, 'desktop-sync-live.png') });
 
   // ── unpairing leaves the files alone ──────────────────────────────

@@ -13,25 +13,15 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
-// hiddenNames are filex-internal buckets never exposed over WebDAV.
-var hiddenNames = map[string]bool{
-	".filex-trash": true,
-	".versions":    true,
-	".thumbs":      true,
-}
-
-// hiddenPath reports whether any segment of rel is an internal bucket.
-func hiddenPath(rel string) bool {
-	for _, seg := range strings.Split(rel, "/") {
-		if hiddenNames[seg] {
-			return true
-		}
-	}
-	return false
-}
+// ⚠ filex's own directories (trash, version history, thumbnails, the desktop
+// app's open-with working area) are judged by syspath.InDir, the one list
+// every surface shares. This file used to carry its own three-name copy that
+// did not know `.filex-open`, so a mounted drive was shown the desktop's
+// working copies beside the person's own files (2026-09-21).
 
 // davFS is the composite webdav.FileSystem: the first path segment picks a
 // storage, the rest is storage-relative. One instance lives per request and
@@ -131,7 +121,7 @@ func mapErr(err error) error {
 
 func (f *davFS) Mkdir(ctx context.Context, name string, _ os.FileMode) error {
 	sname, rel := f.split(name)
-	if sname == "" || hiddenPath(rel) {
+	if sname == "" || syspath.InDir(rel) {
 		return os.ErrPermission
 	}
 	if rel == "" {
@@ -182,7 +172,7 @@ func (f *davFS) OpenFile(ctx context.Context, name string, flag int, _ os.FileMo
 		}
 		return f.rootDir(ctx)
 	}
-	if hiddenPath(rel) {
+	if syspath.InDir(rel) {
 		return nil, os.ErrNotExist
 	}
 	st, set, err := f.storageByName(ctx, sname)
@@ -247,7 +237,7 @@ func (f *davFS) OpenFile(ctx context.Context, name string, flag int, _ os.FileMo
 
 func (f *davFS) RemoveAll(ctx context.Context, name string) error {
 	sname, rel := f.split(name)
-	if sname == "" || rel == "" || hiddenPath(rel) {
+	if sname == "" || rel == "" || syspath.InDir(rel) {
 		return os.ErrPermission // never delete the root or a whole storage
 	}
 	st, set, err := f.storageByName(ctx, sname)
@@ -331,7 +321,7 @@ func (f *davFS) Rename(ctx context.Context, oldName, newName string) error {
 	if sSrc == "" || relSrc == "" || sDst == "" || relDst == "" {
 		return os.ErrPermission
 	}
-	if hiddenPath(relSrc) || hiddenPath(relDst) {
+	if syspath.InDir(relSrc) || syspath.InDir(relDst) {
 		return os.ErrPermission
 	}
 	if sSrc != sDst {
@@ -392,7 +382,7 @@ func (f *davFS) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 	if sname == "" {
 		return syntheticDirInfo("/"), nil
 	}
-	if hiddenPath(rel) {
+	if syspath.InDir(rel) {
 		return nil, os.ErrNotExist
 	}
 	st, set, err := f.storageByName(ctx, sname)
@@ -461,7 +451,7 @@ func (f *davFS) storageDir(ctx context.Context, st *model.Storage, set *acl.Set,
 	}
 	infos := make([]os.FileInfo, 0, len(objs))
 	for _, o := range objs {
-		if hiddenNames[o.Name] {
+		if syspath.IsDirName(o.Name) {
 			continue
 		}
 		childRel := acl.CleanRel(o.Path)

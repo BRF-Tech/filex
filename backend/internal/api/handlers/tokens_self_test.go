@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	apitoken "github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -31,23 +33,18 @@ func TestCappedScopes_ViewerReadOnly(t *testing.T) {
 	}
 }
 
-func TestCappedScopes_EmptyNeverAll(t *testing.T) {
+// An empty list is REFUSED — on this door as on every other
+// (apitoken.ParseIssued). It used to be quietly filled with a role default
+// here, a second copy of a guard the admin door did not have; the owner's
+// rule since v0.43.0 is that no door issues a token without an explicit list.
+// A root on its own names no verb and is refused the same way.
+func TestCappedScopes_EmptyIsRefused(t *testing.T) {
 	h := &SelfTokens{}
-	// Empty must never become "" (== all == includes admin). It must expand to
-	// an explicit, admin-free default.
-	got, err := h.cappedScopes(context.Background(), &model.User{Role: model.RoleUser}, "")
-	if err != nil {
-		t.Fatalf("empty scopes should default, got err: %v", err)
-	}
-	if got == "" {
-		t.Fatal("empty scopes must expand to an explicit set, not stay empty")
-	}
-	if strings.Contains(got, "admin") {
-		t.Fatalf("default scopes must never include admin: %q", got)
-	}
-	vgot, _ := h.cappedScopes(context.Background(), &model.User{Role: model.RoleViewer}, "")
-	if strings.Contains(vgot, "write") || strings.Contains(vgot, "delete") {
-		t.Fatalf("viewer default must be read-only: %q", vgot)
+	for _, raw := range []string{"", "  ", ",", "root:main://docs"} {
+		got, err := h.cappedScopes(context.Background(), &model.User{Role: model.RoleUser}, raw)
+		if !errors.Is(err, apitoken.ErrScopesRequired) {
+			t.Fatalf("%q: want ErrScopesRequired, got %q, %v", raw, got, err)
+		}
 	}
 }
 

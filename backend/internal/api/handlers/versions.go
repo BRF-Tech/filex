@@ -33,6 +33,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/versioning"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -154,7 +155,8 @@ func (h *Versions) List(w http.ResponseWriter, r *http.Request) {
 	}
 	// Viewer: the timeline is metadata about content the caller can already
 	// read, and the read-only inspector is meant to show it.
-	if _, ok := h.authorizedNode(w, r, nodeID, acl.LevelViewer, "not found"); !ok {
+	node, ok := h.authorizedNode(w, r, nodeID, acl.LevelViewer, "not found")
+	if !ok {
 		return
 	}
 	versions, err := h.Service.List(r.Context(), nodeID)
@@ -162,12 +164,22 @@ func (h *Versions) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if versions == nil {
-		versions = nil
+	// `node` says WHICH file the history is of — its name, path and storage.
+	// ⚠ The admin "File history" page headed the list "Node #31": a number
+	// the operator had to have typed in themselves, and nothing else
+	// (release-candidate sweep, 2026-09-21). Already authorized above, so
+	// naming it tells the caller nothing they could not open.
+	info := map[string]any{"id": nodeID}
+	if node != nil {
+		info["name"] = node.Name
+		info["path"] = node.Path
+		info["storage_id"] = node.StorageID
+		info["storage_name"] = h.storageName(r.Context(), node.StorageID)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"versions": versions,
 		"node_id":  nodeID,
+		"node":     info,
 	})
 }
 
@@ -227,8 +239,19 @@ func (h *Versions) Restore(w http.ResponseWriter, r *http.Request) {
 	// victim's file on disk was replaced by the old version's contents — and,
 	// on a single-tenant install, a `viewer` account did the same to any file
 	// on the box.
-	node, ok := h.authorizedNode(w, r, req.NodeID, acl.LevelEditor, "not found")
+	// Visible first, then writegate (names, app locks), then ≥editor: the
+	// level check reads a lock's viewer cap as a plain 403, and a person
+	// rolling back a frozen document is told who froze it.
+	node, ok := h.authorizedNode(w, r, req.NodeID, acl.LevelViewer, "not found")
 	if !ok {
+		return
+	}
+	// Versions of an open-with working copy were taken before versioning
+	// learned to skip `.filex-open`; rolling one back writes into it.
+	if gate(w, r, h.ACL, node.StorageID, writegate.Writes(livePathOf(node))) {
+		return
+	}
+	if _, ok := h.authorizedNode(w, r, req.NodeID, acl.LevelEditor, "not found"); !ok {
 		return
 	}
 

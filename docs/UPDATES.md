@@ -212,7 +212,9 @@ you chose, and every downloaded byte is verified against it.
 ## Notifications
 
 Two events are emitted through the normal notification pipeline (in-app history
-plus any configured webhooks):
+plus any configured webhooks). ⚠ Since v0.43.0 both are **operator alarms**:
+only an administrator's bell and badge carry them. The stored row, the admin
+**Notifications** list and the webhook delivery are unchanged.
 
 | Event | When |
 |---|---|

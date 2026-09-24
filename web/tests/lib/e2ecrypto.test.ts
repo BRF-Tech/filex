@@ -225,8 +225,24 @@ describe('a new encrypted folder with escrow off', () => {
     // configuration and nothing about this folder's bytes.
     const priv = await importEscrowPrivateKey(escrowTestKey.private_pkcs8_b64);
     expect(await unlockWithEscrowKey(marker, priv)).toBeNull();
-    // And there is nowhere for it to have been hidden.
-    expect(JSON.stringify(marker)).not.toContain('esc');
+    // And there is nowhere for it to have been hidden: no field of the
+    // marker, at any depth, is an escrow slot (`esc`, `esc_declined`).
+    //
+    // ⚠⚠ NOT a substring search of the serialized marker. `verify`, `fmk_pw`
+    // and the recovery blob are random base64, and three given letters turn
+    // up in a hundred random base64 characters about once in two thousand
+    // runs — which is how this assertion failed the v0.43.0 release gate on a
+    // marker that was perfectly correct (`...QkCZtL45S+3rpH++t3MyBt8hNvyo+6PHEescR22io=`).
+    // A test that fails on the dice is worse than no test: the next person
+    // deletes it.
+    const fieldsOf = (o: unknown, at = ''): string[] =>
+      o && typeof o === 'object'
+        ? Object.entries(o as Record<string, unknown>).flatMap(([k, v]) => [
+            `${at}${k}`,
+            ...fieldsOf(v, `${at}${k}.`),
+          ])
+        : [];
+    expect(fieldsOf(marker).filter((f) => /esc/i.test(f))).toEqual([]);
   }, SLOW);
 });
 

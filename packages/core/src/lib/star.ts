@@ -14,10 +14,14 @@
  * one). Same trap as `loadStarred`/`fetchNavRows` in FileExplorer.
  */
 
+import { requestFailure } from './errorWords';
+
 export interface StarRequestOptions {
   apiBase?: string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
+  /** The language a refusal is said in (lib/errorWords). */
+  locale?: string;
 }
 
 /** Toggle the starred flag for ONE node. Throws on a non-2xx answer so the
@@ -38,5 +42,7 @@ export async function setNodeStarred(
     credentials: opts.authCredentials ?? 'same-origin',
     body: JSON.stringify({ node_id: nodeId, starred }),
   });
-  if (!res.ok) throw new Error(`star toggle failed: ${res.status}`);
+  // Said (lib/errorWords), not "star toggle failed: 403" — the caller that
+  // shows it passes the language it speaks.
+  if (!res.ok) throw requestFailure(res.status, await res.text().catch(() => ''), opts.locale);
 }

@@ -31,6 +31,9 @@ type Auth struct {
 	// internal/tenanturl — it is the one implementation of this rule, and
 	// redirectBase below is now just its caller.
 	Tenants tenanturl.Resolver
+	// OIDCLocalLogout (FILEX_OIDC_LOGOUT=local) keeps sign-out inside filex:
+	// the IdP's session is left open, as it was before RP-initiated logout.
+	OIDCLocalLogout bool
 }
 
 // NewAuth constructs an Auth handler.
@@ -40,6 +43,20 @@ func NewAuth(store db.Store, local auth.LoginDriver, oidc auth.OIDCDriver, publi
 		PublicURL: publicURL, MultiTenant: multiTenant, CookieDomain: cookieDomain,
 		Tenants: tenanturl.New(store, publicURL, multiTenant),
 	}
+}
+
+// available reports whether a sign-in path is there to use. The server hands
+// these handlers the running set's proxies (authsetup.Live), which are never
+// nil and answer through Available instead, so a provider switched on or off
+// on the Identity providers page takes effect without re-wiring anything.
+func available(d any) bool {
+	if d == nil {
+		return false
+	}
+	if a, ok := d.(interface{ Available() bool }); ok {
+		return a.Available()
+	}
+	return true
 }
 
 type loginReq struct {
@@ -60,7 +77,7 @@ type loginReq struct {
 // returning — no usable cookie is ever handed out and no orphan session
 // lingers.
 func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
-	if h.LocalAuth == nil {
+	if !available(h.LocalAuth) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "local login disabled"})
 		return
 	}
@@ -143,18 +160,76 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Logout clears the cookie + revokes the server-side session.
+// Logout clears the cookie + revokes the server-side session — and, for an
+// OIDC session, answers with the IdP's end-session URL as `logout_url` so the
+// web app can end the IdP's session too (see idpLogoutURL).
+//
+// Optional body: {"return_to": "/admin/login" | "/drive/login"} — the sign-in
+// page of the front door the person was using, where the IdP sends the browser
+// back once it is done.
 func (h *Auth) Logout(w http.ResponseWriter, r *http.Request) {
+	out := map[string]any{"ok": true}
 	if c, err := r.Cookie(authlocal.SessionCookieName); err == nil && c.Value != "" {
+		// Before the delete: the id_token lives on the session row.
+		if u := h.idpLogoutURL(w, r, c.Value); u != "" {
+			out["logout_url"] = u
+		}
 		_ = h.Store.DeleteSession(r.Context(), c.Value)
 	}
 	h.clearSessionCookie(w, r)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, out)
+}
+
+// signedOutPages are the only places the IdP may send the browser back to
+// after sign-out: the sign-in page of either front door (router/index.ts).
+// `signed_out` tells the page not to start SSO again on its own.
+var signedOutPages = map[string]string{
+	"/admin/login": "/admin/login?signed_out=1",
+	"/drive/login": "/drive/login?signed_out=1",
+}
+
+// idpLogoutURL is the IdP half of signing out (OpenID Connect RP-Initiated
+// Logout 1.0), or "" to keep sign-out local.
+//
+// ⚠ Without it signing out was not signing out. filex dropped its own session
+// and nothing else, so in SSO-first mode (FILEX_OIDC_AUTO_REDIRECT) the login
+// page went straight back to the IdP, whose session was still open: a new code
+// without a form, the same account signed in again ~0.5 s later (measured on
+// Keycloak 26), and on a shared computer the next person got the previous
+// one's files.
+//
+// Local when: the operator chose FILEX_OIDC_LOGOUT=local, the session kept no
+// id_token (password/LDAP sign-in, or one from before this version), or the
+// driver/IdP cannot end sessions. The post-logout address is picked from
+// signedOutPages — never taken from the request — so sign-out cannot be turned
+// into an open redirect; the IdP must list it among its allowed post-logout
+// redirect URIs (docs/SSO.md).
+func (h *Auth) idpLogoutURL(w http.ResponseWriter, r *http.Request, session string) string {
+	if h.OIDCLocalLogout {
+		return ""
+	}
+	lo, ok := h.OIDCAuth.(auth.OIDCLogoutDriver)
+	if !ok {
+		return ""
+	}
+	idToken, err := h.Store.GetSessionIDToken(r.Context(), session)
+	if err != nil || idToken == "" {
+		return ""
+	}
+	var body struct {
+		ReturnTo string `json:"return_to"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body)
+	page, ok := signedOutPages[body.ReturnTo]
+	if !ok {
+		page = signedOutPages["/admin/login"]
+	}
+	return lo.EndSessionURL(r, idToken, h.redirectBase(r)+page)
 }
 
 // OIDCStart redirects to the IdP.
 func (h *Auth) OIDCStart(w http.ResponseWriter, r *http.Request) {
-	if h.OIDCAuth == nil {
+	if !available(h.OIDCAuth) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OIDC not configured"})
 		return
 	}
@@ -165,7 +240,7 @@ func (h *Auth) OIDCStart(w http.ResponseWriter, r *http.Request) {
 
 // OIDCCallback completes the OIDC flow.
 func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
-	if h.OIDCAuth == nil {
+	if !available(h.OIDCAuth) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OIDC not configured"})
 		return
 	}
@@ -197,26 +272,32 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// target is a fixed relative path so it stays on the tenant host that
 	// served this callback (v0.1.66's host fix) with zero open-redirect
 	// surface.
-	writeOIDCBounce(w, "/admin/")
+	writeOIDCBounce(w, r, "/admin/")
 }
 
 // oidcBounceTmpl is the 200 "signing in…" page that carries the session
 // Set-Cookie past a CDN that strips it from 3xx responses. html/template
 // context-escapes the target in the meta/JS/href sinks; the caller only ever
-// passes a fixed relative path.
+// passes a fixed relative path. Its two phrases are the server catalogue's
+// (`server.public.signing_in` / `continue`), in the browser's language: the
+// person is not signed in yet, so there is no account to read one from.
 var oidcBounceTmpl = template.Must(template.New("oidcbounce").Parse(
-	`<!doctype html><html><head><meta charset="utf-8">` +
-		`<meta http-equiv="refresh" content="0;url={{.}}">` +
-		`<title>Signing in…</title></head>` +
-		`<body><script>location.replace("{{.}}")</script>` +
-		`<noscript><a href="{{.}}">Continue</a></noscript>` +
-		`Signing in…</body></html>`))
+	`<!doctype html><html lang="{{.Lang}}" dir="{{.Dir}}"><head><meta charset="utf-8">` +
+		`<meta http-equiv="refresh" content="0;url={{.Target}}">` +
+		`<title>{{.SigningIn}}</title></head>` +
+		`<body><script>location.replace("{{.Target}}")</script>` +
+		`<noscript><a href="{{.Target}}">{{.Continue}}</a></noscript>` +
+		`{{.SigningIn}}</body></html>`))
 
-func writeOIDCBounce(w http.ResponseWriter, target string) {
+func writeOIDCBounce(w http.ResponseWriter, r *http.Request, target string) {
+	lang := publicLocale(r, "")
+	t := publicT(lang)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	_ = oidcBounceTmpl.Execute(w, target)
+	_ = oidcBounceTmpl.Execute(w, map[string]string{
+		"Lang": lang, "Dir": pageDir(lang), "Target": target, "SigningIn": t["signing_in"], "Continue": t["continue"],
+	})
 }
 
 // redirectBase returns the origin that OIDCCallback redirects should target.

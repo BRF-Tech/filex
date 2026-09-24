@@ -20,6 +20,8 @@ import type { FileNode } from '../types/FileNode';
 import { hasInternalDrag } from '../lib/dragOut';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { lockOf, lockWords } from '../lib/appLock';
+import { linkWordsFor } from '../lib/symlink'; /* issue #34 — a link that will not open */
 import { checkMod, clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
 import ItemCheck from './ItemCheck.vue';
 import { encryptedFolderTile, fileIconTile, isEncryptedFolder } from '../lib/fileIcons';
@@ -38,6 +40,7 @@ import { useSortStore, type ListingOrder } from '../lib/sortOrder'; /* gruplama 
 import StarButton from './StarButton.vue';
 import { snippetSegments } from '../lib/snippet'; /* bul:s3 */
 import { applyDragGhost } from '../lib/dragGhost'; /* wiring:c4 */
+import { contentDir } from '../lib/direction';
 
 const props = withDefaults(defineProps<{
   files: FileNode[];
@@ -151,6 +154,25 @@ const emit = defineEmits<{
  */
 const { t, formatSize, nodeDisplayName, formatDate, formatMonthYear, zonedYearMonth, toDate } =
   useLocale(() => props.locale);
+
+/* App plugins — an app's hold on a row (docs/APP-PLUGINS-API.md → "File
+   locks"). The listing already caps `perm` at viewer, so the write verbs are
+   gone without this; the badge is what stops that reading as a bug. ⚠ One
+   source of words for every view and the details panel (lib/appLock). */
+function lockTitleOf(n: FileNode): string {
+  return lockWords(lockOf(n), { t, formatDate, locale: props.locale });
+}
+
+/* issue #34 — a symlink the server will not follow. Same shape as the lock
+   badge above and for the same reason: the words live in ONE module
+   (lib/symlink), so the row, the details panel and the toast that explains a
+   refused open cannot drift apart. `null` for every ordinary row — a link
+   whose target is inside the root was already followed and arrives as that
+   target, so it is not one of these. */
+function linkOf(n: FileNode) {
+  return linkWordsFor(n, { t });
+}
+
 
 const ordered = computed<FileNode[]>(() => [...props.files].sort(byFoldersFirst));
 watch(
@@ -459,6 +481,7 @@ function snippetTitle(snippet: string): string {
             v-for="p in previewFor(n)"
             :key="'fprev'"
             class="fe-fprev"
+            :dir="contentDir(p.kind)"
             :class="'fe-fprev--' + p.kind"
             :style="p.kind === 'table' ? { '--fprev-cols': String(p.cols) } : undefined"
             aria-hidden="true"
@@ -576,7 +599,7 @@ function snippetTitle(snippet: string): string {
         </span>
         <div class="fe-grid__main">
           <div class="fe-grid__label" :title="n.basename">
-            {{ nodeDisplayName(n) }}
+            <bdi>{{ nodeDisplayName(n) }}</bdi>
             <span
               v-if="keepBadgeFor && keepBadgeFor(n)"
               :class="['fe-keepbadge', 'fe-keepbadge--' + keepBadgeFor(n)]"
@@ -585,7 +608,32 @@ function snippetTitle(snippet: string): string {
               :aria-label="t('keep.badge_' + keepBadgeFor(n))"
             >{{ keepGlyph(keepBadgeFor(n)!) }}</span>
           </div>
-          <div class="fe-grid__meta">{{ captionFor(n) }}</div>
+          <!-- The whole caption on hover: the card has room for "110 B • Sep 22,
+               2026" and not for every language's date (German "22. Sept. 2026"
+               lost its year to the ellipsis, v0.43.0 translator pass). -->
+          <div class="fe-grid__meta" :title="captionFor(n)">
+            <span
+            v-if="lockTitleOf(n)"
+            class="fe-applock"
+            role="img"
+            :title="lockTitleOf(n)"
+            :aria-label="lockTitleOf(n)"
+            data-testid="lock-badge"
+            ><span class="fe-applock__glyph" aria-hidden="true">&#128274;</span>{{ t('applock.badge') }}</span>
+            <!-- issue #34 — a symlink the server will not follow. Same badge,
+                 same words, same module as the list and the gallery. -->
+            <span
+            v-if="linkOf(n)"
+            class="fe-symlink"
+            :class="'fe-symlink--' + linkOf(n)!.state"
+            role="img"
+            :title="linkOf(n)!.why"
+            :aria-label="linkOf(n)!.why"
+            data-testid="symlink-badge"
+            :data-link-state="linkOf(n)!.state"
+            ><span class="fe-symlink__glyph" aria-hidden="true">&#128279;</span>{{ linkOf(n)!.badge }}</span>
+            {{ captionFor(n) }}
+          </div>
           <!-- A card at a storage's root has no parent folder to name: no line,
                not an em dash — the same rule the gallery follows and the list's
                Location cell (tablo:t1). The dash read as a stray character under
@@ -594,7 +642,7 @@ function snippetTitle(snippet: string): string {
             v-if="showParentPath && parentDirOf(n.path)"
             class="fe-grid__parent"
             :title="parentDirOf(n.path)"
-          >{{ parentDirOf(n.path) }}</div>
+          ><bdi>{{ parentDirOf(n.path) }}</bdi></div>
           <!-- bul:s3 — content snippet («» → <mark> via TEXT segments, no innerHTML) -->
           <div v-if="cardSnippet(n)" class="fe-grid__snippet" :title="snippetTitle(cardSnippet(n))">
             <template v-for="(seg, si) in snippetSegments(cardSnippet(n))" :key="si">

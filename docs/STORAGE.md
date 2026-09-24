@@ -269,7 +269,7 @@ storage:
 |---|---|---|---|
 | `name` | string | — | Display name + top‑level folder label. Required. |
 | `driver` | string | — | `local` · `s3` · `sftp` · `webdav` · `ftp` · `smb`, or the name of an installed [plugin](PLUGINS.md). Required. |
-| `config` | object | `{}` | Per‑adapter settings (see [Adapters](#adapters)). |
+| `config` | object | `{}` | Per‑adapter settings (see [Adapters](#adapters)), plus `scan_exclude`, which every storage has — see [Scan exclusions](#scan-exclusions). |
 | `mount_path` | string | `/` | Logical mount point inside filex. |
 | `sync_mode` | string | `poll` | `poll` · `fsnotify` (the local driver, **or a [plugin](PLUGINS.md) that streams its own changes**) · `ondemand`. Anything else is **rejected on write** — see [Modes](#sync). |
 | `sync_interval_s` | int (seconds) | `900` | Poll cadence — **Scan every (minutes)** on the storage form. **Values < 5 s are clamped to 15 min.** |
@@ -311,7 +311,11 @@ curl -s https://files.example.com/api/admin/storage-drivers \
 
 `root: true` marks the field the [root‑path guard](#path-validation--errors)
 checks. `aliases` lists older spellings of a key that the driver still reads,
-so configs written before a rename keep working. Adding a driver on the backend
+so configs written before a rename keep working. `scan_fields` lists the
+settings every storage has whatever its driver — today `scan_exclude`
+([Scan exclusions](#scan-exclusions)). They live in the same `config` object,
+and the storage form draws them beside the driver's fields; the
+replication‑target dialog does not, since nothing scans a target. Adding a driver on the backend
 puts it in every picker without a frontend release.
 
 `capabilities` on `/api/capabilities` still carries the plain
@@ -323,7 +327,8 @@ callers.
 ## Adapters
 
 Each adapter's `config` object is passed verbatim to the driver. Only the keys
-below are read; unknown keys are ignored. The same key lists are served
+below are read; unknown keys are ignored — `scan_exclude` among them, which the
+scan reads, not the driver ([Scan exclusions](#scan-exclusions)). The same key lists are served
 machine‑readably by
 [`GET /api/admin/storage-drivers`](#driver-descriptors-get-apiadminstorage-drivers).
 
@@ -347,10 +352,102 @@ Serves a directory on the host running filex.
 |---|---|---|---|
 | `path` | yes* | — | Absolute path to serve. Created (`0755`) if missing. |
 | `root` | yes* | — | Legacy alias for `path`. |
+| `follow_symlinks` | no | `false` | Follow symlinks whose target is **outside** this folder. See [Symlinks](#symlinks). |
 
 \*One of `path` / `root`. Example: `{"path": "/data/files"}`.
 Capabilities: read, write, move, copy, delete, mkdir, **live change events**
-(fsnotify). Path traversal (`..`) is rejected.
+(fsnotify).
+
+**Path traversal.** A `..` segment can never leave the configured folder, on
+any host. Wire paths use `/`; on Windows a `\` is treated as a separator too,
+and on Linux it is treated as an ordinary character in a file name, because
+that is what each host means by it.
+
+> ⚠ **Fixed in v0.43.0 — this was not true before.** On a **Windows** host a
+> backslash payload escaped the folder: `?action=index&path=..\other-storage`
+> returned the contents of a sibling directory, while the same request with a
+> forward slash was correctly refused. Two roots whose names shared a prefix
+> (`storage1` and `storage10`) were also treated as one. Linux hosts were never
+> affected. If you run filex on Windows, upgrade.
+
+#### Symlinks
+
+A symlink whose target is **inside** the folder is always followed. It appears
+as the thing it points at — a linked directory is a directory you can open, and
+a linked file reports the target's size — and this is true whether the link was
+made with a relative or an absolute path.
+
+A symlink whose target is **outside** the folder is governed by
+`follow_symlinks`, which is **off** by default:
+
+| | `follow_symlinks: false` (default) | `follow_symlinks: true` |
+|---|---|---|
+| In listings | **Shown**, marked as a link that cannot be opened | Shown as its target |
+| Open / download / write / delete *through* it | Refused | Allowed |
+| Delete or rename **the link itself** | Allowed — the link is inside the folder, and only the link is removed | Allowed |
+| Indexing, virus scanning, versioning, quota | Skipped | Treated as ordinary files |
+
+Out-of-root links are shown rather than hidden on purpose: an entry you can see
+and cannot open is confusing, but an entry that silently is not there is worse.
+
+**Copying a folder that holds links.** A link inside the storage is copied as
+what it points at. A link filex may not follow is **skipped, not copied** — its
+target's bytes never enter the copy — and the rest of the folder is copied
+anyway. Inside one storage a linked *folder* is skipped as well; copied to
+**another** storage it is carried with a cycle guard, and every skipped entry is
+named in the operation's result ([Moving files between
+storages](#moving-files-between-storages)).
+
+**What that looks like.** Such a row carries a badge in the list, the grid and
+the gallery alike — *Outside storage*, *Broken link* or *Remote link* — and its
+tooltip, its screen-reader label and the details panel all say the same
+sentence: what it is, why it will not open, and, for an out-of-root link, that
+an administrator can allow it with *Follow symlinks that leave this folder* in
+the storage's settings. A **broken** link reads differently on purpose: nothing
+can be configured back into working there, so it says the target no longer
+exists and has to be repaired or removed on the server. Opening such a row is
+refused in words, with the same sentence, rather than doing nothing — doing
+nothing was the original complaint ([issue #34](https://github.com/BRF-Tech/filex/issues/34):
+a 0-byte file that would not open and said why to nobody).
+
+> ⚠ **Turning `follow_symlinks` on extends the storage.** Everything behind the
+> link becomes part of it — including deletion, quota accounting, full-text
+> indexing and virus scanning. Turn it on only when you meant to mount that
+> content.
+
+> ⚠ **Fixed in v0.43.0 — this was not true before.** Symlinks leaving the
+> folder were followed unconditionally by every operation, including recursive
+> delete, with no option to control it. Planting such a link requires
+> filesystem access to the server (it cannot be done through filex), but an
+> administrator who created one to share a folder was also granting filex write
+> and delete access to whatever it pointed at.
+
+**Other drivers.** `ftp` and `sftp` report a remote symlink as a link and do
+not resolve it: filex's boundary on a remote host is the account's own
+permissions, so there is no in-root/out-of-root distinction to make. `s3`,
+`webdav` and `smb` have no symlinks.
+
+#### Named pipes, sockets and devices
+
+filex serves **regular files and folders**. A named pipe (FIFO), a Unix socket
+or a block/character device under a `local` storage — Docker overlay
+directories are full of them — is **skipped**: it is not listed, not
+catalogued, not indexed, not thumbnailed, not copied along with its folder,
+and a write onto its name is refused. A symlink pointing at one is skipped the
+same way. The server log says so **once per entry** (not on every scan):
+
+```text
+WARN storage scan: skipped an entry that is not a regular file or folder — filex never opens named pipes, sockets or device nodes driver=local root=/data path=/data/.liveos/…/tmp/.cinit_cmd kind="named pipe"
+```
+
+> ⚠ **Fixed in v0.43.0 — this was not true before** ([issue
+> #38](https://github.com/BRF-Tech/filex/issues/38)). Anything that was not a
+> folder or a symlink was treated as a file and opened to read its type, and
+> opening a pipe nobody writes to never returns: one `mkfifo` anywhere under
+> the root left the storage scan `running` forever with nothing processed, and
+> every later scan queued behind it. `sftp` skips a remote pipe, socket or
+> device the same way — the SSH server would open it for filex and wait just
+> the same.
 
 ### NAS (NFS, SMB, and friends)
 
@@ -429,7 +526,8 @@ directory if it is missing**, so a storage pointed at an *unmounted* path will
 cheerfully serve an empty directory, and the next sync run reads "empty backend"
 as "everything was deleted". The [tombstone guard](#sync) blocks the *first*
 such run — it skips the delete pass when a run sees less than ~70 % of what the
-previous run saw — but it only ever compares against the **previous run**. Once
+previous run saw — but it only ever compares against the **last run that
+finished `ok`**. Once
 that empty run is on record with a seen count of 0, the guard has nothing to
 compare against and the next empty run soft‑deletes the tree from the cache. It
 buys you one cycle, not safety. Nothing is deleted on the NAS itself, and a sync
@@ -594,7 +692,10 @@ uploaded straight to the S3 console).
   remote driver implements it; otherwise it falls back to poll. Either way a
   2‑second debounce coalesces bursts like `tar -xf`, and every batch triggers the
   same full run a poll would, so an event stream affects *latency*, never
-  correctness. ⚠ A driver stream that **ends** (a plugin restarts, a connection
+  correctness. The OS watch covers exactly what the scan walks: filex's own
+  trees and the storage's [scan exclusions](#scan-exclusions) are neither
+  watched nor able to start a run, and a hidden folder the storage does not
+  exclude is watched like any other. ⚠ A driver stream that **ends** (a plugin restarts, a connection
   drops) drops the storage back to polling rather than leaving it frozen with a
   stale index.
 - **`ondemand`** — only syncs when explicitly triggered
@@ -625,6 +726,16 @@ catalogued file and a file whose content drifted are also **queued for an
 antivirus scan**, one priority step below everything a person asked for, so a
 first import of twenty thousand files does not make an upload's scan wait
 behind it ([PROTECTION.md → Files the sync discovers](PROTECTION.md#files-the-sync-discovers)).
+A changed object's size, etag and time are copied onto its row; its **mime is
+kept** when the listing has none to offer (an object store's never does), since
+the row's came from sniffing the bytes at upload.
+
+**A staged upload whose bytes landed is settled.** A row a staged upload left
+`staged` or `failed` — no staging session behind it any more, and the object at
+its key has the committed size and is not older than the commit — is marked
+`stored`, counted as updated, and queued for the antivirus scan it never had.
+Short of that evidence the row is left alone, metadata included (see
+[UPLOADS.md → transfer_state](UPLOADS.md#transfer_state)).
 
 **What a sync does not do: it never un‑deletes.** Deleting in filex is a
 rename — the bytes move to `.filex-trash/` and the row is soft‑deleted and
@@ -646,6 +757,28 @@ heals an install that ran the old code: a revived deletion is soft‑deleted
 again (keeping its `storage_key`, so restore still knows where to put it back)
 and a row minted for the trash's own bytes is dropped. Bytes are never touched
 either way.
+
+**The walk does not enter filex's other trees either.** Version history lives
+at the storage root under `.versions/<node id>/<n>`, and `.thumbs/` is a
+cache; neither is anybody's file. The walk used to skip only the trash, so a
+full scan minted a system‑owned row for every snapshot folder and file —
+counted in the storage's totals, indexed for search — and, once such a row
+went unseen, the delete pass put the *folder* rows in the trash where they
+stood. Purging a trashed folder deletes its prefix on the backend: that is
+every version of every file. Three rules now hold:
+
+- the walk **skips `.versions/` and `.thumbs/`** at the storage root, exactly
+  as it skips `.filex-trash/` (a user folder called `.versions` *below* the
+  root is the user's and is catalogued as usual);
+- rows an earlier scan minted in there — live ones and ones already in the
+  trash — are **dropped from the catalogue** on the next full pass, deepest
+  first, search documents included. The backend is never touched, and the
+  version history's own rows (`node_versions`, keyed by the versioned file)
+  are unaffected;
+- the delete pass **never moves a row inside `.filex-trash/`, `.versions/` or
+  `.thumbs/` into the trash**, whatever else went wrong, so a failed cleanup
+  is only a cleanup deferred to the next pass.
+
 A **tombstone guard** protects against transient backend glitches: if a run sees
 fewer than ~70 % of the objects the previous run saw, the delete pass is skipped
 (so a flaky S3 endpoint doesn't wipe your tree from the cache).
@@ -654,12 +787,27 @@ fewer than ~70 % of the objects the previous run saw, the delete pass is skipped
 and that is expected.** `seen` no longer counts objects inside `.filex-trash/`,
 so a storage whose trash held more than ~30 % of its objects looks like it
 shrank: one warning, one skipped delete pass, and the next run compares like
-with like.
+with like. The same holds once more after the upgrade that stopped counting
+`.versions/` and `.thumbs/`, for a storage whose version history was a large
+share of its objects.
 
-⚠ The comparison is against the **previous run only**: a backend that stays empty records a run
-with a seen count of 0, and the run after that has nothing to compare against
-and deletes. The guard buys a cycle to notice the outage in — see
+⚠ The comparison is against the **last run that finished `ok`**. A run that
+failed or was cut short (`aborted`) records whatever it had counted when it
+stopped, usually 0, and it no longer resets the baseline: it used to, and the
+run after an interrupted scan then deleted with nothing to compare against. A
+backend that stays empty is another matter: its run finishes `ok` with a seen
+count of 0, and the run after that has nothing to compare against and deletes.
+The guard buys a cycle to notice the outage in — see
 [NAS trap 2](#nas-nfs-smb-and-friends).
+
+**A run always closes its own record.** A run that is cancelled — a shutdown,
+an edit to the storage that restarts its syncer, the ceiling on a manual scan —
+is recorded as `aborted` with the reason, not left `running`. A run the server
+died in the middle of is closed the same way the next time the sync worker
+starts (`interrupted: the server stopped during the scan`), before any new run
+begins. Until then such a row said `running` for ever: on the storage list, in
+the sync history, and to `filex thumb backfill`, which refuses to render over a
+catalogue a sync has not finished — an `aborted` last run included.
 
 **Cadence is per storage.** The poll loop uses the storage row's
 `sync_interval_s` (`900` when you don't set one; anything under 5 s is treated
@@ -674,6 +822,100 @@ counted as a failure), and **Scan now** while a run is in flight starts no
 second walk: it answers **202** with `status: "running"` — the scan you asked
 for is the one in progress. Progress is under *Storages → sync runs* as before.
 
+**Rescanning one folder.** `POST /api/admin/storages/{id}/sync?path=<folder>`
+rescans a single catalogued folder's subtree instead of the whole storage — for
+when you know what changed and a full scan is expensive (169,000 rows is about
+twenty minutes, and every row's `seen_at` is rewritten). It is the same walk
+with the same rules — new objects catalogued, changed ones updated, staged
+uploads settled — and three differences that keep it the folder's business:
+
+- only rows **inside the folder** can go to the trash, and the ~70 % guard
+  compares what the listing saw with the folder's own catalogued size;
+- a listing that **failed part-way** removes nothing (a folder the walk could
+  not look into is not a deleted folder);
+- **no sync-run row** is written and the storage's last-synced time does not
+  move.
+
+It shares the one-run lock (while any scan walks the storage it answers **202**
+`status: "running"`), answers with its counts when it is done, and gives up
+after ten minutes with **504** and the counts so far. The folder must already be
+in the catalogue (**404** otherwise — rescan its parent); `..`, filex's own
+trees and a folder the storage [excludes from scanning](#scan-exclusions) are
+refused with **400**. See [BACKEND.md](BACKEND.md) for the answer.
+
+### Scan exclusions
+
+A storage pointed at an existing tree used to catalogue everything under its
+root — a `.git`, a snapshot directory, a download client's half-finished
+files — and hand all of it to the search index, the thumbnailer and the virus
+scanner. **Paths to exclude from scanning** on the storage form
+(`config.scan_exclude`, on every driver) tells the scan what to leave alone:
+glob patterns, one per line, relative to the storage root. Blank lines and
+lines starting with `#` are ignored.
+
+| Pattern | Excludes |
+|---|---|
+| `.*` | every hidden file and folder, at any depth |
+| `@eaDir` | every folder of that name (Synology's thumbnails), at any depth |
+| `*.tmp` | every `.tmp` file, at any depth |
+| `downloads/incomplete/**` | that folder and everything in it |
+| `/build` or `./build` | the `build` at the storage root only |
+| `projects/**/node_modules` | a `node_modules` anywhere under `projects` |
+
+- `*` matches within one name, `?` one character, `[abc]` / `[!abc]` a
+  character class; `**` as a whole segment matches any number of folders,
+  none included. A pattern **without a `/`** names an entry at any depth, the
+  way `.gitignore` reads it; one **with a `/`** (or a leading `/` or `./`) is
+  anchored at the storage root. A trailing `/` is ignored. Matching is
+  case-sensitive.
+- A path is excluded when the pattern matches it **or any folder above it**,
+  and the scan does not go into an excluded folder at all — it is never
+  listed, so a big `.git` costs nothing. On an object store the one-pass
+  listing cannot leave a prefix out: the keys under it are returned and
+  dropped, never held or catalogued.
+- One rule decides every walk that catalogues: the full scan, a
+  [folder rescan](#sync) (an excluded folder is refused with **400**), the
+  catalogue of a copied folder, and the `fsnotify` watcher, which does not
+  watch an excluded folder and ignores a change to an excluded name — a
+  download client writing `*.part` files no longer starts a scan every two
+  seconds.
+- filex's own names are outside the patterns: `.*` does not take the desktop
+  app's `.filex-open` working copies, the `.keepdir` marker or an encrypted
+  folder's marker out of the catalogue (the "open with" round trip and the
+  lock screen read their rows). The trash, the version history and the
+  thumbnail cache are never walked, patterns or not.
+- **Refused on save (400,** `error: "SCAN_EXCLUDE_INVALID"` **and a
+  `message` naming the pattern, in the reader's language):** a pattern that
+  would exclude everything (`*`, `**`, `**/*`, …), `!` (re-including a path is
+  not supported), `..`, a broken glob, more than 200 patterns or one longer
+  than 512 characters. A value that got into a storage row some other way is
+  logged and ignored — that storage is scanned in full.
+
+⚠⚠ **It saves work; it is not access control.** An excluded path is still on
+the storage and still served to whoever asks for it by path: the file
+protocols (WebDAV, SFTP, FTP, NFS, S3), the AI and MCP tools, a public share
+of the folder above it and an archive download all read the storage directly
+and see it. The explorer lists the catalogue, so once the storage has been
+scanned an excluded entry does not appear in its folder there — but typing its
+path opens it. Copies, moves and
+deletes act on the whole tree as always: a folder moved to another storage
+takes its `.git` with it. To keep people out of a folder, use
+[permissions](RBAC.md).
+
+⚠ **What was catalogued before you add a pattern stays as it is.** The scan
+no longer looks at those rows, so it neither refreshes them nor removes them —
+and it never moves them to the trash for being unseen, since a folder row in
+the trash is purged by deleting its prefix on the backend. Shares, comments,
+tags and version history on them are untouched; lifting the pattern brings
+them back under the scan. On the first full pass after a pattern that covers
+more than ~30 % of what the previous pass saw, the tombstone guard trips once
+(one warning, one skipped delete pass); a folder rescan discounts those rows
+from its own guard, so it is not affected.
+
+What a person writes **through** filex into an excluded path — an upload, a
+new folder, a WebDAV client's save — is catalogued like any other write; only
+the scan stays out.
+
 You can watch runs at `GET /api/admin/storages/{id}/sync-runs` and detect drift
 with `GET /api/admin/storages/{id}/drift`.
 
@@ -683,7 +925,11 @@ Catching a file that was changed *outside* filex is the whole point of the sync,
 so it matters exactly how "changed" is decided.
 
 **With an etag** — the backend's own content fingerprint — that is the answer,
-and it is exact. Only **S3 and WebDAV** report one.
+and it is exact. Only **S3 and WebDAV** report one. A write filex makes itself
+records the etag the backend reports for the new bytes (or an empty one when the
+backend cannot be asked, which the next pass fills in). ⚠ It used to keep the
+etag of the file it had replaced, so a later out-of-band change that happened to
+restore those exact bytes compared equal and was never noticed.
 
 **Without one** — local, SFTP, SMB, FTP, and any WebDAV server that omits the
 header — the comparison is the file's **size and modification time**, the two
@@ -770,7 +1016,8 @@ backend fast. So when a **big** file lives on a **slow** storage, filex fetches
 it to local disk once and says so while it happens:
 
 1. the first `?action=download` is answered **`202`** — a progress page in a
-   browser, `{"state":"preparing","percent":N}` for an API client;
+   browser, or `{"state":"preparing","percent":N}` (with `Retry-After`) for an
+   API client that sent **`X-Filex-Accept-Prepare: 1`**;
 2. the client polls `?action=download&…&cache=status` (the page does it for
    you) until `{"ready":true}`;
 3. from then on the file is served from local disk — for **every** surface,
@@ -805,6 +1052,14 @@ worse":
   A preview still *uses* a copy that already exists.
 * **`Range` requests** are never answered `202` — a resume or a seek is a client
   already committed to a body.
+* **An API client that did not opt in** is never answered `202`, and no copy is
+  prepared for it: it gets the file, streamed from the backend. ⚠ Before this
+  rule every non-browser download got the `202` JSON, and filex's own sync
+  client (and the desktop app's drag-out and "open with") took the `2xx` for the
+  file — the JSON was written to disk under the file's name and the next sync
+  uploaded it over the real file. `Accept: application/json` alone is **not** an
+  opt-in: HTTP libraries send it on every request. The CLI and the desktop app
+  ask for `Range: bytes=0-`, which no version of the server answers with `202`.
 * **Public share links** are never answered `202` either: they spend one of the
   link's capped downloads before bytes leave, and "not yet" is not something to
   charge a visitor for. They do read from a copy that exists.
@@ -851,11 +1106,28 @@ itself, one file at a time, through the queue you can watch in the ops tray:
 - a name already taken on the target becomes `name-copy`, `name-copy-2`, …;
   nothing is overwritten;
 - filex's own `.filex-trash` and `.thumbs` are skipped — they belong to the
-  storage they are in.
+  storage they are in;
+- a **symlink the source cannot follow** — broken, pointing outside the storage
+  ([Symlinks](#symlinks)), or a remote `sftp`/`ftp` link filex does not resolve —
+  is **left behind and named**, never opened: one such link does not cost you
+  the rest of the folder. A link to something *inside* the storage is carried as
+  what it points at (a real folder or file on the far side);
+- a folder link that leads back into the folder being carried (`cycle -> .`) is
+  walked **once** and then refused, and so is anything more than 64 folders
+  below the one you picked.
+
+What was left behind is in the operation's result: the row in the ops tray ends
+**partial** and says which entries and why — for example *copied, but 1 entry was
+left out: "photos/old" (a broken link)*.
 
 ⚠ A cross-storage **move deletes the source outright**; it does not go through
 the trash. Moving between storages is usually done to free the first one, and a
 trashed copy would keep both the bytes and the quota until the trash is emptied.
+
+⚠ **…except when something was left behind: then the source is kept, whole.** A
+move deletes only what it carried, and a folder more than 64 levels deep is real
+data nobody linked. The copy on the far side is complete without the named
+entries; delete the source yourself once you have looked at the list.
 
 Refusals happen at submit time, with a reason: an unknown target storage is a
 `400`, a **read-only** target a `403` naming the storage, and a target folder you
@@ -880,16 +1152,29 @@ affordances go.
 ## Path validation & errors
 
 **Root‑path guard.** The API/UI reject a storage whose prefix/root is empty or
-`/` with:
+`/` with **400**, a code and the sentence in the reader's language:
 
-```
-ROOT_PATH_FORBIDDEN: storage prefix/path cannot be empty or root '/';
-use a sub-folder like 'fileman' or 'data/files'
+```json
+{ "error": "ROOT_PATH_FORBIDDEN",
+  "message": "A storage cannot be the whole of its backend. Enter a sub-folder for the path or prefix, such as fileman or data/files." }
 ```
 
 Always mount a sub‑folder (S3 `prefix`, or `root`/`path` for the others). To
 have every top-level folder of a bucket in filex, mount them as separate
 storages in one go — [Mounting several folders at once](#mounting-several-folders-at-once).
+
+**Containment errors (`local`).** Two refusals mean the path left the
+storage folder, and they are separate because they have different cures:
+
+```
+local: path escapes root
+    — the request named a path outside the folder (a `..` segment).
+      Nothing to configure; the path is wrong.
+
+local: symlink target is outside the storage root
+    — a real symlink, inside the folder, pointing out of it, with
+      follow_symlinks off. Turn it on if you meant to mount that content.
+```
 
 **Driver errors → HTTP:** `not found → 404`, `read-only → 403`,
 `unsupported → 501`, `already exists → 409`, anything else `→ 500`. The

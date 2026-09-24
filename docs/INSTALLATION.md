@@ -256,6 +256,12 @@ prints the password **once**:
   Change at: /admin/dashboard?settings=1
 ```
 
+The account's username is **`admin`**, whatever its email: the SFTP, FTPS and
+sign-in forms accept either. `admin` is reserved — no other account can take
+it, and a later account whose email starts with `admin@` becomes `admin2`.
+(Installs created before v0.43.0 keep the name their first administrator
+already has, usually `admin2`.)
+
 That last line is a deep link, not a page: the account fields live in the
 **user-settings dialog** behind the avatar menu, and a dialog has no address of
 its own to print. Sign in at `…/admin`, open it, and change the password under

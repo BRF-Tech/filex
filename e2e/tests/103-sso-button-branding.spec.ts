@@ -125,6 +125,6 @@ test.describe('SSO button — custom label and a readable accent in both themes 
     await setBranding(request, { 'branding.accent': '', 'branding.sso_label': '' });
     await openLogin(page, 'light');
     const m = await measure(page);
-    expect(m.text).toMatch(/^(Sign in with SSO|SSO ile giriş yap)$/);
+    expect(m.text).toMatch(/^(Sign in with SSO|SSO ile oturum aç)$/);
   });
 });

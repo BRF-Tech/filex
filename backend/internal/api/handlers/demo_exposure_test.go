@@ -280,35 +280,33 @@ func getBody(t *testing.T, base string, client *http.Client, path string) string
 // TestDemo_AuthProviderSecretsAreMasked — found while enumerating what a demo
 // visitor can READ, which is the half a guard on writes does not cover.
 //
-// GET /api/admin/auth-providers returns the stored provider config under a
-// field called `config_redacted`. The redaction is by leaf NAME, and the admin
-// UI saves the whole provider config as ONE leaf called `config` holding a
-// JSON document — so the name check saw nothing secret about "config" and the
-// document went out with `client_secret` in clear, to whoever read the demo
-// credentials off the landing page.
+// GET /api/admin/auth-providers used to return the stored provider config
+// under `config_redacted`, redacted by leaf NAME — and a whole config saved as
+// one `config` leaf holding a JSON document went out with `client_secret` in
+// clear, to whoever read the demo credentials off the landing page. It was
+// masked on a demo only.
 //
-// Masked on a demo only: on an ordinary install the operator is entitled to
-// read back what they configured, and blanking it would leave the provider
-// form unable to show its own settings.
+// ⚠ Since v0.43.0 the rule is stronger and has no mode: a secret is never sent
+// back by this endpoint, demo or not (the page shows "set — replace?"), and a
+// leaf that is not a field of the provider is not listed at all.
 func TestDemo_AuthProviderSecretsAreMasked(t *testing.T) {
 	const secret = "OIDC-Cli3nt-Secret"
 
 	for _, tc := range []struct {
-		name   string
-		demo   bool
-		masked bool
+		name string
+		demo bool
 	}{
-		{"demo masks it", true, true},
-		{"an ordinary install still shows it", false, false},
+		{"demo", true},
+		{"an ordinary install", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			base, client, store := startDemo(t, tc.demo)
 			require.NoError(t, store.UpsertSetting(context.Background(), "auth.oidc.config",
 				`{"issuer":"https://auth.example","client_id":"filex","client_secret":"`+secret+`"}`))
+			require.NoError(t, store.UpsertSetting(context.Background(), "auth.oidc.client_secret", secret))
 
 			body := getBody(t, base, client, "/api/admin/auth-providers")
-			require.Equal(t, tc.masked, !strings.Contains(body, secret),
-				"/api/admin/auth-providers")
+			require.NotContains(t, body, secret, "/api/admin/auth-providers")
 		})
 	}
 }

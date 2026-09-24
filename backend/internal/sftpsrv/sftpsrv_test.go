@@ -29,6 +29,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/sftpsrv"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/testutil"
 )
 
@@ -797,7 +798,12 @@ func TestHiddenBucketsAreInvisible(t *testing.T) {
 	hz := newHarness(t)
 	hz.user(t, "sftp@example.com")
 	st := hz.storage(t, "main")
-	hz.writeFile(t, st, ".filex-trash/old.txt", []byte("trashed"))
+	// Every internal directory, from the one list (syspath) — the copy this
+	// server used to carry did not know `.filex-open`, the desktop app's
+	// open-with working area, and listed it.
+	for _, d := range syspath.Dirs() {
+		hz.writeFile(t, st, d+"/old.txt", []byte("internal"))
+	}
 	hz.writeFile(t, st, "visible.txt", []byte("x"))
 	cl := hz.mustDial(t, "sftp@example.com", testPassword)
 
@@ -806,12 +812,14 @@ func TestHiddenBucketsAreInvisible(t *testing.T) {
 		t.Fatalf("readdir: %v", err)
 	}
 	for _, e := range entries {
-		if e.Name() == ".filex-trash" {
-			t.Fatal("the trash bucket is listed")
+		if syspath.IsDirName(e.Name()) {
+			t.Errorf("the internal directory %s is listed", e.Name())
 		}
 	}
-	if _, err := cl.Stat("/main/.filex-trash/old.txt"); err == nil {
-		t.Fatal("a path inside the trash bucket is reachable")
+	for _, d := range syspath.Dirs() {
+		if _, err := cl.Stat("/main/" + d + "/old.txt"); err == nil {
+			t.Errorf("a path inside %s is reachable", d)
+		}
 	}
 }
 

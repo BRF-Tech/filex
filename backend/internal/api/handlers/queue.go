@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/queue"
 )
 
@@ -15,6 +17,66 @@ import (
 // routes.go behind auth.Middleware + auth.RequireAdmin.
 type Queue struct {
 	Driver queue.Driver
+	// Store names what a job is about (see subjectOf). Nil leaves the
+	// payload as the only description.
+	Store db.Store
+}
+
+// newQueueWithStore is NewQueue with its store attached (the AI admin copy).
+func newQueueWithStore(driver queue.Driver, store db.Store) *Queue {
+	h := NewQueue(driver)
+	h.Store = store
+	return h
+}
+
+// AttachStore wires the store the list names its jobs' subjects from.
+func (h *Queue) AttachStore(s db.Store) { h.Store = s }
+
+// queueRow is one listed job plus WHAT it is about, in words.
+//
+// ⚠ The Queue page's "Content" column printed the payload as JSON —
+// `{"node_id":8}` (release-candidate sweep, 2026-09-21): an internal id the
+// operator cannot look up anywhere. `subject` is the file's path (with its
+// storage) or the storage's name the payload points at.
+type queueRow struct {
+	queue.Op
+	Subject string `json:"subject,omitempty"`
+}
+
+// subjectOf reads the payload keys the queue's producers write: node_id
+// (content index, antivirus scan), storage_id + path (replica), storage_id.
+func (h *Queue) subjectOf(ctx context.Context, p map[string]any, storages map[int64]string) string {
+	num := func(k string) int64 {
+		switch v := p[k].(type) {
+		case float64:
+			return int64(v)
+		case int64:
+			return v
+		case int:
+			return int64(v)
+		case string:
+			n, _ := strconv.ParseInt(v, 10, 64)
+			return n
+		}
+		return 0
+	}
+	if id := num("node_id"); id > 0 && h.Store != nil {
+		if n, err := h.Store.GetNode(ctx, id); err == nil && n != nil {
+			if st := storages[n.StorageID]; st != "" {
+				return st + ":" + n.Path
+			}
+			return n.Path
+		}
+	}
+	path, _ := p["path"].(string)
+	st := storages[num("storage_id")]
+	switch {
+	case path != "" && st != "":
+		return st + ":" + path
+	case path != "":
+		return path
+	}
+	return st
 }
 
 // NewQueue constructs the handler. driver may be nil when the bootstrap
@@ -71,8 +133,20 @@ func (h *Queue) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	storages := map[int64]string{}
+	if h.Store != nil {
+		if list, lerr := h.Store.ListStorages(r.Context()); lerr == nil {
+			for _, st := range list {
+				storages[st.ID] = st.Name
+			}
+		}
+	}
+	rows := make([]queueRow, 0, len(ops))
+	for _, op := range ops {
+		rows = append(rows, queueRow{Op: op, Subject: h.subjectOf(r.Context(), op.Payload, storages)})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items":  ops,
+		"items":  rows,
 		"total":  total,
 		"limit":  limit,
 		"offset": offset,

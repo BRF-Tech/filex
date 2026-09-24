@@ -138,3 +138,50 @@ func TestSizeRefresher_StoragesAreSeparate(t *testing.T) {
 	r.Touch(2, "x")
 	waitFor(t, "both storages", func() bool { return rec.n(1) == 1 && rec.n(2) == 1 })
 }
+
+// derivedEmitter records whether each event it hears is marked Derived.
+type derivedEmitter struct {
+	mu      gosync.Mutex
+	derived map[string]bool // "dir|action" → Derived
+}
+
+func (e *derivedEmitter) EmitChange(_ int64, dir string, ev realtime.ChangeEvent) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.derived == nil {
+		e.derived = map[string]bool{}
+	}
+	e.derived[dir+"|"+ev.Action] = ev.Derived
+}
+
+func (e *derivedEmitter) snapshot() map[string]bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make(map[string]bool, len(e.derived))
+	for k, v := range e.derived {
+		out[k] = v
+	}
+	return out
+}
+
+// The refresher's ancestor "modify" frames report a recomputed aggregate, not
+// a change to anybody's files, and must say so: the desktop sync engine
+// watches whole subtrees over the same stream, and an unmarked refresh after
+// every save sent it re-listing every folder up to the storage root (its own
+// uploads included). The change that caused the refresh stays unmarked.
+func TestSizeRefresher_RefreshesAreMarkedDerived(t *testing.T) {
+	rec := &countingRecompute{}
+	hub := &derivedEmitter{}
+	r := NewSizeRefresher(rec.fn, hub, 20*time.Millisecond, 200*time.Millisecond)
+	emit := r.Wrap(hub)
+
+	emit.EmitChange(7, "docs/2026", realtime.ChangeEvent{Action: "upload", Name: "a.txt"})
+
+	waitFor(t, "ancestor refresh", func() bool { return len(hub.snapshot()) == 4 })
+	for k, derived := range hub.snapshot() {
+		want := k != "docs/2026|upload"
+		if derived != want {
+			t.Fatalf("%s: Derived = %v, want %v (all: %v)", k, derived, want, hub.snapshot())
+		}
+	}
+}

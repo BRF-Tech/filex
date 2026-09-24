@@ -64,6 +64,14 @@
    * new width in Turkish, the longer of the two catalogues — the widest row
    * label ("Paylaşılanlar") clears it, and so does the quota line. */
   --fe-sidenav-w: 192px;
+  /* The list view's FROZEN LEAD — how far from the pane's left edge the Name
+   * column's sticky offset sits, i.e. the width of the tick's track plus the
+   * gap after it. Declared here because it is a real default and because a
+   * `--fe-*` nobody declares is a name nobody can find (web/tests/api/
+   * themeTokens.test.ts), even though ListView writes the exact number inline:
+   * only the component knows the tick's track, and it recomputes it whenever
+   * the metrics change. */
+  --fe-list-lead: calc(var(--fe-h-sm) + var(--fe-gap) + var(--fe-gap-sm));
   /* Type scale. Small and tight on purpose: the shell packs a filename, a
    * size, a date and a menu into one row, and 14px with normal leading pushes
    * that to two lines at any realistic column width. */
@@ -245,4 +253,56 @@
      value the inline fallbacks carried, identical in light + dark — declaring
      it changes nothing visually, it only makes the token real. */
   --fe-ok: #16a34a;
+}
+
+/* === The outward-facing page's own ground and card =====================
+ * The public shell (`/s/`, `/d/`, an app's public page) does NOT paint with
+ * `--fe-bg` / `--fe-bg-elev`: in the app those two mean "surface" and
+ * "sunken strip", and a card on a page has to sit ABOVE its ground, not
+ * below it. Drawing the card in `--fe-bg-elev` on `--fe-bg` is exactly what
+ * made the v0.43.0 public page look like no page at all.
+ *
+ * The values are the Go-rendered page's own, up to v0.42.2 (`--px-bg1`,
+ * `--px-bg2`, `--px-card`, `--px-shadow`).
+ *
+ * ⚠ Declared HERE, in both variants, and not beside the rules that use them:
+ * web/tests/api/themeTokens.test.ts reads this file alone, and a `--fe-*`
+ * declared anywhere else is a phantom token to every other reader. */
+.fe.fe-ppage {
+  --fe-ppage-ground-1: #f5f7fb;
+  --fe-ppage-ground-2: #e9edf4;
+  --fe-ppage-card: #ffffff;
+  --fe-ppage-shadow: 0 12px 40px rgba(15, 23, 42, 0.1);
+  --fe-ppage-ok: var(--fe-ok);
+  /* The card's width, set by the shell's `layout` (lib/publicLayout):
+     the gate's 400px here, 520 and 880 below. */
+  --fe-ppage-max: 400px;
+}
+.fe.fe-ppage.fe--theme-dark,
+:root[data-theme='dark'] .fe.fe-ppage,
+:root.dark .fe.fe-ppage,
+.dark .fe.fe-ppage {
+  --fe-ppage-ground-1: #12151a;
+  --fe-ppage-ground-2: #191e25;
+  --fe-ppage-card: #1f242c;
+  --fe-ppage-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --fe-ppage-ok: #22c55e;
+}
+@media (prefers-color-scheme: dark) {
+  .fe.fe-ppage:not(.fe--theme-light) {
+    --fe-ppage-ground-1: #12151a;
+    --fe-ppage-ground-2: #191e25;
+    --fe-ppage-card: #1f242c;
+    --fe-ppage-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    --fe-ppage-ok: #22c55e;
+  }
+}
+/* ⚠ `.fe.` on purpose: `.fe.fe-ppage` above is (0,2,0), so a single-class
+   modifier LOSES to it and every card came out at the gate's 400px —
+   measured on the folder and the signing page at 1440. */
+.fe.fe-ppage--form {
+  --fe-ppage-max: 520px;
+}
+.fe.fe-ppage--wide {
+  --fe-ppage-max: 880px;
 }

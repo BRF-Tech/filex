@@ -120,12 +120,6 @@ func TestRenderFolderPage_EscapesNames(t *testing.T) {
 	assert.NotContains(t, body, "<img onerror=x>")
 }
 
-func TestHumanSize(t *testing.T) {
-	assert.Equal(t, "512 B", HumanSize(512))
-	assert.Equal(t, "1.0 KB", HumanSize(1024))
-	assert.Equal(t, "2.0 MB", HumanSize(2*1024*1024))
-}
-
 func TestMimeForName(t *testing.T) {
 	assert.Contains(t, MimeForName("a.jpg"), "image/jpeg")
 	assert.Equal(t, "application/octet-stream", MimeForName("noext"))

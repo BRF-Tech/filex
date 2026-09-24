@@ -294,6 +294,8 @@ func (f *stagedFixture) issueAIToken(t *testing.T) string {
 		UserID:    f.userID,
 		Label:     "staged-surfaces",
 		TokenHash: apitoken.HashToken(plain),
+		// Named: an empty list grants nothing since v0.43.0.
+		Scopes: "read,write,delete",
 	})
 	require.NoError(t, err)
 	return plain

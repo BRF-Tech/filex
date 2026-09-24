@@ -58,19 +58,33 @@ import '@brftech/filex-core/style.css';
 import { AuthApi } from '@/api/auth';
 import { quotaApi, type QuotaSnapshot } from '@/api/quota';
 import { extractError } from '@/api/client';
+import { emailProblem, refusalField, usernameProblem } from '@/lib/accountRules';
 import { useAuthStore } from '@/stores/auth';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { useNotificationsStore } from '@/stores/notifications';
 import { useToastStore } from '@/stores/toast';
 import { setStoredLocale, type Locale } from '@/i18n';
+import { ProductVersion, availableLocales, gateOnService } from '@brftech/filex-core';
 import { getStoredTheme, setStoredTheme, type ThemeMode } from '@/lib/theme';
 import { getDensity, setDensity, type Density } from '@/lib/density';
 import { openTriggerPref, setOpenTriggerPref } from '@/lib/explorerConfig';
-// belge:v1 — the per-folder view memory is OPT-IN (owner's ruling: "user bunu
-// ayarlardan açabilir olacak isterse"), and its switch belongs here. The state
-// itself lives in the server-side document core keeps, NOT in localStorage, so
-// it follows the person between browsers and machines.
-import { folderMemoryEnabled, setFolderMemoryEnabled } from '@brftech/filex-core';
+// tablo:t3 — the DEFAULT FOLDER VIEW: what a folder the person has never
+// changed opens as. ⚠ It replaced the "remember each folder's view" switch,
+// which was off by default — and off, every change in any folder became the
+// view of every folder (owner, 2026-09-21: "tüm klasörlerde görünüm
+// değişikliği geçerli oluyor"). A change now always belongs to its folder, and
+// this is where the person says what an untouched one opens as. The state
+// lives in the server-side document core keeps, so it follows the person
+// between browsers and machines; an unset field follows the operator's
+// instance default, and filex's own after that.
+import {
+  forgetAllFolders,
+  instanceFolderDefault,
+  personFolderDefault,
+  rememberedCount,
+  setPersonFolderDefault,
+  type ViewMode,
+} from '@brftech/filex-core';
 import { formatBytes } from '@/lib/format';
 // gorunum — the palette grid is core's component, mounted here. Not a copy:
 // see ThemePalette.vue's header for why it had to be split out of the
@@ -84,7 +98,7 @@ import {
 // zaman:z3 — the zone picker is core's component, mounted here. Not a copy:
 // the embed's own "⋯ → Time zone" dialog mounts the very same one (see
 // TimeZonePicker.vue's header for why it had to move out of this file).
-import { TimeZonePicker, formatInstant, resolvedTimeZone } from '@brftech/filex-core';
+import { TimeZonePicker, formatInstant, localeTag, personInitial, personName, resolvedTimeZone } from '@brftech/filex-core';
 import { deviceTimeZone, getStoredTimeZone, setStoredTimeZone } from '@/lib/timezone';
 import { getStartPage, setStartPage, type StartPage } from '@/lib/startPage';
 // ⚠⚠ THE SAME LIST THE REMINDER SHOWS, not a second copy of it. The corner
@@ -97,7 +111,7 @@ import { getStartPage, setStartPage, type StartPage } from '@/lib/startPage';
 // `web/tests/quality/duplication.test.ts` exists to catch.
 import { useDesktopDownloads } from '@/composables/useInstallPrompt';
 import { downscaleImageToDataURL } from '@/lib/image';
-import { WEBHOOK_EVENTS, userEventKey } from '@/lib/webhookEvents';
+import { WEBHOOK_EVENTS, eventOffReason, userEventKey } from '@/lib/webhookEvents';
 import {
   browserNotifyEnabled,
   browserNotifyPermission,
@@ -107,7 +121,11 @@ import {
   type BrowserNotifyPermission,
 } from '@/lib/browserNotify';
 
-const props = defineProps<{ modelValue: boolean }>();
+const props = defineProps<{
+  modelValue: boolean;
+  /** The pane to open on (the admin Notifications page opens `notifications`). */
+  initialSection?: 'profile' | 'preferences' | 'notifications' | 'security' | 'ai';
+}>();
 const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>();
 
 const { t, locale } = useI18n();
@@ -118,7 +136,7 @@ const toast = useToastStore();
 
 type Section = 'profile' | 'preferences' | 'notifications' | 'security' | 'ai';
 
-const section = ref<Section>('profile');
+const section = ref<Section>(props.initialSection ?? 'profile');
 /**
  * ⚠ `ai` is listed, and it is listed as NOT HERE YET — the rail carries it so
  * the shape matches the reference shell, and the pane behind it says in one
@@ -162,13 +180,45 @@ const avatarError = ref('');
 const avatarInput = ref<HTMLInputElement | null>(null);
 const savingProfile = ref(false);
 
+/*
+ * ⚠⚠ The e-mail and the username are checked WHILE they are typed
+ * (lib/accountRules.ts, the mirror of the server's rules), and a refusal the
+ * server still makes lands under the box it is about, in the words the
+ * server wrote for the reader. Before (release-candidate sweep, 2026-09-21):
+ * "bu-bir-eposta-degil" saved with "Profil kaydedildi", another account's
+ * address answered "saved" and changed nothing, and "Ayşe Yılmaz!" as a
+ * username came back as raw English in a toast.
+ */
+const serverRefusal = ref<{ field: string; message: string } | null>(null);
+watch([email, username], () => {
+  serverRefusal.value = null;
+});
+const emailError = computed(() => {
+  if (serverRefusal.value?.field === 'email') return serverRefusal.value.message;
+  // An account that never had an address may keep having none (the server
+  // agrees: account_rules / UpdateProfile).
+  if (!email.value.trim() && !(auth.user?.email ?? '')) return '';
+  const p = emailProblem(email.value);
+  return p ? t(`account.errors.${p.key}`, p.params ?? {}) : '';
+});
+const usernameError = computed(() => {
+  if (serverRefusal.value?.field === 'username') return serverRefusal.value.message;
+  const p = usernameProblem(username.value, auth.user?.username ?? '');
+  return p ? t(`account.errors.${p.key}`, p.params ?? {}) : '';
+});
+const profileInvalid = computed(() => !!emailError.value || !!usernameError.value);
+
 // Mirrors the server's cap (handlers.avatarMaxBytes) so a picture is resized
 // to fit rather than 400-ing after the fact.
 const AVATAR_MAX_BYTES = 48 * 1024;
 const AVATAR_MAX_PX = 160;
 
-const avatarInitial = computed(() =>
-  (displayName.value || email.value || '?').trim().charAt(0).toUpperCase(),
+const avatarInitial = computed(
+  () =>
+    personInitial(
+      { display_name: displayName.value, username: username.value, email: email.value },
+      localeTag(currentLocale.value),
+    ) || '?',
 );
 
 function hydrateProfile() {
@@ -201,6 +251,8 @@ async function onAvatarFile(e: Event) {
 }
 
 async function saveProfile() {
+  // Nothing goes to the server while a box says what is wrong with it.
+  if (profileInvalid.value) return;
   savingProfile.value = true;
   try {
     const u = await AuthApi.updateProfile({
@@ -212,7 +264,9 @@ async function saveProfile() {
     auth.user = u;
     toast.success(t('profile.saved'));
   } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.generic')));
+    const refusal = refusalField(e);
+    if (refusal) serverRefusal.value = refusal;
+    else toast.error(extractError(e, t('errors.generic')));
   } finally {
     savingProfile.value = false;
   }
@@ -233,16 +287,24 @@ async function saveProfile() {
  * Density   → localStorage `filex.density`, read by packages/core's Toolbar.
  * Storage   → GET /api/files/quota/me, read-only. */
 
-const localeOptions: { value: Locale; label: string }[] = [
-  { value: 'en', label: 'English' },
-  { value: 'tr', label: 'Türkçe' },
-];
+/*
+ * ⚠⚠ The OFFERED languages (packages/core lib/uiLocales `availableLocales`),
+ * not a pair written here. This used to be `[en, tr]`, and `currentLocale`
+ * mapped anything that was not `tr` to `en` — so a language pack's language
+ * could not be chosen, and once chosen elsewhere this dialog claimed the
+ * person was reading English. Reactive: a pack installed while the dialog is
+ * open adds its button.
+ */
+const localeOptions = computed<{ value: Locale; label: string }[]>(() =>
+  availableLocales().map((o) => ({ value: o.code, label: o.label || o.code })),
+);
 
-const currentLocale = computed<Locale>(() => (locale.value === 'tr' ? 'tr' : 'en'));
+const currentLocale = computed<Locale>(() => locale.value);
 
 async function pickLocale(v: Locale) {
+  // setStoredLocale decides and applies (web/src/i18n settle) — including a
+  // pack's language, whose strings it fetches.
   setStoredLocale(v);
-  locale.value = v;
   // Also on the account, so the next browser this person signs in from opens
   // in the language they chose here instead of the instance default.
   if (caps.demoReadOnly) return;
@@ -380,10 +442,43 @@ async function pickTimeZone(v: string) {
 }
 
 const density = ref<Density>('comfortable');
-const folderMemory = ref(false);
-function pickFolderMemory(on: boolean) {
-  folderMemory.value = on;
-  setFolderMemoryEnabled(on);
+
+/* ── the default folder view ─────────────────────────────────────────── */
+
+type FvSort = 'name' | 'type' | 'modified' | 'size';
+const FV_VIEWS: ViewMode[] = ['list', 'grid', 'gallery'];
+const FV_SORTS: FvSort[] = ['name', 'type', 'modified', 'size'];
+
+/* Read straight from core's reactive state — the modal holds no copy, so it
+   cannot show a default the explorer is not using. */
+const fvPerson = computed(() => personFolderDefault());
+const fvInstance = computed(() => instanceFolderDefault());
+const fvFoldersKept = computed(() => rememberedCount());
+
+/** What "follow the server" resolves to right now, so the choice that says
+ *  "inherit" also says WHAT it inherits — a default nobody can read is a
+ *  default nobody can predict. */
+const fvInheritView = computed<ViewMode>(() => fvInstance.value.v ?? 'list');
+const fvInheritSort = computed(() => {
+  const k: FvSort = fvInstance.value.k ?? 'name';
+  const d = fvInstance.value.d ?? (k === 'modified' ? 'desc' : 'asc');
+  return `${t(`userSettings.prefs.fvSort_${k}`)} ${d === 'asc' ? '↑' : '↓'}`;
+});
+
+function pickFolderView(v: ViewMode | '') {
+  setPersonFolderDefault({ v: v || undefined });
+}
+function pickFolderSort(k: FvSort | '') {
+  /* A new key arrives in its own natural direction (dates newest first), the
+     same rule a column header follows. */
+  setPersonFolderDefault({ k: k || undefined, d: k ? (k === 'modified' ? 'desc' : 'asc') : undefined });
+}
+function pickFolderDir(d: 'asc' | 'desc') {
+  if (!fvPerson.value.k) return;
+  setPersonFolderDefault({ d });
+}
+function resetDefaultColumns() {
+  setPersonFolderDefault({ c: undefined });
 }
 
 function pickDensity(compact: boolean) {
@@ -473,6 +568,19 @@ const savingNotif = ref(false);
 
 const inAppOn = computed(() => notif.settings?.in_app_enabled !== false);
 const mutedEvents = computed<string[]>(() => notif.settings?.muted_events ?? []);
+// The events that can happen on this instance (lib/webhookEvents
+// eventOffReason): a switch for virus hits with scanning off, or for the
+// escrow key where there is none, is a promise the product cannot keep. ⚠ The
+// same split as every "needs a service" entry (core lib/serviceGate): an
+// ADMINISTRATOR, who can switch the service on, sees it greyed with the reason
+// (QA #39); everybody else is not offered it at all.
+const offeredEvents = computed(() =>
+  WEBHOOK_EVENTS.map((ev) => {
+    const off = eventOffReason(ev, caps.data);
+    const gate = gateOnService(off === null, caps.data.caller_admin === true, off ? t(off) : '');
+    return { ev, off, gate };
+  }).filter((row) => !row.gate.hidden),
+);
 
 async function patchSettings(inApp: boolean, muted: string[]) {
   savingNotif.value = true;
@@ -612,7 +720,6 @@ function sync(open: boolean) {
       theme.value = getStoredTheme();
       density.value = getDensity();
       openTrigger.value = openTriggerPref();
-      folderMemory.value = folderMemoryEnabled();
       timeZone.value = getStoredTimeZone();
       startPage.value = getStartPage();
       refreshTzNow();
@@ -701,6 +808,10 @@ function onBackdropClick(ev: MouseEvent) {
           <h2 class="fx-us__title">{{ t('userSettings.heading') }}</h2>
           <p class="fx-us__subtitle">{{ t('userSettings.headingSub') }}</p>
         </div>
+        <!-- Which filex this is — at the end of the head, before the way out,
+             quiet: the same piece the account menus draw (Burak, 2026-09-24).
+             Nothing is drawn while the server's answer is not in. -->
+        <ProductVersion :version="caps.data.version" class="fx-us__version" />
         <button
           type="button"
           class="fx-us__icon-btn"
@@ -751,7 +862,7 @@ function onBackdropClick(ev: MouseEvent) {
               </span>
               <div class="fx-us__identity-text">
                 <p class="fx-us__identity-name">
-                  <span class="fx-us__identity-who">{{ displayName || email || username }}</span>
+                  <span class="fx-us__identity-who">{{ personName({ display_name: displayName, username, email }) }}</span>
                   <span v-if="auth.isAdmin" class="fx-us__badge">{{ t('userSettings.adminBadge') }}</span>
                 </p>
                 <p class="fx-us__identity-sub">{{ email }}</p>
@@ -790,26 +901,46 @@ function onBackdropClick(ev: MouseEvent) {
                 <input v-model="displayName" class="fx-us__input" :disabled="caps.demoReadOnly" />
               </label>
               <label class="fx-us__field">
-                <span class="fx-us__label">{{ t('common.email') }}</span>
+                <span class="fx-us__label">
+                  {{ t('common.email') }}
+                  <span class="fx-us__required" aria-hidden="true">*</span>
+                </span>
                 <input
                   v-model="email"
                   type="email"
                   class="fx-us__input"
+                  :class="{ 'is-invalid': emailError }"
                   autocomplete="email"
+                  required
+                  :aria-invalid="emailError ? 'true' : undefined"
                   :disabled="caps.demoReadOnly"
+                  data-testid="profile-email"
                 />
+                <span v-if="emailError" class="fx-us__hint fx-us__hint--bad" role="alert" data-testid="profile-email-error">
+                  {{ emailError }}
+                </span>
               </label>
             </div>
 
             <label class="fx-us__field">
-              <span class="fx-us__label">{{ t('profile.username.label') }}</span>
+              <span class="fx-us__label">
+                {{ t('profile.username.label') }}
+                <span class="fx-us__required" aria-hidden="true">*</span>
+              </span>
               <input
                 v-model="username"
                 class="fx-us__input"
+                :class="{ 'is-invalid': usernameError }"
                 autocomplete="username"
+                required
+                :aria-invalid="usernameError ? 'true' : undefined"
                 :disabled="caps.demoReadOnly"
+                data-testid="profile-username"
               />
-              <span class="fx-us__hint">{{ t('profile.username.help') }}</span>
+              <span v-if="usernameError" class="fx-us__hint fx-us__hint--bad" role="alert" data-testid="profile-username-error">
+                {{ usernameError }}
+              </span>
+              <span v-else class="fx-us__hint">{{ t('profile.username.help') }}</span>
             </label>
 
             <p v-if="caps.demoReadOnly" class="fx-us__note">{{ t('userSettings.demoReadOnly') }}</p>
@@ -960,22 +1091,97 @@ function onBackdropClick(ev: MouseEvent) {
               </div>
             </div>
 
-            <div class="fx-us__switch-row">
-              <button
-                type="button"
-                role="switch"
-                class="fx-us__switch"
-                :class="{ 'is-on': folderMemory }"
-                :aria-checked="folderMemory"
-                data-testid="user-settings-folder-memory"
-                @click="pickFolderMemory(!folderMemory)"
-              >
-                <span class="fx-us__switch-knob" />
-              </button>
-              <div class="fx-us__switch-text">
-                <span class="fx-us__label">{{ t('userSettings.prefs.folderMemory') }}</span>
-                <span class="fx-us__hint">{{ t('userSettings.prefs.folderMemoryHint') }}</span>
+            <!-- tablo:t3 — the default folder view. Every choice has an
+                 "inherit" option that NAMES what it inherits, because the
+                 operator's default can change underneath a person who never
+                 picked one, and they should be able to see that it did. -->
+            <div class="fx-us__field" data-testid="user-settings-folder-view">
+              <span class="fx-us__label">{{ t('userSettings.prefs.folderView') }}</span>
+              <span class="fx-us__hint">{{ t('userSettings.prefs.folderViewHint') }}</span>
+
+              <span class="fx-us__label fx-us__label--sub">{{ t('userSettings.prefs.fvMode') }}</span>
+              <div class="fx-us__segmented" role="group" :aria-label="t('userSettings.prefs.fvMode')">
+                <button
+                  type="button"
+                  class="fx-us__seg"
+                  :class="{ 'is-active': !fvPerson.v }"
+                  :aria-pressed="!fvPerson.v"
+                  data-testid="user-settings-fv-view-inherit"
+                  @click="pickFolderView('')"
+                >
+                  {{ t('userSettings.prefs.fvInherit', { value: t(`userSettings.prefs.fvView_${fvInheritView}`) }) }}
+                </button>
+                <button
+                  v-for="v in FV_VIEWS"
+                  :key="v"
+                  type="button"
+                  class="fx-us__seg"
+                  :class="{ 'is-active': fvPerson.v === v }"
+                  :aria-pressed="fvPerson.v === v"
+                  :data-testid="`user-settings-fv-view-${v}`"
+                  @click="pickFolderView(v)"
+                >
+                  {{ t(`userSettings.prefs.fvView_${v}`) }}
+                </button>
               </div>
+
+              <span class="fx-us__label fx-us__label--sub">{{ t('userSettings.prefs.fvSort') }}</span>
+              <div class="fx-us__segmented" role="group" :aria-label="t('userSettings.prefs.fvSort')">
+                <button
+                  type="button"
+                  class="fx-us__seg"
+                  :class="{ 'is-active': !fvPerson.k }"
+                  :aria-pressed="!fvPerson.k"
+                  data-testid="user-settings-fv-sort-inherit"
+                  @click="pickFolderSort('')"
+                >
+                  {{ t('userSettings.prefs.fvInherit', { value: fvInheritSort }) }}
+                </button>
+                <button
+                  v-for="k in FV_SORTS"
+                  :key="k"
+                  type="button"
+                  class="fx-us__seg"
+                  :class="{ 'is-active': fvPerson.k === k }"
+                  :aria-pressed="fvPerson.k === k"
+                  :data-testid="`user-settings-fv-sort-${k}`"
+                  @click="pickFolderSort(k)"
+                >
+                  {{ t(`userSettings.prefs.fvSort_${k}`) }}
+                </button>
+              </div>
+              <div
+                v-if="fvPerson.k"
+                class="fx-us__segmented"
+                role="group"
+                :aria-label="t('userSettings.prefs.fvDir')"
+              >
+                <button
+                  v-for="d in (['asc', 'desc'] as const)"
+                  :key="d"
+                  type="button"
+                  class="fx-us__seg"
+                  :class="{ 'is-active': (fvPerson.d ?? (fvPerson.k === 'modified' ? 'desc' : 'asc')) === d }"
+                  :aria-pressed="(fvPerson.d ?? (fvPerson.k === 'modified' ? 'desc' : 'asc')) === d"
+                  :data-testid="`user-settings-fv-dir-${d}`"
+                  @click="pickFolderDir(d)"
+                >
+                  {{ t(`userSettings.prefs.fvDir_${d}`) }}
+                </button>
+              </div>
+
+              <span v-if="fvPerson.c" class="fx-us__hint">
+                {{ t('userSettings.prefs.fvColumns') }}
+                <button type="button" class="fx-us__link" data-testid="user-settings-fv-columns-reset" @click="resetDefaultColumns">
+                  {{ t('userSettings.prefs.fvColumnsReset') }}
+                </button>
+              </span>
+              <span v-if="fvFoldersKept > 0" class="fx-us__hint">
+                {{ t('userSettings.prefs.fvKept', { count: fvFoldersKept }, fvFoldersKept) }}
+                <button type="button" class="fx-us__link" data-testid="user-settings-fv-forget" @click="forgetAllFolders()">
+                  {{ t('userSettings.prefs.fvForget') }}
+                </button>
+              </span>
             </div>
 
             <div class="fx-us__field">
@@ -1119,20 +1325,33 @@ function onBackdropClick(ev: MouseEvent) {
               <span class="fx-us__label">{{ t('userSettings.notifications.eventsTitle') }}</span>
               <span class="fx-us__hint">{{ t('userSettings.notifications.eventsHint') }}</span>
               <div class="fx-us__events">
-                <div v-for="ev in WEBHOOK_EVENTS" :key="ev" class="fx-us__switch-row">
+                <div
+                  v-for="row in offeredEvents"
+                  :key="row.ev"
+                  class="fx-us__switch-row"
+                  :class="{ 'is-off': row.gate.disabled }"
+                  :title="row.gate.title"
+                >
                   <button
                     type="button"
                     role="switch"
                     class="fx-us__switch"
-                    :class="{ 'is-on': !mutedEvents.includes(ev) }"
-                    :aria-checked="!mutedEvents.includes(ev)"
-                    :disabled="savingNotif"
-                    :data-testid="`user-settings-event-${ev}`"
-                    @click="setEventOn(ev, mutedEvents.includes(ev))"
+                    :class="{ 'is-on': !row.gate.disabled && !mutedEvents.includes(row.ev) }"
+                    :aria-checked="!row.gate.disabled && !mutedEvents.includes(row.ev)"
+                    :disabled="savingNotif || row.gate.disabled"
+                    :data-testid="`user-settings-event-${row.ev}`"
+                    @click="setEventOn(row.ev, mutedEvents.includes(row.ev))"
                   >
                     <span class="fx-us__switch-knob" />
                   </button>
-                  <span class="fx-us__event-label">{{ t(userEventKey(ev)) }}</span>
+                  <span class="fx-us__event-label">
+                    {{ t(userEventKey(row.ev)) }}
+                    <span
+                      v-if="row.gate.disabled"
+                      class="fx-us__event-off"
+                      :data-testid="`user-settings-event-off-${row.ev}`"
+                    >{{ row.gate.title }}</span>
+                  </span>
                 </div>
               </div>
             </div>
@@ -1313,7 +1532,7 @@ function onBackdropClick(ev: MouseEvent) {
             v-if="profileSaveVisible"
             type="button"
             class="fx-us__btn fx-us__btn--primary"
-            :disabled="savingProfile"
+            :disabled="savingProfile || profileInvalid"
             data-testid="user-settings-save-profile"
             @click="saveProfile"
           >
@@ -1374,7 +1593,7 @@ function onBackdropClick(ev: MouseEvent) {
   gap: var(--fe-gap-xs);
   padding: var(--fe-gap) var(--fe-gap-sm);
   background: var(--fe-bg-elev);
-  border-right: 1px solid var(--fe-border);
+  border-inline-end: 1px solid var(--fe-border);
   overflow-y: auto;
 }
 .fx-us__rail-item {
@@ -1390,7 +1609,7 @@ function onBackdropClick(ev: MouseEvent) {
   font: inherit;
   font-size: var(--fe-text-md);
   font-weight: 500;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .fx-us__rail-item:hover {
@@ -1415,7 +1634,7 @@ function onBackdropClick(ev: MouseEvent) {
    other four and then opened onto an apology is the thing this avoids. */
 .fx-us__rail-soon {
   flex: 0 0 auto;
-  margin-left: auto;
+  margin-inline-start: auto;
   letter-spacing: 0.01em;
   padding: 0 6px;
   border-radius: 999px;
@@ -1466,6 +1685,11 @@ function onBackdropClick(ev: MouseEvent) {
 .fx-us__head-text {
   min-width: 0;
   flex: 1 1 auto;
+}
+/* The version sits between the heading and the close button and never pushes
+   either: it keeps its own width, and the heading is what gives way. */
+.fx-us__version {
+  flex: 0 0 auto;
 }
 .fx-us__title {
   margin: 0;
@@ -1541,7 +1765,7 @@ function onBackdropClick(ev: MouseEvent) {
     flex-direction: row;
     gap: var(--fe-gap-xs);
     padding: var(--fe-gap-sm);
-    border-right: 0;
+    border-inline-end: 0;
     border-bottom: 1px solid var(--fe-border);
     overflow-x: auto;
     overflow-y: hidden;
@@ -1550,7 +1774,7 @@ function onBackdropClick(ev: MouseEvent) {
     flex: 0 0 auto;
   }
   .fx-us__rail-soon {
-    margin-left: var(--fe-gap-xs);
+    margin-inline-start: var(--fe-gap-xs);
   }
   .fx-us__main {
     grid-column: 1;
@@ -1571,7 +1795,7 @@ function onBackdropClick(ev: MouseEvent) {
     flex: 1 1 60%;
   }
   .fx-us__identity-change {
-    margin-left: 0;
+    margin-inline-start: 0;
   }
   .fx-us__foot {
     padding: var(--fe-gap-sm) var(--fe-gap);
@@ -1621,6 +1845,30 @@ function onBackdropClick(ev: MouseEvent) {
 }
 .fx-us__hint--bad {
   color: var(--fe-danger);
+}
+/* The default folder view's three rows sit under ONE heading, so their own
+   labels step down a size rather than reading as three separate settings. */
+.fx-us__label--sub {
+  margin-top: var(--fe-gap-xs);
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+/* An inline action inside a hint ("Reset them", "Forget them all"): a link,
+   not a button — the hint is the sentence and this is its verb. */
+.fx-us__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fe-primary);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.fx-us__required {
+  color: var(--fe-danger);
+}
+.fx-us__input.is-invalid {
+  border-color: var(--fe-danger);
 }
 .fx-us__note {
   margin: 0;
@@ -1706,7 +1954,7 @@ function onBackdropClick(ev: MouseEvent) {
   color: var(--fe-text-muted);
 }
 select.fx-us__input {
-  padding-right: 6px;
+  padding-inline-end: 6px;
 }
 .fx-us__btn {
   display: inline-flex;
@@ -1776,7 +2024,7 @@ select.fx-us__input {
   height: var(--fe-h-md);
   padding: 0 var(--fe-gap);
   border: 0;
-  border-right: 1px solid var(--fe-border);
+  border-inline-end: 1px solid var(--fe-border);
   background: var(--fe-bg);
   color: var(--fe-text-muted);
   font: inherit;
@@ -1785,7 +2033,7 @@ select.fx-us__input {
   cursor: pointer;
 }
 .fx-us__seg:last-child {
-  border-right: 0;
+  border-inline-end: 0;
 }
 .fx-us__seg:hover {
   background: var(--fe-bg-hover);
@@ -1824,7 +2072,7 @@ select.fx-us__input {
 .fx-us__switch-knob {
   position: absolute;
   top: 2px;
-  left: 2px;
+  inset-inline-start: 2px;
   width: 16px;
   height: 16px;
   border-radius: 999px;
@@ -1832,7 +2080,8 @@ select.fx-us__input {
   transition: transform 120ms ease;
 }
 .fx-us__switch.is-on .fx-us__switch-knob {
-  transform: translateX(14px);
+  /* ⚠ RTL: toward "on" = toward the inline end (--filex-dir-x, core base.css). */
+  transform: translateX(calc(14px * var(--filex-dir-x, 1)));
 }
 .fx-us__switch-text {
   display: flex;
@@ -1843,6 +2092,19 @@ select.fx-us__input {
 .fx-us__event-label {
   font-size: var(--fe-text-sm);
   color: var(--fe-text);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+/* An event whose service is off: greyed, with the reason under it (the
+   administrator's view — everybody else is not offered it). */
+.fx-us__switch-row.is-off .fx-us__event-label {
+  color: var(--fe-text-muted);
+}
+.fx-us__event-off {
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
 }
 .fx-us__events {
   display: flex;
@@ -1927,7 +2189,7 @@ select.fx-us__input {
   line-height: 20px;
 }
 .fx-us__identity-change {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 /* ── the assistant pane, which has nothing in it on purpose ───────── */

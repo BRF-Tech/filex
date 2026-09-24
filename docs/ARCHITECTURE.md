@@ -199,8 +199,8 @@ Built-ins:
 ## DB schema
 
 The tables an operator or an integrator is most likely to need. ⚠ This is a
-map, not the schema: the real one has roughly twice as many tables and 39
-migrations, and some names here are the older ones (`files` is `nodes`,
+map, not the schema: the real one has roughly twice as many tables and 51
+migrations at v0.43.0, and some names here are the older ones (`files` is `nodes`,
 `operations` is `ops_queue`, `thumbs` is `thumbnails`). Read
 `backend/db/migrations/` for the truth. Names use `singular_or_plural` to match
 Laravel conventions of the sister projects.
@@ -219,7 +219,7 @@ Laravel conventions of the sister projects.
 | `sync_runs`                  | per-storage sync history with counts and errors |
 | `audit_events`               | all auditable user actions |
 | `external_services`          | OnlyOffice/Drawio config + last_check |
-| `thumbs`                     | thumbnail cache index (bytes live on disk; released when the node is purged, and a reconciler sweeps orphans at boot and every `FILEX_THUMBS_SWEEP_INTERVAL`) |
+| `thumbs`                     | thumbnail cache index (bytes live on disk; released when the node is purged, and a reconciler sweeps orphans at boot and every `FILEX_THUMBS_SWEEP_INTERVAL`; at boot it also re-fits pages cached at full size before 0.41.0) |
 | `migration_lock`             | goose migration lock |
 
 ER diagram (high-level):
@@ -249,10 +249,19 @@ loop:
     seen := {}
 
     for entry in storage.Sync(since=last_run_started):
-      if entry.path is inside .filex-trash/:  # filex's own bookkeeping
-        skip                                  # -- not catalogue content
+      if entry.path is inside /.filex-trash/, /.versions/ or /.thumbs/:
+        skip                                  # filex's own bookkeeping,
+                                              # -- not catalogue content
       seen.add(entry.path)
-      upsert(files, storage_id, entry)
+      if row is staged/failed:              # a staged upload never flipped
+        if no staging session and entry has the committed size and is not
+           older than the commit:           # the bytes did land
+          mark stored, queue antivirus scan
+        else:
+          touch seen_at only                 # keep the committed size/time
+          continue
+      upsert(files, storage_id, entry)      # keeps the row's mime when the
+                                            # listing has none (object stores)
 
     # anything LIVE inside .filex-trash/ is a defect, and both kinds are fixed
     for f in db.files where storage_id=$id and path under .filex-trash/ and not deleted:
@@ -261,10 +270,18 @@ loop:
       else:                                       # a row minted for trash bytes
         hard_delete(f)                            # -> dropped, bytes untouched
 
+    # ANY row under .versions/ or .thumbs/ (live or trashed) was minted by an
+    # older walk: dropped, deepest first, with its search document
+    for f in db.files where storage_id=$id and path under .versions/ or .thumbs/:
+      hard_delete(f)                              # catalogue only, bytes untouched
+
     # tombstone pass — a node not seen this run is a CANDIDATE, not a verdict
-    if seen < 0.7 * previous_run.seen:      # the whole listing looks wrong
-      skip the pass entirely
+    if seen < 0.7 * last_ok_run.seen:       # the whole listing looks wrong
+      skip the pass entirely                # (a failed/aborted run is no baseline)
     for f in db.files where storage_id=$id and seen_at < run_started:
+      if f.path is inside filex's own trees: # never, whatever else went wrong:
+        keep                                 # a trashed .versions/ folder purges
+                                             # the version history
       if f.transfer_state != "stored":      # filex never put the bytes there
         keep
       elif storage.Stat(f.path) is found:   # the listing missed it
@@ -274,8 +291,22 @@ loop:
       else:
         soft_delete(f)                       # genuinely gone → trash
 
-    finish_sync_run(run)
+    finish_sync_run(run)                  # on a context the run's own
+                                          # cancellation cannot reach: "ok",
+                                          # "failed", or "aborted" if cut short
+
+  # at worker start, before any run: a row still open belongs to a process
+  # that is gone
+  close every sync_run with no finished_at as "aborted"
 ```
+
+A **folder rescan** (`POST /api/admin/storages/{id}/sync?path=`) runs the same
+walk from one catalogued folder's row (`Worker.RescanFolder`): the one-pass
+listing asks for that subtree only, the tombstone candidates are the stale rows
+strictly below the folder (an exact, character-counted prefix — never `LIKE`),
+the whole-listing guard compares against the folder's own live row count, and a
+listing that failed part-way skips the tombstone pass. It takes the storage's
+one-run lock and writes no `sync_runs` row.
 
 ⚠ Absence from a listing is not proof of deletion, and answering it with
 "move to trash" turns any unrelated bug into lost data — which is exactly
@@ -351,6 +382,19 @@ is what heals an install that ran an earlier version: a revived deletion is
 soft-deleted again (keeping `storage_key`, so restore still knows where it came
 from), and a row the old walk minted for the trash's own bytes is dropped
 outright. Bytes are never touched by either.
+
+**`.versions/` and `.thumbs/` are filex's too, and the walk skips them the same
+way** (`versioning.IsInternalTree`, anchored at the storage root — the one list
+the sync walk, a cross-storage copy and the public share pages all ask). The
+walk used to skip only the trash, so a full scan minted a system-owned row for
+every snapshot folder and file. Unseen once the walk stopped listing them, the
+*folder* rows would have gone to the trash in place — `confirmGone` has no
+object to `Stat` for a directory — and purging a trashed folder deletes its
+prefix on the backend: every version of every file. So every row under those
+two trees, live or trashed, is dropped from the catalogue before the tombstone
+pass runs (deepest first, search documents included, backend untouched), and
+the tombstone pass itself refuses any row inside an internal tree, so a cleanup
+that failed is a cleanup deferred, never a version history in the trash.
 
 `storage.Sync` compares the backend's etag when the driver reports one (S3,
 WebDAV PROPFIND) and the object's **size and modification time** when it does

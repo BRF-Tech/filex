@@ -68,12 +68,13 @@ type BrandingConfig struct {
 	// SSOLabel is the operator's own text for the sign-in page's SSO button
 	// (issue #28). Empty means the product's translated default.
 	SSOLabel string `json:"sso_label"`
-	// CustomCSS is the operator stylesheet (settings key `ui.custom_css`,
-	// gorunum:v1 — custom_css.go). It rides this payload because /api/branding
-	// is the appearance fetch the SPA already makes at boot, pre-session; the
-	// browser injects it into <head>. Instance-wide, never tenant-overlaid,
-	// and deliberately unused by the server-rendered public-page chrome below.
-	CustomCSS string `json:"custom_css"`
+	// ⚠ tema:v1 — the operator stylesheet USED TO RIDE THIS PAYLOAD and no longer
+	// does. /api/branding is public: it is fetched by the login page and by
+	// every anonymous share visitor, so a sheet carried here was a sheet the
+	// login page wore and a stranger downloaded. It now has an authenticated
+	// endpoint of its own (`GET /api/me/custom-css`), and the field is gone
+	// rather than emptied so that a client reading the old name fails loudly
+	// instead of quietly styling nothing. See custom_css.go.
 }
 
 // BrandingSource resolves the effective branding for a request host from the
@@ -84,8 +85,24 @@ type BrandingSource struct {
 	Store       db.Store
 	MultiTenant bool
 
+	// Appearance supplies the instance THEME for the server-rendered public
+	// pages (tema:v1). It hangs off the branding source rather than being
+	// threaded through every public handler because those handlers already
+	// hold exactly one appearance-ish dependency, and adding a second
+	// constructor argument to eight call sites to express "and also the
+	// theme" would be ceremony, not clarity. Nil-safe.
+	Appearance *AppearanceSource
+
 	mu    sync.Mutex
 	cache map[string]brandingCacheEntry
+}
+
+// AttachAppearance wires the theme source used by the public-page chrome.
+func (b *BrandingSource) AttachAppearance(a *AppearanceSource) {
+	if b == nil {
+		return
+	}
+	b.Appearance = a
 }
 
 type brandingCacheEntry struct {
@@ -141,10 +158,6 @@ func (b *BrandingSource) For(ctx context.Context, host string) BrandingConfig {
 		return BrandingConfig{}
 	}
 	cfg := brandingFromMap(m, "branding.")
-	// gorunum:v1 — THE READER for `ui.custom_css`. A settings field with no
-	// reader saves, reads back and does nothing (filex lesson #92); this is
-	// the line that makes the operator's stylesheet reach a browser.
-	cfg.CustomCSS = customCSSFromSettings(m)
 	if b.MultiTenant && host != "" {
 		if p, perr := b.Store.GetProviderByHost(ctx, host); perr == nil && p != nil && !p.IsSupertenant {
 			overlayBrandingFromMap(&cfg, m, fmt.Sprintf("tenant.%d.branding.", p.ID))
@@ -302,35 +315,81 @@ func NewBranding(src *BrandingSource) *Branding { return &Branding{Source: src} 
 // the admin SPA login page fetches it before any session exists.
 func (h *Branding) Get(w http.ResponseWriter, r *http.Request) {
 	cfg := h.Source.ForRequest(r)
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	writeJSON(w, http.StatusOK, cfg)
+	// ⚠ Revalidated rather than held for a minute — a name or a logo just
+	// changed is on the next page load (public_cache.go).
+	writePublicJSON(w, r, cfg)
 }
 
 // ─────────────────── public-page chrome ───────────────────
 
 // publicChrome bundles the per-request branded fragments the public page
 // templates render: an accent CSS override, a logo+name header, and the
-// footer (custom text + the default "filex ile paylaşıldı" line, which
-// stays visible unless hide_powered_by is set).
+// footer (custom text + the default "Shared with filex" line, which stays
+// visible unless hide_powered_by is set).
 type publicChrome struct {
 	BrandCSS  template.HTML
 	BrandHead template.HTML
-	FooterTR  template.HTML
-	FooterEN  template.HTML
+	// footerCustom is the operator's own footer line, already escaped and
+	// wrapped; "" when none is set.
+	footerCustom string
+	// hidePowered drops the "Shared with filex" line.
+	hidePowered bool
+	// wrapped: the operator set a footer text or hid the powered-by line, so
+	// the footer is the `.pfoot` block (the historical output keeps the bare
+	// line otherwise).
+	wrapped bool
+}
+
+// Footer is the page footer in lang: the operator's line, then the
+// "Shared with filex" line in the visitor's language (publicFooterLine).
+//
+// ⚠ A method taking the language, not one field per language: it was
+// FooterTR + FooterEN, and a third language had nowhere to go but English.
+func (c publicChrome) Footer(lang string) template.HTML {
+	powered := ""
+	if !c.hidePowered {
+		powered = publicFooterLine(lang)
+	}
+	if !c.wrapped {
+		return template.HTML(powered) //nolint:gosec // publicFooterLine escapes the translation before adding the fixed link
+	}
+	if c.footerCustom == "" && powered == "" {
+		return template.HTML("")
+	}
+	return template.HTML(`<div class="pfoot">` + c.footerCustom + powered + `</div>`) //nolint:gosec // both halves escaped at construction
 }
 
 // publicChromeFor computes the chrome for one request. Nil src / zero
 // branding yields fragments identical to the historical constants.
+//
+// ⚠ tema:v1 — THE INSTANCE THEME IS APPLIED HERE, and the order is the whole
+// design. `BrandCSS` ends up as theme-then-accent, so an operator who has set
+// both a custom theme and a `branding.accent` gets the accent: it is the more
+// specific statement ("this one colour, on the pages strangers see") and the
+// one they will have set second.
+//
+// ⚠ The theme resolved is the INSTANCE DEFAULT and nothing else. These pages
+// are looked at by people with no account here, so there is no preference to
+// read — and reading one would leak which palette the sender had picked.
 func publicChromeFor(src *BrandingSource, r *http.Request) publicChrome {
-	return chromeFor(src.ForRequest(r))
+	c := chromeFor(src.ForRequest(r))
+	if src == nil || src.Appearance == nil || r == nil {
+		return c
+	}
+	ctx := r.Context()
+	themeCSS := publicThemeCSS(
+		src.Appearance.DefaultTokens(ctx, false),
+		src.Appearance.DefaultTokens(ctx, true),
+	)
+	if themeCSS != "" {
+		c.BrandCSS = template.HTML(themeCSS) + c.BrandCSS //nolint:gosec // both halves are built from pattern-checked values
+	}
+	return c
 }
 
 // chromeFor builds the branded fragments from a resolved config.
 func chromeFor(cfg BrandingConfig) publicChrome {
-	c := publicChrome{
-		FooterTR: template.HTML(publicFooterTR),
-		FooterEN: template.HTML(publicFooterEN),
-	}
+	c := publicChrome{}
 
 	// Accent override: injected AFTER publicPageStyle, so the plain :root
 	// selector wins over both the light and dark defaults (same specificity,
@@ -362,22 +421,11 @@ func chromeFor(cfg BrandingConfig) publicChrome {
 
 	// Footer: optional custom line + the powered-by line (default ON).
 	if cfg.FooterText != "" || cfg.HidePoweredBy {
-		custom := ""
+		c.wrapped = true
 		if cfg.FooterText != "" {
-			custom = `<div class="pfoot__custom">` + template.HTMLEscapeString(cfg.FooterText) + `</div>`
+			c.footerCustom = `<div class="pfoot__custom">` + template.HTMLEscapeString(cfg.FooterText) + `</div>`
 		}
-		wrap := func(powered string) template.HTML {
-			if custom == "" && powered == "" {
-				return template.HTML("")
-			}
-			return template.HTML(`<div class="pfoot">` + custom + powered + `</div>`)
-		}
-		poweredTR, poweredEN := publicFooterTR, publicFooterEN
-		if cfg.HidePoweredBy {
-			poweredTR, poweredEN = "", ""
-		}
-		c.FooterTR = wrap(poweredTR)
-		c.FooterEN = wrap(poweredEN)
+		c.hidePowered = cfg.HidePoweredBy
 	}
 	return c
 }

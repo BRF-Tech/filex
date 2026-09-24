@@ -25,7 +25,9 @@
 
 import { computed, getCurrentScope, onScopeDispose, ref } from 'vue';
 
-export type OperationKind = 'upload' | 'copy' | 'move' | 'delete' | 'convert' | 'archive';
+/** `plugin` — an app-plugin job (docs/APP-PLUGINS-API.md); also what any
+ *  queue kind this package has no drawing for is shown as. */
+export type OperationKind = 'upload' | 'copy' | 'move' | 'delete' | 'convert' | 'archive' | 'plugin' | 'trash';
 export type OperationStatus = 'running' | 'done' | 'error' | 'aborted';
 
 /** What a publisher hands to `sync()` for one row. */
@@ -38,7 +40,11 @@ export interface OperationInput {
   /** 0..100, or null for indeterminate (renderer shows a spinner). */
   percent: number | null;
   status: OperationStatus;
+  /** The failure, SAID (lib/errorWords) — never a raw server string. */
   error?: string | null;
+  /** The raw words behind it — set only for a caller who administers the
+   *  instance; drawn as a second line under the sentence. */
+  errorDetail?: string | null;
   /** Queue op accepted but not started yet ("Queued"). */
   queued?: boolean;
   /** Progress counters for queue ops (3/5 items). */
@@ -49,6 +55,20 @@ export interface OperationInput {
   totalBytes?: number;
   cancellable?: boolean;
   retryable?: boolean;
+  /** A plugin job's last progress message — shown under the name while it runs. */
+  message?: string | null;
+  /** Files a finished job produced (adapter-qualified paths); the row offers "Open". */
+  outputs?: string[];
+  /**
+   * An app-plugin job's output mode — `sibling` (a new file beside the
+   * original) or `version` (the same file, a new version of it).
+   *
+   * ⚠ It is on the row because the two are indistinguishable once the job
+   * lands: "Open" navigates to `outputs[0]`, which in `version` mode IS the
+   * input the person started from, so without the chip the tray reads as if
+   * nothing was produced. Absent for every other kind.
+   */
+  outputMode?: string | null;
 }
 
 export interface OperationActions {
@@ -56,6 +76,8 @@ export interface OperationActions {
   /** Clean the row out of the OWNING source list (called on retire/dismiss). */
   dismiss?: () => void;
   retry?: () => void;
+  /** Reveal one of the row's outputs in the listing. */
+  open?: (path: string) => void;
 }
 
 export interface Operation {
@@ -66,6 +88,7 @@ export interface Operation {
   percent: number | null;
   status: OperationStatus;
   error: string | null;
+  errorDetail: string | null;
   queued: boolean;
   doneCount: number | null;
   totalCount: number | null;
@@ -73,6 +96,9 @@ export interface Operation {
   totalBytes: number | null;
   cancellable: boolean;
   retryable: boolean;
+  message: string | null;
+  outputs: string[];
+  outputMode: string | null;
   startedAt: number;
   settledAt: number | null;
 }
@@ -89,6 +115,7 @@ function toOperation(key: string, input: OperationInput, prev?: Operation): Oper
     percent: input.percent,
     status: input.status,
     error: input.error ?? null,
+    errorDetail: input.errorDetail ?? null,
     queued: input.queued ?? false,
     doneCount: input.doneCount ?? null,
     totalCount: input.totalCount ?? null,
@@ -96,6 +123,9 @@ function toOperation(key: string, input: OperationInput, prev?: Operation): Oper
     totalBytes: input.totalBytes ?? null,
     cancellable: input.cancellable ?? false,
     retryable: input.retryable ?? false,
+    message: input.message ?? null,
+    outputs: input.outputs ?? [],
+    outputMode: input.outputMode ?? null,
     startedAt: prev?.startedAt ?? Date.now(),
     settledAt: prev?.settledAt ?? (terminal ? Date.now() : null),
   };
@@ -204,8 +234,11 @@ export function useOperations() {
     }
     for (const key of [...actions.keys()]) {
       if (key.startsWith(prefix) && !present.has(key) && !active.value.some((o) => o.key === key)) {
-        // keep actions for rows still on screen (sticky errors)
-        if (!next.some((o) => o.key === key)) actions.delete(key);
+        // keep actions for rows still on screen (sticky errors) and for
+        // history rows that can still be opened (a finished job's outputs)
+        if (next.some((o) => o.key === key)) continue;
+        if (history.value.some((o) => o.key === key && o.outputs.length > 0)) continue;
+        actions.delete(key);
       }
     }
 
@@ -227,6 +260,13 @@ export function useOperations() {
     const acts = actions.get(key);
     retire(key);
     acts?.dismiss?.();
+  }
+
+  /** Reveal a finished row's output — the first one unless a path is named. */
+  function open(key: string, path?: string) {
+    const row = active.value.find((o) => o.key === key) ?? history.value.find((o) => o.key === key);
+    const target = path ?? row?.outputs[0];
+    if (target) actions.get(key)?.open?.(target);
   }
 
   function clearHistory() {
@@ -284,6 +324,7 @@ export function useOperations() {
     cancel,
     retry,
     dismiss,
+    open,
     clearHistory,
   };
 }

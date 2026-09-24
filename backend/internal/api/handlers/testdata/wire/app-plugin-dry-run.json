@@ -1,0 +1,139 @@
+{
+  "engines_missing": [
+    {
+      "id": "libreoffice",
+      "name": "LibreOffice"
+    }
+  ],
+  "installed": {
+    "id": 7,
+    "version": "0.2.0"
+  },
+  "kind": "app",
+  "manifest": {
+    "actions": [
+      {
+        "applies": {
+          "ext": [
+            "pdf"
+          ],
+          "kind": "file"
+        },
+        "confirm": {
+          "en": "Send it?",
+          "tr": "Gönderilsin mi?"
+        },
+        "id": "sign",
+        "label": {
+          "en": "Sign…",
+          "tr": "İmzala…"
+        },
+        "limits": {},
+        "output": {
+          "mode": "sibling",
+          "name": "{stem}-sign{ext}"
+        },
+        "view": "wizard"
+      }
+    ],
+    "description": {
+      "en": "Send a document out for signature.",
+      "tr": "Bir belgeyi imzaya gönderin."
+    },
+    "label": {
+      "en": "e-Signature",
+      "tr": "e-İmza"
+    },
+    "languages": [
+      "en",
+      "tr"
+    ],
+    "limits": {},
+    "manifest_version": 1,
+    "name": "sign",
+    "permission_reasons": {
+      "files:read": {
+        "en": "To read the document you sign or send.",
+        "tr": "İmzaladığınız ya da gönderdiğiniz belgeyi okumak için."
+      },
+      "files:write": {
+        "en": "To write the signed document beside the original.",
+        "tr": "İmzalı belgeyi özgün belgenin yanına yazmak için."
+      },
+      "public_pages": {
+        "en": "To let a signer without an account open their own link.",
+        "tr": "Hesabı olmayan bir imzacının kendi bağlantısını açabilmesi için."
+      }
+    },
+    "permissions": [
+      "files:read",
+      "files:write",
+      "public_pages",
+      "state"
+    ],
+    "public_pages": [
+      {
+        "id": "signer",
+        "label": {
+          "en": "Sign the document",
+          "tr": "Belgeyi imzala"
+        },
+        "pin": "optional"
+      }
+    ],
+    "settings": [
+      {
+        "key": "tsa_url",
+        "label": "Timestamp authority",
+        "type": "string"
+      }
+    ],
+    "version": "1.2.0",
+    "views": [
+      {
+        "applies": {
+          "kind": "file"
+        },
+        "id": "wizard",
+        "label": {
+          "en": "Signing",
+          "tr": "İmzalama"
+        },
+        "placement": "page"
+      }
+    ]
+  },
+  "permissions": [
+    {
+      "id": "files:read",
+      "label": "Reads the contents of the files you pick",
+      "reason": {
+        "en": "To read the document you sign or send.",
+        "tr": "İmzaladığınız ya da gönderdiğiniz belgeyi okumak için."
+      }
+    },
+    {
+      "id": "files:write",
+      "label": "Writes files next to the one you pick, or as its new version",
+      "reason": {
+        "en": "To write the signed document beside the original.",
+        "tr": "İmzalı belgeyi özgün belgenin yanına yazmak için."
+      }
+    },
+    {
+      "id": "public_pages",
+      "label": "Creates time-limited, PIN-protected public pages for outside participants",
+      "reason": {
+        "en": "To let a signer without an account open their own link.",
+        "tr": "Hesabı olmayan bir imzacının kendi bağlantısını açabilmesi için."
+      }
+    },
+    {
+      "id": "state",
+      "label": "Keeps small per-file state records"
+    }
+  ],
+  "signed": true,
+  "wasm_bytes": 5242880,
+  "wasm_sha256": "a9950e0d84a62a1b30c952736b097e5f3cde019564724dc3c0432a36f7c0d091"
+}

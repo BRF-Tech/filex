@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,8 @@ func init() {
 
 const stateCookieName = "filex_oidc_state"
 
+var _ auth.OIDCLogoutDriver = (*Driver)(nil)
+
 // Driver is the OIDC auth driver.
 type Driver struct {
 	store       db.Store
@@ -43,6 +46,7 @@ type Driver struct {
 	verifier    *oidc.IDTokenVerifier
 	oauth       *oauth2.Config
 	issuer      string
+	endSession  string // IdP's end_session_endpoint from discovery; "" = none, sign-out stays local
 	roleClaim   string // metadata field name containing role
 	adminGroup  string // group/role string that elevates user to admin
 	defaultRole string
@@ -90,6 +94,12 @@ func (d *Driver) Init(ctx context.Context, cfg map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("oidc: discover provider: %w", err)
 	}
+	// RP-initiated logout (see EndSessionURL). Optional in discovery: an IdP
+	// without it simply keeps sign-out local, as it always was.
+	var logout struct {
+		EndSessionEndpoint string `json:"end_session_endpoint"`
+	}
+	_ = provider.Claims(&logout)
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -103,6 +113,7 @@ func (d *Driver) Init(ctx context.Context, cfg map[string]any) error {
 		Scopes:       scopes,
 	}
 	d.issuer = issuer
+	d.endSession = logout.EndSessionEndpoint
 	d.roleClaim, _ = cfg["role_claim"].(string)
 	d.adminGroup, _ = cfg["admin_group"].(string)
 	return nil
@@ -164,6 +175,7 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 	roleClaim := d.roleClaim
 	adminGroup := d.adminGroup
 	providerID := d.providerID
+	endSession := d.endSession
 	d.mu.RUnlock()
 	if oauthCfg == nil {
 		return nil, "", errors.New("oidc: not initialized")
@@ -269,7 +281,61 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 	if _, err := d.store.CreateSession(ctx, user.ID, sessionToken, time.Now().Add(12*time.Hour), "", ""); err != nil {
 		return nil, "", err
 	}
+	// Kept only where sign-out can use it (EndSessionURL). Losing it costs the
+	// IdP half of sign-out, not the sign-in, so a failure here is a warning.
+	if endSession != "" {
+		if err := d.store.SetSessionIDToken(ctx, sessionToken, rawIDToken); err != nil {
+			slog.Warn("oidc: could not keep the id_token for sign-out; this session will sign out of filex only",
+				slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
+		}
+	}
 	return user, sessionToken, nil
+}
+
+// EndSessionURL implements auth.OIDCLogoutDriver: where to send the browser so
+// the IdP ends its own session too (OpenID Connect RP-Initiated Logout 1.0).
+//
+// ⚠ Without this, signing out of filex was not signing out. The IdP's session
+// stayed open, so in SSO-first mode (FILEX_OIDC_AUTO_REDIRECT) the login page
+// went straight back to the IdP, which issued a new code without a form: the
+// same account was signed in again ~0.5 s later (measured on Keycloak 26), and
+// on a shared computer the next person got the previous one's files.
+//
+// id_token_hint is what lets the IdP end the session without first asking
+// "Do you want to log out?" (Keycloak) — or at all (IdPs that require it).
+// An expired token is fine: the spec has the IdP accept it, and by sign-out
+// time it usually has expired.
+//
+// "" — keep sign-out local — when the IdP advertises no end_session_endpoint,
+// no id_token was kept for the session, or the one kept was issued by another
+// issuer (a provider re-pointed between sign-in and sign-out): one IdP is
+// never handed a token another one issued.
+func (d *Driver) EndSessionURL(_ *http.Request, idToken, postLogoutRedirect string) string {
+	d.mu.RLock()
+	endSession, issuer := d.endSession, d.issuer
+	clientID := ""
+	if d.oauth != nil {
+		clientID = d.oauth.ClientID
+	}
+	d.mu.RUnlock()
+	if endSession == "" || idToken == "" {
+		return ""
+	}
+	if iss, _ := parseJWTClaims(idToken)["iss"].(string); iss != issuer {
+		return ""
+	}
+	u, err := url.Parse(endSession)
+	if err != nil {
+		return ""
+	}
+	q := u.Query() // an endpoint may already carry parameters of its own
+	q.Set("id_token_hint", idToken)
+	q.Set("client_id", clientID)
+	if postLogoutRedirect != "" {
+		q.Set("post_logout_redirect_uri", postLogoutRedirect)
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // mappedRoleOnLogin is the role an EXISTING account holds after an SSO sign-in

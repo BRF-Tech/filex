@@ -13,15 +13,17 @@ import {
   ArrowUpCircle, CheckCircle2, RefreshCw, ShieldAlert, Terminal, Copy, AlertTriangle,
 } from 'lucide-vue-next';
 
-import { UpdatesApi, type UpdateStatus } from '@/api/updates';
+import { UpdatesApi, type UpdateRelease, type UpdateStatus } from '@/api/updates';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
+import { formatDate } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Spinner from '@/components/ui/Spinner.vue';
+import { DataTable, type DataColumn } from '@brftech/filex-core';
 
-const { t } = useI18n();
+const { t, te, locale } = useI18n();
 const toast = useToastStore();
 
 const loading = ref(true);
@@ -58,7 +60,8 @@ async function checkNow() {
   checking.value = true;
   try {
     status.value = await UpdatesApi.check();
-    if (status.value?.check_error) toast.error(status.value.check_error);
+    // The sentence, not the raw error: the page keeps that as a second line.
+    if (status.value?.check_error) toast.error(t('updates.checkFailedWords'));
     else if (status.value?.action === 'none') toast.success(t('updates.upToDate'));
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
@@ -104,6 +107,32 @@ const stepVariant = computed(() => {
     default: return 'success';
   }
 });
+
+/** The versions a jump goes over: one per row, with what each one carries.
+ *
+ * The explorer's table (DataTable), remembered under `admin.updates.skipped`.
+ * The whole list arrives in one answer, so the table sorts it itself; the
+ * version compares digit groups as numbers (0.9 before 0.10), and the flags
+ * sort by weight — a security fix outranks a migration. */
+const skippedColumns = computed<DataColumn<UpdateRelease>[]>(() => [
+  { id: 'version', label: t('versions.col.version'), sortable: true, width: 140 },
+  {
+    id: 'flags',
+    label: t('common.flags'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 200,
+    sortValue: (r) => (r.security ? 2 : 0) + (r.migrations ? 1 : 0),
+  },
+  {
+    id: 'notes',
+    label: t('common.notes'),
+    sortable: true,
+    width: 320,
+    format: (r) => r.notes || '—',
+    sortValue: (r) => r.notes || null,
+  },
+]);
 </script>
 
 <template>
@@ -153,7 +182,11 @@ const stepVariant = computed(() => {
           </div>
           <div class="flex flex-wrap items-center justify-end gap-2">
             <Badge variant="default">{{ t('updates.mode.' + (s.mode === 'docker' ? 'docker' : 'binary')) }}</Badge>
-            <Badge variant="default">{{ t('updates.policyLabel') }}: {{ s.policy }}</Badge>
+            <!-- ⚠ The policy by name ("politika: manual" printed the setting's
+                 value); the colon lives in the message. -->
+            <Badge variant="default" data-testid="updates-policy">{{
+              t('updates.policyIs', { policy: te(`updates.policyName.${s.policy}`) ? t(`updates.policyName.${s.policy}`) : s.policy })
+            }}</Badge>
           </div>
         </div>
 
@@ -184,21 +217,40 @@ const stepVariant = computed(() => {
 
           <!-- Everything being skipped over, so a multi-version jump is never
                a surprise. -->
-          <div v-if="s.skipped?.length" class="rounded-lg bg-zinc-50 p-3 text-sm dark:bg-zinc-800/50">
-            <div class="mb-1 font-medium">{{ t('updates.includes') }}</div>
-            <ul class="space-y-1">
-              <li v-for="r in s.skipped" :key="r.version" class="flex flex-wrap items-center gap-2">
-                <span class="font-mono text-xs">{{ r.version }}</span>
-                <Badge v-if="r.migrations" variant="warning">{{ t('updates.migrations') }}</Badge>
-                <Badge v-if="r.security" variant="danger">{{ t('updates.security') }}</Badge>
-                <span class="text-zinc-500 dark:text-zinc-400">{{ r.notes }}</span>
-              </li>
-            </ul>
-          </div>
+          <!-- ⚠ A version, its flags and its notes per row is a table, and it
+               was a `<ul>` on a `bg-zinc-50 dark:bg-zinc-800/50` ground that
+               no palette could move. The shared table, with the heading in
+               its own toolbar slot. -->
+          <DataTable
+            v-if="s.skipped?.length"
+            table-id="admin.updates.skipped"
+            :columns="skippedColumns"
+            :rows="s.skipped"
+            row-key="version"
+            data-testid="updates-skipped"
+          >
+            <template #toolbar>
+              <span class="text-sm font-medium">{{ t('updates.includes') }}</span>
+            </template>
+            <template #cell-version="{ row }">
+              <span class="tbl-mono">{{ row.version }}</span>
+            </template>
+            <template #cell-flags="{ row }">
+              <!-- ONE root, the pills wrapping inside it: two Badges as two
+                   flex items of the cell are squeezed below their labels in a
+                   narrow column (web/tests/ui/tablePinnedActions → "a Badge
+                   shares its cell with nothing"). -->
+              <div class="flex flex-wrap gap-1">
+                <Badge v-if="row.migrations" variant="warning">{{ t('updates.migrations') }}</Badge>
+                <Badge v-if="row.security" variant="danger">{{ t('updates.security') }}</Badge>
+                <template v-if="!row.migrations && !row.security">—</template>
+              </div>
+            </template>
+          </DataTable>
 
           <div class="flex flex-wrap gap-2">
             <Button v-if="canApplyHere" :disabled="applying" @click="applyNow">
-              <Spinner v-if="applying" class="mr-2 h-4 w-4" />
+              <Spinner v-if="applying" class="me-2 h-4 w-4" />
               {{ t('updates.applyNow') }}
             </Button>
             <span v-else-if="s.action === 'auto'" class="text-sm text-zinc-500 dark:text-zinc-400">
@@ -214,7 +266,7 @@ const stepVariant = computed(() => {
                 <Terminal class="h-4 w-4" /> {{ t('updates.howTo') }}
               </div>
               <Button size="sm" variant="outline" @click="copyInstructions">
-                <Copy class="mr-1 h-3 w-3" /> {{ t('common.copy') }}
+                <Copy class="me-1 h-3 w-3" /> {{ t('common.copy') }}
               </Button>
             </div>
             <pre class="overflow-x-auto rounded-lg bg-zinc-900 p-3 text-xs text-zinc-100"><code>{{ s.instructions.join('\n') }}</code></pre>
@@ -222,21 +274,32 @@ const stepVariant = computed(() => {
         </div>
 
         <div class="flex items-center justify-between border-t border-zinc-200 pt-3 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-          <span v-if="s.checked_at">{{ t('updates.checkedAt') }}: {{ s.checked_at }}</span>
+          <!-- ⚠ A date in the reader's format, and the colon in the message
+               (it printed "Son kontrol: 2026-09-22T11:05:58Z"). -->
+          <span v-if="s.checked_at" data-testid="updates-checked-at">{{
+            t('updates.checkedAtWhen', { when: formatDate(s.checked_at, locale) })
+          }}</span>
           <span v-else-if="!s.enabled">{{ t('updates.disabled') }}</span>
           <span v-else>—</span>
           <Button size="sm" variant="outline" :disabled="checking" @click="checkNow">
-            <RefreshCw class="mr-1 h-3 w-3" :class="checking ? 'animate-spin' : ''" />
+            <RefreshCw class="me-1 h-3 w-3" :class="checking ? 'animate-spin' : ''" />
             {{ t('updates.checkNow') }}
           </Button>
         </div>
 
-        <p v-if="s.check_error" class="text-xs text-amber-600 dark:text-amber-400">
-          {{ t('updates.checkFailed') }}: {{ s.check_error }}
-        </p>
-        <p v-if="s.last_apply_error" class="text-xs text-rose-600 dark:text-rose-400">
-          {{ t('updates.applyFailed') }}: {{ s.last_apply_error }}
-        </p>
+        <!-- ⚠ What happened, in words; the raw error is the second line
+             (QA, 2026-09-21: "Check failed: Get \"https://…\": dial tcp…"
+             was the whole message). -->
+        <div v-if="s.check_error" class="text-xs text-amber-600 dark:text-amber-400" data-testid="updates-check-error">
+          <p>{{ t('updates.checkFailedWords') }}</p>
+          <p class="font-mono text-[11px] text-zinc-400 dark:text-zinc-500 break-all" data-testid="updates-check-detail">
+            {{ s.check_error }}
+          </p>
+        </div>
+        <div v-if="s.last_apply_error" class="text-xs text-rose-600 dark:text-rose-400" data-testid="updates-apply-error">
+          <p>{{ t('updates.applyFailedWords') }}</p>
+          <p class="font-mono text-[11px] text-zinc-400 dark:text-zinc-500 break-all">{{ s.last_apply_error }}</p>
+        </div>
       </div>
     </template>
   </div>

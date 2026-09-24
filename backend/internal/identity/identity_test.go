@@ -1,6 +1,8 @@
 package identity
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -136,5 +138,62 @@ func TestNames(t *testing.T) {
 	unnamed := &model.User{Email: "x@example.com"}
 	if Names(unnamed, "") {
 		t.Error("an empty identifier must never name an account")
+	}
+}
+
+// memUsers is the slice of the store identity needs, in memory.
+type memUsers struct{ byID map[int64]*model.User }
+
+func (m *memUsers) GetUserByEmail(_ context.Context, email string) (*model.User, error) {
+	for _, u := range m.byID {
+		if u.Email == email {
+			return u, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (m *memUsers) GetUserByUsername(_ context.Context, name string) (*model.User, error) {
+	for _, u := range m.byID {
+		if u.Username == name {
+			return u, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (m *memUsers) SetUserUsername(_ context.Context, id int64, name string) error {
+	m.byID[id].Username = name
+	return nil
+}
+
+// The first administrator is "admin" (the owner's decision, 2026-09-22), signs
+// in with it, and the name stays nobody else's.
+func TestClaimBootstrap(t *testing.T) {
+	ctx := context.Background()
+	first := &model.User{ID: 1, Email: "admin@local", Username: "admin2"}
+	other := &model.User{ID: 2, Email: "ada@example.com", Username: "ada"}
+	m := &memUsers{byID: map[int64]*model.User{1: first, 2: other}}
+
+	if err := ClaimBootstrap(ctx, m, first); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if first.Username != BootstrapUsername {
+		t.Fatalf("username = %q, want admin", first.Username)
+	}
+	// ⚠ A reserved name is looked up — the first administrator signs in with it.
+	if u, err := Resolve(ctx, m, "Admin"); err != nil || u.ID != 1 {
+		t.Fatalf("Resolve(admin) = %v, %v; want account 1", u, err)
+	}
+	// …but it is still refused to anybody who tries to take it.
+	if Check("admin") == nil || Check("admin").Kind != ProblemReserved {
+		t.Error("admin must stay reserved for everybody else")
+	}
+	if err := ClaimBootstrap(ctx, m, other); err == nil {
+		t.Error("a second account must not claim admin while the first holds it")
+	}
+	// A malformed identifier still resolves to nothing, whatever it looks like.
+	if _, err := Resolve(ctx, m, "NOT valid"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("malformed identifier: %v, want ErrNotFound", err)
 	}
 }

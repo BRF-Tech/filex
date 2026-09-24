@@ -31,6 +31,8 @@ import { useLocale } from '../composables/useLocale';
 import { browserProbeURL } from '../lib/externalReach';
 import { fileIconTile } from '../lib/fileIcons';
 import { actionIconSvg } from '../lib/actionIcons';
+import { OFFICE_EXTS } from '../lib/serviceGate';
+import { requestFailure, sayFailure } from '../lib/errorWords';
 
 const props = defineProps<{
   open: boolean;
@@ -40,6 +42,13 @@ const props = defineProps<{
   downloadUrl: (path: string) => string;
   onlyOfficeBase?: string | null;
   onlyOfficeConfigEndpoint?: string | null;
+  /**
+   * Could this person set up a missing service (`capabilities.caller_admin`)?
+   * Only changes WHICH sentence a missing document server gets: an
+   * administrator is told where to set it up, everybody else that it is not
+   * available here and how to get the file anyway.
+   */
+  canConfigure?: boolean;
   saveTextEndpoint?: string | null;
   /** Endpoint for the archive (zip/rar/7z/tar) member list. Forwarded to
    *  ArchiveViewer, which otherwise assumes a same-origin path. */
@@ -136,7 +145,10 @@ const CODE_LANGS: Record<string, string> = {
 // CSV/TSV land in the rich viewer (`csv` kind below) instead of the
 // legacy plain-text path so the user gets a proper table preview.
 const TEXT_PLAIN = ['txt', 'log'];
-const OFFICE = ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'rtf'];
+/* The document server's formats — ONE list, shared with the explorer's menu
+ * (lib/serviceGate), so a type previewed as "office" is exactly a type whose
+ * Open needs ONLYOFFICE. */
+const OFFICE = OFFICE_EXTS;
 
 /**
  * Lazy viewer map — extension → component loader. Each loader is a
@@ -223,7 +235,7 @@ async function loadViewerFor(extension: string): Promise<void> {
     const mod = (await loader()) as { default?: Component };
     viewerCmp.value = mod.default ?? (mod as unknown as Component);
   } catch (err) {
-    viewerLoadError.value = err instanceof Error ? err.message : 'viewer load failed';
+    viewerLoadError.value = said(err, 'err.viewer_failed').text;
     if (extension === 'pdf') pdfFallbackToNative.value = true;
   }
 }
@@ -240,6 +252,9 @@ const viewerProps = computed(() => {
     ext: e,
     mime: props.file?.mime_type,
     t,
+    /* The viewer's language as a code, for the one thing `t` cannot give it:
+       how a NUMBER is written (a size in the archive list). */
+    locale: props.locale,
     authHeaders: props.authHeaders,
     authCredentials: props.authCredentials,
   };
@@ -256,6 +271,7 @@ const viewerProps = computed(() => {
   }
   if (e === 'drawio' || e === 'dio') {
     base.drawioUrl = props.drawioUrl ?? undefined;
+    base.canConfigure = props.canConfigure === true;
     base.saveUrl = props.saveTextEndpoint ?? undefined;
     base.readOnly = props.openMode === 'view';
   }
@@ -316,6 +332,26 @@ const EDITABLE_EXTS = new Set([
 
 const canEditKind = computed<boolean>(() =>
   !!props.file && EDITABLE_EXTS.has(ext(props.file)),
+);
+
+/**
+ * The Edit button of a document whose editor is an optional service that is
+ * not there — ONLYOFFICE for office files, draw.io for diagrams. It led to a
+ * tab that could only say so. The owner's rule (lib/serviceGate): greyed with
+ * where to set it up for someone who can, not offered to anybody else.
+ */
+const editNeeds = computed<'' | 'onlyoffice' | 'drawio'>(() => {
+  const e = ext(props.file);
+  if (OFFICE.includes(e) && !props.onlyOfficeBase) return 'onlyoffice';
+  if ((e === 'drawio' || e === 'dio') && !props.drawioUrl) return 'drawio';
+  return '';
+});
+const editTitle = computed(() =>
+  editNeeds.value === 'onlyoffice'
+    ? t('ctx.needs_onlyoffice')
+    : editNeeds.value === 'drawio'
+      ? t('ctx.needs_drawio')
+      : t('viewer.edit'),
 );
 
 // Keep adapter prefix so backend resolves the right storage — stripping
@@ -472,6 +508,24 @@ function onGroundClick(): void {
 
 const loading = ref(false);
 const fetchError = ref<string | null>(null);
+/** An administrator's second line under `fetchError` (lib/errorWords). */
+const fetchErrorDetail = ref<string | null>(null);
+
+/**
+ * A failure, said (lib/errorWords): the sentence for everybody, the raw words
+ * as a second line only for a caller who can administer the instance.
+ *
+ * ⚠⚠ This modal used to print what it caught: "save failed: 500 {…}",
+ * "404 Not Found", "Monaco mount fail: …" — a status code, a JSON body and a
+ * library's message, to whoever was editing (QA, 2026-09-21).
+ */
+function said(err: unknown, fallbackKey: string) {
+  return sayFailure(err, t(fallbackKey), { callerAdmin: props.canConfigure === true });
+}
+function showFetchError(f: { text: string; detail?: string }): void {
+  fetchError.value = f.text;
+  fetchErrorDetail.value = f.detail ?? null;
+}
 const rawText = ref<string>('');
 const MAX_TEXT_BYTES = 1_000_000;
 const tooLarge = ref(false);
@@ -499,6 +553,7 @@ async function saveMarkdown() {
   if (!props.saveTextEndpoint || !props.file || mdSaving.value) return;
   mdSaving.value = true;
   fetchError.value = null;
+  fetchErrorDetail.value = null;
   try {
     const headers = {
       'Content-Type': 'application/json',
@@ -511,11 +566,11 @@ async function saveMarkdown() {
       body: JSON.stringify({ path: stripAdapter(props.file.path), content: rawText.value }),
     });
     if (!res.ok) {
-      throw new Error(`save failed: ${res.status} ${await res.text()}`);
+      throw requestFailure(res.status, await res.text().catch(() => ''), props.locale);
     }
     mdDirty.value = false;
   } catch (err) {
-    fetchError.value = err instanceof Error ? err.message : String(err);
+    showFetchError(said(err, 'err.save_failed'));
   } finally {
     mdSaving.value = false;
   }
@@ -524,6 +579,7 @@ async function saveMarkdown() {
 async function fetchText(url: string): Promise<void> {
   loading.value = true;
   fetchError.value = null;
+  fetchErrorDetail.value = null;
   rawText.value = '';
   tooLarge.value = false;
   try {
@@ -534,7 +590,7 @@ async function fetchText(url: string): Promise<void> {
       headers,
     });
     if (!res.ok) {
-      throw new Error(`${res.status} ${res.statusText}`);
+      throw requestFailure(res.status, await res.text().catch(() => ''), props.locale);
     }
     const len = Number(res.headers.get('content-length') || '0');
     if (len > MAX_TEXT_BYTES) {
@@ -549,7 +605,7 @@ async function fetchText(url: string): Promise<void> {
       rawText.value = text;
     }
   } catch (err) {
-    fetchError.value = err instanceof Error ? err.message : String(err);
+    showFetchError(said(err, 'err.load_failed'));
   } finally {
     loading.value = false;
   }
@@ -604,7 +660,7 @@ async function renderMarkdown(text: string): Promise<void> {
     await enrichMarkdown();
   } catch (err) {
     markdownHtml.value = '';
-    fetchError.value = err instanceof Error ? err.message : String(err);
+    showFetchError(said(err, 'err.load_failed'));
   }
 }
 
@@ -724,7 +780,7 @@ async function highlightCode(text: string, language: string): Promise<void> {
     }
   } catch (err) {
     codeHtml.value = '';
-    fetchError.value = err instanceof Error ? err.message : String(err);
+    showFetchError(said(err, 'err.load_failed'));
   }
 }
 
@@ -834,7 +890,7 @@ async function tryMountMonaco(text: string, extension: string): Promise<boolean>
     monacoReady.value = true;
     return true;
   } catch (err) {
-    fetchError.value = `Monaco mount fail: ${(err as Error).message}`;
+    showFetchError(said(err, 'err.viewer_failed'));
     return false;
   }
 }
@@ -860,15 +916,15 @@ async function saveCode(): Promise<void> {
       }),
     });
     if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      throw new Error(`${res.status} ${res.statusText}${txt ? ' — ' + txt.slice(0, 150) : ''}`);
+      throw requestFailure(res.status, await res.text().catch(() => ''), props.locale);
     }
     saveOk.value = true;
     setTimeout(() => {
       saveOk.value = false;
     }, 2500);
   } catch (err) {
-    saveError.value = (err as Error).message;
+    const f = said(err, 'err.save_failed');
+    saveError.value = f.detail ? `${f.text}\n${f.detail}` : f.text;
   } finally {
     saving.value = false;
   }
@@ -881,6 +937,7 @@ async function runOrchestration(open: boolean, url: string, k: string): Promise<
   markdownHtml.value = '';
   codeHtml.value = '';
   fetchError.value = null;
+  fetchErrorDetail.value = null;
   officeError.value = null;
   viewerCmp.value = null;
   viewerLoadError.value = null;
@@ -963,11 +1020,42 @@ const officeEl = ref<HTMLDivElement | null>(null);
 const officeError = ref<string | null>(null);
 let officeEditor: any = null;
 
+/** "No document server here", in the sentence this person can act on. */
+function officeUnconfigured(): string {
+  return t(props.canConfigure ? 'viewer.office_unconfigured_admin' : 'viewer.office_unconfigured');
+}
+
+/**
+ * ⚠⚠ Every failure below becomes a SENTENCE, never the HTTP layer. This
+ * function used to throw `Config fetch ${status}: ${body}` and put it on
+ * screen, which is how a person clicking "Open" on a .docx read
+ * `Config fetch 503: {"error":"onlyoffice not configured"}` (owner,
+ * 2026-09-21: "böyle hata vermek yerine … düzgün hata mesajı vermemiz
+ * lazım"). The status still reaches the console for whoever is debugging it.
+ */
+async function officeConfigError(res: Response): Promise<string> {
+  let body = '';
+  try {
+    body = (await res.text()).slice(0, 200);
+  } catch {
+    /* nothing to read */
+  }
+  console.warn('[filex] ONLYOFFICE config request failed', res.status, body);
+  if (res.status === 503 && /not configured/i.test(body)) return officeUnconfigured();
+  if (res.status === 403) return t('viewer.office_forbidden');
+  return t('viewer.office_failed');
+}
+
 async function mountOnlyOfficeEditor(): Promise<void> {
   officeError.value = null;
   if (!props.file || kind.value !== 'office') return;
-  if (!props.onlyOfficeConfigEndpoint) {
-    officeError.value = t('viewer.office_unconfigured');
+  /* ⚠ BOTH halves. The standalone /files/edit route always handed over the
+   * config ENDPOINT and left the base null when the capabilities probe said
+   * the service was off — so this check, reading the endpoint alone, let the
+   * request go out and put the server's 503 on screen. No base means no
+   * document server, whatever else is configured. */
+  if (!props.onlyOfficeConfigEndpoint || !props.onlyOfficeBase) {
+    officeError.value = officeUnconfigured();
     return;
   }
   if (!officeEl.value) return;
@@ -989,7 +1077,8 @@ async function mountOnlyOfficeEditor(): Promise<void> {
       }),
     });
     if (!res.ok) {
-      throw new Error(`Config fetch ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      officeError.value = await officeConfigError(res);
+      return;
     }
     const { config, documentServerUrl } = (await res.json()) as {
       config: any;
@@ -1014,7 +1103,11 @@ async function mountOnlyOfficeEditor(): Promise<void> {
     }
     officeEditor = new W.DocsAPI.DocEditor(mountId, config);
   } catch (err) {
-    officeError.value = err instanceof Error ? err.message : String(err);
+    /* The document server's script did not load, or did not define its API:
+       the server is configured but not answering. The detail is for the
+       console, the sentence for the person. */
+    console.warn('[filex] ONLYOFFICE did not start', err);
+    officeError.value = t(props.canConfigure ? 'viewer.office_unreachable_admin' : 'viewer.office_unreachable');
   }
 }
 
@@ -1141,11 +1234,12 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
             @change="(v: boolean) => emit('starred', v)"
           />
           <button
-            v-if="openMode === 'view' && canEditKind && newTabEnabled !== false /* wiring:e2 */"
+            v-if="openMode === 'view' && canEditKind && newTabEnabled !== false /* wiring:e2 */ && (!editNeeds || canConfigure)"
             type="button"
             class="fe-viewer__act"
-            :title="t('viewer.edit')"
-            :aria-label="t('viewer.edit')"
+            :disabled="!!editNeeds"
+            :title="editTitle"
+            :aria-label="editTitle"
             @click="openEditInNewTab"
           ><span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('rename')"></span></button>
           <button
@@ -1239,15 +1333,19 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
                   v-else
                   ref="markdownEl"
                   class="fe-preview__md-split-output fe-preview__md"
+                  dir="auto"
                   v-html="markdownHtml"
                 ></div>
               </div>
             </div>
             <div v-else-if="fetchError" class="fe-preview__fallback">
               <p>{{ fetchError }}</p>
+              <p v-if="fetchErrorDetail" class="fe-preview__error-detail" data-testid="preview-error-detail">{{ fetchErrorDetail }}</p>
               <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
             </div>
-            <div v-else-if="markdownHtml" ref="markdownEl" class="fe-preview__md" v-html="markdownHtml"></div>
+            <!-- ⚠ RTL: a document reads in ITS direction, not the interface's —
+                 `auto` lets an English README stay left to right in Arabic. -->
+            <div v-else-if="markdownHtml" ref="markdownEl" class="fe-preview__md" dir="auto" v-html="markdownHtml"></div>
             <pre v-else class="fe-preview__pre">{{ rawText }}</pre>
           </template>
 
@@ -1287,6 +1385,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
             </div>
             <div v-else-if="fetchError" class="fe-preview__fallback">
               <p>{{ fetchError }}</p>
+              <p v-if="fetchErrorDetail" class="fe-preview__error-detail" data-testid="preview-error-detail">{{ fetchErrorDetail }}</p>
               <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
             </div>
             <div v-else class="fe-preview__code-wrap">

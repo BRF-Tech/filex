@@ -9,6 +9,8 @@ export interface AdminGrant {
   is_dir: boolean;
   user_id: number;
   user_email: string;
+  /** The person as every screen names them (server model.PersonLabel). */
+  user_name?: string;
   level: 'viewer' | 'editor' | 'owner';
   created_at: string;
 }

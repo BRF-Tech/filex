@@ -20,6 +20,7 @@ import type { ExplorerConfig } from '../types/ExplorerConfig';
 import type { ApiToken, ApiTokenCreated, ApiTokenRequest } from '../types/Tokens';
 import { connectionsBase } from './useConnections';
 import { useFileApi } from './useFileApi';
+import { serverWords } from '../lib/errorWords';
 
 export function useTokens(config: ExplorerConfig) {
   const api = useFileApi(config);
@@ -40,19 +41,14 @@ export function useTokens(config: ExplorerConfig) {
   /** The secret, held in memory for exactly as long as the user is looking. */
   const revealed = ref<ApiTokenCreated | null>(null);
 
+  /** A refusal, said — lib/errorWords `serverWords`, the one rule every
+   *  connection panel shares (it used to print the server's `error` field as
+   *  it came: an environment variable, to a regular user). ⚠ The locale is
+   *  passed because what comes back may be the SERVER's own sentence: it
+   *  never met a translator, and an Arabic panel needs its machine runs
+   *  isolated (lib/direction `foreignText`). */
   function messageOf(e: unknown): string {
-    const err = e as { message?: string; detail?: string } | null;
-    // The backend's own words beat a status line: "scope 'admin' is not
-    // available here" tells the user what to change; "403" does not.
-    if (err?.detail) {
-      try {
-        const parsed = JSON.parse(err.detail) as { error?: string };
-        if (parsed?.error) return parsed.error;
-      } catch {
-        /* not JSON — fall through */
-      }
-    }
-    return err?.message || String(e);
+    return serverWords(e, config.locale);
   }
 
   function statusOf(e: unknown): number | undefined {

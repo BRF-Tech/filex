@@ -340,7 +340,13 @@ func (d *Driver) Stat(ctx context.Context, p string) (storage.Object, error) {
 			// WebDAV stats the parent before a PUT and maps a miss to 409, so
 			// olivov could write to a storage root but into no subfolder, and
 			// PROPFIND on a folder 404'd (H3, 2026-08-05).
-			if d.hasChildren(ctx, p) {
+			has, lerr := d.hasChildren(ctx, p)
+			if lerr != nil {
+				// ⚠ Not "not found": a name that reads as free gets written
+				// over (see hasChildren).
+				return storage.Object{}, lerr
+			}
+			if has {
 				return storage.Object{
 					Path: p,
 					Name: path.Base(p),
@@ -694,7 +700,10 @@ func (d *Driver) Move(ctx context.Context, src, dst string) error {
 	if d.isDir(ctx, src) {
 		return d.copyDir(ctx, src, dst, true)
 	}
-	if err := d.Copy(ctx, src, dst); err != nil {
+	// copyObject, not Copy: Copy would ask "is this a folder?" a second time
+	// — one more HEAD for every file moved, which is what putting a file in
+	// the trash is. Across a bulk delete that was a quarter of every request.
+	if err := d.copyObject(ctx, src, dst); err != nil {
 		return err
 	}
 	_, err := d.client.DeleteObject(ctx, &s3.DeleteObjectInput{
@@ -714,6 +723,12 @@ func (d *Driver) Copy(ctx context.Context, src, dst string) error {
 	if d.isDir(ctx, src) {
 		return d.copyDir(ctx, src, dst, false)
 	}
+	return d.copyObject(ctx, src, dst)
+}
+
+// copyObject is the single-object half of Copy, for a caller that already
+// knows src is not a folder.
+func (d *Driver) copyObject(ctx context.Context, src, dst string) error {
 	_, err := d.client.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket:     aws.String(d.bucket),
 		CopySource: aws.String(encodeCopySource(d.bucket, d.key(src))),
@@ -792,9 +807,31 @@ func (d *Driver) isDir(ctx context.Context, p string) bool {
 // hasChildren reports whether any object lives under p's prefix. This is the
 // only thing that makes a folder "exist" on an object store. Kept separate
 // from isDir so Stat can use it without the two recursing into each other.
-func (d *Driver) hasChildren(ctx context.Context, p string) bool {
-	keys, _ := d.listKeysUnder(ctx, p)
-	return len(keys) > 0
+//
+// ⚠⚠ A listing that fails is an ERROR, never "no children". It used to be
+// swallowed, so Stat answered ErrNotFound for a folder the store could not
+// list at that moment — and "not found" is what makes a name look free: the
+// rename guard and the de-collision of every move took the name, and the
+// driver's copy-then-delete MERGED the moved folder into the existing one,
+// replacing every object with the same name.
+//
+// One key is enough to know (MaxKeys 1): it used to page through every
+// object under the prefix, so a Stat of a folder of 100,000 files listed all
+// of them.
+func (d *Driver) hasChildren(ctx context.Context, p string) (bool, error) {
+	prefix := d.key(p)
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	resp, err := d.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:  aws.String(d.bucket),
+		Prefix:  aws.String(prefix),
+		MaxKeys: aws.Int32(1),
+	})
+	if err != nil {
+		return false, fmt.Errorf("s3: list %s: %w", prefix, err)
+	}
+	return len(resp.Contents) > 0, nil
 }
 
 // listKeysUnder returns every raw S3 key under p's prefix (recursive, no

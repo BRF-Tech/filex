@@ -55,7 +55,15 @@ describe('auth providers', () => {
 
   it('GET /api/admin/auth-providers returns providers[]', () => {
     cy.adminGet<{
-      providers?: Array<{ name: string; enabled: boolean; capabilities: Record<string, boolean> }>;
+      providers?: Array<
+        {
+          name: string;
+          enabled: boolean;
+          capabilities: Record<string, boolean>;
+          config_redacted: Record<string, unknown>;
+          secrets_set: Record<string, unknown>;
+        } & Record<string, unknown>
+      >;
     }>('/api/admin/auth-providers').then((d) => {
       expect(d.providers, 'providers').to.be.an('array');
       const names = (d.providers ?? []).map((p) => p.name);
@@ -63,13 +71,39 @@ describe('auth providers', () => {
       for (const p of ['local', 'oidc']) {
         expect(names, `providers has ${p}`).to.include(p);
       }
+      // ⚠ The row's shape, from handlers/auth_providers.go `providerView`.
+      // This spec pinned four keys and went stale the release the page grew
+      // five more (v0.43.0 release run). The REQUIRED keys are the ones the
+      // struct always writes; the OPTIONAL ones are `omitempty` and appear
+      // only when they say something. Both directions are asserted: nothing
+      // required is missing, and nothing outside the two lists appears — a
+      // new field on this admin surface should be a deliberate edit here.
+      const REQUIRED = [
+        'name',
+        'capabilities',
+        'managed',
+        'origin',
+        'enabled',
+        'state',
+        'config_redacted',
+        'secrets_set',
+        'testable',
+      ];
+      const OPTIONAL = ['from', 'error', 'legacy', 'shadowed', 'fields'];
       for (const p of d.providers ?? []) {
-        expect(p, `${p.name} envelope`).to.have.all.keys(
-          'name',
-          'enabled',
-          'capabilities',
-          'config_redacted',
-        );
+        expect(p, `${p.name} envelope`).to.include.all.keys(...REQUIRED);
+        const stray = Object.keys(p).filter((k) => !REQUIRED.includes(k) && !OPTIONAL.includes(k));
+        expect(stray, `${p.name}: fields this spec has not been told about`).to.deep.equal([]);
+
+        // ⚠⚠ THE property worth pinning on this row. `secrets_set` says WHICH
+        // secret fields hold a value ("set — replace?") and never the value
+        // itself: every entry is a boolean. And a secret field is never
+        // echoed in `config_redacted` — the page learns that it is set, not
+        // what it is.
+        for (const [field, v] of Object.entries(p.secrets_set ?? {})) {
+          expect(v, `${p.name}.secrets_set.${field} is a boolean, never the secret`).to.be.a('boolean');
+          expect(p.config_redacted ?? {}, `${p.name}: secret field ${field} is not echoed in config_redacted`).not.to.have.property(field);
+        }
       }
     });
   });

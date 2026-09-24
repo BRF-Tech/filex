@@ -17,6 +17,7 @@ vi.mock('@/api/storages', () => ({
 }));
 
 import { useStoragesStore } from '@/stores/storages';
+import en from '@/locales/en.json';
 import { StoragesApi } from '@/api/storages';
 import type { StorageRef } from '@/api/types';
 
@@ -71,8 +72,8 @@ describe('stores/storages', () => {
     await s.fetch();
     // extractError() falls back to its second-arg default for plain objects
     // (no isAxiosError flag, not instanceof Error) — store passes
-    // 'Failed to load storages' as the fallback in stores/storages.ts.
-    expect(s.error).toBe('Failed to load storages');
+    // the catalogue's errors.loadFailed as the fallback in stores/storages.ts.
+    expect(s.error).toBe(en.errors.loadFailed);
     expect(s.items).toEqual([]);
   });
 

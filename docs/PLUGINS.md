@@ -1,5 +1,10 @@
 # Storage plugins
 
+> Looking for the other kind of plugin — an **app** that adds actions to the
+> file menu (convert, sign, send) rather than a storage backend? That is
+> [Apps (app plugins)](APP-PLUGINS.md): sandboxed WebAssembly, installed from
+> a GitHub URL with a permission review. This page is about storage drivers.
+
 filex speaks local disk, S3, SFTP, FTP, WebDAV and SMB out of the box. A
 **plugin** is how it speaks to something it has never heard of: your appliance,
 your company's object store, a research archive with its own API — anything
@@ -19,7 +24,7 @@ A plugin that fails its own claims is refused, because a half-working driver
 produces failures the user reads as *filex* being broken.
 
 ```
-Admin → Plugins → Install          Connections → Add a storage
+Admin → Plugins → Storage plugins  Admin → Storages → Add storage
         ┌──────────────┐                  ┌────────────────────┐
         │ your program │◀── HTTP/JSON ────│ filex              │
         │  (any lang)  │   unix socket    │  storage.Driver    │
@@ -30,15 +35,18 @@ Admin → Plugins → Install          Connections → Add a storage
 
 ## Install one
 
-**Admin → Plugins → Install a plugin**, in one of three ways:
+**Admin → Plugins → Storage plugins → Install a plugin**, in one of three ways.
+(The Plugins page has two tabs, **Storage plugins** and **Apps** — the other
+kind of plugin, [APP-PLUGINS.md](APP-PLUGINS.md). It opens on **Apps** when the
+app runtime is on and at least one app is installed.)
 
 | Source | What happens | When to use it |
 |---|---|---|
 | **Upload a binary** | The file is stored under `<data-dir>/plugins/<name>/`, hashed, and launched. | The normal case. |
-| **From a URL** | Downloaded, checked against a **required** SHA256, then as above. | Unattended installs, scripted setups. |
-| **Remote service** | Nothing is launched: filex connects to an address you give it with a bearer token you give it. | A sidecar container, a plugin on another host, or a plugin you are developing. |
+| **From a URL** | Downloaded, checked against a **required** SHA256 (and the signature, when required) **before anything is executed**, then as above. The URL must point at a **public** host: private, loopback and link-local targets are refused, after DNS and on every redirect, so a plugin URL cannot become a probe of the server's own network. | Unattended installs, scripted setups. |
+| **Remote service** | Nothing is launched: filex connects to an address you give it with a bearer token you give it. **Remote = TLS**: `https://` anywhere; plain `http://` only when the address is on the private network (loopback, link-local, RFC 1918, ULA), because the token and every storage credential travel on that connection. | A sidecar container, a plugin on another host, or a plugin you are developing. |
 
-![The Plugins page with the example plugin running](screenshots/v0.42.2/admin-plugins.png)
+![The Plugins page with the example plugin running](screenshots/v0.43.0/admin-plugins.png)
 
 > ⚠ **A plugin runs with filex's own privileges** and is handed the credentials
 > of every storage created on it. Install only plugins you trust — the same
@@ -83,14 +91,15 @@ that says whose surface it is.
 |---|---|
 | **Running** | Described itself, driver registered, storages can open. |
 | **Starting…** | Launched; the handshake or describe has not finished. |
-| **Failed** | Exited or became unreachable. A binary is restarted with backoff; a remote is re-checked every few seconds. |
-| **Refused** | filex will not use it: protocol mismatch, an invalid describe, a driver-name collision, a binary whose SHA256 no longer matches what was installed, a missing or bad signature where one is required, or **conformance failure** — it declared a capability it could not perform. `state_error` carries the reason. Fix it and press **Restart**. |
+| **Failed** | Exited or became unreachable. A binary is restarted with backoff — up to **ten starts in a row** that never come up, after which filex stops trying and says so (`not restarting until Restart`); a remote is re-checked every few seconds. |
+| **Refused** | filex will not use it: protocol mismatch, an invalid describe, a driver-name collision, a binary whose SHA256 no longer matches what was installed, a missing or bad signature where one is required, or **conformance failure** — it declared a capability it could not perform. `state_error` carries the reason. Fix it and choose **Restart** from the plugin's **Actions** menu. |
 | **Off** | Disabled by the toggle. The driver is unregistered, and storages on it stop opening. |
 
 **Removing** a plugin deletes its files and its registration. Storages created
 on it are **left alone** — they simply cannot open until the plugin is back.
-Deleting somebody's storages is not a decision this button makes; the page shows
-how many will be affected before you confirm.
+Deleting somebody's storages is not a decision **Delete** (in the plugin's
+**Actions** menu) makes; its confirmation says how many will be affected
+before you agree.
 
 **Upgrading** replaces the binary and keeps everything else — see
 [Upgrade in place](#upgrade-in-place). Do not remove-then-install to get a new
@@ -177,7 +186,8 @@ discover that the safety net is down by meeting a broken storage.
 ## Upgrade in place
 
 `POST /api/admin/plugins/{id}/upgrade` — multipart, `file` (and `signature` when
-this instance requires one). Admin → Plugins → **Upgrade** does the same thing.
+this instance requires one). Admin → Plugins → Storage plugins → the plugin's
+**Actions** menu → **Upgrade** does the same thing.
 
 The row, the name, the driver and every storage built on it survive. What
 happens, in order: stop the plugin, put the new file in place, start it, run the
@@ -194,6 +204,11 @@ plugin.
 
 > ⚠ Only a **binary** plugin can be upgraded this way. A remote plugin is
 > upgraded where it runs — filex only holds its address.
+
+> ⚠ The file **keeps the name it was installed under**, whatever the upload is
+> called (`myfs-v2` replaces `myfs` *as* `myfs`). One name means one backup and
+> one rollback; the signature you send is stored beside it, and a rollback
+> restores the previous signature with the previous file.
 
 ---
 
@@ -227,8 +242,15 @@ FILEX_PLUGIN_TRUSTED_KEYS=3d40…e91b,7ac2… filex serve
 
 > ⚠ Enforcement is **off until a key is set** — which is the honest default for
 > a single-admin instance, and the wrong one for a shared server where "admin"
-> is several people. Setting one key changes nothing about plugins already
-> installed; it applies from the next install or upgrade.
+> is several people.
+
+The signature is **kept beside the binary** as `<binary>.sig` and verified
+again at **every start**, not only at install: a trusted key set is a rule
+about what may run, not a check on one upload. So setting a key *does* reach
+plugins already installed — one installed before the keys were set has no
+`.sig` and is refused at its next start with `signature required (installed
+before trusted keys were set — reinstall)`; reinstall or upgrade it with a
+signature and it runs again.
 
 > ⚠ Rotation is why the setting takes a list: any one trusted key verifying is
 > enough, so a new key can be added before the old one is retired.
@@ -378,7 +400,7 @@ install and drive them, so neither can rot:
 
 ```bash
 go build -o myfs ./cmd/myfs      # for the SERVER's platform
-# Admin → Plugins → Install → upload `myfs`
+# Admin → Plugins → Storage plugins → Install a plugin → upload `myfs`
 ```
 
 ### Capabilities are your method set
@@ -461,9 +483,17 @@ a restart of your own process:
 
 ```bash
 FILEX_PLUGIN_TOKEN=dev-token FILEX_PLUGIN_LISTEN=127.0.0.1:9099 go run ./cmd/myfs
-# Admin → Plugins → Install → Remote service
+# Admin → Plugins → Storage plugins → Install a plugin → Remote service
 #   Address: http://127.0.0.1:9099   Token: dev-token
 ```
+
+> ⚠ **Remote = TLS; plain `http://` only on the private network.** `http://`
+> is accepted for loopback, link-local, RFC 1918 and ULA addresses (a name is
+> resolved first, and every address it resolves to has to be private). Anything
+> else is refused with `remote plugins outside the private network must use
+> https://` — the bearer token and every storage credential travel on that
+> connection. The rule is applied when the plugin is registered and again at
+> every start.
 
 While a capability is half-finished, run **that** filex with
 `FILEX_PLUGIN_CONFORMANCE=warn`: the probes still run and the report still
@@ -475,15 +505,24 @@ who pays for a broken claim is the user, not you.
 
 ## The protocol (any language)
 
-filex sets two environment variables and reads **one line** on stdout:
+filex sets four environment variables and reads **one line** on stdout:
 
 ```
 FILEX_PLUGIN_TOKEN=<32-byte hex>     the bearer token on every request
-FILEX_PLUGIN_SOCKET_DIR=<dir>        a private directory you may create a socket in
+FILEX_PLUGIN_SOCKET_DIR=<dir>        a private directory (mode 0700) you may create a socket in
+FILEX_PLUGIN_NAME=<name>             the name the admin installed you under
+FILEX_PLUGIN_PROTOCOL=1              the protocol version this filex speaks
 
 → stdout: FILEX-PLUGIN/1 unix:/path/to.sock
       or: FILEX-PLUGIN/1 tcp:127.0.0.1:PORT
 ```
+
+> ⚠ **The plugin does not see filex's own environment** — no `FILEX_*`
+> variables, no secrets. Besides the four above, the process inherits only what
+> it needs to run: `PATH`, `HOME`, `TMPDIR`/`TMP`/`TEMP`, `LANG`, `LC_*`, `TZ`
+> and, on Windows, `SystemRoot`, `USERPROFILE`, `ProgramData`, `ComSpec`,
+> `PATHEXT`. Anything a plugin needs beyond that belongs in its config fields,
+> which filex hands it per instance.
 
 Everything after that is HTTP with `Authorization: Bearer <token>`:
 
@@ -556,10 +595,11 @@ restart invisible to the person using the file manager.
 | What | Where |
 |---|---|
 | Installed binaries | `<data-dir>/plugins/<name>/` |
-| Sockets a plugin creates | `<data-dir>/plugins/<name>/run/` (mode 0600) |
+| Sockets a plugin creates | `<data-dir>/plugins/<name>/run/` (directory mode 0700; the SDK gives the socket 0600) |
+| A binary's signature | `<data-dir>/plugins/<name>/<binary>.sig` (mode 0600) — written at install/upgrade when a signature was supplied, verified again at every start while trusted keys are configured |
 | Registration | the `plugins` table (migration 00029) |
 | A remote plugin's token | sealed with `FILEX_SECRET_KEY` — registering one without that key is refused rather than stored in plaintext |
-| The previous binary, during an upgrade | `<data-dir>/plugins/<name>/<binary>.previous`, removed once the new one is up (and used to roll back when it is not) |
+| The previous binary, during an upgrade | `<data-dir>/plugins/<name>/<binary>.previous` (and `<binary>.sig.previous`), removed once the new one is up (and used to roll back when it is not) |
 | Conformance probe leftovers | `.filex-conformance-<random>/` at a storage's root — named so an operator who finds one knows what made it |
 | Host implementation | [`backend/internal/plugin`](../backend/internal/plugin) |
 | Driver shapes | `internal/plugin/driver_shapes.go` — **generated**, 20 combinations: `go run ./internal/plugin/gen > internal/plugin/driver_shapes.go`. ⚠ Regenerate it after touching the generator: `TestGeneratedShapesAreCurrent` runs the generator and fails CI when the file differs (it skips under `go test -short`) |

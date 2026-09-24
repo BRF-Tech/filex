@@ -37,27 +37,25 @@ import { actionIconSvg } from '@brftech/filex-core';
 
 import { useNotificationsStore } from '@/stores/notifications';
 import { useAuthStore } from '@/stores/auth';
-import { formatDate } from '@/lib/format';
-import { anchorUnderRightEdge, refElement } from '@/lib/anchoredPanel';
+import { anchorUnderEndEdge, refElement } from '@/lib/anchoredPanel';
+import { dirOfElement } from '@brftech/filex-core';
 import { openNotificationTarget } from '@/lib/notificationNav';
-import { resolveNotificationTarget } from '@/lib/notificationTarget';
-import { useNotificationText } from '@/composables/useNotificationText';
+// ⚠ The row and the badge are components, not markup written here: the same
+// row is drawn by the full-list screen and the same badge by that screen's
+// heading and by the desktop app's dock icon. Rule 1 and rule 3 of
+// docs/NOTIFICATIONS.md → "The bell, and who can reach it" are both rules
+// about "the same everywhere", which a second copy quietly ends.
+import NotificationRow from '@/components/NotificationRow.vue';
+import UnreadBadge from '@/components/UnreadBadge.vue';
 import type { NotificationItem } from '@/api/types';
 
-const { t, locale } = useI18n();
-// ⚠ Same renderer as the browser toast and the desktop shell. A row's stored
-// title is written once, on the server, in one language — and for most file
-// events it is not written at all, so what was shown here was the raw event id
-// (`share.created`). The sentence is composed by the reader; see
-// lib/notificationText.ts.
-const { notificationText } = useNotificationText();
+const { t } = useI18n();
 const notif = useNotificationsStore();
 const auth = useAuthStore();
 const router = useRouter();
 
 /* ── the count on the button ───────────────────────────────────────────── */
 const unread = computed(() => Math.max(0, notif.unreadCount || 0));
-const countLabel = computed(() => (unread.value > 99 ? '99+' : String(unread.value)));
 /** The accessible name carries the count too — a badge is a picture of a number. */
 const buttonLabel = computed(() =>
   unread.value > 0
@@ -68,7 +66,12 @@ const buttonLabel = computed(() =>
 /* ── where the teleported panel goes ───────────────────────────────────── */
 const PANEL_W = 360;
 const btnEl = ref<InstanceType<typeof PopoverButton> | null>(null);
-const pos = ref({ top: '0px', right: '0px', width: `${PANEL_W}px`, maxHeight: '420px' });
+const pos = ref<{ top: string; right?: string; left?: string; width: string; maxHeight: string }>({
+  top: '0px',
+  right: '0px',
+  width: `${PANEL_W}px`,
+  maxHeight: '420px',
+});
 
 /**
  * Recorded from the button, not the panel (the panel does not exist until it
@@ -77,16 +80,18 @@ const pos = ref({ top: '0px', right: '0px', width: `${PANEL_W}px`, maxHeight: '4
  * to be. Neither handler intercepts the event.
  */
 function syncPos() {
-  const r = refElement(btnEl.value)?.getBoundingClientRect();
+  const el = refElement(btnEl.value);
+  const r = el?.getBoundingClientRect();
   if (!r) return;
-  const at = anchorUnderRightEdge(
+  const at = anchorUnderEndEdge(
     r,
     { width: window.innerWidth, height: window.innerHeight },
     // The list scrolls inside the panel; 520 keeps ~6 rows on a laptop and
-    // the head + foot visible on a phone.
-    { width: PANEL_W, maxHeight: 520 },
+    // the head + foot visible on a phone. ⚠ RTL: flush with the bell's END
+    // edge — its left one in a right-to-left header.
+    { width: PANEL_W, maxHeight: 520, dir: dirOfElement(el) },
   );
-  pos.value = { top: at.top, right: at.right, width: at.width ?? `${PANEL_W}px`, maxHeight: at.maxHeight };
+  pos.value = { top: at.top, right: at.right, left: at.left, width: at.width ?? `${PANEL_W}px`, maxHeight: at.maxHeight };
 }
 
 /**
@@ -108,34 +113,13 @@ function onPanelOpen() {
 /* ── the rows ──────────────────────────────────────────────────────────── */
 
 /**
- * gorunum:v2 — the severity in the reader's language, not the enum.
- *
- * It printed the raw value under a CSS `uppercase`, which in Turkish turns
- * `info` into `İNFO` — the locale's own uppercasing of a dotted i, applied to a
- * word that was never Turkish in the first place.
- */
-function severityLabel(sev: string): string {
-  const key = `notifications.severity.${sev}`;
-  const out = t(key);
-  return out === key ? sev : out;
-}
-
-function severityTone(s: string): 'danger' | 'warning' | 'info' {
-  if (s === 'critical' || s === 'error') return 'danger';
-  if (s === 'warning') return 'warning';
-  return 'info';
-}
-
-/** Does this row go anywhere? Drives the hint and the cursor. */
-function hasTarget(n: NotificationItem): boolean {
-  return resolveNotificationTarget(n.target).kind !== 'none';
-}
-
-/**
  * Clicking a row marks it read AND goes to the thing it is about — through the
  * SAME resolver the browser and desktop notifications use, so the three can
  * never land in three different places. Owner's standing requirement:
  * *"tıklandığında yollarına gitmesini istiyorum."*
+ *
+ * ⚠ Only a row that HAS somewhere to go ever gets here: `NotificationRow`
+ * emits nothing for an inert one (it is not even a button).
  */
 async function openItem(n: NotificationItem, close: () => void) {
   close();
@@ -143,16 +127,32 @@ async function openItem(n: NotificationItem, close: () => void) {
   await openNotificationTarget(router, n.target);
 }
 
-// ⚠ Rendered ONCE per row, here, not twice per row in the template (title +
-// body). vue-i18n's locale is reactive, so this recomputes when the language
-// changes: the same row reads differently for a different person.
-const list = computed(() =>
-  notif.feed.slice(0, 15).map((n) => ({ ...n, text: notificationText(n) })),
-);
+/**
+ * "See all" — for EVERYBODY, and it no longer leaves the explorer.
+ *
+ * ⚠⚠ It used to be an admin-only `<RouterLink to="/notifications">`, i.e. the
+ * instance-wide audit page behind `requiresAdmin`. Owner, 2026-09-20: *"Tüm
+ * bildirimleri gör butonu explore'dan dışarı çıkıyor; adam admin değilse
+ * göremez."* So a person who was not an administrator could read the newest
+ * fifteen rows in this popover and had no way to reach the sixteenth. The
+ * full list is now a panel over the explorer (NotificationsPanel.vue) reading
+ * the user-scoped endpoints, and the admin page keeps its own, separate door
+ * below — for MANAGING the subsystem, which is what it is for.
+ */
+function seeAll(close: () => void) {
+  close();
+  notif.openPanel();
+}
+
+// The newest fifteen. The full list is one click further on.
+const list = computed(() => notif.feed.slice(0, 15));
 </script>
 
 <template>
-  <Popover v-slot="{ open, close }" class="fx-bell">
+  <Popover
+    v-slot="{ open, close }"
+    class="fx-bell"
+  >
     <PopoverButton
       ref="btnEl"
       class="fx-bell__btn"
@@ -164,19 +164,27 @@ const list = computed(() =>
       @keydown="syncPos"
     >
       <!-- eslint-disable-next-line vue/no-v-html — static markup from @brftech/filex-core's lib/actionIcons -->
-      <span class="fx-bell__icon" aria-hidden="true" v-html="actionIconSvg('bell')"></span>
-      <span v-if="unread > 0" class="fx-bell__count" aria-hidden="true" data-testid="notification-bell-count">{{
-        countLabel
-      }}</span>
+      <span
+        class="fx-bell__icon"
+        aria-hidden="true"
+        v-html="actionIconSvg('bell')"
+      ></span>
+      <!-- ⚠ THE badge component (rule 3): the count is drawn on the icon by
+           one thing, here, in the admin nav, in the full list's heading and —
+           through lib/unreadBadge.ts — on the desktop app's dock. -->
+      <UnreadBadge :count="unread" />
     </PopoverButton>
 
     <Teleport to="body">
       <PopoverPanel
         class="fx-bell__panel"
-        :style="{ top: pos.top, right: pos.right, width: pos.width }"
+        :style="{ top: pos.top, right: pos.right, left: pos.left, width: pos.width }"
         data-testid="notification-panel"
       >
-        <div class="fx-bell__head" @vue:mounted="onPanelOpen">
+        <div
+          class="fx-bell__head"
+          @vue:mounted="onPanelOpen"
+        >
           <span class="fx-bell__heading">{{ t('notifications.title') }}</span>
           <button
             v-if="notif.hasUnread"
@@ -186,46 +194,67 @@ const list = computed(() =>
             @click="notif.markAllRead()"
           >
             <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
-            <span class="fx-bell__markall-icon" aria-hidden="true" v-html="actionIconSvg('check')"></span>
+            <span
+              class="fx-bell__markall-icon"
+              aria-hidden="true"
+              v-html="actionIconSvg('check')"
+            ></span>
             {{ t('notifications.markAllRead') }}
           </button>
         </div>
 
-        <ul class="fx-bell__list" :style="{ maxHeight: pos.maxHeight }" data-testid="notification-list">
-          <li v-if="!list.length && !notif.feedLoading" class="fx-bell__empty">
+        <ul
+          class="fx-bell__list"
+          :style="{ maxHeight: pos.maxHeight }"
+          data-testid="notification-list"
+        >
+          <li
+            v-if="!list.length && !notif.feedLoading"
+            class="fx-bell__empty"
+          >
             {{ t('notifications.empty') }}
           </li>
-          <li v-for="n in list" :key="n.id">
-            <button
-              type="button"
-              class="fx-bell__row"
-              :class="{ 'is-unread': !n.read_at, 'has-target': hasTarget(n) }"
-              :title="hasTarget(n) ? t('notifications.openTarget') : undefined"
-              data-testid="notification-row"
-              @click="openItem(n, close)"
-            >
-              <span class="fx-bell__dot" aria-hidden="true"></span>
-              <span class="fx-bell__rowbody">
-                <span class="fx-bell__meta">
-                  <span class="fx-bell__sev" :class="`is-${severityTone(n.severity)}`">{{
-                    severityLabel(n.severity)
-                  }}</span>
-                  <span class="fx-bell__when">{{ formatDate(n.created_at, locale) }}</span>
-                </span>
-                <span class="fx-bell__title">{{ n.text.title }}</span>
-                <span v-if="n.text.body" class="fx-bell__body">{{ n.text.body }}</span>
-              </span>
-            </button>
+          <li
+            v-for="n in list"
+            :key="n.id"
+          >
+            <!-- ⚠⚠ THE row component — the same one the full-list screen
+                 draws. Whether a row is clickable is a fact about the row
+                 (rule 1), so it is decided in one place and looks the same in
+                 every list it appears in. -->
+            <NotificationRow
+              :item="n"
+              @open="openItem($event, close)"
+            />
           </li>
         </ul>
 
-        <!-- ⚠ Admins only. /notifications is the instance-wide audit page and
-             sits behind the admin panel's route guard, so for anybody else
-             this link would bounce them to their Home — a door that opens onto
-             the hallway. For them the list above IS the list. -->
-        <div v-if="auth.isAdmin" class="fx-bell__foot">
-          <RouterLink to="/notifications" class="fx-bell__all" @click="close()">
+        <div class="fx-bell__foot">
+          <!-- ⚠⚠ For EVERYBODY. This was `v-if="auth.isAdmin"` around a link
+               to the admin audit page, which meant a non-admin was shown no
+               way at all to read their own sixteenth notification. It now
+               opens the full list over the explorer, from the user-scoped
+               endpoints — no admin rights anywhere on the path. -->
+          <button
+            type="button"
+            class="fx-bell__all"
+            data-testid="notification-view-all"
+            @click="seeAll(close)"
+          >
             {{ t('notifications.viewAll') }}
+          </button>
+          <!-- ⚠ The admin page is a SECOND, smaller door, and it is for
+               managing the subsystem (the webhook, everybody's rows) — not
+               for reading your own mail. An administrator walks to it
+               deliberately; nobody is sent there by a "see all". -->
+          <RouterLink
+            v-if="auth.isAdmin"
+            to="/notifications"
+            class="fx-bell__manage"
+            data-testid="notification-manage"
+            @click="close()"
+          >
+            {{ t('notifications.manageAdmin') }}
           </RouterLink>
         </div>
       </PopoverPanel>
@@ -286,27 +315,10 @@ const list = computed(() =>
   display: block;
   color: inherit;
 }
-/* The unread count. Primary on text-on-primary — the one ink pairing the
-   theme contrast test pins in every palette and both variants — with a ring
-   in the header's own ground so it reads as sitting ON the bell. */
-.fx-bell__count {
-  position: absolute;
-  top: 2px;
-  right: 1px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: var(--fe-primary);
-  color: var(--fe-text-on-primary);
-  box-shadow: 0 0 0 2px var(--fe-bg);
-  font-family: var(--fe-font);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 16px;
-  text-align: center;
-  pointer-events: none;
-}
+/* The unread count is UnreadBadge.vue now (rule 3: one badge, every
+   surface). The button keeps `position: relative` above, which is the
+   badge's positioning context and the only part of it that is about
+   THIS control. */
 
 .fx-bell__panel {
   position: fixed;
@@ -372,98 +384,46 @@ const list = computed(() =>
   text-align: center;
   color: var(--fe-text-muted);
 }
-.fx-bell__row {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--fe-gap-sm);
-  width: 100%;
-  padding: 8px;
-  border: 0;
-  border-radius: var(--fe-radius-sm);
-  background: transparent;
-  color: var(--fe-text);
-  font: inherit;
-  text-align: left;
-  cursor: default;
-}
-.fx-bell__row.has-target {
-  cursor: pointer;
-}
-.fx-bell__row:hover,
-.fx-bell__row:focus-visible {
-  background: var(--fe-bg-hover);
-  outline: none;
-}
-/* Unread is the dot; read rows keep their words and lose only the weight. */
-.fx-bell__dot {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  margin-top: 5px;
-  border-radius: 50%;
-  background: var(--fe-border-strong);
-}
-.fx-bell__row.is-unread .fx-bell__dot {
-  background: var(--fe-primary);
-}
-.fx-bell__rowbody {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-.fx-bell__meta {
-  display: flex;
-  align-items: baseline;
-  gap: var(--fe-gap-sm);
-  font-size: var(--fe-text-xs);
-  color: var(--fe-text-muted);
-}
-.fx-bell__sev {
-  font-weight: 600;
-}
-.fx-bell__sev.is-danger {
-  color: var(--fe-danger);
-}
-.fx-bell__sev.is-warning {
-  color: var(--fe-warning);
-}
-.fx-bell__sev.is-info {
-  color: var(--fe-primary-ink);
-}
-.fx-bell__when {
-  margin-left: auto;
-  white-space: nowrap;
-}
-.fx-bell__title {
-  font-weight: 500;
-  overflow-wrap: anywhere;
-}
-.fx-bell__row:not(.is-unread) .fx-bell__title {
-  font-weight: 400;
-  color: var(--fe-text-muted);
-}
-.fx-bell__body {
-  color: var(--fe-text-muted);
-  font-size: var(--fe-text-sm);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-}
+/* The rows are NotificationRow.vue now — the same component the full-list
+   screen draws, so "which rows are clickable" cannot be answered
+   differently in the two places it is asked. */
+
 .fx-bell__foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fe-gap-sm);
   padding: 8px 12px;
   border-top: 1px solid var(--fe-border-soft);
   text-align: center;
   font-size: var(--fe-text-xs);
 }
 .fx-bell__all {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
   color: var(--fe-primary-ink);
   text-decoration: none;
+  cursor: pointer;
 }
 .fx-bell__all:hover {
+  text-decoration: underline;
+}
+/* ⚠ Visibly the lesser of the two. "See all" is where a person reads their
+   own notifications; this one goes to the operator's console, and drawing
+   them as equals is how the old bell sent everybody to the wrong one. */
+.fx-bell__manage {
+  color: var(--fe-text-muted);
+  text-decoration: none;
+}
+.fx-bell__manage::before {
+  content: '·';
+  margin-inline-end: var(--fe-gap-sm);
+  color: var(--fe-border-strong);
+}
+.fx-bell__manage:hover {
+  color: var(--fe-text);
   text-decoration: underline;
 }
 </style>

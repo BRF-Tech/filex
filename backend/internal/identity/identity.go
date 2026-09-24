@@ -71,48 +71,100 @@ func Normalize(identifier string) string {
 	return strings.ToLower(strings.TrimSpace(identifier))
 }
 
-// Validate reports whether a username is acceptable, returning an error whose
-// message is meant to be shown to the person who typed it.
+// Problem kinds Check answers. They are the rule's names for the HTTP layer
+// and the browser, which each say them in the reader's language; the
+// English sentence Validate builds is for logs and the CLI.
+const (
+	ProblemEmpty    = "empty"
+	ProblemAt       = "at"
+	ProblemShort    = "short"
+	ProblemLong     = "long"
+	ProblemUpper    = "upper"
+	ProblemDigit    = "digit"
+	ProblemChar     = "char"
+	ProblemReserved = "reserved"
+)
+
+// Problem is why a username is refused, in parts: the kind, and the one
+// detail the sentence needs (the character, or the limit).
+type Problem struct {
+	Kind  string
+	Char  rune // ProblemChar: the first character that is not allowed
+	Limit int  // ProblemShort / ProblemLong: MinLen or MaxLen
+}
+
+// Check reports why a username is not acceptable, nil when it is.
 //
 // The character set is ASCII on purpose, and this is the one place in filex
 // where that is the right answer: a username travels through SSH USER records,
 // FTP command lines, S3 key labels and shell config files, all of which mangle
 // non-ASCII differently. The DISPLAY name is where a person's name belongs, and
-// it has always accepted the full alphabet. The error text below is the user's
-// language's job at the API boundary; the sentinel is what callers match on.
-func Validate(username string) error {
+// it has always accepted the full alphabet.
+//
+// ⚠ The browser checks the same rules while a person types
+// (web/src/lib/accountRules.ts); this is the authority, that is the mirror.
+// A rule added here must be added there, or the form lets through a name the
+// save then refuses.
+func Check(username string) *Problem {
 	if username == "" {
-		return fmt.Errorf("%w: empty", ErrInvalidUsername)
+		return &Problem{Kind: ProblemEmpty}
 	}
 	if strings.Contains(username, "@") {
 		// Stated separately from the character-set error because it is the one
 		// mistake a user is most likely to make (typing their e-mail), and a
 		// generic "invalid character" would not tell them what to do instead.
-		return fmt.Errorf("%w: contains @, which belongs to an e-mail address", ErrInvalidUsername)
+		return &Problem{Kind: ProblemAt}
 	}
 	if len(username) < MinLen {
-		return fmt.Errorf("%w: shorter than %d characters", ErrInvalidUsername, MinLen)
+		return &Problem{Kind: ProblemShort, Limit: MinLen}
 	}
 	if len(username) > MaxLen {
-		return fmt.Errorf("%w: longer than %d characters", ErrInvalidUsername, MaxLen)
+		return &Problem{Kind: ProblemLong, Limit: MaxLen}
 	}
 	if username != strings.ToLower(username) {
-		return fmt.Errorf("%w: must be lowercase", ErrInvalidUsername)
+		return &Problem{Kind: ProblemUpper}
 	}
 	if unicode.IsDigit(rune(username[0])) {
 		// A leading digit makes a username ambiguous with a numeric user id in
 		// the places that accept either (admin URLs, CLI arguments).
-		return fmt.Errorf("%w: must not start with a digit", ErrInvalidUsername)
+		return &Problem{Kind: ProblemDigit}
 	}
 	for _, r := range username {
 		if !isUsernameRune(r) {
-			return fmt.Errorf("%w: %q is not allowed (use a-z, 0-9, dot, dash, underscore)", ErrInvalidUsername, r)
+			return &Problem{Kind: ProblemChar, Char: r}
 		}
 	}
 	if reserved[username] {
-		return fmt.Errorf("%w: %q is reserved", ErrReservedUsername, username)
+		return &Problem{Kind: ProblemReserved}
 	}
 	return nil
+}
+
+// Validate reports whether a username is acceptable, as an error for logs,
+// the CLI and callers that match the sentinels. The HTTP layer says it in the
+// reader's language from Check instead.
+func Validate(username string) error {
+	p := Check(username)
+	if p == nil {
+		return nil
+	}
+	switch p.Kind {
+	case ProblemEmpty:
+		return fmt.Errorf("%w: empty", ErrInvalidUsername)
+	case ProblemAt:
+		return fmt.Errorf("%w: contains @, which belongs to an email address", ErrInvalidUsername)
+	case ProblemShort:
+		return fmt.Errorf("%w: shorter than %d characters", ErrInvalidUsername, MinLen)
+	case ProblemLong:
+		return fmt.Errorf("%w: longer than %d characters", ErrInvalidUsername, MaxLen)
+	case ProblemUpper:
+		return fmt.Errorf("%w: must be lowercase", ErrInvalidUsername)
+	case ProblemDigit:
+		return fmt.Errorf("%w: must not start with a digit", ErrInvalidUsername)
+	case ProblemChar:
+		return fmt.Errorf("%w: %q is not allowed (use a-z, 0-9, dot, dash, underscore)", ErrInvalidUsername, p.Char)
+	}
+	return fmt.Errorf("%w: %q is reserved", ErrReservedUsername, username)
 }
 
 func isUsernameRune(r rune) bool {

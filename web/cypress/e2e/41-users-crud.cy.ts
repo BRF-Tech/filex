@@ -92,22 +92,28 @@ describe('users list: the actions column stays at the right edge', () => {
         cy.visit('/admin/users');
         cy.get('input[placeholder]').filter(':visible').first().type(email);
 
-        cy.contains('tr', email, { timeout: 10000 }).within(() => {
-          cy.get('td.tbl-actions').should('have.css', 'position', 'sticky');
-          cy.get('td.tbl-actions').find('button').first().as('edit');
+        // The Users table is the product's ONE table (DataTable): a row is
+        // `.fe-list__row`, and its verbs are behind the one Actions control in
+        // the frozen trailing column (`.fe-list__col--menu`).
+        cy.contains('.fe-list__row', email, { timeout: 10000 }).within(() => {
+          cy.get('.fe-list__col--menu').should('have.css', 'position', 'sticky');
+          cy.get(`[data-testid="user-actions-${uid}"]`).as('actions');
         });
         // Nothing has been scrolled sideways, so the pinned cell being inside
         // the viewport is the sticky offset doing its job, not the user.
-        cy.get('.tbl-scroll').filter(':visible').first().invoke('scrollLeft').should('eq', 0);
-        cy.get('@edit').should('be.visible');
-        cy.get('@edit').then(($btn) => {
+        cy.get('.fe-table--framed .fe-list').filter(':visible').first().invoke('scrollLeft').should('eq', 0);
+        cy.get('@actions').should('be.visible');
+        cy.get('@actions').then(($btn) => {
           const r = $btn[0].getBoundingClientRect();
           const w = $btn[0].ownerDocument.defaultView!.innerWidth;
-          expect(r.right, 'edit button inside the viewport').to.be.at.most(w);
-          expect(r.left, 'edit button inside the viewport').to.be.at.least(0);
-          expect(r.width, 'edit button has a size').to.be.greaterThan(0);
+          expect(r.right, 'Actions control inside the viewport').to.be.at.most(w);
+          expect(r.left, 'Actions control inside the viewport').to.be.at.least(0);
+          expect(r.width, 'Actions control has a size').to.be.greaterThan(0);
         });
-        cy.get('@edit').click();
+        cy.get('@actions').click();
+        // The menu is teleported to <body>; its entry keeps the control's
+        // address plus the verb.
+        cy.get(`[data-testid="user-actions-${uid}-edit"]`).click();
         cy.url({ timeout: 10000 }).should('match', new RegExp(`/admin/users/${uid}([?#]|$)`));
 
         cy.request({ method: 'DELETE', url: `/api/admin/users/${uid}`, headers: { Authorization: `Bearer ${tok}` }, failOnStatusCode: false });

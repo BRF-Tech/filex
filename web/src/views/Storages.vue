@@ -8,19 +8,21 @@ import { useStoragesStore } from '@/stores/storages';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { StorageRef } from '@/api/types';
-import { formatBytes, formatNumber, formatRelative } from '@/lib/format';
+import { fileCountOf, formatBytes, formatNumber, formatRelative } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import Spinner from '@/components/ui/Spinner.vue';
-import { syncTone } from '@/lib/syncTone';
+import { syncStateLabel, syncTone } from '@/lib/syncTone';
+import { StorageTags } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
 const router = useRouter();
 const storages = useStoragesStore();
 const toast = useToastStore();
+
 
 const syncingId = ref<number | null>(null);
 const deleteTarget = ref<StorageRef | null>(null);
@@ -112,31 +114,35 @@ onMounted(load);
               >
                 {{ s.name }}
               </RouterLink>
-              <Badge size="xs" tone="zinc">{{ s.driver }}</Badge>
-              <Badge v-if="s.read_only" size="xs" tone="amber">RO</Badge>
-              <Badge v-if="!s.enabled" size="xs" tone="rose">{{ t('common.disabled') }}</Badge>
+              <!-- ⚠ One vocabulary with Connections → Storages: this list
+                   said "RO" and "local", that one "SALT OKUNUR" and "LOCAL"
+                   (QA #34). Both draw the same StorageTags now. -->
+              <StorageTags :driver="s.driver" :read-only="s.read_only" :enabled="s.enabled" :locale="locale" />
             </div>
             <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
               {{ formatBytes(s.stats?.total_size_bytes ?? s.total_bytes ?? 0, locale) }} ·
-              {{ formatNumber(s.stats?.file_count ?? s.file_count ?? 0, locale) }}
-              {{ t('storages.filesUnit') }}
+              <!-- ⚠ The count is IN the message ("{n} files"), with its plural
+                   forms: a number followed by a separately translated "files"
+                   could not agree with the number or move in a language whose
+                   word order differs. -->
+              {{ t('storages.fileCount', { n: formatNumber(fileCountOf(s), locale) }, fileCountOf(s)) }}
             </p>
           </div>
-          <Badge :tone="syncTone(s.last_sync_state)" dot>
-            {{
-              s.last_sync_state === 'running'
-                ? t('common.running')
-                : // ⚠ `poll`, not `ondemand`: an unset sync_mode is defaulted to
-                  // poll by the backend (handlers/storages.go), so the badge was
-                  // naming the OPPOSITE mode to the one running.
-                  (s.last_sync_state ?? t('storages.modeLabel.' + (s.sync_mode || 'poll')))
-            }}
+          <!-- ⚠ `poll`, not `ondemand`: an unset sync_mode is defaulted to poll
+               by the backend (handlers/storages.go), so the badge was naming
+               the OPPOSITE mode to the one running. The state in words
+               (syncStateLabel), not the wire value "ok". -->
+          <Badge :tone="syncTone(s.last_sync_state)" dot data-testid="storage-sync-state">
+            {{ syncStateLabel(s.last_sync_state, t) || t('storages.modeLabel.' + (s.sync_mode || 'poll')) }}
           </Badge>
         </div>
 
         <p class="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
-          {{ t('dashboard.lastSync') }}:
-          {{ s.last_sync_at ? formatRelative(s.last_sync_at, locale) : t('storages.notYetSynced') }}
+          {{
+            s.last_sync_at
+              ? t('dashboard.lastSyncAt', { when: formatRelative(s.last_sync_at, locale) })
+              : t('storages.notYetSynced')
+          }}
         </p>
         <p
           v-if="s.last_sync_error"

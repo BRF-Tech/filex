@@ -26,8 +26,11 @@
  *   · the RULES (`byActiveKey`, `compareNodes`, folders-first, the two click
  *     vocabularies) — written once, closed over each store;
  *   · the LOCALE the `type` key sorts in — one alphabet for the whole bundle;
- *   · the persisted GLOBAL DEFAULT (`filex.list-sort`) — "the last sort a
- *     person chose", which is one fact no matter which pane they chose it in.
+ *   · the DEFAULT a folder nobody configured opens with — the person's, else
+ *     the instance's (`lib/viewPrefs`). ⚠ Since v0.43 it is NOT "the last sort
+ *     a person chose": a choice belongs to the folder it was made in, and
+ *     nothing in this file writes the default (see the note where `persist`
+ *     used to be).
  *
  * ⚠ Panes find their store by INJECTION (`provideSortStore` / `useSortStore`),
  * not by a prop threaded through every view: `ListView` and `FilterBar` are
@@ -61,6 +64,10 @@ import type { LocaleCode } from '../types/ExplorerConfig';
 import { messages } from '../locales';
 import { typeLabelKey } from './fileIcons';
 import { byFoldersFirst } from './listing';
+/* ⚠ The DEFAULT a folder nobody configured opens with (the person's, else the
+ * instance's). `viewPrefs` imports only TYPES from this file, so there is no
+ * runtime cycle between the two. */
+import { defaultFolderView, onViewPrefsApplied, viewPrefsReady } from './viewPrefs';
 
 export type SortKey = 'name' | 'type' | 'modified' | 'size';
 export type SortDir = 'asc' | 'desc';
@@ -247,48 +254,71 @@ export interface SortStore {
   sortListing(files: FileNode[], order?: ListingOrder): FileNode[];
 }
 
-function persist(key: SortKey, dir: SortDir): void {
-  try {
-    localStorage.setItem(SORT_LS_KEY, JSON.stringify({ key, dir }));
-  } catch {
-    /* quota / private mode — the in-memory refs still moved */
-  }
-}
+/*
+ * A person CHOSE a sort — and that is ALL it is. There is no `persist` here
+ * any more.
+ *
+ * ⚠⚠ This used to write the choice as the GLOBAL DEFAULT (on the account and
+ * into `filex.list-sort`), under the rule "your last choice becomes the
+ * default for every folder you have never set up". That rule was the leak the
+ * owner reported on 2026-09-21 — "Explore içindeki değişikliklerimiz o klasör
+ * özelinde olmalı; tüm klasörlerde görünüm değişikliği geçerli oluyor": sort
+ * folder A by size and every untouched folder came up sorted by size. A
+ * choice now belongs to the folder it was made in, and the explorer records
+ * it there (FileExplorer → `rememberFolder`); the default is set on purpose,
+ * in the person's settings, and nothing in this file writes it.
+ *
+ * ⚠ `filex.list-sort` is still READ (`readStored`) — for the first paint only,
+ * as the cache of the resolved default that `lib/viewPrefs` keeps. Writing a
+ * click into it would paint the next page load in the last folder's sort
+ * before the document corrected it: the same leak, for half a second.
+ */
 
 /**
- * A fresh sort store, seeded from the global default.
+ * Every store this module has handed out.
  *
- * ⚠⚠ Every store WRITES the global default when a person chooses in it, and
- * that is the point rather than an oversight: `filex.list-sort` is defined as
- * "the last sort a person chose", and a choice made in the right-hand pane is
- * still a choice. What must not happen — and does not, because the refs are
- * per store — is the OTHER pane moving when it does. Measured 2026-09-13:
- * sorting the split pane by Size left the main pane on Name ↑ and made Size
- * the arrangement the next unconfigured folder opens in.
+ * ⚠ Needed so a document arriving from the SERVER can reach the panes that
+ * are already on screen — the main one, the split one, an embed's. Without
+ * it the account's answer would only apply to panes created after it landed,
+ * which is "it works if you navigate first".
+ */
+const liveStores = new Set<SortStore>();
+
+/**
+ * The default each store was last put on — its creation seed, then whatever
+ * the account's answer moved it to. "Still following the default" means the
+ * store holds exactly this.
+ *
+ * ⚠ Per store, and NOT a fresh read of the first-paint cache: by the time the
+ * document is announced, `lib/viewPrefs` has already rewritten that cache with
+ * the NEW default, so a comparison against it would see every store as
+ * "somebody chose something" and move none of them.
+ */
+const followed = new WeakMap<SortStore, { key: SortKey; dir: SortDir }>();
+
+/**
+ * A fresh sort store, seeded from the DEFAULT (the first-paint cache of it
+ * until the account's answer lands).
+ *
+ * ⚠ A choice made in one store moves only that store's refs: the split pane
+ * sorting by Size leaves the main pane on Name ↑ (measured 2026-09-13), and
+ * since v0.43 it no longer changes what any other folder opens with either.
  */
 export function createSortStore(): SortStore {
-  const stored = readStored();
+  const stored = defaultSort();
   const key = ref<SortKey>(stored.key);
   const dir = ref<SortDir>(stored.dir);
 
   function setSort(k: SortKey, d?: SortDir): void {
     key.value = k;
     dir.value = d ?? defaultSortDir(k);
-    persist(key.value, dir.value);
   }
 
   /**
-   * tablo:t1 — RESTORE a sort that was already the person's, without recording
-   * it as a fresh choice.
-   *
-   * ⚠⚠ The difference from `setSort` is the whole point and it is not
-   * cosmetic. `filex.list-sort` is the GLOBAL default — "what a folder I have
-   * never set up opens as" — and per-folder memory (`lib/viewPrefs`) is
-   * layered on top of it. If applying a folder's remembered sort went through
-   * `setSort`, walking into one folder that is sorted by size would quietly
-   * make Size the default for every folder in the product, and the person
-   * would have no idea which folder did it. Restoring is not choosing; only a
-   * choice writes the default.
+   * tablo:t1 — RESTORE a sort (a folder's memory, or the default) without
+   * recording it as a fresh choice. The explorer's recorder tells the two
+   * apart by comparing against what it last applied, so a restore can never
+   * write itself into the folder it was restored into.
    */
   function applySort(k: SortKey, d: SortDir): void {
     key.value = k;
@@ -297,7 +327,6 @@ export function createSortStore(): SortStore {
 
   function toggleSortDir(): void {
     dir.value = dir.value === 'asc' ? 'desc' : 'asc';
-    persist(key.value, dir.value);
   }
 
   /**
@@ -322,7 +351,7 @@ export function createSortStore(): SortStore {
     return order === 'relevance' ? byFoldersFirst : compareNodesFn;
   }
 
-  return {
+  const store: SortStore = {
     key,
     dir,
     setSort,
@@ -334,6 +363,9 @@ export function createSortStore(): SortStore {
     sortListing: (files: FileNode[], order: ListingOrder = 'sort') =>
       [...(files || [])].sort(compareInOrderFn(order)),
   };
+  liveStores.add(store);
+  followed.set(store, { ...stored });
+  return store;
 }
 
 /**
@@ -387,15 +419,45 @@ export function applySort(key: SortKey, dir: SortDir): void {
 }
 
 /**
- * tablo:t1 — THE GLOBAL DEFAULT: the sort a folder nobody has configured opens
- * in. Re-read from storage rather than mirrored in a second ref, because
- * `setSort` writes there and `applySort` deliberately does not — so the stored
- * value IS "the last sort a person chose", which is exactly the definition of
- * the default, and a mirror could only drift from it.
+ * THE DEFAULT SORT — what a folder nobody has configured opens in: the
+ * person's default, else the instance's, else this browser's cached copy of
+ * it (until the document lands), else filex's own (Name ↑).
+ *
+ * ⚠ Once the document has landed the cache is NOT consulted: an account with
+ * no default of its own must get filex's default, not whatever the cache held
+ * from the last person or the last release.
  */
-export function globalSort(): { key: SortKey; dir: SortDir } {
+export function defaultSort(): { key: SortKey; dir: SortDir } {
+  const d = defaultFolderView();
+  if (d.k) return { key: d.k, dir: d.d ?? defaultSortDir(d.k) };
+  if (viewPrefsReady()) return { key: DEFAULT_KEY, dir: defaultSortDir(DEFAULT_KEY) };
   return readStored();
 }
+
+/** ⚠ DEPRECATED name for `defaultSort` — kept so an embedder importing it
+ *  keeps compiling. It is no longer "the last sort a person chose". */
+export const globalSort = defaultSort;
+
+/**
+ * The account's document landed (or another browser's newer one did): move
+ * every store that is still following the DEFAULT onto the resolved one.
+ *
+ * ⚠⚠ "Still following" is the whole subtlety. A store whose sort was restored
+ * from a folder's own memory, or chosen in this tab a second ago, must not be
+ * yanked — so the move happens only where the store still holds what this
+ * browser's cache said, i.e. where nobody has chosen anything since the page
+ * opened. (The explorer's main pane is re-applied by the explorer itself,
+ * folder memory included; this reaches the other stores.)
+ */
+onViewPrefsApplied(() => {
+  const want = defaultSort();
+  for (const store of liveStores) {
+    const was = followed.get(store);
+    if (!was || store.key.value !== was.key || store.dir.value !== was.dir) continue;
+    store.applySort(want.key, want.dir);
+    followed.set(store, { ...want });
+  }
+});
 
 export function toggleSortDir(): void {
   defaultStore.toggleSortDir();

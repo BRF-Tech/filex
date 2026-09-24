@@ -1,50 +1,105 @@
 <script setup lang="ts">
 /**
- * AdminFiles — small lookup page that takes a node ID and routes the
- * caller to the version history.
+ * AdminFiles — find a file by name and open its version history.
  *
- * Why this and not a hover-action on Explore? The FileExplorer SFC
- * (`@brftech/filex-core`) owns its own context menu / row hover state
- * and the embedder can't extend it without forking the SFC. Until the
- * SFC exposes a slot or event for "open versions", this dedicated page
- * is the least-invasive way to surface version history from the admin
- * SPA. Users find a node ID via the API (or the SFC's own info panel)
- * and paste it here.
+ * ⚠⚠ It asked the operator to TYPE A NODE ID ("Node ID — örn. 1024"), and
+ * told them to fish it out of the explorer's details panel or an API answer
+ * (release-candidate sweep, 2026-09-21, QA #30). A database id is not how
+ * anybody names a file. The page now searches by name — the same file search
+ * the explorer uses (`/api/files/search`, which already applies the caller's
+ * permissions) — and a row opens that file's history. The id travels in the
+ * URL only; the history page names the file it is showing.
  *
- * v1 deliberately scopes itself to "I know the node ID" — a fuzzy
- * search-by-path UI can land in v2 once the manager listing returns
- * version_count alongside the row data.
+ * ⚠ One table: the results are the explorer's DataTable, like every other
+ * admin list. Folders are left out — a folder has no version history.
  */
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { History, Search } from 'lucide-vue-next';
 
+import { SearchApi, type SearchHitEx } from '@/api/search';
+import { useStoragesStore } from '@/stores/storages';
+import { extractError } from '@/api/client';
+import { formatBytes, formatDate } from '@/lib/format';
+
 import Button from '@/components/ui/Button.vue';
-import EmptyState from '@/components/ui/EmptyState.vue';
+import Input from '@/components/ui/Input.vue';
+import { DataTable, type DataColumn } from '@brftech/filex-core';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const router = useRouter();
+const storages = useStoragesStore();
 
-const nodeIdInput = ref('');
-const error = ref<string | null>(null);
+const q = ref('');
+const searched = ref('');
+const hits = ref<SearchHitEx[]>([]);
+const searching = ref(false);
+const failure = ref('');
 
-const parsedId = computed(() => {
-  const v = nodeIdInput.value.trim();
-  if (!v) return null;
-  const n = Number(v);
-  if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) return null;
-  return n;
+onMounted(() => {
+  if (storages.empty) void storages.fetch().catch(() => {});
 });
 
-function go() {
-  error.value = null;
-  if (parsedId.value === null) {
-    error.value = t('adminFiles.invalidId');
+function storageName(id: number): string {
+  return storages.items.find((s) => s.id === id)?.name ?? '';
+}
+
+async function search() {
+  failure.value = '';
+  const term = q.value.trim();
+  if (!term) {
+    failure.value = t('adminFiles.needTerm');
+    hits.value = [];
+    searched.value = '';
     return;
   }
-  router.push({ name: 'files.versions', params: { nodeId: parsedId.value } });
+  searching.value = true;
+  try {
+    const res = await SearchApi.query({ q: term, scope: 'name', page: 1, page_size: 50 });
+    hits.value = res.items.filter((h) => !h.is_dir);
+    searched.value = term;
+  } catch (e: unknown) {
+    failure.value = extractError(e, t('errors.generic'));
+  } finally {
+    searching.value = false;
+  }
 }
+
+function open(row: SearchHitEx) {
+  router.push({ name: 'files.versions', params: { nodeId: row.id } });
+}
+
+const columns = computed<DataColumn<SearchHitEx>[]>(() => [
+  { id: 'filename', label: t('explore.cols.name'), sortable: true, width: 220 },
+  { id: 'path', label: t('common.path'), sortable: true, width: 280 },
+  {
+    id: 'storage_id',
+    label: t('common.storage'),
+    sortable: true,
+    width: 140,
+    format: (h) => storageName(h.storage_id) || '—',
+    sortValue: (h) => storageName(h.storage_id),
+  },
+  {
+    id: 'size',
+    label: t('explore.cols.size'),
+    align: 'right',
+    sortable: true,
+    width: 100,
+    format: (h) => formatBytes(h.size, locale.value),
+    sortValue: (h) => h.size,
+  },
+  {
+    id: 'modified_at',
+    label: t('explore.cols.modified'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 160,
+    format: (h) => formatDate(h.modified_at, locale.value),
+    sortValue: (h) => (h.modified_at ? Date.parse(h.modified_at) : null),
+  },
+]);
 </script>
 
 <template>
@@ -58,38 +113,44 @@ function go() {
       </p>
     </header>
 
-    <div class="card">
-      <div class="card-body space-y-3">
-        <label for="node-id" class="block text-sm font-medium text-zinc-800 dark:text-zinc-200">
-          {{ t('adminFiles.nodeIdLabel') }}
-        </label>
-        <div class="flex gap-2">
-          <input
-            id="node-id"
-            v-model="nodeIdInput"
-            type="text"
-            inputmode="numeric"
-            pattern="[0-9]*"
-            :placeholder="t('adminFiles.nodeIdPlaceholder')"
-            class="flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500"
-            @keydown.enter="go"
-          />
-          <Button variant="primary" :disabled="parsedId === null" @click="go">
-            <History class="h-4 w-4" />
-            {{ t('adminFiles.viewVersions') }}
-          </Button>
-        </div>
-        <p v-if="error" class="text-sm text-rose-600 dark:text-rose-400">{{ error }}</p>
-        <p class="text-xs text-zinc-500 dark:text-zinc-400">
-          {{ t('adminFiles.hint') }}
-        </p>
-      </div>
-    </div>
+    <!-- ⚠ novalidate: the empty-term message is ours, in the panel's language. -->
+    <form class="flex gap-2 items-start" novalidate data-testid="admin-files-search" @submit.prevent="search">
+      <Input
+        v-model="q"
+        :aria-label="t('adminFiles.searchLabel')"
+        :placeholder="t('adminFiles.searchPlaceholder')"
+        autocomplete="off"
+        class="flex-1"
+        data-testid="admin-files-q"
+      />
+      <Button type="submit" :loading="searching" data-testid="admin-files-go">
+        <Search class="h-4 w-4" />
+        {{ t('common.search') }}
+      </Button>
+    </form>
+    <p v-if="failure" class="error-text" role="alert" data-testid="admin-files-error">{{ failure }}</p>
 
-    <EmptyState
-      :icon="Search"
-      :title="t('adminFiles.helperTitle')"
-      :description="t('adminFiles.helperDescription')"
-    />
+    <DataTable
+      v-if="searched"
+      table-id="admin.files.search"
+      :columns="columns"
+      :rows="hits"
+      :loading="searching"
+      :empty="t('adminFiles.noMatch', { q: searched })"
+      row-key="id"
+      data-testid="admin-files-results"
+      @row-click="open"
+    >
+      <template #cell-filename="{ row }">
+        <span class="inline-flex items-center gap-1.5 font-medium">
+          <History class="h-3.5 w-3.5 shrink-0 text-zinc-400" aria-hidden="true" />
+          <bdi>{{ row.filename }}</bdi>
+        </span>
+      </template>
+      <template #cell-path="{ row }">
+        <span class="tbl-clamp"><bdi>{{ row.path }}</bdi></span>
+      </template>
+    </DataTable>
+    <p v-else class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('adminFiles.hint') }}</p>
   </section>
 </template>

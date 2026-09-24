@@ -86,7 +86,7 @@ func TestCatalogEventsAreDotted(t *testing.T) {
 		EventFileUploaded, EventFileUpdated, EventFileUploadFailed,
 		EventFileDeleted, EventFileMoved, EventFileTrashed,
 		EventShareCreated, EventDropReceived, EventFileInfected,
-		EventCommentAdded, EventE2EEscrowUsed,
+		EventCommentAdded, EventE2EEscrowUsed, EventPluginNotice,
 	}
 	for _, e := range dotted {
 		if !strings.Contains(string(e), ".") {

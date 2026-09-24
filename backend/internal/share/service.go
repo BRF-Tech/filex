@@ -15,6 +15,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/secretbox"
 )
 
 // ErrExpired is returned by Resolve when a share is past its TTL or
@@ -41,10 +42,32 @@ const MaxTTLDaysLimit = 3650
 // Service provides high-level share operations.
 type Service struct {
 	store db.Store
+	// secret signs the unlock cookie a visitor gets for answering a PIN
+	// (pin.go). Empty falls back to a per-process key; AttachSecret wires the
+	// instance secret.
+	secret string
+	// box seals the PIN so it can be handed back to the link's owner and to an
+	// administrator (migration 00049, RevealPIN in pin.go). Built by
+	// AttachSecret from the SAME FILEX_SECRET_KEY the app-plugin secret
+	// settings (wasmplugin/registry.go) and the S3 access keys are sealed
+	// under — one scheme, not a second one invented here.
+	//
+	// Never nil: NewService gives it a keyless Box, which refuses to Seal and
+	// therefore degrades honestly on an instance with no key configured.
+	box *secretbox.Box
 }
 
 // NewService constructs a share Service.
-func NewService(store db.Store) *Service { return &Service{store: store} }
+//
+// The PIN box starts KEYLESS. secretbox.New("") returns a Box that refuses to
+// Seal (ErrNoKey) rather than one that quietly stores plaintext, so a Service
+// nobody called AttachSecret on mints links whose PIN can never be shown —
+// which is exactly the truth about such an instance, and is said in those words
+// by the endpoint rather than guessed at by the screen.
+func NewService(store db.Store) *Service {
+	box, _ := secretbox.New("")
+	return &Service{store: store, box: box}
+}
 
 // CreateOpts is the set of fields a caller may supply when minting a share.
 type CreateOpts struct {
@@ -60,6 +83,54 @@ type CreateOpts struct {
 	Kind         string  // "" defaults to download
 	MaxUploads   *int    // cap on total files a drop link may receive
 	DropSettings *string // JSON limits blob
+
+	// App-plugin page options (migration 00046). Set only by the
+	// `share_create` host function: an app's public page IS a share, so it is
+	// minted here and inherits the expiry ceiling, the PIN gate, the visit
+	// counter and the administrator's revoke like every other link. Zero here
+	// means an ordinary share.
+	PluginID  int64
+	PageID    string
+	Subject   string
+	StateJSON string // the plugin's own durable record (≤ 64 KiB)
+	FilesJSON string // [{ref,name,file,size,mime}] — the exposed copies
+	// PurposeJSON is what the app says this link IS (wire.PagePurpose,
+	// migration 00052) — how a list of links names it.
+	PurposeJSON string
+
+	// Token is the link's token when the caller ALREADY MINTED one and has
+	// handed it out. Empty — every other caller — mints a fresh one here.
+	//
+	// ⚠ It exists for one case: a plugin may promise a share of a file its
+	// own job is still writing (wasmplugin/public.go). Such a row cannot be
+	// written until the bytes are committed and the node exists, but the
+	// plugin needs the link NOW, to put in the mail it is composing. So the
+	// token is minted with NewToken at the promise and spent here when the
+	// output lands. Refused unless it has the shape every token has, so a
+	// caller cannot choose a guessable one.
+	Token string
+}
+
+// NewToken mints a share token in the shape every link carries: 32 lowercase
+// hex characters from crypto/rand.
+//
+// Exported because a caller sometimes has to KNOW a link's token before the
+// row that carries it can exist — see CreateOpts.Token. Nothing else should
+// need it: Create mints its own.
+func NewToken() (string, error) { return randomToken(16) }
+
+// validToken is the shape NewToken produces, and the only shape Create will
+// accept from a caller.
+func validToken(tok string) bool {
+	if len(tok) != 32 {
+		return false
+	}
+	for _, r := range tok {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // MaxTTLDays returns the configured ceiling on a new link's life in days
@@ -105,17 +176,42 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) (*model.Share, er
 		return nil, errors.New("share: missing node_id")
 	}
 	opts.ExpiresAt, _ = ClampExpiry(opts.ExpiresAt, s.MaxTTLDays(ctx), time.Now())
-	tok, err := randomToken(16)
-	if err != nil {
-		return nil, err
+	tok := strings.ToLower(strings.TrimSpace(opts.Token))
+	if tok == "" {
+		var err error
+		if tok, err = NewToken(); err != nil {
+			return nil, err
+		}
+	} else if !validToken(tok) {
+		return nil, errors.New("share: token is not in the minted shape")
 	}
-	pinHash := ""
+	// The PIN is stored TWICE, for two different jobs (migration 00049):
+	//
+	//   pin_hash  bcrypt — what the visitor's guess is checked against. Still
+	//             the only thing the gate consults (pin.go CheckPIN), so making
+	//             the PIN recoverable did not make it cheaper to guess.
+	//   pin_enc   secretbox — what the OWNER and an ADMIN can be shown again,
+	//             through one audited endpoint. Sealed under FILEX_SECRET_KEY,
+	//             never in clear, never in a listing.
+	//
+	// ⚠ No key configured ⇒ pin_enc stays empty and the link still works. It is
+	// the one case where a missing key must NOT fail the write: refusing to
+	// mint a share on an instance with no FILEX_SECRET_KEY would break sharing
+	// outright to add a convenience.
+	pinHash, pinEnc := "", ""
 	if opts.PIN != "" {
 		h, err := bcrypt.GenerateFromPassword([]byte(opts.PIN), bcrypt.DefaultCost)
 		if err != nil {
 			return nil, err
 		}
 		pinHash = string(h)
+		if s.box.Enabled() {
+			sealed, err := s.box.Seal(opts.PIN)
+			if err != nil {
+				return nil, err
+			}
+			pinEnc = sealed
+		}
 	}
 	kind := opts.Kind
 	if kind == "" {
@@ -125,6 +221,7 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) (*model.Share, er
 		NodeID:       opts.NodeID,
 		Token:        tok,
 		PinHash:      pinHash,
+		PinEnc:       pinEnc,
 		ExpiresAt:    opts.ExpiresAt,
 		MaxDownloads: opts.MaxDownloads,
 		CreatedBy:    opts.CreatedBy,
@@ -132,6 +229,12 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) (*model.Share, er
 		Kind:         kind,
 		MaxUploads:   opts.MaxUploads,
 		DropSettings: opts.DropSettings,
+		PluginID:     opts.PluginID,
+		PageID:       opts.PageID,
+		Subject:      opts.Subject,
+		StateJSON:    opts.StateJSON,
+		FilesJSON:    opts.FilesJSON,
+		PurposeJSON:  opts.PurposeJSON,
 	}
 	return s.store.CreateShare(ctx, sh)
 }

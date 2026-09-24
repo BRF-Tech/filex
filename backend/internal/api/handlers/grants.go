@@ -18,8 +18,10 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 )
 
 // Grants is the per-file/per-folder permission-management API backing the
@@ -191,6 +193,7 @@ func (h *Grants) List(w http.ResponseWriter, r *http.Request) {
 		if u, uerr := h.Store.GetUser(r.Context(), g.UserID); uerr == nil && u != nil {
 			gv.UserEmail = u.Email
 			gv.UserDisplayName = u.DisplayName
+			gv.UserName = u.Label()
 		}
 		switch {
 		case gp == rel:
@@ -234,6 +237,9 @@ func (h *Grants) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	st, rel, ok := h.resolvePath(w, r, req.Path)
 	if !ok {
+		return
+	}
+	if gate(w, r, h.ACL, st.ID, writegate.Names(rel)) {
 		return
 	}
 	if !st.RBACEnabled {
@@ -398,6 +404,7 @@ func (h *Grants) AdminList(w http.ResponseWriter, r *http.Request) {
 	scope, scoped := tenant.FromContext(r.Context())
 	storageName := map[int64]string{}
 	userEmail := map[int64]string{}
+	userName := map[int64]string{}
 	out := make([]map[string]any, 0, len(all))
 	for _, g := range all {
 		if scoped && !scope.IsSupertenant && !scope.CanAccessStorage(g.StorageID) {
@@ -411,6 +418,7 @@ func (h *Grants) AdminList(w http.ResponseWriter, r *http.Request) {
 		if _, ok := userEmail[g.UserID]; !ok {
 			if u, e := h.Store.GetUser(r.Context(), g.UserID); e == nil && u != nil {
 				userEmail[g.UserID] = u.Email
+				userName[g.UserID] = u.Label()
 			}
 		}
 		out = append(out, map[string]any{
@@ -422,6 +430,7 @@ func (h *Grants) AdminList(w http.ResponseWriter, r *http.Request) {
 			"is_dir":       g.IsDir,
 			"user_id":      g.UserID,
 			"user_email":   userEmail[g.UserID],
+			"user_name":    userName[g.UserID],
 			"level":        g.Level,
 			"created_at":   g.CreatedAt,
 		})
@@ -487,13 +496,15 @@ func (h *Grants) SearchUsers(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, 10)
 	for _, u := range users {
 		if q != "" && !strings.Contains(strings.ToLower(u.Email), q) &&
-			!strings.Contains(strings.ToLower(u.DisplayName), q) {
+			!strings.Contains(strings.ToLower(u.DisplayName), q) &&
+			!strings.Contains(strings.ToLower(u.Username), q) {
 			continue
 		}
 		out = append(out, map[string]any{
 			"id":           u.ID,
 			"email":        u.Email,
 			"display_name": u.DisplayName,
+			"username":     u.Username,
 			"role":         u.Role,
 		})
 		if len(out) >= 10 {
@@ -534,6 +545,7 @@ func (h *Grants) Resolve(w http.ResponseWriter, r *http.Request) {
 			"id":           u.ID,
 			"email":        u.Email,
 			"display_name": u.DisplayName,
+			"username":     u.Username,
 			"role":         u.Role,
 		},
 	})
@@ -609,12 +621,9 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Prefer the recipient's own language; fall back to the composer's.
-		loc := u.Locale
-		if loc == "" {
-			loc = req.Locale
-		}
+		loc := srvtext.Pick(u.Locale, req.Locale, userLang(r))
 		subject, body := itemGrantText(loc, st.Name+"://"+rel, h.Tenants.FromRequest(r)+"/admin/explore")
-		emailed := h.tryMail(r.Context(), email, subject, body)
+		emailed := h.tryMail(mailer.WithLanguage(r.Context(), loc), email, subject, body)
 		writeJSON(w, http.StatusOK, map[string]any{"mode": "granted", "user_id": u.ID, "emailed": emailed})
 		return
 	}
@@ -647,12 +656,11 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": herr.Error()})
 			return
 		}
-		// Normalize the new account's locale to tr/en from the composer's UI
-		// locale (empty → en default).
-		loc := "en"
-		if req.Locale != "" && !mailLangEN(req.Locale) {
-			loc = "tr"
-		}
+		// The new account starts in the language the composer is using — any
+		// language this server speaks, a pack's included (it used to be
+		// forced to tr/en, which made a Spanish composer's invitee TURKISH).
+		// It is also the language of the welcome mail below.
+		loc := srvtext.Pick(req.Locale, userLang(r))
 		newU, cerr := h.Store.CreateUser(r.Context(), email, hash, role, loc, model.TimezoneUnset)
 		if cerr != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "could not create user: " + cerr.Error()})
@@ -686,7 +694,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		}
 		loginURL := h.Tenants.FromRequest(r) + "/admin/"
 		subject, body := accountCreatedText(loc, loginURL, email, tempPw)
-		emailed := h.tryMail(r.Context(), email, subject, body)
+		emailed := h.tryMail(mailer.WithLanguage(r.Context(), loc), email, subject, body)
 		resp := map[string]any{"mode": "user_created", "user_id": newU.ID, "emailed": emailed}
 		if !emailed {
 			resp["temp_password"] = tempPw // show once so the admin can relay it
@@ -712,8 +720,9 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	url := h.Tenants.FromRequest(r) + "/s/" + sh.Token
-	subject, body := shareMailText(req.Locale, h.siteName(r.Context()), baseName(rel), isDir, 0, url, "", 0)
-	emailed := h.tryMail(r.Context(), email, subject, body)
+	lang := srvtext.Pick(req.Locale, userLang(r))
+	subject, body := shareMailText(lang, h.siteName(r.Context()), baseName(rel), isDir, 0, url, "", 0)
+	emailed := h.tryMail(mailer.WithLanguage(r.Context(), lang), email, subject, body)
 	writeJSON(w, http.StatusOK, map[string]any{"mode": "shared", "url": url, "emailed": emailed})
 }
 
@@ -804,6 +813,10 @@ func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
 	// NOT override with the recipient's stored locale here: a link often goes to
 	// people outside the system, and the sender picks the language. A drop link
 	// ("mode":"drop") is an upload invite, so it uses the upload-worded body.
+	// ⚠ Any language the server speaks — a pack's too (srvtext.Pick); a tag it
+	// does not speak falls to the composer's account language, then the
+	// instance default, then English.
+	lang := srvtext.Pick(req.Locale, userLang(r))
 	var subject, body string
 	if req.Mode == model.ShareKindDrop {
 		// Look the drop link's configured limits back up from the token so the
@@ -816,14 +829,14 @@ func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
 				maxFiles, maxSizeMB, allowedExt = ds.MaxFiles, ds.MaxFileSizeMB, ds.AllowedExt
 			}
 		}
-		subject, body = dropInviteMailText(req.Locale, h.siteName(r.Context()), baseName(rel), link, req.Pin, req.ExpiresDays, maxFiles, maxSizeMB, allowedExt)
+		subject, body = dropInviteMailText(lang, h.siteName(r.Context()), baseName(rel), link, req.Pin, req.ExpiresDays, maxFiles, maxSizeMB, allowedExt)
 	} else {
-		subject, body = shareMailText(req.Locale, h.siteName(r.Context()), baseName(rel), req.IsDir, req.Size, link, req.Pin, req.ExpiresDays)
+		subject, body = shareMailText(lang, h.siteName(r.Context()), baseName(rel), req.IsDir, req.Size, link, req.Pin, req.ExpiresDays)
 	}
 	var sent, failed []string
 	reason := ""
 	for _, email := range recipients {
-		if err := h.Mailer.Send(r.Context(), email, subject, body); err != nil {
+		if err := h.Mailer.Send(mailer.WithLanguage(r.Context(), lang), email, subject, body); err != nil {
 			// Distinguish "SMTP not set up / not verified" (show the link) from a
 			// transient send failure (worth retrying) so the UI can say which.
 			reason = "send_failed"

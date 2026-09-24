@@ -16,6 +16,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/scanrule"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -95,7 +96,23 @@ func (w *Worker) AttachAntivirus(fn func(ctx context.Context, n *model.Node)) {
 
 // Start launches one syncer per enabled storage. ctx is the parent
 // shutdown context.
+//
+// ⚠ First it closes every sync_runs row still open. A run records its own end,
+// and a process that stopped in the middle of one — restarted, killed, out of
+// memory — never did: its row said `running` for ever, on panels, to the
+// thumbnail backfill's "is a sync running?" check, and in the history. Nothing
+// of this process can be running yet, so an open row here belongs to one that
+// is gone.
+//
+// This is Start's job and not server.New's on purpose: `filex thumb backfill`
+// builds a whole Server beside a live one (it never calls Start), and closing
+// rows there would declare the live server's scan dead while it walks.
 func (w *Worker) Start(ctx context.Context) error {
+	if n, err := w.store.AbortUnfinishedSyncRuns(ctx, AbortedAtStartup); err != nil {
+		slog.Warn("sync: could not close the runs a previous process left open", slog.String("err", err.Error()))
+	} else if n > 0 {
+		slog.Info("sync: closed runs a previous process left open as aborted", slog.Int64("runs", n))
+	}
 	storages, err := w.store.ListEnabledStorages(ctx)
 	if err != nil {
 		return fmt.Errorf("sync: list storages: %w", err)
@@ -111,16 +128,6 @@ func (w *Worker) Start(ctx context.Context) error {
 func (w *Worker) AddStorage(ctx context.Context, st *model.Storage) error {
 	w.startOne(ctx, st)
 	return nil
-}
-
-// QueueDepth returns the number of currently active syncer goroutines.
-//
-// Used by the dashboard handler. A 0 here doesn't mean "no work" — it means
-// no storage is enabled or all syncers have stopped (shutdown).
-func (w *Worker) QueueDepth() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return len(w.syncers)
 }
 
 // RemoveStorage stops the syncer for a deleted storage.
@@ -199,6 +206,7 @@ func (w *Worker) startOne(parent context.Context, st *model.Storage) {
 		avScan:   w.avScan,
 		storage:  st,
 		driver:   driver,
+		rule:     ruleFor(st, cfg),
 		ctx:      ctx,
 		fallback: w.fallback,
 	}
@@ -221,7 +229,10 @@ type storageSyncer struct {
 	avScan  func(ctx context.Context, n *model.Node)
 	storage *model.Storage
 	driver  storage.Driver
-	ctx     context.Context
+	// rule says which paths the walk does not enter: filex's own trees and
+	// the storage's scan exclusions (issue #44). See internal/scanrule.
+	rule *scanrule.Rule
+	ctx  context.Context
 	// fallback is the cadence used when this storage states none of its own.
 	fallback time.Duration
 	// failures counts CONSECUTIVE failed runs. See noteRun.
@@ -231,6 +242,10 @@ type storageSyncer struct {
 	runMu    sync.Mutex
 	inFlight atomic.Bool
 }
+
+// AbortedAtStartup is the error recorded on a sync_runs row the worker closes
+// at start because the process that opened it is gone.
+const AbortedAtStartup = "interrupted: the server stopped during the scan"
 
 // ErrRunInProgress is what RunOnce (and so Worker.Trigger) returns when this
 // storage is already being walked. It is not a failure of the run — the run
@@ -347,6 +362,29 @@ func (s *storageSyncer) loopPoll() {
 			s.noteRun(s.RunOnce(s.ctx))
 		}
 	}
+}
+
+// ruleFor compiles a storage's scan exclusions from its config.
+//
+// ⚠ A setting that does not compile scans EVERYTHING, loudly. The admin API
+// refuses such a value on write, so this is a row written some other way (a
+// hand edit, an older client); walking a path the operator wanted skipped
+// costs time, while guessing which half of a broken list they meant could
+// skip something they did not.
+func ruleFor(st *model.Storage, cfg map[string]any) *scanrule.Rule {
+	if cfg == nil {
+		cfg = map[string]any{}
+		if len(st.ConfigJSON) > 0 {
+			_ = jsonToMap(st.ConfigJSON, &cfg)
+		}
+	}
+	r, err := scanrule.FromConfig(cfg)
+	if err != nil {
+		slog.Warn("sync: the storage's scan exclusions do not compile; scanning everything",
+			slog.String("storage", st.Name), slog.String("err", err.Error()))
+		return &scanrule.Rule{}
+	}
+	return r
 }
 
 // jsonToMap is a tiny helper to avoid pulling in encoding/json all over.

@@ -45,5 +45,9 @@ type FileGrant struct {
 	// the UI panel). Left empty by the store scanners.
 	UserEmail       string `json:"user_email,omitempty"`
 	UserDisplayName string `json:"user_display_name,omitempty"`
-	Inherited       bool   `json:"inherited,omitempty"`
+	// UserName is the person as every screen names them (PersonLabel):
+	// display name, else username, else e-mail. The panels print this; the
+	// e-mail stays for the tooltip.
+	UserName  string `json:"user_name,omitempty"`
+	Inherited bool   `json:"inherited,omitempty"`
 }

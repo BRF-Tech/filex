@@ -34,6 +34,14 @@ hand.
 > 10.x does not know the `utf8mb4_0900_*` collations and stops at migration
 > `00001`; MariaDB 11.4 accepts them.
 
+> **PostgreSQL's locale.** Without the search index, a file-name search asks
+> PostgreSQL to compose and lower-case the stored name (`normalize`, PostgreSQL
+> 13+, and `lower`) the way filex folds the query — see
+> [SEARCH.md](SEARCH.md#capital-letters-and-the-turkish-i). `lower` follows the
+> database's locale: create the database with a UTF-8 locale that is not `C`
+> (the official `postgres` image's default, `en_US.utf8`, is fine), or only
+> `A`–`Z` change case and `şubat` misses `ŞUBAT.pdf`.
+
 ## Supported versions
 
 | Engine | filex | Checked on every change (CI) | Also measured |
@@ -91,6 +99,10 @@ describe exactly what is guaranteed:
 - **The paths that broke on MySQL stay fixed** on every engine: quota
   accounting, version pruning, the sync history window, and file names that
   differ only by case, accent or a trailing space.
+- **A file-name search without the index gives one answer on every engine**:
+  every word required, ranked before the limit, and the stored name compared
+  through the same normaliser as the query — decomposed names, Turkish
+  capitals, the four i's as one letter.
 
 Run them yourself against throwaway servers:
 
@@ -120,7 +132,7 @@ grants and settings, but also tags, stars, comments, version history (its bytes
 stay on the backend under `.versions/`, keyed by node ids that no longer exist), recents,
 each person's remembered folder views — and who owns each file. A re-synced
 file is found by the scanner, and a file the scanner found is recorded as
-belonging to **System**, so the Owner column and the People filter start empty.
+belonging to **System**, so the Owner column and the Owner filter start empty.
 Plan it as a migration, not a switch of a variable.
 
 ## Backups

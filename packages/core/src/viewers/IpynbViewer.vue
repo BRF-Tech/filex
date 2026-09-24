@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { sayFailure } from '../lib/errorWords';
 /**
  * IpynbViewer — Jupyter notebook (.ipynb JSON) renderer.
  *
@@ -84,7 +85,7 @@ async function load(): Promise<void> {
       credentials: props.authCredentials,
     });
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'fetch failed';
+    error.value = sayFailure(err, tt('viewer.failed_to_load', 'Failed to load file'), { t: props.t }).text;
     loading.value = false;
     return;
   }
@@ -263,6 +264,7 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
             <div
               v-if="renderedMarkdown.get(idx)"
               class="filex-viewer-ipynb__md"
+              dir="auto"
               v-html="renderedMarkdown.get(idx)"
             />
             <pre v-else class="filex-viewer-ipynb__md-raw">{{ joinSource(cell.source) }}</pre>

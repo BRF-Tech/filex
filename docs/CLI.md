@@ -34,7 +34,8 @@ Connection settings resolve in this order (first non-empty wins, per field):
 3. `~/.filex/cli.yaml` (written by `filex client login`)
 
 The token may be a **session token** (minted by `login`) or a durable
-**API token** created in the admin panel / self-service token page — the
+**API token** — an API key from the admin panel's API / MCP page or the explorer's
+**API keys** entry — the
 server accepts both as `Authorization: Bearer`.
 
 Two variables move where the CLI keeps its own files, for a checkout or a run
@@ -54,7 +55,7 @@ files.
 
 ```bash
 filex client login --url https://fm.example.com
-E-mail: you@example.com
+Email: you@example.com
 Password: ********
 Logged in as you@example.com on https://fm.example.com
 Token saved to /home/you/.filex/cli.yaml (0600)
@@ -152,12 +153,14 @@ Done: 2 file(s), 3 folder(s), 0 error(s)
 - Remote folders are created as needed — **empty local folders included**.
   The destination's *parent* must already exist (same as `mkdir`).
 - **Symlinks are skipped** with a warning on stderr; they are never
-  followed, so link cycles can't loop the walk.
+  followed, so link cycles can't loop the walk. **Named pipes, sockets and
+  devices** are skipped with a warning too — opening a pipe nobody writes to
+  would never return.
 - A failed folder creation skips that subtree; a failed file is recorded
   and the walk continues. The summary lists every failure and the command
   exits **non-zero** when anything failed — safe for scripts.
 - With `--json` the command prints one summary object instead:
-  `{"local":…,"remote":…,"files":2,"dirs":3,"skipped_symlinks":[…],"errors":[…]}`.
+  `{"local":…,"remote":…,"files":2,"dirs":3,"skipped_symlinks":[…],"skipped_special":[…],"errors":[…]}`.
 
 ### download
 
@@ -186,6 +189,11 @@ filex client mv docs://inbox/a.pdf docs://reports/b.pdf   # move + rename
   `/`) moves the item into it; otherwise the last segment is the new name.
   Move + rename across folders takes two API calls under the hood (the
   server has no combined verb). Cross-adapter moves are not supported.
+- ⚠ **`mv` never replaces.** Since v0.43.0 a target name that is already
+  taken fails with `409 NAME_TAKEN` and nothing moves — Unix `mv` would have
+  overwritten it. A case-only rename still works. A script that relied on the
+  overwrite must delete the target first, or pick a free name. (An **agent's**
+  move, over MCP or `/api/ai/move`, still takes a free name beside it instead.)
 
 ### search
 
@@ -208,9 +216,11 @@ server's search index (see `docs/SEARCH.md`).
 
 The query itself is the same one the web UI uses: separators (`.`, `-`, `_`,
 space) are interchangeable, every word has to match — in any order, and a word
-may be answered by a folder (`main code` finds `Code/main.go`) — a single typo
-is forgiven, and `tag:` / `-tag:` filter by tag. Results arrive in rank order,
-exact filename matches first — quote a query that contains spaces.
+may be answered by a folder when the server has its search index (`main code`
+finds `Code/main.go`; without the index every word has to be in the file's own
+name) — a single typo is forgiven, and `tag:` / `-tag:` filter by tag. Results
+arrive in rank order, exact filename matches first — quote a query that contains
+spaces.
 
 ### share
 

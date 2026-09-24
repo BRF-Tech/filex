@@ -8,6 +8,7 @@ package quotastore_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -254,6 +255,59 @@ func TestHardDelete_ReleasesTheBytes(t *testing.T) {
 
 	require.NoError(t, e.store.HardDeleteNode(ctx, n.ID))
 	assert.EqualValues(t, 0, e.usage(t, e.alice))
+}
+
+// meetingStore makes the two purges below meet: each GetNode waits (a
+// little) for the other one to have read too, which is exactly the overlap
+// in which both used to see the row.
+type meetingStore struct {
+	db.Store
+	mu    sync.Mutex
+	reads int
+	both  chan struct{}
+}
+
+func (m *meetingStore) GetNode(ctx context.Context, id int64) (*model.Node, error) {
+	m.mu.Lock()
+	m.reads++
+	if m.reads == 2 {
+		close(m.both)
+	}
+	m.mu.Unlock()
+	select {
+	case <-m.both:
+	case <-time.After(300 * time.Millisecond):
+	}
+	return m.Store.GetNode(ctx, id)
+}
+
+// Two purges of one row release its bytes once. They overlapped when three
+// "empty trash" presses raced over one trash (PR #47): each read the row,
+// each deleted it, each subtracted its size.
+func TestHardDelete_TwoPurgesOfOneRowReleaseOnce(t *testing.T) {
+	_, raw := testutil.NewTestDB(t)
+	meet := &meetingStore{Store: raw, both: make(chan struct{})}
+	acct := quotastore.New(meet)
+	st, err := raw.CreateStorage(context.Background(), &model.Storage{
+		Name: "main", Driver: "local", MountPath: "/data", Enabled: true,
+	})
+	require.NoError(t, err)
+	e := &env{store: acct, acct: acct, raw: raw, storageID: st.ID, alice: mkUser(t, raw, "alice@test.local")}
+	ctx := asUser(e.alice)
+	gone := e.file(t, ctx, "gone.bin", 1000)
+	e.file(t, ctx, "kept.bin", 500)
+	require.EqualValues(t, 1500, e.usage(t, e.alice))
+
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			assert.NoError(t, acct.HardDeleteNode(ctx, gone.ID))
+		}()
+	}
+	wg.Wait()
+	assert.EqualValues(t, 500, e.usage(t, e.alice), "the purged file's bytes are released once, not twice")
 }
 
 // An explicit attribution beats the session — this is how the public file-drop

@@ -29,6 +29,8 @@ const props = defineProps<{
   /** Upload the produced File into the current folder (api.uploadMultipart bound to dir). */
   upload: (file: File) => Promise<void>;
   locale: LocaleCode;
+  /** For an administrator: this converter is being retired, and by what. */
+  adminNote?: string;
 }>();
 
 const { t } = useLocale(() => props.locale);
@@ -96,10 +98,34 @@ function send(cmd: string, extra: Record<string, unknown> = {}, transfer: Transf
   });
 }
 
+/**
+ * ⚠ The converter has to SAY it is there. The iframe posts `ready` when it
+ * has loaded; a converter that is down never does, and this modal used to sit
+ * on "Loading the converter…" for ever. 20 s is far longer than a healthy
+ * converter needs to boot and short enough that a person is not left
+ * wondering.
+ */
+const READY_TIMEOUT_MS = 20000;
+let readyTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Every failure a person sees here is a sentence (owner, 2026-09-21: never
+ *  the raw status or body — which is what `fetchBytes`/`upload` errors carry,
+ *  `${status} ${statusText} — <json>`). The detail goes to the console. */
+function failWith(key: string, detail: unknown): void {
+  console.warn('[filex] convert:', key, detail);
+  error.value = t(key);
+  status.value = 'error';
+}
+
 function onMessage(ev: MessageEvent) {
   const d = ev.data;
   if (!d || d.source !== 'convert-embed') return;
-  if (d.event === 'ready') { void loadFormats(); return; }
+  if (d.event === 'ready') {
+    if (readyTimer) clearTimeout(readyTimer);
+    readyTimer = undefined;
+    void loadFormats();
+    return;
+  }
   const p = pending.get(d.id);
   if (!p) return;
   pending.delete(d.id);
@@ -115,8 +141,7 @@ async function loadFormats() {
       error.value = t('convert.unsupported_input');
     }
   } catch (e) {
-    error.value = (e as Error).message;
-    status.value = 'error';
+    failWith('convert.unreachable', e);
   }
 }
 
@@ -124,8 +149,10 @@ async function doConvert() {
   if (!selectedTo.value || !fromFmt.value) return;
   status.value = 'converting';
   error.value = null;
+  let stage: 'read' | 'convert' | 'save' = 'read';
   try {
     const buf = await props.fetchBytes();
+    stage = 'convert';
     const res = await send(
       'convert',
       { name: props.fileName, bytes: buf, fromIndex: fromFmt.value.index, toIndex: selectedTo.value.index },
@@ -135,17 +162,28 @@ async function doConvert() {
     const ext = res.ext || selectedTo.value.ext || selectedTo.value.format;
     const outName = `${base}.${ext}`;
     const file = new File([res.bytes], outName, { type: selectedTo.value.mime || 'application/octet-stream' });
+    stage = 'save';
     await props.upload(file);
     status.value = 'done';
     emit('done', outName);
   } catch (e) {
-    error.value = (e as Error).message;
-    status.value = 'error';
+    failWith(
+      stage === 'read' ? 'convert.read_failed' : stage === 'save' ? 'convert.save_failed' : 'convert.failed',
+      e,
+    );
   }
 }
 
-onMounted(() => window.addEventListener('message', onMessage));
-onBeforeUnmount(() => window.removeEventListener('message', onMessage));
+onMounted(() => {
+  window.addEventListener('message', onMessage);
+  readyTimer = setTimeout(() => {
+    if (status.value === 'loading') failWith('convert.unreachable', 'no ready message');
+  }, READY_TIMEOUT_MS);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('message', onMessage);
+  if (readyTimer) clearTimeout(readyTimer);
+});
 </script>
 
 <template>
@@ -165,8 +203,16 @@ onBeforeUnmount(() => window.removeEventListener('message', onMessage));
         </button>
       </header>
 
+      <p v-if="adminNote" class="filex-cv__note" data-testid="convert-legacy-note">{{ adminNote }}</p>
+
       <div v-if="status === 'loading'" class="filex-cv__msg">
         {{ t('convert.loading') }}
+      </div>
+
+      <!-- The converter never answered: there is nothing to pick from, so the
+           sentence stands alone rather than above an empty format list. -->
+      <div v-else-if="status === 'error' && formats.length === 0" class="filex-cv__msg filex-cv__err">
+        {{ error }}
       </div>
 
       <div v-else-if="status === 'done'" class="filex-cv__msg filex-cv__ok">
@@ -195,7 +241,7 @@ onBeforeUnmount(() => window.removeEventListener('message', onMessage));
             @click="selectedTo = f"
           >
             <b>{{ (f.ext || f.format).toUpperCase() }}</b>
-            <small>{{ f.name }}</small>
+            <small><bdi>{{ f.name }}</bdi></small>
           </button>
           <div v-if="toList.length === 0" class="filex-cv__empty">
             {{ t('convert.no_format') }}
@@ -253,6 +299,11 @@ onBeforeUnmount(() => window.removeEventListener('message', onMessage));
 .filex-cv__x .fe-aicon { color: currentColor; }
 .filex-cv__ok .fe-icon { display: inline-flex; vertical-align: -0.2em; }
 .filex-cv__msg { padding: 28px; text-align: center; color: var(--fe-text-muted, #5a6475); }
+.filex-cv__note {
+  margin: 12px 16px 0; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; line-height: 1.45;
+  background: var(--fe-bg-elev, #f7f8fa); color: var(--fe-text-muted, #5a6475);
+  border: 1px solid var(--fe-border, #e2e6ed);
+}
 .filex-cv__ok { color: #059669; }
 .filex-cv__src { padding: 12px 16px 0; font-size: 13px; color: var(--fe-text-muted, #5a6475); }
 .filex-cv__search {
@@ -266,7 +317,7 @@ onBeforeUnmount(() => window.removeEventListener('message', onMessage));
 }
 .filex-cv__fmt {
   display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
-  padding: 8px 10px; cursor: pointer; text-align: left;
+  padding: 8px 10px; cursor: pointer; text-align: start;
   border: 1px solid var(--fe-border, #e2e6ed); border-radius: 8px;
   background: var(--fe-bg-elev, #f7f8fa); color: inherit;
 }
@@ -274,11 +325,11 @@ onBeforeUnmount(() => window.removeEventListener('message', onMessage));
 .filex-cv__fmt.is-sel { border-color: #44c878; background: rgba(68, 200, 120, 0.12); }
 .filex-cv__empty { grid-column: 1 / -1; text-align: center; color: var(--fe-text-muted, #5a6475); padding: 16px; }
 .filex-cv__err { padding: 0 16px; color: var(--fe-danger, #dc2626); font-size: 13px; }
-.filex-cv__foot { padding: 12px 16px; border-top: 1px solid var(--fe-border, #e2e6ed); text-align: right; }
+.filex-cv__foot { padding: 12px 16px; border-top: 1px solid var(--fe-border, #e2e6ed); text-align: end; }
 .filex-cv__convert {
   padding: 8px 18px; border: 0; border-radius: 8px; cursor: pointer;
   background: #44c878; color: #03200f; font-weight: 600; font-size: 13px;
 }
 .filex-cv__convert:disabled { opacity: 0.5; cursor: default; }
-.filex-cv__frame { position: absolute; width: 0; height: 0; border: 0; left: -9999px; }
+.filex-cv__frame { position: absolute; width: 0; height: 0; border: 0; inset-inline-start: -9999px; }
 </style>

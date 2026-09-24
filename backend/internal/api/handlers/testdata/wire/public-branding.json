@@ -1,0 +1,28 @@
+{
+  "accent": "#2f6ceb",
+  "footer_text": "",
+  "hide_powered_by": false,
+  "locale": "en",
+  "locales": [
+    "ar",
+    "en",
+    "es",
+    "tr"
+  ],
+  "logo_url": "",
+  "name": "Acme",
+  "theme": "system",
+  "ui_locales": [
+    {
+      "code": "ar",
+      "plugin": "lang-ar",
+      "rtl": true,
+      "source": "plugin"
+    },
+    {
+      "code": "es",
+      "plugin": "lang-es",
+      "source": "plugin"
+    }
+  ]
+}

@@ -18,6 +18,7 @@ import {
   COLUMNS,
   FOLDER_CAP,
   NAME_AUTO,
+  NAME_MIN,
   __flushViewPrefs,
   __resetViewPrefs,
   attachViewPrefsStore,
@@ -27,6 +28,7 @@ import {
   columnWidth,
   columnsCustomised,
   freezeWidths,
+  folderColumnStore,
   folderIsRemembered,
   folderKey,
   folderMemoryEnabled,
@@ -93,35 +95,61 @@ describe('folderKey', () => {
   });
 });
 
-describe('the opt-in switch', () => {
-  it('is off until the document says otherwise', async () => {
+describe('the per-folder memory is always on', () => {
+  /* ⚠⚠ It used to be an opt-in, OFF by default — and off, every change in any
+   * folder became the view of every folder (owner, 2026-09-21: "tüm
+   * klasörlerde görünüm değişikliği geçerli oluyor"). A host that genuinely
+   * wants no per-folder memory says so (`config.rememberFolderView: false`);
+   * a person's settings no longer can. */
+  it('is on with no document at all', async () => {
     attach({});
     await settle();
-    expect(folderMemoryEnabled()).toBe(false);
+    expect(folderMemoryEnabled()).toBe(true);
   });
 
-  it('hides every stored folder while it is off', async () => {
+  it('reads the stored folders even from a document written with the old switch OFF', async () => {
+    // A folder somebody set up while the switch was off was still written
+    // down (the recorder always wrote); hiding it now would lose it.
     attach({ on: false, f: { 'a/b': { v: 'grid', t: 1 } } });
-    await settle();
-    expect(folderPrefs('a/b')).toBeNull();
-    expect(folderIsRemembered('a/b')).toBe(false);
-    expect(rememberedCount()).toBe(0);
-  });
-
-  it('and reveals them when it is on', async () => {
-    attach({ on: true, f: { 'a/b': { v: 'grid', t: 1 } } });
     await settle();
     expect(folderPrefs('a/b')).toEqual({ v: 'grid' });
     expect(folderIsRemembered('a/b')).toBe(true);
+    expect(rememberedCount()).toBe(1);
   });
 
-  it('answers Recent’s seeded sort even while it is off', async () => {
-    // ⚠ The seed is a property of the Recent VIEW, which the owner asked for
-    // directly; it must not hinge on an unrelated preference. Only the stored
-    // map is gated.
-    attach({ on: false });
+  it('the old switch is a no-op now', async () => {
+    attach({});
+    await settle();
+    setFolderMemoryEnabled(false);
+    rememberFolder('a/b', { v: 'grid' });
+    expect(folderPrefs('a/b')).toEqual({ v: 'grid' });
+  });
+
+  it('answers Recent’s seeded sort, and a folder’s own choice beats the seed', async () => {
+    attach({});
     await settle();
     expect(folderPrefs('.recent')).toEqual({ k: 'modified', d: 'desc' });
+    // A view-mode-only memory keeps the seeded sort…
+    rememberFolder('.recent', { v: 'grid' });
+    expect(folderPrefs('.recent')).toEqual({ k: 'modified', d: 'desc', v: 'grid' });
+    // …and a sort the person chose replaces it.
+    rememberFolder('.recent', { k: 'name', d: 'asc' });
+    expect(folderPrefs('.recent')).toEqual({ v: 'grid', k: 'name', d: 'asc' });
+  });
+
+  it('a folder keeps its own COLUMNS, and "reset" sends it back to the default ones', async () => {
+    attach({});
+    await settle();
+    const a = folderColumnStore(() => 's/A');
+    const b = folderColumnStore(() => 's/B');
+    a.setWidth('size', 150);
+    expect(a.width('size')).toBe(150);
+    // ⚠ The other folder did not move — the leak, for columns.
+    expect(b.width('size')).toBe(COLUMNS.find((c) => c.id === 'size')!.width);
+    expect(folderPrefs('s/A')?.c?.w?.size).toBe(150);
+    a.reset();
+    expect(folderPrefs('s/A')).toBeNull();
+    expect(a.width('size')).toBe(COLUMNS.find((c) => c.id === 'size')!.width);
   });
 });
 
@@ -190,8 +218,8 @@ describe('a folder’s setup survives a round trip', () => {
 
   it('writes nothing at all when there is nobody to write for', async () => {
     // An embed on a shared app token, or a public share link: `load` resolves
-    // null. It must degrade to "remember nothing", not to an error and not to
-    // a write that would 401 on every change.
+    // null. It must degrade to "remember for this session only" — never to an
+    // error, and never to a write that would 401 on every change.
     const saved: unknown[] = [];
     attachViewPrefsStore({ load: async () => null, save: (d) => saved.push(d) });
     await settle();
@@ -199,7 +227,9 @@ describe('a folder’s setup survives a round trip', () => {
     setColumnWidth('size', 120);
     __flushViewPrefs();
     expect(saved).toHaveLength(0);
-    expect(folderPrefs('a/b')).toBeNull();
+    // The folder DOES keep its view while the page is open — only the
+    // session, but still per folder.
+    expect(folderPrefs('a/b')).toEqual({ v: 'grid' });
   });
 });
 
@@ -376,7 +406,18 @@ describe('tableLayout — a table, not a fit', () => {
     // more than a phone has. The honest answer is a table wider than the pane.
     const phone = tableLayout(358, all);
     expect(phone.total).toBeGreaterThan(358);
-    expect(phone.widths.name).toBe(NAME_AUTO);
+    /* ⚠ Name opens at its own MINIMUM here, not at NAME_AUTO (v0.43.0).
+       This line used to read `toBe(NAME_AUTO)`: 220 of a 358px pane, with
+       every other column starting past the right edge, so a phone's first
+       sight of the list was one column and a sliver. The lead gives way once
+       the others have given everything they can — down to NAME_MIN, which is
+       the width the product already calls the narrowest a person may drag
+       Name to, never the 85px crush the case below guards. The table is
+       still wider than the pane and still scrolls; what changed is what is
+       painted before anybody scrolls. Measured in a browser:
+       e2e/tests/117-narrow-table-columns.spec.ts. */
+    expect(phone.widths.name).toBe(NAME_MIN);
+    expect(phone.widths.name).toBeLessThan(NAME_AUTO);
     // And the sum really is the total, so the header and the rows agree.
     const tracks = phone.visible.reduce((s, id) => s + phone.widths[id], 0);
     expect(phone.total).toBe(28 + 28 + 24 + 8 * (phone.visible.length + 2) + phone.widths.name + tracks);
@@ -543,8 +584,9 @@ describe('somebody else’s keys survive our saves', () => {
     const doc = saved[0] as Record<string, unknown>;
     expect(doc.install).toEqual({ dismissed: true });
     expect(doc.futureThing).toEqual([1, 2, 3]);
-    // …and our own half still went out with it.
-    expect((doc.c as { w: Record<string, number> }).w.size).toBe(130);
+    // …and our own half still went out with it (the default layout lives in
+    // the person's default, `p.c`, since the columns became per folder).
+    expect((doc.p as { c: { w: Record<string, number> } }).c.w.size).toBe(130);
   });
 
   it('gives a feature its own corner, readable and writable by name', async () => {
@@ -573,7 +615,7 @@ describe('somebody else’s keys survive our saves', () => {
   it('refuses the three names this module owns, rather than renaming them', () => {
     // A slot quietly relocated to `c2` would be a value the caller could never
     // read back — and one that landed ON `c` would erase the column setup.
-    for (const reserved of ['on', 'f', 'c']) {
+    for (const reserved of ['on', 'f', 'c', 'p', 'g']) {
       expect(() => viewPrefsSlot(reserved)).toThrow(/reserved/);
     }
   });

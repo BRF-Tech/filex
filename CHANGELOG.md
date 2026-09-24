@@ -7,6 +7,2416 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-09-24
+
+The release that makes filex extensible. **Apps** are a second kind of
+plugin — a sandboxed WebAssembly module that adds things to *do* with
+files — and two ship alongside it as public repositories: **e-Signature**
+and **Convert**.
+
+A **language pack** is an app with nothing that runs, so filex can be
+translated without waiting for a release; the text the server writes — mail,
+notifications, the pages behind a link — comes from the same catalogue; and
+the interface lays itself out **right to left** for the languages that read
+that way.
+
+Alongside them: desktop folder sync is now **live** in both directions, the
+explorer's table is the only table left in the product, an operator composes
+the instance's **theme**, tags are personal or shared with the team, and
+every door that issues a credential refuses to issue one wider than the
+caller.
+
+> ⚠⚠ **Security — upgrade promptly.** Every filex up to v0.42.2 with ONLYOFFICE
+> configured accepts an unsigned save callback, which lets anybody who can
+> reach the server overwrite a file ([Security](#security)). filex has never
+> enabled the editor without a JWT secret — an install with no secret has
+> editing off and is unaffected — so the one thing to check is the other
+> side: a Document Server running with `JWT_ENABLED` off sends unsigned
+> callbacks, and after this upgrade its saves fail. Turn JWT on there, with
+> the same secret filex holds.
+>
+> ⚠⚠ **A narrow API token could mint a wide one.** Every door that issues
+> a credential — the desktop pairing endpoint, self-service API tokens, S3
+> access keys, NFS exports and SSH keys — measured the account behind the
+> caller instead of the caller itself, so a token restricted to reading, or
+> confined to one folder, could create a full-rights credential for the same
+> account and then use it ([Security](#security)). Every one of them now
+> refuses with `403 token_ceiling`. The desktop door was found and fixed by
+> Berk Başarır ([#35](https://github.com/BRF-Tech/filex/pull/35)).
+>
+> ⚠⚠ **Desktop sync could replace real files — upgrade the server AND the
+> desktop app.** A field report, traced and fixed by Berk Başarır
+> ([#35](https://github.com/BRF-Tech/filex/pull/35)), found filex's own sync client writing a server's
+> `202 "preparing"` status report to disk as the file and uploading it over
+> the original, conflict copies nesting by the thousand, a stale mirror
+> re-uploaded over a cleaned-up server, and a rename onto a taken name
+> destroying the file that had it ([Fixed](#fixed)). The server fix protects
+> every client already installed; the new desktop build carries the rest.
+>
+> ⚠⚠ **A cache in front of filex could hand one person's answers to
+> everybody.** API answers carried no `Cache-Control`, so a CDN rule that
+> caches everything kept `GET /api/auth/me` for two hours and served one
+> administrator's identity to every visitor. Every `/api` answer is now
+> `no-store` unless it is one of the four answers that say who the instance
+> is ([Security](#security)). Found and fixed by Berk Başarır
+> ([#41](https://github.com/BRF-Tech/filex/pull/41)).
+>
+> ⚠⚠ **The notification bell named files its reader could not open.** Queued
+> copies, moves and deletes were announced to every account, a member of an
+> RBAC storage read the names of files in folders they have no grant on, one
+> person's "mark all read" read everybody's alerts, and a tenant admin could
+> read every tenant's notification history ([Security](#security)). Found and
+> fixed by Berk Başarır ([#42](https://github.com/BRF-Tech/filex/pull/42), [#43](https://github.com/BRF-Tech/filex/pull/43)).
+>
+> ⚠ **Before upgrading, read [Upgrade notes](#upgrade-notes)**: API/MCP tokens
+> created with no scopes are rewritten to an explicit list that includes
+> `admin` — review and narrow them; identity providers saved on the admin
+> page come back switched off; existing tags become team tags, and a client
+> that sends no kind now makes personal ones; custom CSS is off until
+> switched on (see *Changed*); live desktop sync needs the new desktop build;
+> a desktop pairing needs a signed-in browser, and existing pairings keep
+> their old token until paired again; a rename onto a taken name answers
+> `409`; a program that wants the `202` "preparing" answer must now ask for
+> it (`X-Filex-Accept-Prepare: 1`); with SSO, sign-out now ends the identity
+> provider's session too, and the provider must allow filex's sign-in pages
+> as a post-logout return address; `POST /api/admin/trash/empty` answers
+> `202` while a large trash is still being emptied, and `400` for a value it
+> cannot read.
+
+### Added
+
+- **Apps (app plugins) — a sandboxed plugin that adds things to *do* with
+  files.** A WebAssembly module that adds actions to the file menu, screens
+  filex draws for it, and public pages for outside participants. Install from a GitHub repository
+  URL, a file upload or a URL, always through a permission review; the grant
+  is exactly the manifest's list and an upgrade that asks for more stops at
+  the review again. Actions run as ops-queue jobs (progress, cancel, open the
+  output), write through the same path as every other write, and are gated
+  by ACL, read-only storages and encrypted folders at submit. Host functions
+  under one permission each: files, per-file state, settings (secrets sealed),
+  the server's engines (ffmpeg, ImageMagick, LibreOffice, Ghostscript, poppler,
+  rsvg) with bare-token arguments, directory lookup, notifications (new
+  `plugin.notice` event), mail (60/hour), guarded outbound HTTP, public links
+  for outside participants (PIN with lock-out, exposed copies, jobs as the
+  link's creator) and host-held signing (per-tenant CA, certificates,
+  `host_sign`, admin CA download/rotate). Admin: **Plugins → Apps** tab with
+  the install wizard, settings, per-action overrides and logs. Explorer:
+  menu rows, ops-tray jobs, surface screens (form, steps, list, progress,
+  people picker, PIN, file chooser, preview, PDF fields, signature pad),
+  details-panel sections and an **Apps** side-bar section. Guest SDK
+  `pkg/pluginkit` (stock Go, `GOOS=wasip1`). Docs: `APP-PLUGINS.md`,
+  `PLUGIN-KIT.md`. Off in demo mode (`FILEX_APP_PLUGINS_DISABLED`).
+- **Language packs — filex can be translated without a release.** An app can
+  add a language to filex, and it now does so end to end. A manifest that only carries `ui_locales` is a *language pack*:
+  it installs from the manifest alone (upload, GitHub repository or URL — no
+  module, no Go, no release), never starts a runtime, and is listed in
+  **Plugins → Apps** as a *Language pack* with each language's coverage of the
+  running version's catalogue (*Español — 97% translated · the rest shows in
+  English*). Its language joins every picker — the settings dialog, the admin
+  header, public share pages — and translates the explorer, the admin panel
+  and the public pages alike; anything it lacks shows in English. Integrity
+  moves to the manifest (the sha256 pin and, with `FILEX_PLUGIN_TRUSTED_KEYS`,
+  the signature are over the manifest). A right-to-left language lays the
+  interface out right to left (see *Right-to-left layout*). Format, grammar and limits:
+  `PLUGIN-KIT.md` → *Writing a language pack*; a template repository,
+  `BRF-Tech/filex-lang-template`, walks a translator from export to install.
+- **Right-to-left layout.** Arabic, Hebrew, Persian, Urdu and every other
+  right-to-left language a language pack adds now lays the whole interface
+  out right to left — the explorer, the admin panel, the public share, PIN
+  and file-request pages, the signing wizard and the embeddable components.
+  Whether a language is right to left is the server's one list
+  (`wire.IsRTL`, the `rtl` flag on the offered-language rows); a page's `dir`
+  is derived from its `lang`, and an embedded explorer takes its direction
+  from its OWN `locale`, not the host page's (menus drawn under `<body>`
+  carry it too). The stylesheets are written in logical properties and the
+  admin panel in Tailwind's logical utilities (`ms-`, `pe-`, `start-`,
+  `text-end`, …), so English and Turkish draw the same pixels as before.
+  Gestures turn with the layout: a column's edge grows the way the pointer
+  drags it, a dragged column lands on the side of its neighbour the pointer
+  is on, the arrow keys move things the way they point, menus open toward the
+  line's end and flip at the screen's edge, and the frozen Name and Actions
+  columns draw their edges while a right-to-left table scrolls. Icons that
+  mean a direction (back/forward, breadcrumb and disclosure chevrons, undo,
+  sign-out, send, the panel icons) are mirrored; "open in a new tab",
+  refresh, media controls and **document space** — a PDF page's signature
+  boxes, images — never are. Commands, paths and URLs stay left to right;
+  file names, paths and people are isolated (`<bdi>`), and number pairs,
+  `tag:…` tokens and names inside a right-to-left sentence are isolated so
+  they keep their order. List fields (recipients, extensions, tags,
+  identities) accept the Arabic `،`, ideographic `、` and fullwidth `，`
+  commas. A source check (`web/tests/quality/rtlLogical.test.ts`) keeps
+  physical `left`/`right` from coming back. Docs: `docs/RTL.md`.
+- **Appearance: the instance can wear your colours.** A new admin screen
+  (**Appearance**, `/admin/appearance`) where an operator composes
+  named themes — twelve colours per light/dark variant, a corner radius and a
+  font stack — and picks one as the instance default. Ten more tokens are
+  derived server-side and stored with the theme, so the browser does no colour
+  maths at paint time, and the text colour on a coloured button is chosen by
+  WCAG contrast rather than assumed to be white. Served to the login page and
+  to anonymous share visitors as well, because a palette that stops at the
+  sign-in screen is not branding. Themes export and import as one JSON
+  document — the exported file *is* the upload body (migration 00051).
+- **Desktop sync is live: an edit on either side arrives in about a second.**
+  A save in the web app's text editor, an ONLYOFFICE save, an upload or a
+  delete now reaches the synced folder on the desktop as it happens, and a
+  save on the desktop reaches the server just as fast — instead of waiting for
+  the engine's next 30-second lap. Measured on one Windows machine against a
+  local server, six edits each at random moments: browser text save → file on
+  disk 6.2–24.8 s (median 15.2 s) before, 0.19–0.22 s (median 0.20 s) now;
+  ONLYOFFICE callback → disk 0.5–25.9 s before, 0.19–0.21 s now; local save →
+  server 9.4–29.0 s (median 25.3 s) before, 0.43–0.61 s (median 0.46 s) now.
+  `filex sync run --watch` subscribes to the server's change stream (the same
+  WebSocket the web explorer uses, authenticated with the engine's own token
+  through a ws-ticket) and watches the local folders with file-system events;
+  a change reconciles just the folder it happened in (one listing, not a walk
+  of the tree), and the `--watch` interval is the safety net — it no longer
+  walks every pair, see *Changed*. `--live=false` leaves only the interval. The
+  engine prints `live: connected|polling|offline — …` and the desktop app
+  shows it as one word under each synced folder (*Live* / *Polling* /
+  *Offline*). A newly paired folder starts syncing at once instead of on the
+  next lap. See [Folder sync](docs/SYNC.md#how-fast-a-change-arrives).
+- **Realtime: recursive, presence-less `watch` subscriptions.**
+  `{"type":"watch","paths":[…]}` registers any number of roots per socket,
+  authorised exactly like a room subscribe (confinement, RBAC, tenant), always
+  acknowledged with `watching` (the capability probe for older servers), and
+  delivered as `tree_change` frames with root-relative folders, coalesced like
+  rooms and never dropped on a full queue. Folder-size refresh frames are not
+  delivered to watches. See [Realtime](docs/REALTIME.md#watching-a-whole-tree-sync-clients).
+- **Conditional uploads.** The multipart upload and the staged commit accept
+  `expect` (`none`, or the `<size>:<last_modified>` a listing showed) and
+  answer `412 PRECONDITION_FAILED` without writing when the file changed in
+  between. The sync engine sends it on every upload, so a browser save that
+  lands in the same second as a desktop save is kept beside it instead of
+  being replaced. See [Uploads](docs/UPLOADS.md#conditional-uploads-expect).
+- **A first sync that would re-upload a stale copy holds it and asks.** With no
+  history, "new here" and "deleted on the server" look the same, and one client
+  put 9,665 cleaned-up files back on a server. A first run that would upload
+  more than 100 local-only files into a server folder that already has files
+  holds them (and any file that differs) and runs the rest: `filex sync confirm
+  <pair>` sends them, `filex sync discard <pair>` moves them to the local sync
+  trash so the folder matches the server. `sync list --json` carries `hold_new`
+  / `held`; the desktop app shows the count with **Upload them** and **Move to
+  local trash**. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **Bandwidth limits and a sync window.** `filex sync run --limit-down` /
+  `--limit-up <KiB/s>` cap all transfers of a run together (the bodies are
+  paced, never the connection), and `--window HH:MM-HH:MM` only syncs in that
+  part of the day — outside it nothing talks to the server, not even the change
+  stream, and a pass still busy when it closes stops cleanly and continues in
+  the next window. The desktop app offers both as presets in Settings. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **Transfer progress in bytes, with an estimate:** `transfer: 120/11704 (1.2 GiB
+  of 52.6 GiB, about 8h 10m left)`, printed at least every 5 seconds. The desktop
+  app shows it on each folder's line, in its own language. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **`GET /api/files/manager?action=changes&path=…&since=<cursor>`** answers "has
+  anything under this folder changed since my cursor?" as `{ cursor, changed }`,
+  from an in-memory change log fed by every write surface. Every doubt — no
+  cursor, a restart, a cursor older than the log — is `changed`, and a change
+  counts only if the caller can see what it touched. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **Rescan one folder: `POST /api/admin/storages/{id}/sync?path=<folder>`.** The
+  same walk over one catalogued folder, synchronously, answering `{path,
+  scanned, added, updated, removed, reconciled}` (504 after ten minutes). Only
+  rows inside the folder can be removed, a listing that failed part-way removes
+  nothing, and no sync-run row is written. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **Scan exclusions: tell a storage what not to catalogue.** A new storage
+  setting, *Paths to exclude from scanning* (`config.scan_exclude`, on every
+  driver), takes glob patterns relative to the storage root, one per line:
+  `*` within a name, `**` across folders, and a pattern without a `/` names an
+  entry at any depth (`.*` skips every hidden file and folder, `@eaDir` every
+  Synology thumbnail folder, `*.tmp` every temp file), while `/build` or
+  `downloads/incomplete/**` is anchored at the root. The scan does not go
+  **into** a matching folder — a `.git`, a `.snapshots` or a download client's
+  `incomplete/` costs nothing — and nothing matching is catalogued, indexed,
+  thumbnailed or virus-scanned. One rule decides every walk that catalogues
+  (the full scan, the one-pass object-store listing, a folder rescan — which
+  refuses an excluded folder with 400 — the catalogue of a copied folder) and
+  the `fsnotify` watcher, where a change to an excluded path no longer starts
+  a scan. **A cost control, not an access control:** the files stay on the
+  storage and are still served by path, over the file protocols and to the AI
+  tools. Rows catalogued before a pattern was added stay as they are and are
+  never moved to the trash for being unseen; filex's own names (`.filex-open`,
+  `.keepdir`, an encrypted folder's marker) are outside the patterns; a pattern
+  that would exclude everything, a `!`, a `..` or a broken glob is refused on
+  save with `SCAN_EXCLUDE_INVALID` and a sentence naming the pattern in the
+  reader's language — as is an empty or `/` storage root (`ROOT_PATH_FORBIDDEN`,
+  which used to answer one English sentence in `error`; the code stays there
+  and the sentence moved to `message`). Docs: [STORAGE.md → Scan exclusions](docs/STORAGE.md#scan-exclusions).
+  ([#44](https://github.com/BRF-Tech/filex/issues/44))
+- **Desktop: Pause sync,** in the tray menu and Settings, remembered across
+  restarts, reboots and the hidden start at sign-in. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **Desktop: the computer stays awake while sync moves files** (the screen still
+  locks); an overnight first sync lost 1 h 40 min to idle sleep. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **The access log says who asked:** `user_id`, `token_id` (the row id, never the
+  secret) and, in multi-tenant mode, `tenant` on every `msg=http` line, plus
+  `action` for `/api/files/manager` (one of its own verbs, or `other`). The
+  query string is still never logged. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **A cut search result says so:** both search responses carry `truncated`, and
+  the explorer shows "More results than shown — narrow your search". ([#35](https://github.com/BRF-Tech/filex/pull/35))
+
+- **Apps: the platform seal.** `cert_issue {purpose: "platform"}` hands an app
+  with `sign` the installation's own seal: one key per tenant and app, kept by
+  the host (never destroyed — `key_destroy` refuses it), CN *filex document
+  seal*, OU the app's name, issued by the live authority and re-issued by the
+  next one after a rotation; it signs through `host_sign` from jobs only. The
+  signing app seals every completed request with it (the owner, 2026-09-22:
+  "the final bytes are sealed by filex itself"). SDK: `pluginkit.PlatformSeal`,
+  `plugintest.Host.PlatformSeal`.
+- **Apps: a lock until lifted, and a lock on the job's own output.**
+  `file_lock` takes `ttl_days: -1` (`pluginkit.LockUntilLifted`) — no end,
+  until the app or an administrator (audited) lifts it — and a `ref` naming one
+  of the job's OWN outputs, which is promised and taken when the output is
+  committed (never when the job fails). How the signing app keeps a finished
+  document locked for good, when the request asks for it.
+
+- **Apps: `asset_fetch` — a pinned file, downloaded once by the host.**
+  `{url, sha256, max_bytes}` → `{ref, size, cached}`, read with the ordinary
+  file calls (an asset needs no `files:read`). Built for the signing app's
+  fonts — "online çekebilirsek 0 MB": a Noto face for Arabic, Devanagari or
+  Japanese is fetched the first time such text is used instead of adding tens
+  of megabytes to the module. Through the same guarded path as `http_request`
+  (`https`, the app's `http:<host>` grant shown at install, private addresses
+  refused, redirects inside the grant); the sha256 is REQUIRED and checked
+  before the app sees a byte (`integrity`, nothing kept — a font is a
+  parser's attack surface); at most 32 MiB per file (the largest pinned font
+  is 10.5 MB, its variable release 17.8 MB) and 256 MiB per app, least
+  recently used first; kept in `<plugins dir>/assets/<app>/` across upgrades,
+  removed with the app. A download outlives the call that asked for it (a
+  screen's 30 s would cut a slow one and the next keystroke restart it from
+  zero), a failure is not retried for a minute and is logged once per outage.
+  The SDK wraps it as `pluginkit.AssetFetch`; `plugintest.Host` has
+  `Network`, `Offline` and `Downloads` to test the offline path with.
+  Measured against the real network: first Japanese use 0.9–1.4 s (5.3 MB
+  downloaded and verified), every later one ~0.3 s with no network; with no
+  internet the screen answers in ~0.1 s and says which characters will not
+  print.
+
+- **Apps: a home view is a page of its own, with a menu.** The explorer's
+  **Apps** rows open an app's `home` view as a page of this app, in the same
+  tab (`{base}app/{plugin}/{view}`, laid out like **My shares**), instead of a
+  dialog over the file list — the owner's "İmzalar popup açıyor … kendi
+  sayfasını açsın". A home surface may declare `sections` (`[{id, label,
+  count?}]`) and which one it is; the frame draws them as the product's tab
+  strip and keeps the open one in the address (`?section=`), so Back walks
+  them and a link lands on one (`GET …/views/{p}/{v}?section=` hands the app
+  `data.section`); a page opened with no section writes the one it landed on
+  into the address without a step in history. The admin panel's Apps page and the dialog an embed falls
+  back to draw the same menu. Hosts opt in with `config.appHomePage` +
+  `@open-app-home`.
+- **Apps: a notification can open an app's home page**, at a section:
+  `notify_send` with no file and a `view` the app places `home` stores a new
+  target kind, `app` (`open: {plugin, view, section}`); the web opens the
+  page, the desktop app brings its window forward.
+- **Apps: `context.actor.ip`** — the address a signed-in person's view event
+  came from, read like a public page's `visitor_ip`, so an app that records
+  who acted (the signing app's IP line) has it for a signed-in signer too.
+- **`pdf-fields`: drawn or typed, lines under a signature, "Filled by".** A
+  signature box says how it is signed (`style: "typed"`, and only then is a
+  face asked for); the node may offer `stamp_lines` and each signature box
+  chooses its own `lines`, previewed in the app's own words; a date / text /
+  tick box's owner is labelled **Filled by** (tr **Dolduran**) rather than
+  **Signer**.
+- **`signature-pad`: `label`, `required`, `font`, `fonts`.** The pad is
+  labelled like a form field, with the same `*` when required — a required
+  signature was the one required box with no star — and `fonts` narrows the
+  faces a typed signature may use (one face: no picker).
+
+- **Apps: an app's links say what they are.** A manifest page may declare a
+  `purpose` — a label ("Signing request"), what revoking a link of it does,
+  and the section of the app's home page that shows it — and `share_create`
+  may carry one for the link it opens, the only way a page-less link (the
+  finished document handed to everybody) can say what it is ("Signed copy").
+  My shares and the admin's Shares list then carry `app` on those rows
+  (`db.AppLink`, `shares.purpose_json`), and My
+  shares marks the link, opens the app's page for it, and says the app's own
+  words before a revoke. The owner's decision: signing links stay listed,
+  but no longer as plain shares of the file whose revoke silently cancelled
+  a request.
+- **Apps: `applies.engine_ext`.** Extensions an action takes only while an
+  engine is there (`{"libreoffice": ["docx", …]}` on top of `ext: ["pdf"]`);
+  the host folds them in before the menu or the run check sees the action.
+  "Sign…" was offered on a .docx on an installation without LibreOffice and
+  the click opened a page saying it could not be done.
+- **Apps: a file reference says whether its storage takes writes**
+  (`FileRef.read_only`, on views, jobs and pages), so an app whose flow ends
+  in a write can refuse at the start — a signing request on a read-only
+  storage was "sent", froze the file, notified the signer, and could never
+  complete.
+- **Apps: manifest settings in every language.** A setting's `label`, `help`
+  and `placeholder` (and an option's `label`) may be `{"en": …, "tr": …}`;
+  the signing app's settings were English inside the Turkish admin panel. The
+  wake-up line an app reports is kept in every language it gave and read in
+  the reader's, with the host's tally beside it in the same language.
+- **Translator tooling** — `scripts/i18n-export.mjs` writes the complete string
+  catalogue in the exact shape of a pack (`filex-catalogue-en.json`) plus
+  per-key context (which catalogue, which grammar, the Turkish reference, where
+  it is used); `scripts/i18n-validate.mjs` checks a pack against it — key
+  shape and byte limits, unknown and missing keys with coverage, placeholders,
+  plural forms and the per-catalogue `@` / `|` / `{'…'}` / `%{` rules, using
+  vue-i18n's own parser when installed. The catalogue is built into every
+  binary (served at `/admin/i18n/filex-catalogue-en.json`) and attached to
+  every release.
+- **Text the server writes, in a pack's language** — e-mails (share and
+  file-request links, invitations, new accounts, drop notices to the owner,
+  the SMTP test, filex cloud verification, the footer under an app's mail),
+  the notification phrases (bell, browser pop-up), the no-JavaScript pages
+  behind a link (PIN gate, file request, folder listing, error pages, the
+  sign-in hop) and the install review's permission sentences now come from
+  one server catalogue: English and Turkish built in, and any installed pack
+  extends it through `server.*` keys in the same `ui_locales` file — 223 keys
+  in the catalogue, with where each appears and what each placeholder holds.
+  Each flow keeps the reader it always had (the sender's language for a link,
+  the recipient's account for a grant, the folder owner's for a drop notice,
+  the visitor's browser for a public page) and the catalogue answers in it,
+  falling back to English per key. A translation whose placeholders differ
+  from the English is not used at run time, so a mail never loses its link
+  or PIN. Mails carry `Content-Language`; apps may say which language they
+  wrote a mail in (`pluginkit.MailSendIn`) so filex's footer matches it.
+- **Plural forms by CLDR category** — the explorer, the admin panel and the
+  server pick a form by `Intl.PluralRules` (Go: the same Unicode rules), so a
+  pack may write `zero`, `one`, `two`, `few`, `many` and `other` where its
+  language has them: `<key>_few` beside the plain key in the explorer and the
+  server's text, one `|` form per category in the admin panel. Arabic gets its
+  six forms, Russian its four; English and Turkish read exactly as before, and
+  packs written with one, two or three forms keep working. A form may say
+  the number as a word where its category holds only that number (*يوم
+  واحد*). The export lists each language's categories; the validator checks
+  forms against them.
+- **Apps, platform v2** — file **locks** (`files:lock`: an app freezes a
+  document for everyone, administrators included, until it lifts the lock or
+  the TTL passes; `423 locked` on rename/move/delete, `locked` badge in
+  listings, admin list/force-unlift), **state-aware menu rows**
+  (`applies.state` / `no_state` on the app's own state keys, exposed as
+  `app_state` on listings), **hidden actions**, **`page` placement** (a
+  view opens as a full page in a new tab), **per-job output choice**
+  (`job.output`: same file as a new version / new sibling / custom name) and
+  **addressed, clickable notifications** (`notify_send` `to_user_id` +
+  `target` with the action or view to open — the notification's `target`
+  now carries `open`).
+- **Apps, a scheduled wake-up.** An app that asks for the new `schedule`
+  permission is woken once an hour and asked what it wants done and *when*;
+  filex runs each answer at the minute it named, as an ordinary
+  `plugin-action` job (same ops row, sandbox, outputs and cancel), with
+  `actor_id` null because nobody asked for it. So a signature request closes
+  itself at 03:00 and tells both sides, instead of waiting for the next
+  person to open the status screen. New guest export `tick`
+  (`TickInput`/`TickOutput`, read-only scope: decide in `tick`, act in the
+  action it schedules). The schedule is a table (migration 00050), so it
+  survives a restart and runs late rather than never; `status` doubles as a
+  lease, so two filex processes on one database run a due item exactly once.
+  An item's `key` is an idempotency key — naming it again moves it rather
+  than adding a second. Bounded throughout: 64 items a wake-up, 16 files an
+  item, 16 KiB of params, a 30-second call budget, the window is the hour.
+  A wake-up that traps, hangs or fails costs its app one hour and is never
+  retried inside it. Off under `FILEX_APP_PLUGINS_DISABLED` and in demo mode.
+  An app granted `schedule` whose module has no `tick` export is refused at
+  install.
+- **Apps, platform v3 — one public surface.** A download share, a file
+  request and an app's page are now the same branded shell: the instance's own
+  name, logo, colours and footer (`GET /api/public/branding`, unauthenticated,
+  and revalidated against an ETag rather than held — see *Fixed*), one PIN gate, one expiry story, one visit counter, the
+  "this link is gone" wording and a language picker — whichever kind of link
+  a stranger was sent. Whitelabel means whitelabel: a signature request from a
+  renamed instance does not say "filex".
+  The shell wears the shape the PIN gate had before it: a calm card centred on
+  a soft ground, the instance's mark above it, a round accent-tinted badge, a
+  full-width field and a full-width accent button — in three widths, 400px for
+  a gate or a single document, 520 for a file request, 880 for a folder's
+  listing or an app's screen. ⚠ **A locked gate no longer names the link.**
+  The file's or folder's name is drawn once the link has opened, not in front
+  of the PIN box: telling somebody who cannot get in what is behind the link
+  hands the name of a real document to anybody typing at a token. It is the
+  same reasoning as the single "this link is not available" sentence for
+  expired, used up and withdrawn. The plain server-rendered pages stay
+  as the no-JS fallback, and `curl -O` on a share link still downloads the
+  file rather than collecting an HTML page. New JSON:
+  `GET /api/public/s/{token}` (+ `/pin`, `/event`, `/file/{ref}`) and
+  `GET /api/public/d/{token}` (+ `/pin`, `/upload`), every answer `no-store`
+  and `noindex`. `expired` and `revoked` are two different words for two
+  different things, and a shut PIN gate is neither.
+- **Apps, platform v3 — an app's public page IS a share.** `share_create` /
+  `share_revoke` / `share_state` open and manage a real share, so an app's
+  link is `/s/<token>` and an administrator sees and revokes a signature
+  request in **Shares** like any other link: one revoke list, one expiry
+  policy, one PIN implementation to get right, one visit counter, one set of
+  audit rows. The share row carries `plugin_id`, `page_id`, `subject`,
+  `state_json` and `files_json` (migration 00046), and
+  `GET /api/admin/app-plugins/shares` lists one app's links.
+  `public_page_create` / `_revoke` / `_state` stay bound as the older
+  spelling of the same three calls. ⚠ `/p/*` and `/api/p/*` are retired and
+  **301** to their share; pages created under the pre-release table cannot be
+  carried over, because it stored only the hash of each token.
+- **A scheduled app can see its own work again.** `state_list` filtered every
+  row through the asking person's ACL, and the hourly `tick` has no person, so
+  `acl.CanSee` refused all of them: a woken app was told the world was empty
+  while the same rows were on a screen in front of somebody, and with no inputs
+  to key `state_get` on there was nothing to fall back to — the wake-up was
+  inert on any instance with the ACL wired. A call the HOST itself started now
+  lists the app's own rows in full. ⚠ Keyed on that, never on "no actor": a
+  public-page call is person-less too and stays told nothing.
+- **The plugin SDK knows the `schedule` permission.** `plugintest`'s closed
+  permission set was not extended when the wake-up landed, so an app asking for
+  it had its manifest refused by its own tests while this server installed it
+  without complaint. The set is now checked against the host's in the host's
+  own tests, so the two cannot drift again.
+- **An app can share the file its own job is writing.** `share_create` now
+  accepts a ref naming one of THIS job's outputs. The link is decided and
+  handed back at once — token, PIN, expiry, caps — so the app can put the
+  address in the mail it is composing, and the share **row is written when
+  that output is committed**, pointing at the node the bytes landed on. It is
+  an ordinary share from that moment: in **Shares**, revoked and expiring like
+  any other, behind the same bcrypt PIN gate, naming the file the recipient
+  actually gets — for both output modes, a new file beside the original and a
+  new version of it. A job that fails, or that never keeps the output, writes
+  no row at all, so the promised token answers nothing: a link to a file that
+  does not exist is never created rather than created and cleaned up.
+  Without this a signature round finished and the signed document had no link
+  to travel by — an output has no catalogue node while the job runs, and a
+  share points at one. Sharing a file that already exists is unchanged.
+- **The PIN lock-out now guards every public link.** Five wrong answers shut
+  the gate for ten minutes, counted on the share row so it survives a restart
+  and holds across two instances behind one address, and the correct PIN is
+  refused during the lock — a lock the right answer lifts is no lock at all.
+  Before this it existed only on an app's page; a PIN on a `/s/` link could be
+  walked through at the speed of HTTP.
+- **Apps, platform v3 — screens say what they are asking.** A `select`
+  renders as a row of choice buttons instead of a dropdown whose options are
+  hidden until clicked (`multi` for several); `Field.Advanced` is gone, so
+  nothing is folded away behind "advanced"; a step carries at most one primary
+  button; and `show_when` / `required_when` let a field depend on another, so
+  a form cannot present a contradiction. Both conditions are re-checked by the
+  host at submit: a hidden field's value is **dropped before the job runs**.
+  `date` is a field type (and the `date` rule on text fields is gone — two
+  ways to ask for a date is how you get two formats); a `pdf-fields` node in
+  a `page` view fills the screen; and its fields carry a `label`, so a signer
+  fills a form of named fields instead of hunting across a document.
+- **`Surface.open {path, action|view}`** — a screen can send the person to a
+  file and start one of the app's own screens on it, which is what makes a
+  home screen a list of *documents* rather than of names. The host checks the
+  screen belongs to the app that answered; the server checks the path against
+  the **asking** person's permissions and drops the link rather than refusing
+  the screen. A public link's surface never carries it.
+- **`state_list {key, limit}`** (permission `state`) — an app can find the
+  files it keeps state on, which is what a home screen is made of; before this
+  an app only ever saw the file it was opened on. A deleted file drops out of
+  the answer by itself, an un-indexed one does not (the state row now carries
+  the path as well as its hash, migration 00048), and every row is filtered
+  through the asking person's permissions.
+- **Apps can add a language.** A manifest declares `languages[]`, and the host
+  **refuses to install** an app whose own screens are missing one of them — a
+  half-translated screen is the author's bug and they should meet it before a
+  person does. It may also ship `ui_locales{}`, a language pack for **filex
+  itself**: the language joins the interface's picker (public links included)
+  while the app is installed and leaves with it.
+- **Bring your own signing authority.**
+  `POST /api/admin/app-plugins/signing/ca/import` takes a certificate and its
+  key in PEM (an encrypted `.p12`/`.pfx` is converted first with
+  `openssl pkcs12 -nodes`); `GET …/signing/cas` lists every authority the
+  tenant has, live and retired. ⚠ Importing or rotating **retires** the
+  current authority and never deletes it — a signature made two authorities
+  ago must still verify — and `host_sign_info` now hands the guest
+  `ca_certs_pem`, every authority ever used, which is what a verifier's root
+  pool should be built from. Signer certificates are issued for ten years
+  rather than thirty days: a verifier asks whether the certificate is valid
+  *now*, so short ones made every signature read "certificate expired" on its
+  31st day, and the private key is destroyed seconds after the signature
+  either way.
+- **`pluginkit/plugintest`, a test kit shipped with the SDK.** A fake filex in
+  memory — files, settings, per-file state, locks, engines, signing,
+  notifications, mail, HTTP and shares — answering with the same error codes
+  the real host returns and refusing what the manifest never asked for, plus
+  assertions for the surface rules, every declared language, the manifest, the
+  registered handlers and golden screens. It runs before `plugin.wasm` exists,
+  so a build can be refused instead of shipping a broken or half-translated
+  screen.
+- **Interface preferences are per person, not per browser.**
+  `GET|PUT /api/me/prefs?surface=web|desktop` (migration 00047) keeps theme,
+  palette, density and language in the database, capped at 64 KiB per
+  surface; how each folder was left is the separate view-prefs store it always
+  was. `localStorage` is per BROWSER and never per person, so a theme picked in
+  one browser was simply not there in the other. The web app reads and writes
+  it; the desktop app and an embed still keep these choices on that machine or
+  in that browser.
+- Ops queue: `POST /api/files/ops/{id}/cancel` and a `cancelled` status.
+- **My shares** (`/drive/my-shares`, and `/admin/my-shares` for an
+  administrator; in the explorer's navigation panel): a person who is not an
+  administrator can see the links they created — **Copy link**, **Copy PIN**,
+  **Revoke** — and read back their PINs. `GET /api/shares` lists them;
+  `GET /api/shares/{id}/pin` reads one PIN back. Share PINs are sealed with
+  AES-256-GCM beside the bcrypt hash that guards the gate (migration 00049),
+  and only the creator or an administrator can open one, through an endpoint
+  that writes an audit row every time.
+- **Symlinked directories are navigable, and `follow_symlinks` decides what
+  happens at the storage boundary** (`local`, **off** by default, under
+  Advanced settings). A link whose target is **inside** the folder is always
+  followed — it opens as the directory it is, reports the target's size, and
+  this holds for relative and absolute links alike. A link whose target is
+  **outside** is governed by the option: off, it is **listed with a reason**
+  and cannot be opened, written through or deleted through; on, filex treats
+  the linked content as part of the storage. Out-of-root links are shown
+  rather than hidden deliberately — an entry you can see and cannot open is
+  confusing, but an entry that silently is not there is worse. Listings carry
+  `symlink: true` and a `link_state` of `outside_root`, `broken` or
+  `unresolved`; the wire `type` stays the closed `file`/`dir` union, so
+  existing clients render exactly what they rendered before. Docs:
+  [STORAGE.md → Symlinks](docs/STORAGE.md#symlinks).
+- **A link that will not open now says so, in words, everywhere the explorer
+  runs.** The flag above was reaching the browser and nothing drew it, so the
+  half of issue #34 that was actually reported — a row that looks like an
+  ordinary file and mysteriously fails — was still on screen. Such a row now
+  carries a badge in the list, the grid and the gallery (*Outside storage*,
+  *Broken link*, *Remote link*), with the reason as its tooltip and as its
+  screen-reader label, and the same sentence again in the details panel above
+  the facts that mislead on their own ("Size: 0 bytes", "Type: file"). A
+  **broken** link deliberately reads differently from an out-of-root one:
+  only the second can be allowed, with *Follow symlinks that leave this
+  folder*, and sending somebody to a settings screen for a target that has
+  been deleted helps nobody. Opening one is **refused out loud** rather than
+  silently ignored — and refused in the browser, before the request, because
+  the driver's containment error reads as a fault rather than as a boundary
+  somebody chose. It is in `@brftech/filex-core`, so the admin app, the
+  desktop app and every embed get it together; English and Turkish.
+
+- **The signing boxes are defined first and placed after.** A `pdf-fields`
+  node gains two modes: `define` draws the boxes as numbered cards — a name,
+  whose it is, required, a text box's rule, a date box's layout — with no
+  document on screen, and `place` draws the document with the boxes that still
+  need a place: choose one, tap the page, or drag to size it. Two questions,
+  two screens. A date box says how it is written (`31.12.2000`,
+  `12/31/2000`, `2000-12-31`), and that `format` now survives the round trip.
+- **The admin panel's navigation has an Apps section**: one row per installed
+  app's home screen (e-Signature's is *Signatures*), administrators only, and
+  absent when no app has one.
+- **The bell carries its count, and everybody can read all of their
+  notifications.** The unread count is a badge on the bell icon — exact to 99,
+  `99+` above — drawn by one component wherever a count is shown, and the
+  desktop app shows it on its dock icon where the system has one, and in its
+  tray tooltip. **View all** opens the complete, paged list over the explorer
+  for every account, instead of linking to the admin notifications page a
+  non-administrator cannot open. A row is clickable exactly when it has
+  somewhere to go; the desktop app's notification now opens an app's screen
+  the way the web one does.
+- **One table, everywhere — the explorer's own.** Every table in filex is now
+  the file list's table: the admin screens (Users, Shares, Audit, Queue,
+  Webhooks, Trash, Usage, Updates, Replication, Sync, Duplicates, the plugin
+  and app pages, …), My shares, notifications, the connection panels (API
+  keys, S3 keys, SSH keys, NFS exports), the archive viewer and an app's
+  `list` screen. Each one has the list's column resizing, sorting, column
+  visibility and order, remembered **per table** on your account, and ends
+  every row in **one** pinned *Actions* menu. A table that holds one page of
+  a longer list does not pretend to sort it: its headers close and say why.
+  An app's `list` node gains optional `width`, `sortable`, `align` and a
+  per-row `sort` value (backward compatible; `docs/APP-PLUGINS-API.md`).
+- **A default folder view — yours, and the instance's.** Settings → Default
+  folder view sets how a folder you have not arranged opens (view, sort,
+  columns); an administrator sets the instance's on the admin Settings page
+  (same name), which applies to everybody who has not chosen their own. A
+  folder you arranged keeps its own arrangement over both; "Reset" hands it
+  back to the default.
+- **Admin → Identity providers really manages sign-in.** OIDC, LDAP and the
+  proxy header configured on the page are built through the same code as the
+  environment's, applied the moment they are saved (no restart) and offered on
+  the login page at once. Before this version the page wrote settings no
+  server read and answered "restart the server" to a restart that changed
+  nothing. The page cannot lock the instance out:
+  - password sign-in and the installation administrator's recovery sign-in
+    are the environment's (`FILEX_AUTH_DRIVERS`, `FILEX_AUTH_RECOVERY_LOGIN`);
+    the page has no switch for either;
+  - providers from the page are added AFTER the environment's, so `local`
+    judges the administrator's password before any directory round trip, and
+    one that cannot start is left out with its reason on its card;
+  - every save runs the real test; switching a provider on while its test
+    fails needs a confirmation that names the failed steps;
+  - switching off the last way an administrator can sign in is refused.
+
+  A provider the environment defines is shown read-only with where it is
+  defined (`FILEX_AUTH_DRIVERS`, the config file, the built-in default), and
+  wins over a configuration the page holds under the same name. Secrets are
+  sealed with `FILEX_SECRET_KEY` and never sent back; every change is one
+  audit row naming the provider, the switch and the fields that changed —
+  never a value. Instance-wide: supertenant administrators only. See
+  [docs/SSO.md](docs/SSO.md#managing-providers-on-the-identity-providers-page).
+
+- **Personal and team tags.** A tag is now either **personal** — yours alone,
+  like a star — or **team** — shared with everyone in your tenant who can see
+  the file; adding or removing a team tag needs edit permission on the file,
+  and a viewer sees team tags without being able to change them. A team tag
+  never crosses a tenant boundary, not even on a storage two tenants share.
+  Every place a tag appears says which kind it is, with a glyph and in words:
+  the chips on a file (personal outlined, team filled), the tag picker (which
+  asks who sees a new tag — personal by default, team offered only where you
+  may edit, and otherwise shown disabled with the reason), the navigation
+  panel (two groups, **Personal** and **Team**), the tag view's crumb
+  (`#rapor · Personal`; `.mytag~` / `.teamtag~` addresses, the old `.tag~`
+  still opening both), the Tagged files page and the advanced search, which
+  now offers your tags as one-click picks. Names keep the capitals they were
+  typed with ("Müşteri Teklifi" is no longer stored as "müşteri teklifi");
+  sameness is case-insensitive and treats the Turkish `I`/`ı`/`İ`/`i` as one
+  letter, so "IŞIK" and "ışık" are one tag, and so are "INVOICE" and
+  "invoice" (docs/SEARCH.md → "What the same tag means"). The API answers
+  `items: [{name, kind}]` beside the old `tags`, takes `items` on write,
+  `?kind=` on `tagged`, and says `can_edit_team`; a `tag:` search filter
+  covers both kinds you can see. Agents get `GET/POST /api/ai/tags` and the
+  MCP `file_tags` tool, which require the kind of every tag written.
+- **An app's table can hold dates.** A `list` column may say
+  `format: "date"` (`YYYY-MM-DD`) or `"datetime"` (RFC 3339): filex prints
+  the value the way the explorer prints dates — the reader's language and
+  clock, a calendar day never moved by a time zone — and sorts by the value.
+  The e-Signature app's *Due* column uses it ("29 Eyl 2026", not
+  "2026-09-29"). An older filex shows the value as sent.
+- **Apps: the platform says who an action is for, and where its result may
+  go.** Four manifest words, each replacing something filex had to guess.
+  `applies.writable` marks a flow that ends in writing the file although the
+  action's own output is `none` (a signing request: nothing now, the signed
+  document at the end), so it is not offered where nothing can be written.
+  `output.elsewhere` (with `mode: "sibling"`) lets the result go somewhere
+  else: on a read-only storage *Convert…* is still offered, the wizard asks
+  WHERE with filex's own destination picker — starting at `context.home`,
+  the person's first writable storage — and the job answers `output:
+  {"mode": "folder", "dir": "<storage>://<folder>"}`, which the server
+  re-checks before queueing it (the storage enabled and in the caller's
+  tenant, not read-only, the folder really there, the caller an editor, and
+  locks and internal directories honoured). A personal state key
+  (`<key>@<user id>`, matched by `"state": ["todo@me"]`) offers an action to
+  ONE person: the e-Signature app marks each signer whose turn it is, so
+  *Sign / Fill* is offered to them and not to everybody who can open the
+  file. And a manifest's `messages` are texts filex says on the app's
+  behalf later — a file lock's reason is kept as a key with arguments and
+  read back in each reader's language, on the admin page and in the `423` a
+  refused write gets. `plugintest` checks all four, and
+  `pkg/pluginkit/humandate` gives an app the explorer's date style in Go so
+  its own screens read like filex's. Docs:
+  [App plugins](docs/APP-PLUGINS-API.md), [Plugin kit](docs/PLUGIN-KIT.md).
+- **`pkg/pluginkit/humandate` — an app writes dates the way filex does.** A
+  date inside an app's own sentence (a mail, a notice, "valid until …") is
+  written in the explorer's format in English, Turkish, German, Spanish and
+  French (`Day`, `DayTime`, `Stamp`), so no app keeps a month table of its
+  own. The e-Signature app uses it for every date it shows a person; its
+  audit trail keeps ISO 8601.
+
+- **Which filex this is, where a person can find it.** `filex 0.43.0` at
+  the foot of the account menu — the admin panel's and the explorer's — and
+  in the head of the user settings dialog. It was on the sign-in page and
+  the administrators' About page only, so somebody already signed in who is
+  not an administrator had no way to say which version they were on. The
+  server's own string, as it reports it (a development build says so), and
+  nothing to translate: a name and a number.
+
+### Changed
+
+- **Without the index, every word of a search has to be in the file's own
+  name.** A word that appears only in a folder name used to answer through the
+  path when the longest word of the query happened to be in the file name, so
+  whether it did depended on word order (`main code` found `/Code/main.go`,
+  `Code main` did not). It is now found with the index only; matching the words
+  against the path read every row from the table (1.06 s for an eleven-word
+  query on a 169k-file catalogue). By Berk Başarır
+  ([#46](https://github.com/BRF-Tech/filex/pull/46)); see `docs/SEARCH.md`.
+- **Connections is "how to connect" and nothing else — the Storages tab is
+  gone.** Both doors into that screen (the explorer's *How to connect* and the
+  admin panel's *Connections*) are the same component, and both opened on a
+  **Storages** tab holding a second, poorer storage list and form: no sync
+  mode, no RBAC, no sync runs, no drift report, next to an Admin → Storages
+  that has all four. Storages are created, edited and deleted there — the
+  Connections page links straight to it — and the storages you can browse are
+  listed by the explorer's navigation panel; the panel itself now opens
+  directly on the protocol guides and the credential each one needs. The
+  `<filex-connections>` element loses the `initial-tab` attribute and the
+  `changed` event with it: there is no second half to open on, and nothing in
+  the panel can change a storage any more.
+- **A row's Actions menu opens above the dialog it was opened from.** Inside
+  the explorer's pop-up screens — *API keys*, *How to connect* — the menu was
+  painted **underneath** the pop-up and looked as if it never opened. It
+  teleports to `<body>` so no ancestor can clip it, and that left its
+  container's place in the stack behind: menu 80, pop-up 130. It now measures
+  the highest layer in the ancestry of whatever opened it and sits one above
+  that, so it clears the dialog — and, in an embed, whatever the host page's
+  own container is worth — without flattening the orderings the stylesheet
+  sets on purpose.
+- **One word per thing, in the words the product already uses (translation
+  pass).** Translating v0.43.0 into Spanish, German and French read
+  the whole catalogue in one sitting and found the places where it does not
+  agree with itself. What an API key is allowed to do is a **permission** /
+  **izin** everywhere now — the fieldset the boxes sit in, the column that
+  lists them afterwards and the server's refusal said *Scopes*, *Permissions*,
+  *Can do* and *Yetkisi* between them; `scope` survives only where it is the
+  OIDC provider's own word. The four near-identical "at least one scope is
+  required, `admin` is never implicit" sentences are three, one per surface
+  that genuinely has one, and the admin form's error and hint are ONE sentence
+  drawn in red or in grey. Spelling is American English throughout (*Colour
+  palette*, *your own colours*, *the colour palette* and macFUSE's *licence*
+  sat beside *Accent color* and *License: {license}*). A place filex keeps
+  files is a **storage**, never a *drive* or a *sürücü* — the connection
+  guides' drive letters are a real Windows drive and stay. Smaller ones: the
+  Queue's *About* column is *Subject* (it was the About page's word), the
+  About page's tools are *Found* / *Not found* (it was the Apps table's
+  install date), the Search test's *Search scope* is *Look in* like the
+  explorer's, a notification's *Scope* column is *Recipient*, an install
+  refusal no longer quotes a button label that does not exist, the default
+  folder view's help points at the person's own Preferences instead of at
+  itself, and an S3 key refusal says the server has no encryption key instead
+  of calling that key an *access key*. The glossary rows are in
+  [CONTRIBUTING](docs/CONTRIBUTING.md) and `web/tests/i18n/vocabulary.test.ts`
+  fails a relapse.
+- **An environment variable's NAME is never inside a translated sentence.**
+  `FILEX_SECRET_KEY`, `FILEX_AUTH_DRIVERS`, `FILEX_AUTH_RECOVERY_LOGIN` and
+  ONLYOFFICE's `JWT_SECRET` were letters in the middle of six strings a
+  translator retypes; they are a `{env}` slot the page draws as `<code>`, the
+  way `login.noProviders` already did.
+- **A pack is not asked to translate a string that is only a placeholder.**
+  Ten notification bodies were the whole value `{path}`, `{reason}`, `{body}`,
+  `{folder}`, `{error}` or `{notice_title}` — nothing to translate, ten
+  entries every pack had to reproduce byte for byte. They are no longer
+  exported; the renderer falls back to the same template, so nothing on screen
+  changes. The words a notification falls back on (`server.notify.word.*`)
+  moved into the server catalogue, because two of them — *Someone* and *a
+  file* — are also what a MAIL says when nobody typed a name; they were two
+  keys with one meaning (`server.mail.drop_received.someone`,
+  `server.mail.share.unnamed_file`, both removed).
+- **A sentence with a link in it is one message.** The ZIP wait page said
+  `zip_hint_a` + `zip_hint_b` (the link's words) + `zip_hint_c` (a full stop):
+  a sentence no translator could reorder or punctuate. It is one message with
+  `{link}` in it plus the link's own label, the shape
+  `access.ui.create_then_send` already took.
+- **`events:<name>` is refused at install.** It parsed, was granted, and
+  printed *"Is told about … events (not wired yet)"* in the permission list an
+  administrator reads before trusting an app with their files — while nothing
+  delivers a file event to an app (`on_event` returns 0 and no host code calls
+  it). A permission that does nothing is worse than a missing one. The export
+  stays reserved in the kit; the permission comes back with the wiring.
+- **The catalogue's translator notes say "email", not "e-mail"**, in all 64
+  entries that mention it — the screens have said *email* since v0.42.0, and a
+  translator who trusts the note over the string writes the hyphen into their
+  own language.
+
+- **The admin panel says which thing, not only which kind.** The Panel's
+  Recent activity and the Audit log name what a row is about — the user's
+  e-mail, the storage's name, the file's path ("Kullanıcı “ayse@…”" instead
+  of "Kullanıcı", "Depo “arsiv”" instead of "Depo #2") — and keep the name
+  after the thing is deleted. The Audit log's action filter offers resources
+  by name; its address column no longer carries the client's port; its
+  "Target" box, which filtered nothing, is gone.
+- **"File history" finds a file by name.** It asked for a node id; it now
+  searches, lists the matching files and opens the one picked, and the
+  history page names the file and where it lives.
+- **Corporate identity's live preview is the public page itself** — the
+  same shell and file card a visitor gets — instead of a hand-drawn card
+  that looked like no page filex serves.
+- **One set of words for a storage** everywhere storages are listed: the
+  driver by name, "Read-only", "Disabled" (the admin list said "RO" and
+  `local`, Connections "SALT OKUNUR" and `LOCAL`).
+- **An admin's own notification settings live in the user settings dialog
+  only**; the admin Notifications page opens it instead of repeating the
+  switches. An upgrade notice is scoped "Administrators" there, not
+  "Everyone" — no other bell shows it.
+- **A notification a service makes impossible** (virus found with scanning
+  off, escrow key with none set up, an app's message with apps off) is shown
+  to an administrator greyed with the reason, and not offered to anybody
+  else; the Webhooks screen keeps it subscribable and says why it will not
+  fire yet.
+
+- **The sync watcher's interval asks instead of walking.** A pair is walked only
+  when its local tree changed unseen, the server's change log (`action=changes`)
+  says something under its folder changed while the change stream was down (a
+  reconnect asks once, instead of walking everything), a folder whose last pass
+  failed is due a retry — that folder only, with a growing gap — or
+  `--full-every` (default 30 min) passed. It used to walk every pair every 30 s:
+  one Mac with 7,048 folders sent 100–150 thousand listings an hour, around the
+  clock. Against a server without the change log, a quiet pair's walks back off
+  to `--watch-max` (default 5 min). ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **Deleting many files is several times faster.** A delete job trashes 4 items
+  at a time (`FILEX_OPS_DELETE_WORKERS`); jobs still run one after another,
+  items listed inside a folder that is also deleted are dropped first (the folder
+  lands whole in the trash), and progress is written about once a second. On S3
+  a trashed file takes three requests instead of four. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- Default CORS allowed headers gain `Range` and `X-Filex-Accept-Prepare`;
+  `Content-Range` and `Retry-After` are exposed.
+- ⚠ **A view change belongs to the folder it was made in.** Switching a folder
+  to grid, sorting it or resizing its columns no longer changes every other
+  folder: an untouched folder opens as your default (else the instance's,
+  else filex's own). The "remember per folder" switch is gone — per-folder
+  memory is simply how it works. Upgrading keeps every folder you had
+  arranged and your old column widths (as your default columns); the old
+  "last change anywhere" view is not carried over, because it was never a
+  choice anybody made.
+- **A service that is not set up is not offered as if it were.** Where
+  ONLYOFFICE, draw.io, the converter or mail is missing, an administrator
+  sees the entry greyed with where to set it up (*External services*), and
+  everybody else does not see it. Previewing an office document or a diagram
+  says so in words — never `Config fetch 503`, never an environment
+  variable's name.
+- **A line between every app's actions** in the file menu, the selection
+  bar's "⋯" and the row's ⋮, so two apps' verbs no longer read as one list.
+- One name per service, the one its project uses: **draw.io** (not
+  "Drawio", "drawio" or "diagrams.net") and **ONLYOFFICE**; a `.drawio` file
+  is a "draw.io diagram" in the Type column.
+- **One word per thing, one date and size format, one name per person.** The
+  key a person creates for a device or an agent is an **API key** everywhere
+  (it was also "API token" and "token"); a share's **PIN** is called that on
+  the page that asks for it too (it said "Code"). Turkish uses one term per
+  concept — parola, ad, depo, oturum aç / oturumu kapat, Ana sayfa, Çöp
+  kutusu, Değiştirilme, Sahibi, e-posta; *senkron* for the server's scan of a
+  storage and *eşitleme* for the desktop's folder sync — sentence case, and
+  the polite "siz" form in every sentence. English writes "email" (not
+  "e-mail"), and a replica's write mode is "Synchronous / Asynchronous".
+  The glossary is in `docs/CONTRIBUTING.md` → *Words*, and
+  `web/tests/i18n/vocabulary.test.ts` keeps it. Every date reads the way the
+  explorer writes it ("Sep 21, 2026, 2:50 PM" / "21 Eyl 2026, 14:50") — the
+  admin tables, the audit log and the share dialog included; sizes,
+  percentages and durations are written the way the interface language writes
+  numbers. The share email and the no-JavaScript folder page count sizes in
+  1000s like the interface, so a file the listing calls "1.5 MB" no longer
+  arrives as "1.4 MB". A person is shown by their display name, else
+  username, else email — in the Owner column, the share dialog, the presence
+  strip and the admin audit log, Shares, grants and dashboard alike (those
+  responses gain `user_name` / `creator_name` beside the email).
+- **New installs name the first administrator `admin`.** The account first
+  run creates (from `FILEX_ADMIN_EMAIL`, or `admin@local`) gets the username
+  `admin`, and signs in with it on the web, SFTP and FTPS. `admin` stays
+  reserved for everyone else: a later `admin@…` account still becomes
+  `admin2`, and nobody can rename themselves to it. Existing installs keep
+  their first administrator's name.
+- The sign-in form no longer suggests `admin@local` in its email box, and a
+  failed request in the admin panel is never said in axios's English
+  ("Request failed with status code 500", "Network Error").
+- `node scripts/i18n-export.mjs --help` prints its usage instead of writing
+  the catalogue into the current directory.
+- The manager's listings carry `storage_info` (`[{name, read_only}]`) beside
+  `storages`, filtered like the names.
+- **One "Convert".** The legacy iframe converter (`FILEX_CONVERT_URL`,
+  External services → Converter) is offered only when the Convert app is not
+  available and the service is configured; it never appears beside the
+  app's "Convert…". An administrator reads that it is being retired, and
+  External services marks it as legacy.
+- **Failures are said in words.** Whatever went wrong — a refused request, a
+  failed app job, a viewer that could not load, the admin SMTP test, an
+  update check — is now a translated sentence that says what happened and
+  what to do. An administrator also sees the technical detail as a second
+  line; nobody else is shown a status code, a JSON body or an environment
+  variable. Ops rows of app jobs carry `error_code` / `error_engine`; the
+  S3 keys endpoint answers `no_secret_key` (with `admin_hint` for an
+  administrator); the SMTP test answers a `reason`.
+- **Language pack limits are bytes, not a count of strings.** The
+  2 000-strings-per-language cap made a complete translation impossible
+  (filex has 3 593 keys). Now: 1 MiB per language, 4 MiB per manifest, 4 KiB
+  per string, 128-byte keys of a fixed shape, and a 16 MiB manifest document
+  that is refused as `too_large` instead of being silently truncated.
+- **`GET /api/public/branding` lists added languages without their strings**
+  (`ui_locales: [{code, source, plugin, rtl}]`); one language's strings are
+  `GET /api/public/ui-locales/{code}`, fetched when somebody picks it.
+- A language pack's language formats dates and numbers as that language
+  (`localeTag`), and a regional pack (`pt-br`, `zh-hant`) keeps its tag.
+- ⚠ **Custom CSS is off until you switch it on, even where a sheet already
+  exists**, and its editor moved from Settings to the new Appearance screen.
+  There is deliberately no grandfathering: the rules changed underneath an
+  existing sheet — it no longer applies to the sign-in page, and `url()` no
+  longer fetches anything — so continuing to apply it silently would be
+  applying something the operator never approved. **Anyone upgrading with a
+  custom stylesheet in use must re-enable it.**
+- ⚠ `custom_css` is **removed** from `GET /api/branding`, not emptied. It used
+  to ride that public payload, so it reached anonymous visitors and the very
+  screen that edits it; it is now served from `GET /api/me/custom-css` behind
+  authentication. The field is deleted rather than blanked so an old client
+  fails loudly instead of quietly rendering nothing.
+- The palette a person picks is now recorded explicitly, including the stock
+  one. "Has never chosen" is the absence of the setting, which is what an
+  instance default paints over — so deliberately choosing filex's own colours
+  is an answer that sticks, instead of being overwritten on every page load.
+- ⚠ **Upgrading with symlinks already inside a `local` storage: three things
+  change on the next scan.** (1) A link pointing **inside** the folder starts
+  being catalogued as what it points at, so a linked directory gains rows for
+  its contents — files that were always in the storage but were listed as one
+  0-byte entry. (2) A link pointing **outside** stops being catalogued as a
+  file: it is typed `symlink`, which means it is no longer content-indexed,
+  virus-scanned, versioned or counted against quota. If you were relying on
+  that content being part of the storage, set `follow_symlinks` on the storage
+  and it returns, deliberately this time. (3) Rows created by an **older**
+  version for out-of-root links keep their old `file` type — the type is
+  written when a row is created and nothing rewrites it — so until such a row
+  is re-catalogued its scans will now fail against the driver's refusal and
+  terminate after the queue's three attempts. Removing the link, or turning
+  `follow_symlinks` on, settles it either way.
+- ⚠ **A folder copy now skips symlinks it may not follow** instead of copying
+  the bytes behind them — inside a `local` storage and to another storage
+  alike. One unfollowable link no longer costs the operator the rest of the
+  folder: inside a storage a *directory* link used to kill the copy partway
+  through (it tried to read a directory as a file), and to another storage a
+  single broken or out-of-root link failed the whole transfer. Inside one
+  storage a contained directory link is skipped rather than recursed into; to
+  another storage it is carried as the folder it points at, under the cycle
+  guard below. ⚠ The cross-storage copy **says what it left out**: the op ends
+  `partial`, its message naming each entry and why (*a broken link*, *a link
+  pointing outside the storage*, …), and a cross-storage **move keeps its
+  source** when anything was left out — it deletes only what it carried. The
+  agent surface answers the same with `entry.source_kept` and
+  `entry.left_behind` ([MCP.md](docs/MCP.md#links-that-cannot-travel)).
+- The recursive walks that follow links — catalogue scan, collision scan,
+  transfer size estimate and the cross-storage transfer itself — now carry a
+  cycle guard keyed on the link's resolved target, plus a hard depth cap of
+  64. This is the prerequisite for the navigability above, not an
+  afterthought: a root containing `real/cycle -> root` was
+  measured reaching depth 81 (123 listings) on Linux and depth 127 (192) on
+  Windows before the operating system stopped it, re-cataloguing the same
+  subtree under a fresh path hash every time.
+- `sftp` reports a remote symlink as a symlink. It used to call every
+  non-directory a file, so a remote **directory** link was offered as a
+  downloadable file that could not be downloaded. It is still not resolved to
+  its target: filex's boundary on a remote host is the SSH account's own
+  permissions, so there is no in-root test to make and following one would
+  walk the catalogue off the configured root.
+
+- **One table, one row control, across the admin panel.** Every admin table
+  freezes its first column on the left and its actions on the right, the way
+  the explorer's list does, and every row ends in one pinned **Actions** menu
+  holding everything the row can do — the same menu component the explorer's ⋮
+  opens. The loose per-row buttons are gone; anything that automates the admin
+  panel by clicking them now opens the row's menu and picks the entry by its
+  words.
+- A plugin's settings are drawn by the one field mapper core uses everywhere:
+  a `select` is a row of buttons, `multi` is honoured, and a boolean field's
+  `style` is read (a switch or a two-button choice).
+- One language per flow: a job's message, the page around it and the API
+  client all follow the language on screen, and switching language mirrors the
+  choice onto the account, so server-rendered text agrees with the interface.
+- ⚠ **Notifications and webhooks: filex's own directories are no longer
+  announced, and a soft delete targets the Trash view.** A new target kind,
+  `trash` (`{kind: "trash", storage, path}` with the path the item was
+  deleted FROM), replaces `{kind: "file", path: ".filex-trash/<key>"}` on
+  `file.trashed` and on a quarantining `file.infected`; a click opens the
+  Trash view with the item selected. A receiver that switched on the four old
+  kinds sees an unknown one — treat it as "open the trash".
+  `meta.trash_path` stays in the webhook body. Writes, moves and deletes whose
+  subject is inside `.filex-trash`, `.versions`, `.thumbs` or the desktop
+  app's `.filex-open` working area are bookkeeping and produce **no bell row
+  and no webhook**. The one exception is a save of an open-with working copy,
+  which is a change to the person's own document: it is announced under the
+  document's original name, with an empty `node.path`, `target: none` and
+  `meta.open_with: true` (the original lives on their computer, so no storage
+  path names it). Rows recorded before this release are filtered on read —
+  hidden when their body is an internal path, re-addressed to the Trash view
+  when they targeted the bin — and the table itself is not rewritten.
+- The WebDAV, SFTP, FTPS, NFS and S3 endpoints also refuse `.filex-open`
+  (they already refused the other three): all five now judge paths by one
+  shared list instead of five copies of a three-name one.
+- ⚠ `POST /api/files/manager?action=delete` of a path under `.filex-trash/`
+  is refused (403 `RESERVED_NAME`) instead of hard-deleting it. Removing one
+  item from the bin for good is `DELETE /api/admin/trash/{id}`, which it
+  always was for the web app.
+- Live updates (the explorer's change frames) no longer announce anything
+  inside filex's own folders or naming them: the desktop creating
+  `.filex-open`, saving a working copy, a trash move or a version snapshot
+  used to reach every open explorer of that storage as a change.
+- **"Share", not "Share / permissions" — and one link per item.** The menu,
+  the selection bar, the shortcut list and the tour name the verb for what it
+  does for everybody. *People with access* stays inside the dialog for the
+  item's **owner** (an editor was sent a request for the grant list, got a
+  403, and saw an empty dialog); the details panel's *Manage permissions* is
+  an owner's button too. On a storage with RBAC off an administrator sees
+  the people form greyed, with where to switch RBAC on — it used to accept
+  people under a box saying grants did not apply — and nobody else is
+  offered it. With a link already on, the options' button now reads
+  *Replace the link with these settings* and replaces it (new address, the
+  old one stops working) instead of leaving a second live link beside the
+  first; the header's link is no longer listed a second time underneath;
+  every *Copy* is one control and every on/off is the switch.
+- **The explorer's Trash has the facts of a deleted item.** Its table shows
+  **Deleted** (when — sortable and grouped by it), **Deleted from** and
+  **Time left** (`ttl_days`), instead of a date column of dashes, no
+  location and an Owner column reading *System* on every row. *+ New* is no
+  longer drawn above the Trash with every entry greyed.
+- **The first-use tour is offered to a person once.** It opened a moment
+  after every explorer mount whose browser had not closed it — a second
+  tab, another browser, another device — and browser automation met its
+  card on each fresh mount. It is now recorded when it is **offered**, on
+  the account (`GET/PUT /api/me/prefs`, key `tour`) as well as in the
+  browser, and read as one answer; *Restart the tour* still opens it any
+  time.
+- **A refused file-request upload says why, in words.** Every refusal of
+  `POST /d/{token}` and `POST /api/public/d/{token}/upload` carries a
+  `message` in the visitor's language next to the `error` code it always
+  had.
+
+### Upgrade notes
+
+- **A script that empties the trash through the API: check `running`.**
+  `POST /api/admin/trash/empty` waits up to two seconds for the purge it
+  starts: an ordinary trash is done by then and the answer is the final count
+  (`200`, as before), a large one answers `202` with its progress while it
+  carries on as an operation of the queue — follow it on
+  `GET /api/admin/trash/empty` (or `GET /api/files/ops/{op_id}`) until
+  `running` is false. A second press while the same tenant's run goes on is
+  `409 BUSY`, with that run. A day count that is not a whole number `≥ 0`, a
+  `storage_id` that is not a number, or an unknown field is `400` and purges
+  nothing — they used to be dropped, which meant "everything". "Empty" now
+  means *what was in the trash when it was asked for*: a file deleted while
+  the purge runs stays in the trash ([#47](https://github.com/BRF-Tech/filex/pull/47)).
+- ⚠⚠ **ONLYOFFICE: turn JWT on at the Document Server.** filex now refuses
+  a save callback that carries no token whenever a JWT secret is configured
+  (see *Security*). A Document Server running with `JWT_ENABLED` off sends
+  unsigned callbacks, so **its saves stop working** the moment you upgrade:
+  set `JWT_ENABLED=true` and the same secret filex holds before, or
+  immediately after, the upgrade. An install with no secret in filex never
+  had editing on in the first place and nothing changes for it — except
+  that the Panel and **External services** now say so in a red warning
+  until a secret is set.
+- **A reverse proxy or CDN in front of filex: let it follow filex's cache
+  headers.** Every `/api` answer is now `Cache-Control: no-store` unless its
+  handler says otherwise ([#41](https://github.com/BRF-Tech/filex/pull/41)) — thumbnails, file content and
+  share downloads say `private, …`. The one exception is the four answers
+  that say who the instance is: `/api/public/branding`, `/api/branding`,
+  `/api/appearance` and `/api/public/ui-locales/{code}`, which were
+  `public, max-age=60` and now carry a strong ETag with `public, no-cache`, so
+  a reader revalidates and an unchanged answer costs a `304`. Nothing in filex
+  needs changing; an edge rule that *ignores* origin headers ("cache
+  everything") still caches — scope such a rule to your website's own hosts
+  (see [docs/DOCKER.md](docs/DOCKER.md)), or it keeps one person's answers for
+  everybody and an installed language pack or a saved theme takes a minute to
+  appear.
+- ⚠ **A narrow token can no longer mint a wide one — check your
+  integrations.** A token, S3 access key, NFS export or SSH key created
+  through the API now inherits the ceiling of the credential that asked for
+  it: its verbs must be a subset, its `root:` confinement must lie inside
+  the caller's and its expiry cannot outlive the caller's. An automation
+  that used a read-only or confined token to create wider credentials will
+  now get `403 token_ceiling` naming what was too wide — give that
+  automation a token with the rights it actually hands out, or have a person
+  create the credential in the browser. Credentials that already exist are
+  untouched.
+- ⚠⚠ **API/MCP tokens created with no scopes keep `admin` — review them.**
+  Until this version a token created with no scope ticked received **every**
+  scope, `admin` included. On upgrade, migration 00054 rewrites every such
+  token to the explicit list `read,write,delete,mcp,admin`: exactly the access
+  it had, so no integration breaks — and it now shows the `admin` scope on
+  **Admin → API / MCP**. Review those tokens and narrow any that does not need
+  the admin panel: create a token with only the scopes it needs and revoke the
+  old one (a token's scopes cannot be edited). From now on every token names
+  at least one scope, and `admin` is never included unless it is ticked.
+- ⚠⚠ **Identity provider settings saved on the page before v0.43.0 were never
+  applied — and on upgrade they are imported SWITCHED OFF, not switched on.**
+  The Admin → Identity providers page used to save settings that no server
+  read. Now the page's settings drive sign-in, so turning old rows on at
+  upgrade could switch on a sign-in configuration someone typed long ago and
+  forgot. Instead each such provider comes back **off**, marked *"saved before
+  v0.43.0, never applied — review and enable"*. **Before or right after
+  upgrading, open Admin → Identity providers**, review every field of a marked
+  provider, use **Test now**, and switch on what you want. A client secret or
+  bind password among those rows is sealed with `FILEX_SECRET_KEY`; without
+  the key it is cleared (it was never used — type it again) and the log names
+  the provider and field. Providers set in the environment are untouched and
+  keep working exactly as before.
+- The conversion engines (ffmpeg, ImageMagick, LibreOffice, Ghostscript,
+  poppler, rsvg) are looked for once, when filex starts, and every screen
+  reads that one answer: install an engine, then restart filex for **About**,
+  **Apps** and the converter to see it.
+- An app action's customised *applies* rule (**Apps → an app → Menu
+  actions**) is converted once, at the first start, from the copy of the rule
+  it used to be into the change it made against the manifest — keeping what
+  it said (an extension you removed stays removed, one you added stays). See
+  *Fixed* for what that changes.
+- **Migrations 00042–00058 run on the first start** (SQLite, PostgreSQL and
+  MySQL alike) — seventeen of them, because this release adds a whole
+  platform: 00042–00046 the apps themselves, their pages, their signing keys,
+  their file locks and the share row an app's link is; 00047 interface
+  preferences per person; 00048 an app's state row bound to the file it is
+  about; 00049 the sealed copy of a share's PIN that **My shares** reads
+  back; 00050 the hourly wake-up schedule; 00051 the operator's own themes;
+  00052 an app link's own visit counter and purpose (`shares.visit_count`,
+  `shares.purpose_json`); 00053 a recorded revoke (`shares.revoked_at`);
+  00054 the rewrite of empty-scope tokens (above); 00055 the split of tags
+  into personal and team (below); 00056 per-reader read state for
+  notifications ([#43](https://github.com/BRF-Tech/filex/pull/43), written as 00043 there); 00057 the
+  identity provider's id_token kept beside an SSO session, for sign-out
+  ([#40](https://github.com/BRF-Tech/filex/pull/40), written as 00042 there); and 00058 an index on
+  `nodes.parent_id`, which a purge's cascading deletes need
+  ([#47](https://github.com/BRF-Tech/filex/pull/47), written as 00044 there; a no-op on MySQL, which
+  already has one). On a large SQLite database the first start builds that
+  index before it serves.
+- **Existing tags become team tags** (migration `00055`). They were
+  effectively shared with everybody, so nothing anybody could see disappears;
+  each lands in the tenant of the file's storage (a storage linked to two
+  tenants gives each its own copy; a storage linked to none, as on a
+  single-tenant install, keeps them for the whole instance). Names the old
+  code lower-cased stay lower-case; new tags keep their capitals.
+- **A client that does not send a kind now makes personal tags.** Every
+  client before v0.43.0 posts `{node_id, tags:[names]}`; new names in such a
+  request become **personal** — a request that does not say who should see a
+  label must not publish it. Names it round-trips keep their kind, so an old
+  client leaves existing team tags alone; one that drops a team tag from the
+  list needs edit permission for that. A script that shares labels with a team
+  adds `"kind": "team"` (or sends `items`).
+- **What an existing desktop install needs for live sync:** a **new desktop
+  build**. The engine that does the work is the `filex` CLI bundled inside the
+  app (`resources/bin/filex[.exe]`), so the release must ship new desktop
+  packages carrying the new CLI — a server upgrade alone changes nothing on the
+  PC; the app code adds the Live / Polling / Offline word and the per-folder
+  status (a folder's own error, cleared by its next clean pass; the local
+  watching note).
+- **Mixed versions keep working**, just not live in both directions:
+  new app + older server → local saves still go up at once (file-system
+  events), server-side edits arrive with the 30-second full check, and the app
+  says *Polling*; older app + new server → exactly the old behaviour (30 s both
+  ways) — the `watch` subscription, `tree_change` frames and `expect` are only
+  used by a client that asks for them.
+- A reverse proxy in front of filex must pass WebSocket upgrades for `/api/ws`
+  (the web explorer's live updates already need this). Without it the app shows
+  *Offline* and falls back to the 30-second full check.
+- The 30-second check no longer walks every pair (see *Changed*): a quiet pair
+  costs one local walk and — only while the change stream is down — one
+  `action=changes` request per interval, and is walked in full every
+  `--full-every` (30 min). An older server without the change log is walked
+  on a timer that backs off to `--watch-max` (5 min).
+- A program that relied on the `202` "preparing" answer to a download must now
+  send `X-Filex-Accept-Prepare: 1`. Browser navigations are unchanged.
+- `POST /api/auth/desktop/complete` refuses API tokens (browser sessions only).
+  **Existing desktop pairings keep their `app` token** until the app signs in
+  again (then revoke the old *filex desktop* token) or an admin sends
+  `PATCH /api/admin/ai-tokens/{id} {"kind":"user"}` — see docs/DESKTOP.md.
+- A rename onto a taken name now answers `409 NAME_TAKEN` instead of replacing
+  it; API clients that relied on the overwrite must handle it (`filex client mv
+  a b` onto an existing `b` fails the same way). Moves by an agent (MCP
+  `file_move`, `POST /api/ai/move`) keep giving the item a free name instead.
+- The first full scan after upgrading drops the catalogue rows an earlier scan
+  minted under `.versions/` and `.thumbs/`; on a storage whose version history
+  was a large share of its objects the 70% tombstone guard may trip once.
+- The images start `/sbin/tini -s --` before the entrypoint; overriding the
+  entrypoint removes it (docs/DOCKER.md).
+- The search index is rebuilt once, in the background, on the first start
+  (document schema 3: names composed and the four i's folded). Search keeps
+  answering from the old index until the new one is live.
+- Without the index, a PostgreSQL install searches file names through
+  `normalize` (PostgreSQL 13, the documented minimum) and `lower`, which follows
+  the database's locale: with the `C` locale only `A`–`Z` change case
+  (docs/DATABASES.md).
+- For out-of-tree `db.Store` implementations: `SearchNodes` takes a
+  `model.NameMatch` (every word, the cheap runs, the word to rank by) instead
+  of a LIKE pattern, `ListTrashedExpired` takes the storages to read,
+  `ListNotifications` and `UnreadNotificationCount` take the hidden-body
+  patterns and a `model.BroadcastFilter`, and there are new methods
+  (`ListNodesUnder`, `CountLiveNodesUnder`, `ListStaleNodesUnder`,
+  `ListUnstoredNodes`, `AbortUnfinishedSyncRuns`, `GetLastSyncRunByStatus`,
+  `MarkBroadcastsRead`, `MarkAllBroadcastsRead`, `SetSessionIDToken`,
+  `GetSessionIDToken`).
+
+- **The first administrator's username:** new installs name it `admin`;
+  existing installs keep theirs (usually `admin2`) — nothing is renamed on
+  upgrade.
+
+- ⚠ **SSO: allow filex's sign-in pages as a post-logout return address**, or
+  sign-out ends on the identity provider's "invalid redirect URI" page.
+  Sign-out now ends the provider's session too ([#40](https://github.com/BRF-Tech/filex/pull/40), see
+  *Fixed*): allow `https://<host>/admin/login?signed_out=1` and
+  `https://<host>/drive/login?signed_out=1`, or simply `https://<host>/*` — on
+  Keycloak the client's *Valid post logout redirect URIs* (left empty it
+  allows only the *Valid redirect URIs*, which for filex is the callback
+  alone); in multi-tenant mode on every tenant's client
+  ([docs/SSO.md](docs/SSO.md#signing-out)). `FILEX_OIDC_LOGOUT=local` keeps
+  the old behavior. Sessions signed in before the upgrade kept no id_token
+  and sign out of filex only until they expire (12 h); a provider whose
+  discovery document has no `end_session_endpoint` is unaffected.
+- **Who a notification reaches changed** ([#42](https://github.com/BRF-Tech/filex/pull/42), [#43](https://github.com/BRF-Tech/filex/pull/43), see
+  *Security*). Queued work is now addressed to the person who asked; a
+  member's bell takes only an antivirus hit, a failed upload, the admin
+  page's test and an app's instance-wide notice from the broadcasts, and only
+  when the file it names, if any, is one they can see; a drop or share notice
+  with no owner reaches administrators only. The rows the queue wrote without
+  an actor before the upgrade leave every bell — administrators' too — and
+  stay in the admin history, whose Scope column now says who a broadcast
+  reaches. Read state is per reader from now on; a broadcast somebody marked
+  read before the upgrade stays read for everyone. In multi-tenant mode the
+  notification history and the test event are supertenant-only. An
+  integration that reads the bell with a folder-confined (`root:`) token now
+  sees only the notices about that folder.
+
+### Security
+
+- ⚠⚠ **API answers are no longer stored by shared caches.** Every `/api/`
+  answer now carries `Cache-Control: no-store` unless its handler sets a
+  policy of its own, and the only `public` ones are the four that say who the
+  instance is — branding, themes, the offered languages and a language's
+  strings — which are the same for every visitor of a host and revalidate
+  (`public, no-cache` + ETag). JSON answers used to carry no `Cache-Control`
+  at all, and a CDN rule that caches everything took that as permission:
+  measured behind Cloudflare, a zone rule written for the tenant's website,
+  with no host condition, kept `GET /api/auth/me` for two hours and served one
+  administrator's identity (e-mail, role) to everyone who asked, anonymous
+  requests included; signing out and in as somebody else still showed the
+  administrator. `no-store` also keeps a signed-out tab's back button from
+  bringing the previous person back. A test walks every `GET /api` route as
+  four kinds of caller and fails on a fifth `public` answer. Found and fixed
+  by Berk Başarır ([#41](https://github.com/BRF-Tech/filex/pull/41)).
+- ⚠⚠ **The bell no longer names files its reader cannot open.** Every queued
+  copy, move and delete — and the commit of every staged upload — was written
+  as a notification addressed to nobody, because the ops worker has no
+  request user and the event never looked at the actor the queue row
+  carries; the bell handed such a row to every account, so on an RBAC storage
+  members read the names of files deleted from folders they have no grant on
+  (tens of thousands of rows on one instance). Now the event is addressed to
+  the person who queued the work, and who reads a broadcast is one rule, in
+  SQL and then per row: a member gets an antivirus hit, a failed upload, the
+  admin page's test or an app's instance-wide notice, and only when the file
+  it names — if it names one — is one the explorer would list for them (the
+  listing's own grant check); a notice that names a file by name alone, as an
+  "open with filex" working copy does, reaches no member (the antivirus
+  scanner addresses its own to the copy's owner); administrators get every
+  broadcast about their tenant; operator alarms and a drop or share notice
+  with no owner — it carries the link's bearer token — never reach members.
+  The badge and the list's total count exactly what the reader may see.
+  A token confined to one folder (`root:`) reads — and marks read — only the
+  notices about files inside that folder, its owner's own included; it used to
+  read its owner's whole bell. Found and fixed by Berk Başarır
+  ([#42](https://github.com/BRF-Tech/filex/pull/42)); the `root:` gap was named
+  in the PR and closed while it was integrated.
+- ⚠⚠ **"Mark all read" marks YOUR bell read, not everybody's.** A broadcast
+  had one `read_at`, and the read endpoints stamped it for whoever asked: one
+  member's "mark all read" marked every broadcast on the instance read for
+  every reader — another tenant's antivirus alerts, the operator's replica
+  reports, alerts about folders the member cannot open — and `read` did the
+  same to any id anybody typed, the AI admin tool
+  `admin_notifications_mark_read` included. Read state for broadcasts is now
+  per reader (migration 00056): `read-all` reads everything up to that moment
+  for the caller, in one write, and `read` marks a broadcast for the caller
+  only when their bell shows it, answering `204` either way. Found and fixed
+  by Berk Başarır ([#43](https://github.com/BRF-Tech/filex/pull/43)).
+- ⚠ **Multi-tenant: the notification history and the test event are
+  supertenant-only.** `GET /api/admin/notifications` returned every tenant's
+  notifications — file paths included — to the admin of any tenant, and
+  `POST /api/admin/notifications/test` let a tenant admin fire deliveries at
+  the instance's webhook receivers. Both answer `403 supertenant_only` to a
+  tenant admin now; a tenant admin reads the tenant's own events in their
+  bell, which is scoped. Found and fixed by Berk Başarır ([#42](https://github.com/BRF-Tech/filex/pull/42)).
+- ⚠⚠ **Any API token could mint a full personal token through the desktop
+  pairing.** `POST /api/auth/desktop/complete` accepted any API token and handed
+  back a fresh `read,write,delete` token for its owner with no `root:`
+  confinement — a read-only integration token could mint a full one. Found and
+  fixed by Berk Başarır ([#35](https://github.com/BRF-Tech/filex/pull/35)): the route now answers
+  `403 session_required` to every token and mints nothing; only a signed-in
+  browser completes a pairing.
+- ⚠⚠ **A credential a token mints is never wider than that token.** The
+  desktop hole above was one door of a pattern: a narrow token — read-only,
+  or confined to one folder with `root:` — could still create an API token,
+  an S3 access key, an NFS export or an SSH key for its owner with the
+  owner's full rights, and use it to reach everything the owner can reach.
+  Every issuing door now measures the caller first: the verbs of what it
+  mints must be a subset of the caller's, its confinement root must lie
+  inside the caller's, its expiry cannot outlive the caller's, and a narrow
+  caller cannot borrow a wider parent token for a key or an export. A
+  refusal says `403 token_ceiling` and names what was too wide. A
+  browser session is unaffected — it has no ceiling to exceed.
+- ⚠⚠ **An unsigned ONLYOFFICE save callback was accepted — upgrade.** Every
+  filex up to v0.42.2 with ONLYOFFICE configured is affected. The callback
+  route is public and the JWT was checked only when a token was present, so
+  anybody who could reach the server could have filex overwrite a file with
+  bytes of their choosing. With a JWT secret configured, a callback without a
+  token is now refused (a document server with JWT on always signs its
+  callbacks). ⚠ A Document Server running with `JWT_ENABLED` off sends
+  unsigned callbacks, so its saves now fail: turn JWT on there with the same
+  secret filex holds. filex itself has never enabled ONLYOFFICE without a
+  secret — a URL with no secret leaves editing off — and the admin Panel and
+  External services now say so in a red warning that stays until a secret is
+  set ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#1-run-the-document-server-with-a-jwt-secret)).
+- ⚠⚠ **An API/MCP token with no scopes no longer means "every scope".** A
+  token created on the admin screen with nothing ticked was granted
+  everything, `admin` included — the form said so ("If none are selected, all
+  scopes are granted") and such a token read `/api/ai/admin/users` and
+  `/api/ai/admin/storages`. Now one rule covers every door that issues a
+  token (the admin screen, self-service keys, the desktop sign-in): at least
+  one scope is required and an empty list is refused with a `400` in the
+  reader's language; `admin` is granted only when it is ticked, and the
+  screen says what it grants; and the token driver reads an empty list as
+  **nothing**, so a row that is empty anyway fails closed. The self-service
+  door, which used to fill a default silently, refuses the same way. Existing
+  tokens: see the upgrade note.
+- ⚠⚠ **An app's freeze held only in the explorer.** While a signature request
+  is open the signing app freezes the document and the screen promises
+  nobody can change it — but only the file manager's own verbs checked the
+  lock. Measured before the fix, against a frozen document: the document
+  editor's save of a copy opened before the freeze overwrote it
+  (`{"error":0}`); an agent's delete of the folder holding it answered
+  `{"ok":true}`; an archive extracted over it replaced it; a WebDAV `DELETE`
+  of its folder answered 204; FTP and SFTP sessions that were already open
+  overwrote it and renamed it and its folder; NFS renamed them. (The signing
+  app's own hash check caught the change before anyone signed, so no false
+  signature came of it — the request died as "the document changed".) Every
+  write door now asks one check (`writegate`) for both filex's own names and
+  app locks: HTTP answers 423 with the app and its reason (the web app says
+  it in the reader's language), WebDAV answers 423, SFTP/FTPS/NFS their
+  permission error, S3 AccessDenied, the document server gets `error: 1`.
+  The app holding the lock still writes its signed output; another app's
+  output landing on the file is refused.
+- ⚠⚠ **Anybody who could write could write into filex's own folders.** The
+  explorer stopped showing `.filex-trash`, `.versions`, `.thumbs` and the
+  desktop's `.filex-open`, but any editor could still create a folder called
+  `.filex-trash`, upload into it, rename a document to `.versions`, copy or
+  move into or out of these folders, extract an archive whose members sat
+  under them, save text over a version snapshot, grant access to them or put
+  a public link on `.filex-open` (other people's open documents) — and what
+  landed there vanished from every view the moment it was written. The file
+  manager's `delete` also **hard-deleted** anything under `.filex-trash/` for
+  any editor, bypassing the rule that removing an item from the bin for good
+  is an administrator's action. Every person-facing write now refuses these
+  names with **403 `RESERVED_NAME`** (manager verbs, chunked and staged
+  uploads, the operations queue, archives, text save, shares, grants,
+  restores, app output, drop links); an archive member under one of them is
+  skipped like a zip-slip entry. The WebDAV, SFTP, FTPS, NFS and S3 endpoints
+  already refused them and now have tests that say so. The one exception is
+  the desktop app's "open with filex" round trip, exactly as every desktop
+  since 0.29.0 sends it: `newfolder` of `.filex-open` at the storage root,
+  `upload` and the document editor's save of `.filex-open/<session>-<name>`,
+  and `delete` of that copy.
+- ⚠ **An OnlyOffice config requested without `mode` was an editing session
+  for anybody who could view the file.** The document server treats a missing
+  mode as edit, and the viewer downgrade only looked for the literal `edit`;
+  a viewer (or a trashed file, or a version) opened that way came back
+  editable, with a save callback. A missing mode is now edit before any check
+  runs, so the downgrades see what the server will do.
+- **Identity provider secrets are never sent back, and are sealed at rest.**
+  The providers list used to return stored configuration, and a whole
+  configuration saved as one blob went out with its client secret in clear
+  (masked on a demo only). The OIDC client secret and the LDAP bind password
+  are now stored sealed with `FILEX_SECRET_KEY` and listed only as *set*, on
+  every install; a secret is never logged.
+- ⚠⚠ **A `local` storage could be escaped on Windows, with no symlink and no
+  special privileges.** `?action=index&path=..\other-folder` returned the
+  contents of a directory outside the storage root: the driver cleaned wire
+  paths with a POSIX cleaner that does not treat `\` as a separator, so the
+  `..` survived it and the host's own path join then spent it on the way out.
+  The listing endpoint was also the one verb with no traversal guard —
+  `download` and `preview` on the identical path answered `400`. Separately,
+  the root boundary was a string-prefix test, so a storage rooted at
+  `…/storage1` accepted every path under `…/storage10`: with numbered roots
+  that is another tenant's file names, sizes and timestamps. **Linux hosts
+  were never affected by the separator half; the prefix half affected both.**
+  Fixed in the driver (host-aware separator folding, and a real path-boundary
+  test) and guarded again at the listing endpoint, which covers every driver
+  including third-party plugin backends.
+- ⚠⚠ **Symlinks leaving a `local` storage root were followed by everything,
+  including recursive delete.** One link inside the folder gave read, ranged
+  read, list, stat, write, mkdir, copy, move, set-mtime and `RemoveAll` over
+  whatever it pointed at, on Linux and Windows alike. A folder **copy** pulled
+  outside bytes *in*: the tree walk sees a link as an ordinary file and copied
+  the target's contents into the storage. And the catalogue walk was handing
+  those links to the antivirus scanner and the content indexer, which read the
+  bytes on the other end — so out-of-root content was being scanned, indexed,
+  version-tracked and quota-counted. Planting such a link needs filesystem
+  access to the server (it cannot be done through filex — uploads and unzip
+  both write through the storage layer), but an administrator who created one
+  to share a folder was also handing filex delete rights over it. Containment
+  is now enforced on every verb; see **Added → `follow_symlinks`**.
+- **A folder copied or moved to another storage no longer reads through links
+  its source did not resolve.** The transfer handed every non-folder entry to
+  the source driver's `Read` — and on `sftp` and `ftp` that is the server
+  opening the path, which follows a link wherever the SSH/FTP account can read,
+  outside the configured folder. Measured with a source shaped like those
+  drivers: the linked file's bytes arrived at the destination and the copy
+  answered `ok`. A link the source driver reports as unresolved, broken or out
+  of the root is now never opened, only named (see **Changed**); a folder link
+  back into the tree used to nest 41 duplicate folders into the destination
+  before the operating system stopped it.
+- **The custom stylesheet can no longer be used to watch people or to lock you
+  out.** It is scoped with `@scope (:root) to (.fe-css-immune)` and the
+  Appearance screen removes the `<style>` element entirely while it is open, so
+  the switch that turns a ruinous sheet off is always reachable — measured in a
+  browser with the first guard defeated. `@import` is stripped and every
+  `url()` that is not a `data:` URI or a fragment is made inert, which closes
+  the CSS exfiltration classic (an attribute selector plus a background image
+  reporting what a viewer is looking at). An unbalanced sheet is refused
+  outright, because one stray `}` would close the scope wrapper early and let
+  the rest escape it.
+- **Apps: a job asked for from a public link now passes the same submit-time
+  gate as one started inside filex.** That door resolved the action out of the
+  app's raw manifest and checked only the read-only flag, so an outside
+  visitor's press could start an action the administrator had **disabled** or
+  reserved to **administrators**, or one belonging to a **stopped** app, with
+  no ceiling on the parameters and without re-reading the link creator's
+  access to the document — and the job then ran as that creator, under their
+  name in the audit log. The action is now resolved through the registry (with
+  the **creator's** admin status, never the visitor's: the job spends the
+  creator's rights, and a link an administrator minted into a reserved action
+  is deliberate), the creator's ACL on the document is re-read at submit
+  (viewer, editor when the job writes, higher on `min_role`), the
+  encrypted-folder refusal applies, and `params` are capped at the same 64 KiB
+  the authenticated door uses. ⚠ **Consequence:** a link does not outlive its
+  creator's access — when the person who opened it loses their grant on the
+  document, the links they already sent stop working and the visitor is told,
+  in one sentence and without any detail about the instance, to ask them for a
+  new one.
+- **Apps: disabling an account stops the public links it opened.** A public
+  page whose creator's account is switched off (or deleted) reports `revoked`
+  and answers **410** on every event, so an outside participant meets the
+  ordinary dead-link screen instead of filling in a document nothing will
+  accept — somebody who has left leaves no open door behind. ⚠ It is a
+  **pause, not a demolition**: nothing about the share is rewritten, and
+  re-enabling the account brings every outstanding link back. The stop is
+  taken at the door rather than at the job, so the app is not called at all
+  and a dead link cannot record a signature it will never finalise — and it
+  covers the exposed copies and the no-JS page with it, since a closed surface
+  beside a file route that still serves the document is not closed. ⚠ A page
+  an app's scheduled wake-up opened has no account behind it (a `tick` runs
+  with no actor) and is not affected.
+- Storage plugins: a plugin installed **from a URL** is compared with the
+  required sha256 (and its signature checked) **before** anything is written
+  to the row or executed — a mismatched download used to run first and be
+  removed afterwards.
+- Storage plugins: a launched plugin no longer inherits filex's environment.
+  It sees `PATH`, `HOME`, temp/locale variables (and what Windows needs) plus
+  the `FILEX_PLUGIN_*` variables filex sets — never `FILEX_SECRET_KEY`, the
+  database DSN or any other `FILEX_*` variable.
+- Storage plugins: a plugin URL may only point at a public host (private,
+  loopback and link-local targets are refused after DNS and on redirects); a
+  **remote** plugin address must be `https://` unless it is on the private
+  network.
+- Storage plugins: the detached signature is stored beside the binary
+  (`<binary>.sig`) and verified again at every start while
+  `FILEX_PLUGIN_TRUSTED_KEYS` is set; a plugin installed before the keys were
+  set is refused with `signature required … reinstall`.
+- Storage plugins: the SDK compares the bearer token in constant time.
+
+- **Tags were shared with every account on the server.** A tag was one
+  label per file with no owner and no tenant, although the routes introduced
+  it as per-user metadata: another user — and, in a multi-tenant install,
+  another tenant — saw your tag names in their panel and on the file, and any
+  user who could reach the file's id could remove them (reported by a tester;
+  reproduced before the fix: `B GET tags/all → ["müşteri teklifi"]`, `B POST
+  tags [] → 200`, bravo's panel listing alpha's tag). Tags are now personal
+  or team (see Added); a tag is only ever named to someone who can see a file
+  carrying it (RBAC included — the tag view and `tags?node_id=` had no ACL
+  step at all), and changing a team tag needs edit permission.
+
+### Fixed
+
+- **The admin Notifications page's Webhook cell no longer draws over itself.**
+  The "Not sent" badge and the reason beside it were two items of the
+  table's flex row, and a table cell lets its items shrink below their
+  content; when the reason wrapped, the badge was squeezed narrower than its
+  own label and the label ran under the reason. Long reasons (Spanish,
+  Arabic) made it certain, and at the default width English did it too —
+  measured at 1440px: a 116px cell, the label and the reason overlapping by
+  14×16px. The cell is one box now, the badge inline and the reason flowing
+  after it. The table gate that should have caught it looked for a second
+  line announced by a margin class; this one came from wrapping text and
+  announced nothing. It now refuses any `Badge` that shares a cell with
+  something beside it, which also found the same shape on the search-test
+  page and the updates table.
+
+- **A file at the root of a storage reads `/informe.pdf` in Arabic, not
+  `informe.pdf/`.** A notification's body names such a file by a path of one
+  segment, and the shared rule that keeps a path left to right inside a
+  right-to-left line wanted two — so the leading slash took the line's
+  direction and was drawn at the far end, in the bell, the browser toast and
+  the admin list alike. One segment is a path now too, when its slash starts
+  something (not `and/or`, `km/h`, `TCP/IP`, a date, or a slash before
+  Arabic). The admin list's Webhook reason — the receiving server's own
+  error text — was the one text cell never routed through that rule, and is
+  now.
+
+- **`fsnotify` mode watched the inside of the folders it meant to skip.** The
+  watcher left out every folder whose own name began with a dot but still
+  descended into it, so every folder inside a `.git` — and inside filex's own
+  version history, `.versions/<id>/` — was watched, and changes there started
+  scans. It now watches exactly what the scan walks: filex's own trees and the
+  storage's scan exclusions are skipped whole, and a hidden folder the storage
+  does not exclude is watched like any other. ([#44](https://github.com/BRF-Tech/filex/issues/44))
+- **A connection that drops says so once, not once per request.** The page was
+  right to report that the server could not be reached, and it reported it
+  from every single call that got no answer — so a dropped connection filled
+  the corner with copies of one sentence, and the explorer alone fires several
+  a second (the listing, a thumbnail per row, the bell's 15 s poll, the
+  pending-operations poll). Being offline is one fact about the page, so it is
+  said once now: a quiet strip across the top while the condition lasts, which
+  takes itself down the moment anything gets an answer — nothing is left to
+  dismiss. **A failed write the person started still speaks for itself**: an
+  upload, a rename, a save is something they are waiting on, and folding it
+  into a generic "offline" would be worse than the storm. Reads are folded,
+  writes are not, and the rule is shared (`lib/connection`), so the web app,
+  the desktop shell and an embedded explorer behave the same. No polling was
+  added and no cadence changed: recovery is noticed by the next call the page
+  was going to make anyway. Measured in a browser with the server cut off:
+  35 failed calls, 5 toasts on screen before and 0 after, one strip
+  throughout (e2e/tests/132).
+
+- **An app's English no longer beats filex's own translation.** An app ships
+  its text in the languages its author speaks; filex has its own words for
+  some of the same things — a date box's *order*, *separator* and *example*
+  captions, a list's empty line, a job's progress line — and the call was
+  `labelOf(appText, locale) || t(hostKey)`. `labelOf` falls back to English,
+  English is truthy, so for every reader whose language the app does not
+  speak the host string was unreachable: an Arabic reader, with a pack that
+  translates all three captions, got three English words in the middle of an
+  Arabic screen. The order of preference is now the app's text **for this
+  reader**, then **filex's own**, and only then whatever other language the
+  app has — the last resort, for something filex has never had a word for.
+
+- **A public page's language reaches the document, not only the wrapper.**
+  Pressing a language on a share link, a file request or an app's signing
+  page turned the card around, because the shell puts `dir` on its own
+  wrapper — while `<html lang>` and `<html dir>` kept what the server
+  rendered. Everything that does not look at pixels was misled: a screen
+  reader announces the language it is told, and hyphenation, quotation marks
+  and `:lang()` rules follow the document. The cause was two owners for one
+  attribute: the web app restamps `<html lang>` with ITS language whenever
+  the offered languages or a pack's strings arrive, and it did so over the
+  public page's choice. The public route now holds the document's language
+  while it is mounted, and `dir` follows from it by the one rule that owns
+  direction.
+
+- **Signing out of an SSO session signs you out.** "Sign out" dropped filex's
+  own session and nothing else. The identity provider's session stayed open,
+  so with `FILEX_OIDC_AUTO_REDIRECT` the sign-in page went straight back to
+  it, it issued a new code without a form, and the same account was signed in
+  again about half a second later (measured on Keycloak 26) — nobody could
+  switch accounts, and on a shared computer the next person got the previous
+  one's files. filex now does OpenID Connect RP-Initiated Logout: the callback
+  keeps the id_token with the session (migration 00057, only when the
+  provider can end sessions), `POST /api/auth/logout` answers with the
+  provider's end-session URL (`logout_url`, with `id_token_hint`, so Keycloak
+  does not stop on "Do you want to log out?"), and the web app follows it. The
+  provider sends the browser back to the sign-in page of the front door it
+  came from (`/admin/login` or `/drive/login`, with `?signed_out=1`), which
+  says so and does not start SSO by itself. It follows the provider the
+  **Identity providers** page runs — configured or changed without a restart —
+  and a session from a provider that has since been replaced signs out of
+  filex only, because no provider is handed another's token. Multi-tenant:
+  each tenant signs out at its own realm. `FILEX_OIDC_LOGOUT=local` keeps the
+  old behavior. Found and fixed by Berk Başarır ([#40](https://github.com/BRF-Tech/filex/pull/40)).
+
+- **A frozen file says which app is holding it, by its name.** The details
+  panel's lock banner read "sign locked this file" — `sign` is the app's
+  manifest name, the string that ADDRESSES it, and the one thing no other
+  screen ever shows a person: the Apps list, the install review and the app's
+  own page all say **e-Signature**. The lock payloads (the listing's `lock`
+  and a refused write's `423`) now carry `plugin_label` beside `plugin`, the
+  app's own label in every language its manifest wrote it in, and every
+  surface that turns a lock into a sentence prefers it — falling back to the
+  name only where the server cannot resolve one, which is an app that has
+  been removed, or a server with no app runtime at all.
+
+- **A table in a narrow pane shows its columns, not just its first one.** No
+  table in filex sheds a column for want of room — it stays whole and scrolls
+  sideways — but two things decided what a person saw *before* scrolling, and
+  both were sized for a desktop. The lead column stopped shrinking at 240px,
+  which in a 265px details panel is the entire pane; and the trailing
+  `Actions` control is pinned to the end edge with an opaque ground, so at
+  104px it painted over what little was left. An app's signer list in the
+  inspector therefore showed names, Actions buttons, and a blank gap where
+  its *Waiting / Invited / Opened it / Signed / Refused* column should have
+  been. The lead now gives way to its own minimum once the other columns have
+  given all they can, and a control is frozen only while it leaves the
+  columns sliding under it somewhere to be — the same rule the frozen lead
+  has always had, for the same reason. Nothing is shed at any width; a table
+  that somebody has sized keeps the widths they chose.
+
+- **A table cannot loop on its own scrollbars.** Where a scrollbar takes room
+  (Windows, or macOS set to "always show"), a table that lays itself out
+  against its pane's width can move its own container: it overflows by a pixel,
+  the scrollbars come, the pane shrinks, the table fits, the scrollbars go —
+  every frame. A field report blamed that for a 12-file folder in list view
+  that froze Edge and Opera and ran a Chrome tab out of memory on a Windows PC.
+  `.fe-list`, the scroll box of every table in filex, now reserves the vertical
+  scrollbar's room (`scrollbar-gutter: stable`), so a table's width no longer
+  depends on its own scrollbar and no width rule can close that loop. The
+  shipped table was measured not to loop on v0.42.2 or v0.43.0 — its widths
+  round to the pixel the box snaps to — but a table given a width rule with a
+  threshold in it loops exactly as reported without the reserve and settles
+  with it (e2e 139 measures both, with real scrollbars). The PR's second layer,
+  a filter that held any width coming back within 500 ms at the narrower of
+  the two, was taken back out: a real resize that came straight back — a panel
+  opened and shut — left the table 300 px short of its pane. Found by Berk
+  Başarır ([#39](https://github.com/BRF-Tech/filex/pull/39)).
+
+- **The operations list no longer ships every path of every op.** `GET
+  /api/files/ops` returns the newest 200 rows, and a row kept every path it
+  was given: a bulk delete queued in batches left rows of up to 82 KB, and 200
+  of them made an 11.5 MB answer that the explorer downloaded and parsed on
+  every mount — and every 2 s while a copy, move or delete ran. A list row now
+  carries the first 5 sources (`sources_truncated` when there were more),
+  `source_count`, and `source_dir`, the folder a delete came from, which the
+  operations center already knew how to show. `GET /api/files/ops/{id}` still
+  returns every source. Found and fixed by Berk Başarır
+  ([#37](https://github.com/BRF-Tech/filex/pull/37)).
+
+- **Pages cached at full size are scaled down.** Before 0.41.0 PDF and office
+  thumbnails were written at page size (794×1123 for A4, 100–400 KB), and the
+  fix in 0.41.0 changed only new renders, so an upgraded install kept serving
+  every older page at full size — on one install 14,706 of 43,467 thumbnails,
+  1.68 GB of a 2.2 GB cache, and ~3.6 MB of decoded image per card in the
+  browser for a folder of office documents. Once per boot the thumbnail sweeper
+  now rewrites any cached thumbnail wider than 320 px at the size a new render
+  gets; a portrait video frame, 320 px wide, is left alone. Nothing is deleted
+  or regenerated, it runs in the background, and `FILEX_THUMBS_SWEEP_INTERVAL=0`
+  turns it off with the sweep. Found and fixed by Berk Başarır
+  ([#37](https://github.com/BRF-Tech/filex/pull/37)).
+
+- ⚠ **A named pipe under a local storage no longer hangs its scan** (#38).
+  The local driver took everything that was not a folder or a symlink for a
+  file and opened it to read its type — and opening a named pipe (FIFO) nobody
+  writes to never returns. One `mkfifo` anywhere under the root, which Docker
+  overlay directories are full of, left the storage scan `running` with
+  nothing processed, and every scan after it queued behind the hung one. filex
+  now serves regular files and folders only: a named pipe, socket or device is
+  skipped by the scan and by every copy, never opened by a read, a write or a
+  thumbnail, refused as a write target, and reported in the server log once
+  per entry. Every open goes through a check that cannot itself block. The
+  `sftp` driver skips them the same way, and `filex upload <folder>` reports
+  and skips them (`skipped_special` in `--json`).
+
+- **A failed desktop sign-in no longer throws you back to the server address**
+  (#36). The waiting screen — the address to copy and the box to paste the
+  browser's code into — lived only in the sign-in page, and the page took a
+  pending attempt back only on *Reconnect*. A sign-in link that failed (one
+  from an earlier attempt, or a code the server refused) re-opened the window,
+  and so did clicking the tray or Dock icon or starting the app again: each
+  reloaded the page onto the server form, with the attempt still pending behind
+  it and no code box to finish it in. The main process now says what the window
+  shows, so every reload comes back on the waiting screen of the same attempt
+  with the reason written on it; a refused code — which the server has already
+  used up — offers **Start again in the browser** for the same server; and
+  **Cancel** is the one way back to the server address. Server error bodies are
+  shown as their sentence, not their JSON.
+
+- **An installed language pack is offered on the next page load.** The
+  offered-language list rides `/api/public/branding`, which was served
+  `Cache-Control: public, max-age=60`: an administrator installed a pack,
+  reloaded, and the picker still showed two languages — for up to a minute,
+  with nothing on screen to say why, which reads as a broken install. That
+  answer and its three siblings (`/api/branding`, `/api/appearance`,
+  `/api/public/ui-locales/{code}`) now carry a strong **ETag** over the body
+  and `no-cache`, so a reader revalidates instead of holding a copy. They keep
+  their caching benefit: an unchanged answer is a `304` with no body, which
+  matters most for the one that is ~300 KB — a complete language's strings,
+  which also stopped being yesterday's after a pack upgrade. The tag is the
+  body's hash, so it moves for an app installed, removed or upgraded, a theme
+  saved or a logo changed, with no version stamp for anybody to forget; and
+  the answers gained the `Vary: Accept-Language` they were missing while they
+  were cached.
+
+- **A sentence the SERVER wrote is isolated in Arabic too.** `useLocale().t`
+  and the admin panel's post-translation hook isolate a machine run inside a
+  right-to-left sentence; neither sees the other half of what a person reads —
+  a `server.*` message arriving as the `message` of a refusal, an installed
+  app's own words, a notification composed out of a row — and that half is the
+  half full of paths, URLs, commands and token syntax. Measured against the
+  Arabic pack: the API/MCP page drew `server.token.scope_unknown`, which names
+  `root:<storage>://<folder>`, with its closing `>` at the far left of the run
+  and mirrored into `<`, so the line read `…<root:<storage>://<folder`. The
+  catalogue's own copy of the same sentence was right, which is what made it
+  read as a broken pack — and a pack cannot fix it, because bidi controls are
+  forbidden in a translation. Every one of those paths now goes through one
+  function (`foreignText`): the failures lib/errorWords says (the reader's
+  direction rides on the translator), the panel's `extractError`, the
+  connection panels' `serverWords`, an app's own error text, and the bell and
+  browser notification. An absolute path is isolated as well as a `word:value`
+  token — measured in Chromium, its leading slash was drawn at the wrong end of
+  the run. See [RTL](docs/RTL.md#mixed-direction-text).
+
+- **The Apps table's Label cell drew itself on top of itself.** The label, the
+  "Language pack" badge and the per-language coverage lines were three
+  siblings of a `DataTable` cell, and a cell is a flex ROW: `ms-1` and `mt-1`
+  on a sibling are margins on flex items, not a second line. The badge covered
+  the label and the coverage line covered the badge, in a 180px track, at
+  958px and at 1440px, in English as well as under a long German name. The
+  label and the badge are one line and what the pack covers is the line under
+  it; `web/tests/ui/tablePinnedActions.test.ts` now fails any `#cell-*` slot
+  whose second root node carries a top or bottom margin, and
+  `e2e/tests/114-language-pack.spec.ts` measures the three real boxes at three
+  widths.
+- **A counted sentence the server writes says the number.** Ten `server.*`
+  singulars and three admin `one | other` choices still typed a literal `1`
+  ("This link is valid for 1 day.", "Create 1 storage") — the exact defect the
+  rest of the release fixed — so a French pack that copied them read
+  *"1 fichier"* for zero and a Russian one *"1 файл"* for 21.
+  `web/tests/i18n/pluralFormsCarryTheCount.test.ts` now reads all three
+  catalogues, not only the explorer's.
+- **A language pack's plural forms are read where the SERVER writes the
+  sentence too.** Go gated plural lookup on English having a `_one` form, and
+  English writes one only where English itself inflects: the wake-up report's
+  "{count} scheduled / refused / beyond this window" reads the same for 1 and
+  3, so a pack's Arabic dual and Russian few were shipped, validated and never
+  read — while the same pack's forms worked everywhere the browser drew the
+  string. The two now ask the same question: did the caller pass a number, and
+  did the language write the form for it.
+- **Tagged files says which storage each file is in.** The server already
+  attached the storage's name to every row; the client blanked it, so the
+  Storage column printed an em dash on a page whose whole job is finding one
+  file across several storages.
+- **Panel "Queue depth" is the job queue's backlog** (pending + running, the
+  numbers the Queue page shows). It was the number of storage watchers, so it
+  read 2 beside a Queue page saying 0 and 0.
+- **The Search page counts files the way the Panel does** (and says how many
+  folders the index holds besides); "Last built" shows when the index was
+  built instead of "—" on every install.
+- **Empty or invalid form fields are refused in the panel's language.** The
+  browser's own bubble ("Please fill out this field.", in the browser's
+  language) is replaced by a sentence under the box, on every admin form;
+  nothing is sent. External services refuse an address that is not an
+  http(s) URL, on the page and on the server.
+- **No wire values or English on a translated admin panel:** sync states,
+  queue job types (and what a job is about, instead of `{"node_id":8}`),
+  update policy and reason, SMTP "None", token scope names, a user's role,
+  About's program and database names and "search:", durations ("0s"),
+  "Done 24h", byte units (the language's own, e.g. "Go" in French), and
+  failures with no server message (axios's "Network Error" / "Request failed
+  with status code …"). The server's remaining inline Turkish/English
+  sentences (account and token refusals, identity-provider refusals, an
+  app's wake-up tally) come from the server catalogue, so a language pack's
+  language reads them too; a scan now fails on any new inline pair.
+- The Panel's tiles no longer let a long value run out of the card, status
+  pills no longer wrap, and a "(unknown, unknown)" build stamp is no longer
+  printed after a development build's version.
+- **ONLYOFFICE and draw.io no longer vanish for an hour after a page is left
+  mid-load.** The capabilities snapshot is cached for an hour and read by
+  everyone, but it was rebuilt on the context of whichever request asked
+  first; a browser navigating away cancelled it, the list of external
+  services came back empty, and that empty list was what every client saw
+  until the cache expired. The rebuild no longer depends on one caller.
+
+- ⚠⚠ **A download is only ever the file.** Every non-browser download of a big
+  file (≥ `FILEX_CACHE_MIN_SIZE`) on a slow storage was answered `202
+  {"state":"preparing",…}`, and filex's own sync client took any `2xx` for the
+  file: the JSON was written to disk under the file's name and the next run
+  uploaded it over the real one — 45 files of 70–290 MB on one deployment,
+  outside any version window. Three independent layers now stand in the way:
+  the server answers `202` only to a browser navigation or a client that sends
+  `X-Filex-Accept-Prepare: 1` (everyone else gets the stream, and no
+  preparation is started for them — this protects every client already
+  installed); the CLI and the desktop app's sync, drag-out and "open with" ask
+  for `Range: bytes=0-`, which no server version answers with `202`, and accept
+  only a `200` or a `206` covering the whole object; and the sync engine refuses
+  a body whose length is not the size the listing reported. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- ⚠⚠ **Renaming onto a name that is taken no longer destroys the file that had
+  it.** Renaming `a.txt` to `b.txt` in a folder holding a `b.txt` answered 200,
+  replaced b.txt's bytes and hard-deleted its row — version history, shares and
+  comments with it, nothing in the trash; on an object store a folder renamed
+  onto another folder's name was merged into it. A rename now answers `409
+  NAME_TAKEN` and nothing moves (`503 EXISTS_CHECK_FAILED` when the backend
+  cannot tell), and the explorer's dialog says so. A case-only rename still
+  works on a case-insensitive disk, and `.` and `..` are refused. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- ⚠ **A rename retried with the same taken name says so again.** The dialog
+  drops its error line as soon as the name is edited and re-shows it when the
+  answer changes; typing the same taken name a second time produced the
+  identical sentence, so nothing changed, nothing re-rendered, and Save read
+  as a broken button. (Review of [#35](https://github.com/BRF-Tech/filex/pull/35).)
+- ⚠ **A move that finds every candidate name taken refuses instead of
+  overwriting.** The de-collision that gives a moved file ` (2)`, ` (3)`… gave
+  up after its last try and returned the taken name, which the move then
+  wrote over. It now answers `409 NO_FREE_NAME` and touches nothing, on
+  every door — the explorer, the AI surface and MCP, cross-storage transfers
+  and the app plugins. (Review of [#35](https://github.com/BRF-Tech/filex/pull/35).)
+- ⚠⚠ **A file's name, typed as it is shown, finds the file.** A field report
+  from an install without the index: two files in the storage, and typing their
+  names found nothing. Two defects, and either one emptied the list:
+  - **Names a Mac uploaded are stored decomposed.** macOS hands a filename over
+    in Unicode form D — `ü` as `u` + U+0308 — and filex keeps the name as
+    uploaded, while a search box sends the composed `ü`. Nothing normalised
+    either side, so every query word with `ü`, `ö`, `ç`, `ş`, `ğ` or `İ` missed
+    every such name — 71 388 of 169 471 on the instance that reported it — and
+    the index's separator-blind copy cut such a word in two at its mark
+    (`gu rel`). A query a client lower-cased the full Unicode way (`İ` → `i` +
+    U+0307) matched nothing either.
+  - **Without the index, only the longest word reached the database.** The
+    fallback took the first 1,000 rows by name holding that one word and
+    checked the others afterwards; when it was a word most files share, the
+    file being looked for was past row 1,000 (rows 4 128 and 33 623 in the
+    report), so the more of a name you typed, the less you found — the name
+    pasted byte for byte found nothing. Every word is a condition in the
+    query now, on the toolbar search, `/api/files/search` and the AI/MCP name
+    search alike, and the limit counts real answers.
+
+  Found, measured on the reporter's catalogue and fixed by Berk Başarır
+  ([#46](https://github.com/BRF-Tech/filex/pull/46)). Joined with the rest of
+  this release's search work into **one rule** for when a typed word is in a
+  name (`internal/namefold`): composed, the dot a full lower-casing leaves on
+  an `i` dropped, and the four Latin i's — `I`, `ı`, `İ`, `i` — one letter,
+  which is the rule tags use. It applies to both sides of every comparison:
+  the query, the index's normalised fields, the scorer, and the stored name in
+  the fallback's database query — a function filex registers on SQLite,
+  `normalize` + `lower` on PostgreSQL, the collation over both Unicode forms
+  on MySQL. So `şubat` finds `ŞUBAT.pdf` on SQLite (whose `LIKE` folds ASCII
+  only), and `kış` finds `KIŞ LİSTESİ.xlsx` and `IŞIK` finds `ışık.txt` —
+  which no search path found before, with the index or without it; the
+  explorer's name box folds the four i's the same way. The three-engine test
+  holds SQLite, PostgreSQL and MySQL to the answer the rule gives in Go. The
+  index document schema goes to 3, so an existing index is rebuilt
+  automatically, in the background, on the first start.
+- **An upload session row that cannot be deleted is handed to the sweeper.**
+  After the bytes were stored, a failing row delete left a `committing` row
+  with no staging behind it — a state the sweeper skips by design — so the
+  quota reservation of a finished upload never ended. The row is demoted to
+  `failed` with a line saying the file was stored and only the session could
+  not be closed.
+- **A folder an S3 storage cannot list right now is an error, not "not
+  found".** `Stat` on a prefix swallowed the listing error and answered
+  `ErrNotFound`, which reads as "the folder is gone" — a sync pass could act
+  on it. The error is now returned as it is. (Review of
+  [#35](https://github.com/BRF-Tech/filex/pull/35).)
+- **The change log no longer announces filex's own folders.** A write into
+  `.versions/`, `.thumbs/` or the trash raised a change frame that told every
+  sync client to reconcile a tree it must never see; `changes` is also
+  recorded in the access log under its own verb instead of the previous
+  request's. (Review of [#35](https://github.com/BRF-Tech/filex/pull/35).)
+- **A sync window is read digits-first and an ETA never says "60m".**
+  `--window +7:00-09:00` was accepted as 7 o'clock, and a run with 59 m 30 s
+  left printed "about 60m left" instead of "about 1h 0m left". (Review of
+  [#35](https://github.com/BRF-Tech/filex/pull/35).)
+- **The AI surface builds its search pattern like every other door.** It
+  concatenated its own `%…%` instead of going through the one escaper, so a
+  caller that ever handed it a raw query would have had `_` and `%` read as
+  wildcards. (Review of [#35](https://github.com/BRF-Tech/filex/pull/35).)
+- ⚠⚠ **"Empty trash" empties a large trash, and says so while it does.** The
+  purge ran inside `POST /api/admin/trash/empty`, and a trash of tens of
+  thousands of files — 61,844 after one sync incident — could not be emptied
+  at all: nginx answered 504 at sixty seconds, the request's context was
+  cancelled mid-batch, and the admin page, whose own client had given up at
+  thirty, showed nothing; so the admin pressed again, and three purges raced
+  over the same rows. The purge is an **operation of the queue** now: the
+  endpoint answers within two seconds (the final count, or `202` with its
+  progress), the run is in the explorer's operations centre and the admin tray
+  with its counts, an administrator can stop it there or on the Trash page,
+  it is its tenant's alone, it never holds the queue's worker (copies, moves,
+  deletes and uploads keep running beside it), and a restart does not forget
+  it — it carries on with what is left. The admin Trash page draws a progress
+  strip and picks a running empty up when reopened, the explorer's trash
+  banner counts it, and a second press is told about the first instead of
+  starting another. A tenant's press while ANOTHER tenant's purge (or the
+  nightly retention) runs waits its turn instead of being told the trash "is
+  already being emptied". A narrowing the server cannot read —
+  `{"storage_id":2,"older_than_days":""}`, which the page sent once its days
+  box had been typed in and cleared — no longer widens the purge to every
+  storage: it is `400`, and the page no longer sends it. Found and fixed by
+  Berk Başarır ([#47](https://github.com/BRF-Tech/filex/pull/47)); the queue integration adds two things the background
+  run needed: **nothing deleted after the empty was asked for is purged** (the
+  cutoff was "now + 24 h", taken when the purge began — harmless in a request
+  of seconds, but a purge of tens of minutes took with it, for good, files
+  deleted by mistake while it ran), and a row that has started is finished
+  before a cancellation stops the run (stopped between its storage delete and
+  its database delete, it stayed in the trash with its bytes gone). New MCP
+  tool `admin_trash_empty_status`. And a purge no longer reads the whole nodes
+  table for every row it removes: `nodes.parent_id` cascades on delete and
+  nothing indexed it on SQLite or PostgreSQL, so each hard delete scanned the
+  table for children to cascade to — 300 ms a row on the install that reported
+  the trash bug (231,074 nodes). On SQLite, where the store runs one
+  connection, a large purge held that connection while every other request
+  queued behind it: GET p50 19 ms before, 333 ms during. Migration 00058 adds
+  `idx_nodes_parent_id`: 85 ms a row, the purge four times faster (1.8 to 7.1
+  rows a second) and GET p50 46 ms during the same purge. MySQL already had
+  the index (InnoDB creates one for a foreign key). Found and measured by Berk
+  Başarır in production right after deploying this change
+  ([#47](https://github.com/BRF-Tech/filex/pull/47)).
+
+- **A cancelled operation ends in the operations centre.** A job somebody
+  cancelled read as "Queued" for as long as the operations list still carried
+  its row — the explorer had no word for `cancelled` and fell back to
+  `pending`. It is shown as cancelled now, and not announced as done.
+
+- **An agent's `tag:` search lists every tagged file, and `-tag:` excludes.**
+  On the AI search and MCP `file_search`, a bare `tag:x` was the first 200 rows
+  of the storage by name, filtered by the tag afterwards, so a tagged file that
+  sorted past row 200 was not found; and `-tag:x` excluded nothing from the name
+  results. A bare tag now lists the tagged files, as the web search does, and
+  the filter is applied to every row by node. (Review of
+  [#46](https://github.com/BRF-Tech/filex/pull/46).)
+- ⚠⚠ **Emptying the trash no longer deletes a file that came back under an old
+  name.** A trash entry the storage sync writes in place for a file it found gone
+  keeps that file's path; purging it deleted whatever stood there again — a new
+  file, or a whole folder that had come back. Only entries inside
+  `.filex-trash/` delete bytes now. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- ⚠⚠ **A scan no longer catalogues `.versions/`, and cannot put version history
+  in the trash.** The walk skipped only `.filex-trash/`, so a full scan minted a
+  hidden row per snapshot (and for `.thumbs/`), counted in storage totals and
+  indexed for search — and once unseen, a snapshot folder row went to the trash
+  where it stood, and purging a trashed folder deletes its prefix: every version
+  of every file. The walk now skips filex's own trees (the one list,
+  `syspath`), rows an earlier scan minted there are dropped from the catalogue
+  before the delete pass (the storage and `node_versions` are never touched),
+  and the delete pass refuses anything inside them. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- ⚠ **A sync conflict compares the bytes before keeping two copies.** Most
+  "changed in both places" were the same file — a lost baseline, a reinstalled
+  client, a touched timestamp — and one 13 KB spreadsheet grew 14,724 nested
+  `(server copy …) (server copy …)` copies, one every ~30 s. Identical bytes now
+  settle the file. A real conflict's copy goes to the server too (create-only,
+  so two machines never write theirs over each other's) and is recorded at once
+  (a copy tidied away on the server is removed here instead of coming back as a
+  new file), its name never nests, and a taken name gets ` (2)`. A folder on one
+  side and a file on the other touches nothing. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- ⚠ **A folder with a non-ASCII name (`Müşteri`, `Çıktılar`) goes to the trash
+  with its contents,** and comes back with them. `SUBSTR` was given a byte
+  length where SQL counts characters, so the files stayed live under a folder
+  that was gone. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- ⚠ **A staged upload is only reported `ok` once its file says `stored`.** The
+  two writes that flip the row after the storage write were unchecked, and the
+  staging was released regardless: one failed write left a listed, fully stored
+  file that answered `503 STAGING_GONE` on every read. The writes are retried
+  and must succeed before the staging goes. Files already stuck that way are
+  repaired by the next scan — and a boot pass for storages nobody scans — when
+  no staging session is left and the object has the committed size and is not
+  older than the commit. An object store's listing no longer erases a file's
+  mime type on drift. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **A paired desktop app is a person's client again.** New pairings are `user`
+  tokens with the scopes their owner could mint at `/api/tokens` (`read` for a
+  viewer; never `admin`), so the desktop window no longer answers `403
+  app_token` on its own API keys, S3 keys, SSH keys and NFS panels, or hides
+  Recent, Starred and Shared with me. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **An overwrite records the new file's etag, size and time, not the ones it
+  replaced** — browser upload, text editor, file drop, WebDAV, the S3 gateway,
+  SFTP, FTPS, NFS, the agent API and archive extract. The content fingerprint
+  never moved, so the old words stayed searchable until the next scan, and
+  clients that compare etags (the desktop's "Open with") missed edits. When the
+  storage cannot be asked, the etag is left empty for the next scan to fill. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **A search without the index no longer loses its exact match.** A word
+  matching more names than the search reads (1,000, or 400 per storage from the
+  root) was cut alphabetically before it was ranked; exact and prefix names now
+  survive the cut on every engine, and `/api/files/search` ranks its whole
+  window before keeping `limit` rows. Escaped `_` and `%` match themselves on
+  SQLite, which had no `ESCAPE` clause. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **The trash purge meets every row once, and never loops.** It re-read "the
+  oldest 500 expired rows" on every pass and relied on the purge to empty that
+  window, so a full batch of rows it skipped (another storage, another tenant)
+  or failed to purge stalled it for good: emptying one storage's trash behind
+  500 older rows of other storages ran until the request died, and the nightly
+  retention worker, which has no deadline, would never have stopped. The
+  storage and tenant narrowing is in the SQL now ([#35](https://github.com/BRF-Tech/filex/pull/35)) and the sweep walks
+  the trash by id ([#47](https://github.com/BRF-Tech/filex/pull/47)): each row is read once per run, a row that will not
+  purge is counted once, and a run that is cut short stops where it is and
+  says so instead of failing the rest of its batch on a dead context. One
+  sweep runs at a time — an admin empty and the nightly retention take turns —
+  and two purges of the same row no longer release its bytes from the owner's
+  quota twice. Found by Berk Başarır.
+- **A storage scan that is cut short is closed as `aborted`, not left
+  `running`.** Rows a stopped server left open are closed when the sync worker
+  starts; the tombstone guard compares with the last run that finished `ok` (a
+  failed run's ~0 "seen" had been switching the guard off); the dashboard shows
+  a failed last scan as an error — it compared against a status that is never
+  written. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **The images run filex under `tini`,** which reaps the orphaned helpers
+  LibreOffice leaves behind: 19,110 zombies in ten days on one deployment, until
+  the healthcheck could not fork and every thumbnail failed. `init: true` is no
+  longer needed and harmless if kept. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **A revoked token stops the sync watcher.** `filex sync run --watch` retried a
+  401 every round, forever; it now stops at the first 401 with **exit status 3**
+  (every other failure exits 1). `sync run` also stops cleanly on SIGINT and
+  SIGTERM, with its ledger written. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **Desktop: a revoked or expired sign-in stops sync and asks to reconnect.** The
+  window showed "Can't reach … / Try again" forever while the bell and the
+  watcher retried every 15 and 30 seconds. The account is now marked signed out —
+  no watcher, no bell, across restarts — and offers **Reconnect**, which signs in
+  again for the same server and keeps the account's synced folders. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **Desktop: filex no longer switches itself back on at sign-in.** Every start
+  re-registered the login item, on Windows re-enabling an entry disabled in Task
+  Manager. Only the Settings switch writes it now, and at startup the switch
+  follows what the OS says it will do. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **Desktop: signing out stops that account's sync at once, and signing in again
+  restarts it with the new token** — the old watcher kept the old (often
+  revoked) token in its environment. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **Desktop: sync status is read in whole lines** (a line split across two pipe
+  reads showed "0/0", and a Turkish file name in an error could arrive garbled),
+  and the watcher's last line before it exits is no longer lost. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **Desktop: the idle-time auto-update no longer stops an overnight sync;** it
+  waits until the engine is between passes. ([#35](https://github.com/BRF-Tech/filex/pull/35))
+- **Sync no longer absorbs changes made while a pass is running.** The
+  engine rebuilt its baseline after every pass from a second walk of both
+  trees, so whatever changed during the pass was recorded as agreed: a browser
+  save that landed mid-pass was never downloaded, a local save made mid-pass
+  was never uploaded, and a failed download of a changed file was recorded as
+  done (all three reproduced on the previous engine). The baseline is now built
+  from what the pass did; anything that changed meanwhile stays a change for
+  the next pass. The second walk is gone, so a full check lists the server tree
+  once instead of twice. (Found independently in the #35 field report, where a
+  nine-hour first run recorded files edited meanwhile as in step, and a later
+  edit of the stale copy then overwrote the newer one.)
+- **Sync never replaces or trashes a local file that changed after the pass
+  looked at it**, and never trashes a folder that gained a file meanwhile; the
+  next pass keeps both versions. Two conflicts on one file inside the same
+  minute no longer overwrite the first one's side copy.
+- **Uploads, file-drop and text-editor saves record the storage's own
+  modification time** on the catalogue row (the staged path and the ONLYOFFICE
+  callback already did). A row stamped with the handler's clock, or none, was
+  rewritten by the next storage scan — `last_modified` changed with no byte
+  changing, and a desktop client downloaded its own upload back (measured:
+  `…692000` → `…692587` after one scan).
+- **The sync engine's upload skips two round-trips per file**: the destination
+  probe and the per-file mkdir when the folder is known to exist.
+- **A sync error in the desktop app no longer outlives the problem.** It was
+  copied into one field per account and never cleared, so a failure from
+  minutes ago sat under every synced folder and read as a current one — far
+  longer now that passes run every few seconds. An error now belongs to the
+  folder it happened in and disappears on that folder's next clean pass; only
+  a failure that is not about any one folder (the engine could not start, the
+  token was refused) shows under all of them, until any pass completes again.
+  The engine names the pair on every line it prints and ends the summary of a
+  pass that had errors with `, N failed`; a skipped symlink is a `note:`, not
+  an error. The engine's output is also read as whole lines now (a pipe read
+  can end mid-line; each half used to be parsed on its own) and as UTF-8 across
+  reads. Each folder shows its own last line instead of whatever the account's
+  engine printed last.
+- **The desktop app says when changes on this computer are not watched.** The
+  engine used to print a `live: note` nobody saw; it now reports per folder
+  (`pair-1: local: poll-only — too-large|unavailable — …`, and `local: watched`
+  on recovery) and the folder's card says so in English and Turkish, next to
+  the Live / Polling / Offline word.
+- **The window controls paint from the product's palette.** The close button's
+  hover was `#e53935` on `#fff` — a near miss of `--fe-danger` that no theme
+  could reach — and the main window and the document windows now both use
+  `--fe-danger` / `--fe-text-on-primary`, the pair the product's own danger
+  button uses. `desktop/test/chrome-tokens.test.ts` had been red since 0.42.0
+  because of it.
+- **Desktop test runs no longer register the checkout as the `filex://`
+  handler.** Under `FILEX_NO_BROWSER=1` (every desktop E2E suite) the app
+  registers nothing with the OS; a suite run used to point the user's real
+  deep-link handler at `electron.exe <checkout>` until the installed app
+  restarted.
+- The server no longer dies with `fatal error: concurrent map writes` when a
+  storage is attached while thumbnails are being generated (the content
+  indexer resolving a storage for the first time and a thumbnail job reading
+  the same map). A full end-to-end run hit it half-way through; the map is
+  now guarded, and a race test holds it.
+- **An install a closed tab could break for good.** The server compiles a
+  module before it answers; the admin page gave up at 30 s, and the cancelled
+  request aborted the compile (a good module answered `describe_mismatch`) AND
+  the cleanup — leaving a row no list showed, and every later install refused
+  as `name_taken` until a restart. Measured 2026-09-21 with the 20 MB signing
+  module on a busy machine (29 s). An install or upgrade now finishes, or
+  undoes itself, whatever the client does, and the admin page waits up to
+  180 s for one.
+- **Apps: `cache`, `spool`, `public` and `assets` are not app names** — they
+  are the host's own directories beside the apps', and uninstalling an app
+  named after one would have removed everybody's.
+
+- **Placing and dragging a signing box no longer flickers, and a dragged box
+  stays under the pointer.** Every `change` answer re-sent the surface with a
+  new `src` object, and a deep watcher reloaded the whole document on each —
+  "Loading…", every canvas thrown away — after every placement; a drag in
+  progress when it landed kept a detached page element, whose 0×0 rectangle
+  read every pointer position as the far corner, and the box jumped to the
+  document's edge (measured: box centre at the page's bottom-right while the
+  pointer was 200 px away). The document now reloads only for a different
+  document, a drag measures the live page and ignores a page that cannot be
+  measured, a seed that arrives mid-drag waits for the drag, the place step's
+  hint and controls share one strip of constant height (choosing a box
+  re-fitted a `page`-layout document from 383 to 349 px wide mid-gesture),
+  the fit is held still while a box is dragged, and a page is redrawn into a
+  fresh canvas swapped in when ready rather than cleared first. A document
+  loaded while the wizard was still on its define step is drawn when the
+  place step shows it (that had only ever worked because of the reload).
+- **"Anyone" shows as chosen.** A box that belongs to anyone left all three
+  owner buttons unpressed: the choice control reads an empty value as
+  "nothing picked".
+- **The outside signer's page looks like the product's share page.** An app
+  page's exposed files are drawn the way a shared file is (name, size, a
+  Download button) instead of under a "Documents" heading, and a document in
+  an app's screen is fitted to the window inside the card — the approve step
+  showed the top 60 % of the page and none of the signer's boxes.
+- **The desktop-app chip never stands on something to press — on any page.**
+  At 1366×768 it hid the signing page's final "Sign" button completely, and
+  only the sign-in page had been guarded. The chip now asks what is under it
+  (`lib/keepClear.ts`): nothing → its corner; a bar pinned to the edge → on
+  top of that bar; a control in the page's flow, or a phone-wide chip →
+  it steps aside until the spot is clear (the offer stays in Settings). The
+  sign-in page's full card also keeps off the version line under the form.
+- **Opening an app's page is not a download.** An app page's visits have a
+  counter of their own (`shares.visit_count`, migration 00052, backfilled
+  from the counter they used to share) — what `max_visits` caps and what
+  the app reads as `page.visits` — and `download_count` counts only a file
+  the page exposed being TAKEN (`…/file/<ref>?download=1`, the Download
+  button and the no-JS page's link; the page's own viewer is not counted).
+  A signing link that had only been looked at said "İndirme 2" in My shares.
+- A language an app added joined the picker and then **spoke English**: the
+  server sent its strings as a map, the browser read a list. The two ends now
+  agree and the browser tests read the server's own fixtures.
+- A chosen pack language was **lost on every reload** — each source of the
+  choice (this browser, the account, the instance default) was judged before
+  the offered list had arrived. The choice is held until the list lands.
+- The language pickers offered only English and Turkish, and the explorer
+  (`resolveLocale`) turned any other language into the browser's — so a pack
+  translated the panel but not the file browser inside it.
+- Strings no language pack could reach are now in the catalogues: the admin
+  footer, the queue and sync status values, labels built once when a page
+  opened (Appearance, the role and state filters, the theme menu — they kept
+  the opening language after a switch), hard-coded template text and
+  accessible names, and ~100 inline English/Turkish pairs in the share dialog
+  and the explorer, which printed **Turkish** under any third language.
+- A share-link mail composed in a pack's language (or any third language)
+  arrived **in Turkish** — the `else` of an English/Turkish pair — and so did
+  the drop notice to a Spanish owner, the new account an admin invited from a
+  Spanish screen (its language forced to Turkish), and every app mail's
+  footer arrived in English. An unknown language is now English, never
+  Turkish.
+- An app was told `en` for every language but Turkish (`normLang`), so a
+  Spanish reader's signing wizard spoke English even from an app that ships
+  Spanish. An app's call now carries the reader's real language by the one
+  rule the screens and the server's text use (a region kept: `pt-br`), and
+  `Text.Get` falls back per string to the base language, then English.
+- An uploader's name kept only ASCII and Turkish letters: "Lucía" reached the
+  folder owner as "Luca" and an Arabic name as nothing ("anon"); a long
+  Turkish name could be cut inside a letter. Letters of any script are kept,
+  cut by characters.
+- Three numbers were printed with a separately translated word after them
+  (a storage's file count, a trashed item's days left, the free operations in
+  Usage), which no translation could order or inflect ("1 days"). Each is one
+  message with the count in it and plural forms.
+- A non-ASCII mail subject went out as raw UTF-8 in the header; it is now
+  RFC 2047 encoded, and a line break in a subject can no longer add headers.
+- The translator's catalogue named the last release (*filex 0.42.2* on the
+  v0.43.0 branch): it now names the build — `FILEX_VERSION`, the CI tag, and
+  a running server rewrites it to its own version when it serves the file.
+- The validator warned when a singular form left the count out, so Arabic
+  could not write *يوم واحد* without a digit; a category that holds one
+  number may now say it as a word (and one that holds several, like Russian
+  `one`, must keep it).
+- Turkish: the pending-operations progress line printed `97` instead of `%97`
+  (`%{percent}` is vue-i18n's modulo form and swallows the sign); three
+  storage help texts differed between the admin panel and the explorer; the
+  SMB share hint showed `\nas\media` with one backslash in the admin panel.
+- Storage plugins: an upgrade uploaded under a different file name now rolls
+  back correctly — the file keeps the name it was installed under, so the
+  backup and the rollback always refer to the same path; the previous
+  signature is restored with the previous binary.
+- Storage plugins: a binary that fails to start ten times in a row is no
+  longer restarted forever — it is marked failed with the reason, and
+  **Restart** begins a fresh count.
+- Storage plugins: success bodies from a plugin are bounded (64 MiB for a
+  listing, 1 MiB otherwise); listing entries are normalised (name from the
+  path, `.`/`..`/root entries dropped, negative sizes clamped); network
+  errors are classified by type rather than by message text; a database row
+  whose name or binary would leave the plugins directory is refused rather
+  than started or removed.
+- **An agent's move no longer destroys a file that is already at the
+  destination.** `file_move` (MCP) and `POST /api/ai/move` handed the
+  destination straight to the driver — and a driver's move onto an occupied
+  path replaces what is there, with no trash copy, so "move this into that
+  folder" silently deleted the file already carrying that name. Both arms now
+  de-collide like every other move in filex: the item lands on a free name
+  beside it (`rapor-copy.txt`), nothing is overwritten, and a move onto an
+  item's own path stays a no-op. The answer, the catalogue row and the
+  `file.moved` / `file.uploaded` events all name the path the file really
+  landed on, never the one that was requested.
+- A move's answer now reports what it moved: `entry.type` is `"dir"` for a
+  folder instead of the `"file"` it always claimed, so an agent no longer
+  reads "file" and calls `file_read` on a directory.
+- The app detail drawer showed an installed app as blank — no name, version or
+  source, dates as dashes, *unsigned* for a signed app — because the client
+  read the endpoint's envelope as a flat object.
+- The install wizard's permission review printed every reason as raw
+  `{"en": …, "tr": …}`, both languages at once: the server sends an app's
+  words as an object of languages and the client typed the field as a plain
+  string. Reasons are read in the reader's language now, and so is every other
+  localised field of the Apps screens — the detail's `permissions` had the same
+  fault and held the review rows where the permission ids belonged. The web
+  client's tests read the server's own answers
+  (`backend/internal/api/handlers/testdata/wire/`, written and checked by a Go
+  test), because both faults hid behind fixtures typed the client's way.
+- **Every explorer dialog closes on Escape and on a click outside it, and
+  takes the focus.** The converter's dialog — the frame every app screen opens
+  in — did none of the three, while the share dialog closed on Escape: a
+  dialog created already open never wired its keys or its focus, and no
+  dialog closed on an outside click at all (an absent `closeOnBackdrop` was
+  read as `false`). Only the dialog in front answers Escape; a text selection
+  dragged onto the backdrop does not close anything; the standalone editor
+  still never closes on Escape. An app screen that brings its own buttons no
+  longer gets a second "Close" beside its "Cancel".
+- **About said ImageMagick was there when Apps and the converter said it was
+  not.** On Windows `convert` is `C:\Windows\System32\convert.exe`, the disk
+  converter. There is one engine probe now, read by every screen: `magick`
+  first, nothing under the Windows system directory ever counts, and a
+  `convert` elsewhere must say "ImageMagick" in its version banner.
+- **An app's details are a page of their own** (`/admin/plugins/apps/<name>`,
+  Back works), in sections, instead of a dialog holding settings, three tables
+  and a live log. What the app was allowed to do is said in words (the
+  sentences the install review showed), not as `engines:libreoffice` chips;
+  its hidden actions (the signer's `apply`) are no longer offered as switches
+  — a hidden action is not a person's to switch off, and the server neither
+  stores nor honours an override for one; the log's times are in the
+  product's date format.
+- **A customised menu rule no longer freezes the app's rule.** Changing which
+  files an app's action is offered on stored a COPY of the whole rule, which
+  replaced the manifest's from then on: extensions offered only while an
+  engine is on the server (an office file for signing, while LibreOffice is
+  there) stayed out once LibreOffice was installed, or — copied flat — stayed
+  in after it was removed; the manifest's own conditions, which the editor
+  never showed, were dropped (a customised **Sign…** was offered on files with
+  no request open); and an upgrade's new extensions never reached the action.
+  The change is stored now — added and removed extensions and MIME types, and
+  what was set differently — and applied at every read to the rule the app
+  declares and the engines present at that moment. Keeping only extensions
+  whose engine is missing offers the action on nothing, not on every file.
+- **The install review says what the dry run already knows**: that an app of
+  the same name is installed (with **Upgrade it instead**, from the same
+  source), and which engines it needs that this server lacks. A repository
+  that cannot be fetched is explained in the reader's language with what to
+  check — not `filex-app.json not found in … http 404 from
+  raw.githubusercontent.com` — and a tab's error no longer follows you onto
+  the other tabs. A GitHub repository is a "repo" in Turkish, not a "depo"
+  (which is a storage everywhere else).
+- **The profile no longer saves an address that is not one**, nor reports an
+  address that belongs to another account as saved: the e-mail and the
+  username are checked while you type and again by the server before anything
+  is written, and a refusal is said under the box, in words — no more
+  `invalid username: 'ş' is not allowed …`. Adding a user checks the address
+  the same way.
+- **"Test now" on an identity provider tests it for real.** It answered "OK"
+  for anything, including an LDAP entry with no address. LDAP now connects,
+  binds with the service account and reads the base DN; OIDC fetches the
+  discovery document, checks the issuer and its endpoints and asks the token
+  endpoint whether it knows the client; the proxy header checks the trusted
+  ranges and whether your own request came through one. Each step is listed
+  with what it reached or why it failed, and what cannot be checked without a
+  real sign-in (an OIDC redirect address, a client without a secret) says so.
+  Local accounts and API tokens have nothing to test and no button. LDAP with
+  StartTLS and no `ca_file` could never sign anyone in (the TLS layer was
+  handed no server name); it can now.
+- **Add user and New webhook say what they need before sending**: required
+  fields are marked, an empty or malformed field is refused in the dialog, and
+  what the server still refuses is shown inside the dialog. Toasts are drawn
+  above any open dialog instead of behind its backdrop. Enter in a box of the
+  Add user or New token dialog submits it (their buttons sit outside the form,
+  and a form of several fields ignored Enter).
+
+- **An outside signer's "See and approve" step shows the document again.**
+  The page asks for the copy the app exposed as `/file/pub%3A0` — a client is
+  right to encode a path segment — and chi hands a route parameter back still
+  encoded whenever the escaping differs from Go's own, so the server looked
+  for a copy literally named `pub%3A0` and answered 404 ("The document could
+  not be loaded"), while `/file/pub:0` answered 200. Every parameter of the
+  public link surfaces (`/api/public/*`, `/s/*`, `/d/*`) is now read through
+  one decoding reader. The same fault answered 404 for a file in a shared
+  folder whose name carries `&`, `,`, `;`, `=`, `:`, `@`, `+` or `$` — through
+  the SPA's download link and through the no-JS page's own links alike; those
+  open now too.
+- **A signature request — or a share — on a file that is on the storage but
+  not yet in the catalogue works.** The explorer lists such a file (it reads
+  the storage when the catalogue has nothing yet), but a share points at a
+  catalogue row, so the signing app's request failed with "Could not open the
+  signing link…: not_found: no such file" and the Share dialog answered 404
+  "file not found". Both now record the file in the catalogue first, exactly
+  as a write through filex would — for an app, only a file its job was handed;
+  for the dialog, only after the tenant, folder and editor checks, so a
+  person who could not share the file writes nothing.
+- **An app is told how long its links can live.** `share_create` clamps every
+  link to the installation's share ceiling (Protection, 7 days by default),
+  silently, so the e-Signature app offered 14-day links and said so in its
+  review while the links lived 7. Every call an app gets now carries
+  `share_max_ttl_days`, read from the setting the clamp reads.
+- **Revoking or deleting an app's link on the Shares screen reaches the app.**
+  A signing link revoked under My shares or Shares stopped working while its
+  signature request stayed open for ever. The host now brings the app's
+  hourly wake-up forward to a few seconds from now, and the app asks after
+  its links (`share_state`; `pluginkit.ShareInfo`, `pluginkit.IsNotFound`) —
+  no event, no second channel. The e-Signature app closes the request, names
+  the ended link and releases the document.
+- **filex's internal folders no longer surface anywhere a person looks.**
+  Clicking a "Moved to trash" notification opened `.filex-trash` itself (an
+  empty folder, nothing to restore), and a desktop "open with filex" edit left
+  three notifications — "New file", "File changed", "Moved to trash" — each
+  naming `a1b2c3d4e5f6-Bütçe Özeti.xlsx` in `/.filex-open/…` and opening
+  `.filex-open` or `.filex-trash` when clicked. The same working copies were
+  returned by the search box and the global search and listed in the Trash;
+  the listing API returned `.filex-open` at every storage root (only the
+  explorer's own filter hid it); the AI/MCP `file_list` and zip, the public
+  share page and every protocol endpoint showed it outright, the first three
+  showed `.versions` too, and the share ZIP packed it. Now the server never
+  lists, searches, shares, archives or offers any of them; the trash, version
+  and thumbnail trees are refused by path (404) on the file API,
+  `/api/files/read` and `/api/files/stat`; and the explorer never lands inside
+  one — a stale link or a typed address opens the storage instead.
+  `.filex-open` itself is still served by exact path, because the desktop app
+  reads its working copies that way. Version history is no longer kept for
+  working copies, and a thumbnail backfill skips all of these folders.
+- **Notifications, release-candidate sweep.** The "filex X is available"
+  notice — and every other operator alarm (replica, quota, queue, sign-in and
+  disk alarms) — reaches administrators only; a plain user's bell and badge
+  no longer carry them (the row, the admin list and the webhook are
+  unchanged). An app's notice names the app the way people know it ("İmzalar:
+  …", from the manifest's label; new `meta.plugin_label_en`/`_tr`) instead of
+  its install id ("sign: …"). The admin **Notifications** page names the
+  person a row belongs to instead of `user #2`, says what kind of event each
+  row is in the reader's language instead of `share.created`, localises the
+  delivery state ("Gönderilmedi — tanımlı webhook yok" rather than
+  "skipped— no webhook URL configured"), and counts the unread rows of its own
+  list rather than the reader's bell. The default webhook moved to the
+  **Webhooks** page, beside the targets, so there is one place to set where
+  events go. The notification settings offer a switch only for events that
+  can happen here (no virus switch with scanning off, no escrow switch
+  without an escrow key, no app switch with apps off).
+- **A read-only drive says so to everybody, and its menu offers only what
+  can work there.** A non-administrator now sees "Read-only" on the drive
+  (the flag came only from the admin storage list, which they cannot read,
+  and the web app asked for it — and got a 403 — on every page load; it no
+  longer asks). An app action that writes its result (a new file or a new
+  version) is not offered on a read-only drive, and a read-only refusal from
+  anywhere reads "This storage is read-only" instead of "Already exists /
+  conflict" or "You are not allowed to do this".
+- **Opening a document in its own tab keeps a non-administrator under
+  `/drive/`** instead of sending them to an `/admin/files/edit` address.
+- **A revoked link reads as revoked.** My shares said *Expired* for a link
+  its owner had just revoked, and Shares showed it as "expires … 9 seconds
+  ago" (revoking works by ending the link's expiry, and nothing recorded
+  who ended it). Links revoked from now on say *Revoked* on both screens
+  (migration 00053, `revoked_at`); earlier revokes still read as expired.
+- **The revoke dialog asks instead of announcing.** Its title was the
+  success message ("Share revoked" over "Revoke this share?"), and in
+  Turkish both buttons said *iptal*. The title is now the question and the
+  buttons the two answers — *Cancel* / *Revoke share* (*Vazgeç* /
+  *Paylaşımı iptal et*).
+- **Recent, Starred, tags and Home no longer ask for thumbnails that do not
+  exist.** Every file on those views was sent a thumbnail request, and each
+  docx, note or diagram answered "not ready" — ten requests, ten failures,
+  on one Recent view. They now ask only where the server has rendered one.
+- A regular user pressing *Create key* on a server with no encryption key
+  was told to set an environment variable; they are now told the server
+  cannot issue keys yet and an administrator has to set it up.
+- **The public drop page asks the name its link asks for, and refuses a file
+  before sending it.** *Ask uploader name* is on by default and the page had
+  no field, so every submission folder arrived as `<date>_anon`. A type,
+  size or count the link does not take was sent anyway and came back as
+  "The app returned an error" — the app-plugin runtime's sentence; it is
+  now refused on the page with the reason, and the rest of the drop still
+  goes. One drop is one request again — it was one request, and one
+  submission folder, per file, which also let a drop past the
+  per-submission file cap.
+- **A phone's row menu no longer lists keyboard shortcuts** ("Enter",
+  "Ctrl+X", "F2"…) — on any touch-first screen, for every menu.
+- **Home's storage cards say *read-only* on a line of their own**, the side
+  panel's tag. It was glued to the size in a fixed-width caption, and in
+  German the ellipsis ate exactly that part. A grid card's caption carries
+  its whole text on hover, for the same reason (German dates lost their
+  year).
+- **An explorer plural form says the number, not "1".** The English and
+  Turkish singular forms were written with a literal *1* ("1 item"); under
+  a language whose *one* category also covers 0 (French) or 21 (Russian),
+  a pack translated from them printed "1 élément" for an empty folder.
+  They carry the count now (`{n} item`) — language packs pick this up at
+  their next sync.
+- The share dialog's "Create a link, then it will be sent to … ." no longer
+  has a space before its full stop: it is one sentence with the address in
+  it, which a language can also order its own way.
+- **Searching a time zone by its offset works in every language.** "+3" or
+  "UTC+3" found nothing under French ("UTC+3") or Arabic ("غرينتش+3"): the
+  aliases were parsed out of the displayed, localised offset with a `GMT`
+  pattern. They now come from the offset as a number.
+- **An app's notification speaks the reader's language.** A notice kept
+  only its English and Turkish, so a German reader of the e-Signature app —
+  which ships German — got "admin@local asks you to sign a document" under
+  "e-Signature:". Every language the app wrote is kept (at most 16 beyond
+  English and Turkish), and the bell, the browser notification and the
+  desktop use the reader's own, then its base language, then English.
+- **The file menu no longer offers an app action the person could only be
+  refused.** It never read what an action needs: a person with *viewer* on
+  an RBAC storage was offered *Convert…*, *Sign…* and *Request signatures…*
+  there, and each answered "insufficient permission". The menu now asks the
+  level the server asks — *viewer* to read, *editor* to write the result
+  back, and the action's own `min_role` — except on a file the same app has
+  locked (its signers keep *Sign / Fill* on a document frozen for signing).
+- **An app's page names storages and engines the way people read them**: a
+  locked file's storage by its name (not "Storage #1"), and engines as
+  *LibreOffice*, *librsvg* rather than `libreoffice`, `rsvg`.
+- **The converter tells only an administrator which engines the server
+  lacks** (filex-convert): the note and the list of formats each missing
+  engine would unlock were shown to every account; everybody else now sees
+  just the formats they can have.
+- **An administrator is told what a missing engine would add, instead of an
+  action quietly disappearing.** An app's action that needs an engine the
+  server does not have was simply not in the menu, for everybody. Where the
+  engine is the only thing in the way, an administrator now sees the row
+  greyed with the reason ("LibreOffice is not installed on this server —
+  install it on the server and restart filex"), and everyone else still sees
+  nothing: the owner's rule for anything unconfigured. It is a platform
+  mechanism (`gated` on the menu row), not a rule written into one app.
+
 ## [0.42.2] - 2026-09-19
 
 A fix release for the issue 32 follow-up and three things that were wrong on

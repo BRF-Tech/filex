@@ -3,8 +3,23 @@ package handlers
 import (
 	"strconv"
 
+	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 )
+
+// thumbServable reports whether GET /api/files/thumb/{id} would answer this
+// thumbnail with an image — the ONE rule for handing a client a `thumb_url`.
+//
+// ⚠⚠ A listing that hands out a URL the endpoint will refuse makes the client
+// ask and be told `404 "not ready"`, once per file per listing: measured
+// 2026-09-21, opening Recent with ten files (docx, md, drawio, and images the
+// pipeline had not rendered) fired ten thumbnail requests and all ten 404'd.
+// The endpoint (thumb.go Serve) serves `ready` with a stored key and nothing
+// else, so nothing else gets a URL. "Not yet" needs no back-off of its own:
+// the next listing after the pipeline finishes carries the URL.
+func thumbServable(t *model.Thumbnail) bool {
+	return t != nil && t.State == "ready" && t.StorageKey != ""
+}
 
 // thumbURL renders the `thumb_url` field for a node id, stamped by `signer`.
 //

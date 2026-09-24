@@ -3,14 +3,20 @@ package db_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"path"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/namefold"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	searchpkg "github.com/brf-tech/filex/backend/internal/search"
 )
 
 // The store methods below had SQLite-only SQL that the first-five-minutes test
@@ -172,7 +178,7 @@ func TestNamesDifferingOnlyByCaseOrAccentOnEveryEngine(t *testing.T) {
 
 			// A search still ignores case: the fallback planner lower-cases
 			// the word it sends, so a case-sensitive LIKE would find nothing.
-			hits, err := store.SearchNodes(ctx, st.ID, "%readme%", 50)
+			hits, err := store.SearchNodes(ctx, st.ID, model.NameMatch{Words: []string{"readme"}}, 50)
 			require.NoError(t, err)
 			require.Len(t, hits, 2, "search matches both spellings")
 
@@ -191,6 +197,189 @@ func TestNamesDifferingOnlyByCaseOrAccentOnEveryEngine(t *testing.T) {
 			require.Len(t, grants, 2, "two grants on two different folders")
 		})
 	}
+}
+
+// TestSearchNodesOnEveryEngine — SearchNodes is the search an install without
+// the index runs, and every engine spells it differently (fx_match on SQLite,
+// normalize+lower on PostgreSQL, a collation over both Unicode forms on
+// MySQL), so every promise it makes is held here on all three:
+//
+//   - EVERY word is a condition, so the LIMIT counts rows that answer the
+//     whole query. It used to be one word, the longest, and a file that
+//     answered everything but sorted after the first thousand rows holding
+//     that word was never seen (GitHub PR #46: row 33 623 of a 169k-file
+//     catalogue).
+//   - Rank BEFORE the limit: with 1,001 `a-report-NNNN.txt` beside
+//     `report.txt`, the search for `report` returned 1,000 rows and not the
+//     one file called report.
+//   - The stored name goes through the same normaliser as the words
+//     (internal/namefold): a name a Mac wrote decomposed, a Turkish name in
+//     capitals, the four i's as one letter.
+//   - The words are text, not LIKE grammar.
+//
+// And the same promises through the planner (search.PlanFallback, whose runs
+// the engine checks natively first): its answer must be exactly what the
+// normaliser, applied in Go, says it is.
+func TestSearchNodesOnEveryEngine(t *testing.T) {
+	dot := string(rune(0x0307))
+	for _, e := range engines() {
+		t.Run(e.name, func(t *testing.T) {
+			sqlDB, drv := openMigrated(t, e)
+			store := drv.NewStore(sqlDB)
+			ctx := context.Background()
+			st := createEngineStorage(t, store)
+
+			ids := map[string]int64{}
+			add := func(p string) int64 {
+				t.Helper()
+				n, err := store.CreateNode(ctx, &model.Node{
+					StorageID: st.ID, Name: path.Base(p), Path: p,
+					PathHash: pathkey.Hash(st.ID, p), Type: model.NodeTypeFile,
+				})
+				require.NoError(t, err, "catalogue %q", p)
+				ids[p] = n.ID
+				return n.ID
+			}
+			names := func(nodes []*model.Node) []string {
+				out := make([]string, 0, len(nodes))
+				for _, n := range nodes {
+					out = append(out, n.Name)
+				}
+				return out
+			}
+			search := func(m model.NameMatch, limit int) []*model.Node {
+				t.Helper()
+				rows, err := store.SearchNodes(ctx, st.ID, m, limit)
+				require.NoError(t, err, "%+v", m)
+				return rows
+			}
+
+			// ── ranking before the limit ───────────────────────────────
+			for _, name := range []string{
+				// Every one of these holds the word, and sorts before the best
+				// answers in some engine's `ORDER BY name`.
+				"a-report-1.txt", "a-report-2.txt", "B-report.txt",
+				"report-final.txt", // a prefix match
+				"report.txt",       // the name without its extension IS the word
+				"REPORT",           // the name IS the word, in another case
+				"my_file.txt", "myXfile.txt",
+			} {
+				add("/r/" + name)
+			}
+			report := model.NameMatch{Words: []string{"report"}, Prefer: "report"}
+			require.Equal(t, []string{"REPORT", "report.txt", "report-final.txt"}, names(search(report, 3)),
+				"exact (the name, or the name plus an extension) first, then prefix; shorter first")
+			require.Len(t, search(model.NameMatch{Words: []string{"report"}}, 50), 6, "no preference: every match")
+			// `_` is a letter: the store escapes it on every engine. SQLite has
+			// no escape character unless the statement names one.
+			require.Equal(t, []string{"my_file.txt"}, names(search(model.NameMatch{Words: []string{"my_file"}}, 10)))
+			require.Equal(t, []string{"my_file.txt"}, names(search(model.NameMatch{Words: []string{"file"}, Prefer: "my_file"}, 1)),
+				"the preferred word is literal too: myXfile.txt is no exact match for my_file")
+
+			// ── every word, and the LIMIT counts answers ───────────────
+			for i := 0; i < 300; i++ {
+				add(fmt.Sprintf("/2026/Plan - Aa%03d - Yeni.pdf", i))
+			}
+			// What a Mac uploads: ş and ü decomposed into a letter and a mark.
+			decomposed := add("/2026/" + norm.NFD.String("Plan - Ayşe Gürel - Yeni.pdf"))
+			upper := add("/2026/PLAN - AYŞE GÜREL - ESKİ.pdf")
+			// The words are matched against the name: a folder does not count.
+			add("/Gürel/plan.pdf")
+			deleted := add("/2026/Plan - Gürel - silindi.pdf")
+			require.NoError(t, store.SoftDeleteNode(ctx, deleted))
+
+			want := []int64{decomposed, upper}
+			for _, m := range []model.NameMatch{
+				{Words: []string{"gürel", "plan"}},
+				{Words: []string{"plan", "gürel"}},                  // the order is not a condition
+				{Words: []string{"GÜREL", norm.NFD.String("Plan")}}, // the store folds what it is handed
+				{Words: []string{norm.NFD.String("gürel"), "plan"}, Runs: []string{"rel", "plan"}},
+			} {
+				require.ElementsMatch(t, want, nodeIDs(search(m, 50)), "%+v", m)
+			}
+			// The first rows by name holding `plan` are the 300 above.
+			one := search(model.NameMatch{Words: []string{"plan", "gürel"}}, 1)
+			require.Len(t, one, 1)
+			require.Subset(t, want, nodeIDs(one))
+			require.Empty(t, search(model.NameMatch{}, 50), "no words, no rows")
+
+			// ── one normaliser, both sides, every engine ───────────────
+			for _, p := range []string{
+				"/tr/IŞIK.pdf", "/tr/ışık notları.txt",
+				"/tr/" + norm.NFD.String("İPEK ADA.pdf"), "/tr/i" + dot + "pek-lower.txt",
+				"/tr/KIŞ LİSTESİ.xlsx", "/tr/ŞUBAT RAPORU.pdf", "/tr/ÇALIŞMA.txt",
+				"/tr/" + norm.NFD.String("çalışma planı.docx"),
+			} {
+				add(p)
+			}
+			for _, q := range []string{
+				"ışık", "IŞIK", "Işık", "işik", // an all-caps Turkish name typed in lower case, and back
+				"ipek", "İPEK", "i" + dot + "pek", // İ decomposed, and lower-cased the full Unicode way
+				"kış listesi", "KIŞ", "liste",
+				"şubat", "ŞUBAT RAPORU",
+				"çalışma", "ÇALIŞMA", "çalişma", norm.NFD.String("Çalışma"),
+				"Ayşe Gürel", norm.NFD.String("ayşe gürel yeni"),
+			} {
+				words := searchpkg.NormWords(q)
+				var ref []string
+				for p, id := range ids {
+					if id != deleted && refMatch(path.Base(p), words) {
+						ref = append(ref, path.Base(p))
+					}
+				}
+				require.NotEmpty(t, ref, "the fixture must answer %q", q)
+				require.ElementsMatch(t, ref, names(search(model.NameMatch{Words: words}, 500)), "store, query %q", q)
+				rows, err := searchpkg.PlanFallback(q).Candidates(ctx, store, st.ID, 500)
+				require.NoError(t, err)
+				require.ElementsMatch(t, ref, names(rows), "planner + store, query %q", q)
+			}
+			// Ranking before the limit folds the same way, for a word of
+			// Turkish letters too: the file that IS the word comes first,
+			// written in capitals or decomposed.
+			// Each has a decoy the ranking must see past: a name that is also
+			// the word but longer (`IŞIK.pdf` next to `ışık.md`), or a shorter
+			// name holding the word in the middle (`a gürel`), which wins on
+			// length the moment the right name is not recognised as the word.
+			add("/tr/" + norm.NFD.String("Gürel.pdf"))
+			add("/tr/ışık.md")
+			add("/tr/a gürel")
+			for word, want := range map[string]string{
+				"işik":    "ışık.md",
+				"gürel":   norm.NFD.String("Gürel.pdf"),
+				"ÇALIŞMA": "ÇALIŞMA.txt",
+			} {
+				got := names(search(model.NameMatch{Words: []string{word}, Prefer: word}, 1))
+				require.Equal(t, []string{want}, got, "the best match for %q must survive a LIMIT of 1", word)
+			}
+
+			// Accents stay significant to the normaliser. MySQL's collation is
+			// accent-insensitive, so it may hand the scorer more rows — never
+			// fewer; the other two engines answer exactly.
+			if e.name != "mysql" {
+				require.Empty(t, search(model.NameMatch{Words: []string{"gurel"}}, 50), "`gurel` is not `gürel`")
+			}
+		})
+	}
+}
+
+// refMatch is the Go reference the engines are held to: the name, folded by
+// internal/namefold, holds every folded word.
+func refMatch(name string, words []string) bool {
+	f := namefold.String(name)
+	for _, w := range words {
+		if !strings.Contains(f, namefold.String(w)) {
+			return false
+		}
+	}
+	return true
+}
+
+func nodeIDs(rows []*model.Node) []int64 {
+	out := make([]int64, 0, len(rows))
+	for _, n := range rows {
+		out = append(out, n.ID)
+	}
+	return out
 }
 
 func createEngineStorage(t *testing.T, store interface {

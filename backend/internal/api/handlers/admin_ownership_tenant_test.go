@@ -43,6 +43,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/testutil"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/versioning"
@@ -70,6 +71,13 @@ func ownershipServer(t *testing.T, multiTenant bool) (*httptest.Server, *http.Cl
 			// before the tenancy gate is reached, which would have read as a
 			// refusal it never made.
 			d.Notify = notify.New(d.Store, notify.Config{})
+			// "Empty the trash now" is an ops job; without the queue it
+			// answers 503 before the tenancy gate is reached. The queue keeps
+			// its rows in a database of its own here — the harness does not
+			// hand out the store's; only pending_ops lives in it.
+			opsDB, _ := testutil.NewTestDB(t)
+			d.Ops = ops.New(opsDB, d.StorageResolver)
+			t.Cleanup(d.Ops.Stop)
 		})
 }
 

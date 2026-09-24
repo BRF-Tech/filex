@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/ops"
@@ -87,6 +88,12 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 	if destID := req.DestStorageID; destID != 0 && !ownsStorage(w, r, destID, "storage") {
 		return
 	}
+	// Names and app locks first (ops.Targets — the same list SubmitTo judges):
+	// a frozen document is answered 423 with who froze it, before the
+	// permission check below reads the lock's viewer cap as a plain 403.
+	if o.gateOp(w, r, req.Kind, req.StorageID, req.DestStorageID, req.Sources, req.Dest) {
+		return
+	}
 	// RBAC: require ≥editor on each source (and, for copy/move, the dest).
 	for _, s := range req.Sources {
 		_, rel := splitAdapterPath(s)
@@ -140,6 +147,9 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	op, err := o.Service.SubmitTo(r.Context(), req.Kind, req.StorageID, req.DestStorageID, req.Sources, req.Dest)
+	if answerGate(w, err) {
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -192,6 +202,12 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		return
 	}
 
+	// Sources first (their names and app locks), before the permission check
+	// reads a lock's viewer cap as a plain 403; the destination once it is
+	// known, below.
+	if srcT, _ := ops.Targets(kind, sources, ""); gate(w, r, o.ACL, storageID, srcT...) {
+		return
+	}
 	// RBAC: require ≥editor on every source (the async worker runs userless,
 	// so authorize here at submit time).
 	for _, rel := range sources {
@@ -284,6 +300,10 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		}
 	}
 
+	if o.gateOp(w, r, kind, storageID, destStorageID, sources, dest) {
+		return
+	}
+
 	/* wiring:e2 — refuse transfers that cross an encryption boundary.
 	 * Copy and move are server-side byte operations and the server holds no
 	 * key, so it can neither encrypt on the way in nor decrypt on the way
@@ -298,6 +318,9 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 	}
 
 	op, err := o.Service.SubmitTo(r.Context(), kind, storageID, destStorageID, sources, dest)
+	if answerGate(w, err) {
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -366,7 +389,8 @@ func (o *Ops) SubmitDelete(w http.ResponseWriter, r *http.Request) {
 // most-recent rows across all statuses (capped at 200 service-side).
 //
 // Response shape mirrors what the SPA's `opsApi.list` already
-// understands: `{ "ops": [Op, …] }`. The frontend's `normalizeOp`
+// understands: `{ "ops": [Op, …] }`, each row with its sources cut to a
+// preview and counted (opListRow). The frontend's `normalizeOp`
 // adapter then translates the backend's raw shape into the SPA's
 // `PendingOp` contract.
 func (o *Ops) List(w http.ResponseWriter, r *http.Request) {
@@ -380,23 +404,136 @@ func (o *Ops) List(w http.ResponseWriter, r *http.Request) {
 	// tenant's live file paths, spelled out. Restrict the query to the storages
 	// this caller can reach. `nil` (unscoped / supertenant) keeps the previous
 	// instance-wide query verbatim, so single-tenant installs are unchanged.
-	var scopeIDs []int64
-	if scope, confined := confinedScope(r.Context()); confined {
-		// Not scope.StorageIDs directly: a nil slice would read as "unscoped"
-		// in ListIn, and a tenant with no linked storage must see nothing
-		// rather than everything.
-		scopeIDs = make([]int64, len(scope.StorageIDs))
-		copy(scopeIDs, scope.StorageIDs)
-	}
-	list, err := o.Service.ListIn(r.Context(), status, scopeIDs)
+	//
+	// A trash empty is its TENANT's (ops.Viewer): it may name no storage at
+	// all, and its counts describe that tenant's trash.
+	list, err := o.Service.ListFor(r.Context(), status, opsViewer(r))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if list == nil {
-		list = []*ops.Op{}
+	rows := make([]opListRow, 0, len(list))
+	for _, op := range list {
+		rows = append(rows, newOpListRow(op))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ops": list})
+	writeJSON(w, http.StatusOK, map[string]any{"ops": rows})
+}
+
+// opsViewer is who the request is to the queue: every row for an unscoped
+// caller or the supertenant, a tenant's storages' rows and its own trash
+// empties otherwise (ops.ViewerOf, from the same tenant scope
+// confinedScope reads).
+func opsViewer(r *http.Request) ops.Viewer {
+	if _, confined := confinedScope(r.Context()); !confined {
+		return ops.Viewer{All: true}
+	}
+	return ops.ViewerOf(r.Context())
+}
+
+// listSourcesPreview is how many of an op's sources one LIST row carries.
+//
+// A row stores every path it was given, and this listing is what the explorer
+// fetches when it mounts and, while an op runs, every 2 s. A bulk delete queued
+// in batches of a few hundred paths left rows of up to 82 KB — 200 of them made
+// an 11.5 MB answer that every browser opening the drive downloaded and parsed.
+// Nothing that reads the list shows the paths: both trays count progress from
+// `total`, and the explorer's operations center labels a row with its
+// destination or, for a delete, the folder it came from (source_dir, which
+// the server never sent before). GET /ops/{id} still answers every source.
+const listSourcesPreview = 5
+
+// opListRow is one LIST row: the op as stored, its sources cut to a preview
+// and counted. The outer Sources shadows the embedded one in the JSON.
+type opListRow struct {
+	*ops.Op
+	Sources          []string `json:"sources"`
+	SourceCount      int      `json:"source_count"`
+	SourcesTruncated bool     `json:"sources_truncated,omitempty"`
+	SourceDir        string   `json:"source_dir,omitempty"`
+}
+
+func newOpListRow(op *ops.Op) opListRow {
+	row := opListRow{
+		Op:          op,
+		Sources:     op.Sources,
+		SourceCount: len(op.Sources),
+		SourceDir:   commonSourceDir(op.Sources),
+	}
+	if row.Sources == nil {
+		row.Sources = []string{}
+	}
+	if len(row.Sources) > listSourcesPreview {
+		row.Sources = row.Sources[:listSourcesPreview]
+		row.SourcesTruncated = true
+	}
+	return row
+}
+
+// commonSourceDir is the deepest folder holding every source, in the sources'
+// own storage-relative form; "" is the storage root.
+func commonSourceDir(sources []string) string {
+	var common []string
+	for i, s := range sources {
+		var segs []string
+		if d := path.Dir(strings.Trim(s, "/")); d != "." {
+			segs = strings.Split(d, "/")
+		}
+		if i == 0 {
+			common = segs
+			continue
+		}
+		n := 0
+		for n < len(common) && n < len(segs) && common[n] == segs[n] {
+			n++
+		}
+		common = common[:n]
+		if n == 0 {
+			break
+		}
+	}
+	return strings.Join(common, "/")
+}
+
+// Cancel ends a pending or running op the caller may see. A row already
+// finished answers 409; an unknown (or another tenant's) id 404, in the same
+// words Status uses so the id range cannot be probed.
+func (o *Ops) Cancel(w http.ResponseWriter, r *http.Request) {
+	if o.Service == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ops queue unavailable"})
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	op, err := o.Service.Get(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
+		return
+	}
+	if !opsViewer(r).Sees(op) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
+		return
+	}
+	// The person who queued it, or an administrator. A row written before
+	// actor_id existed names nobody and stays cancellable by anyone who can
+	// see it, as before.
+	if u := auth.UserFrom(r.Context()); u != nil && op.ActorID != nil && *op.ActorID != u.ID && !u.IsAdmin() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not your operation"})
+		return
+	}
+	ok, err := o.Service.Cancel(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "already finished"})
+		return
+	}
+	op, _ = o.Service.Get(r.Context(), id)
+	writeJSON(w, http.StatusOK, map[string]any{"op": op})
 }
 
 // Status returns the live or final state of a submitted op.
@@ -418,11 +555,21 @@ func (o *Ops) Status(w http.ResponseWriter, r *http.Request) {
 	// Ownership on the single-row read, matching the listing. The refusal wears
 	// the same "unknown op" the miss above already produces, so probing the id
 	// range cannot count another tenant's operations. An op is the caller's if
-	// EITHER end is in reach — a cross-storage copy belongs to both sides.
-	if scope, confined := confinedScope(r.Context()); confined &&
-		!scope.CanAccessStorage(op.StorageID) && !scope.CanAccessStorage(op.DestStorageID) {
+	// EITHER end is in reach — a cross-storage copy belongs to both sides —
+	// and a trash empty is its tenant's (ops.Viewer).
+	if !opsViewer(r).Sees(op) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
 		return
 	}
 	writeJSON(w, http.StatusOK, op)
+}
+
+// gateOp asks writegate about everything one operation touches (ops.Targets),
+// on the source storage and on the destination storage.
+func (o *Ops) gateOp(w http.ResponseWriter, r *http.Request, kind string, storageID, destStorageID int64, sources []string, dest string) bool {
+	if destStorageID == 0 {
+		destStorageID = storageID
+	}
+	src, dst := ops.Targets(kind, sources, dest)
+	return gate(w, r, o.ACL, storageID, src...) || gate(w, r, o.ACL, destStorageID, dst...)
 }

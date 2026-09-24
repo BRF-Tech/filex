@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { requestFailure } from '../lib/errorWords';
 /**
  * EpubViewer — flowable EPUB reader via `epubjs`.
  *
@@ -74,9 +75,7 @@ async function load(): Promise<void> {
   try {
     mod = await import(/* @vite-ignore */ 'epubjs');
   } catch {
-    error.value = props.t
-      ? props.t('viewer.peer_not_installed')
-      : 'EPUB viewer requires `epubjs` — install or use download.';
+    error.value = tt('viewer.peer_not_installed', 'This kind of file cannot be shown here. Download it to open it on your device.');
     loading.value = false;
     return;
   }
@@ -92,7 +91,7 @@ async function load(): Promise<void> {
         headers,
         credentials: props.authCredentials || 'same-origin',
       });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      if (!res.ok) throw requestFailure(res.status, await res.text().catch(() => ''), undefined);
       source = await res.arrayBuffer();
     }
     book = Epub(source);
@@ -242,7 +241,7 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
 .filex-viewer-epub__nav {
   position: absolute;
   bottom: 12px;
-  left: 50%;
+  left: 50%; /* rtl-physical: centred by translate(-50%) — the same place in both directions */
   transform: translateX(-50%);
   display: flex;
   gap: 8px;
@@ -291,7 +290,7 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
 }
 .filex-viewer-epub__toc {
   width: 260px;
-  border-right: 1px solid var(--fe-border, #e2e6ed);
+  border-inline-end: 1px solid var(--fe-border, #e2e6ed);
   overflow-y: auto;
   padding: 12px 0;
   background: var(--fe-bg-elev, #f7f8fa);
@@ -304,7 +303,7 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
 .filex-viewer-epub__toc-link {
   display: block;
   width: 100%;
-  text-align: left;
+  text-align: start;
   background: transparent;
   border: 0;
   padding: 6px 14px;
@@ -316,7 +315,7 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
   background: var(--fe-bg-hover, #edf0f5);
 }
 .filex-viewer-epub__toc-link.is-child {
-  padding-left: 28px;
+  padding-inline-start: 28px;
   color: var(--fe-text-muted, #5a6475);
   font-size: 12px;
 }

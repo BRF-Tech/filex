@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue';
 import { Moon, Sun, MonitorSmartphone } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
@@ -13,11 +13,12 @@ function pick(mode: ThemeMode) {
   current.value = mode;
 }
 
-const items: { mode: ThemeMode; label: string; icon: typeof Sun }[] = [
+// ⚠ computed: labels built once at setup would keep the opening language.
+const items = computed<{ mode: ThemeMode; label: string; icon: typeof Sun }[]>(() => [
   { mode: 'auto', label: t('nav.themeAuto'), icon: MonitorSmartphone },
   { mode: 'light', label: t('nav.themeLight'), icon: Sun },
   { mode: 'dark', label: t('nav.themeDark'), icon: Moon },
-];
+]);
 </script>
 
 <template>
@@ -39,7 +40,7 @@ const items: { mode: ThemeMode; label: string; icon: typeof Sun }[] = [
       leave-to-class="transform opacity-0 scale-95"
     >
       <MenuItems
-        class="absolute right-0 mt-1 w-36 origin-top-right rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-lg focus:outline-none overflow-hidden"
+        class="absolute end-0 mt-1 w-36 origin-top-right rtl:origin-top-left rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-lg focus:outline-none overflow-hidden"
       >
         <MenuItem v-for="it in items" :key="it.mode" v-slot="{ active }">
           <button
@@ -53,7 +54,7 @@ const items: { mode: ThemeMode; label: string; icon: typeof Sun }[] = [
             @click="pick(it.mode)"
           >
             <component :is="it.icon" class="h-4 w-4" />
-            <span class="flex-1 text-left">{{ it.label }}</span>
+            <span class="flex-1 text-start">{{ it.label }}</span>
             <span v-if="current === it.mode" class="text-brand-600 dark:text-brand-400">●</span>
           </button>
         </MenuItem>

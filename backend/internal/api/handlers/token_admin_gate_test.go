@@ -104,13 +104,18 @@ func TestAdminRoutes_TokenIsLimitedToItsOwnScopes(t *testing.T) {
 		"confinement-only token on an admin account":      testutil.NewAPIToken(t, f.store, f.adminID, "root:main://projects/acme"),
 		"malformed confinement scope on an admin account": testutil.NewAPIToken(t, f.store, f.adminID, "admin,root:projects"),
 		"empty-scope token on a non-admin account":        testutil.NewAPIToken(t, f.store, f.userID, ""),
+		// ⚠⚠ An empty list grants NOTHING since v0.43.0 — admin least of all.
+		// It used to grant every scope, and a token minted on the admin screen
+		// with nothing ticked read /api/ai/admin/users (release-candidate sweep,
+		// 2026-09-21). No door issues one now, migration 00054 wrote the old
+		// ones out explicitly, and a row that is still empty fails closed.
+		"empty-scope token on an admin account": testutil.NewAPIToken(t, f.store, f.adminID, ""),
 	}
 	allowed := map[string]string{
 		"admin-scoped token on an admin account": testutil.NewAPIToken(t, f.store, f.adminID, "admin"),
 		"admin among other scopes":               testutil.NewAPIToken(t, f.store, f.adminID, "read,write,admin"),
-		// An empty scope list grants every scope — the documented meaning,
-		// and what an operator who ticked nothing in the panel was told.
-		"empty-scope token on an admin account": testutil.NewAPIToken(t, f.store, f.adminID, ""),
+		// What migration 00054 turns a pre-0.43 empty-scope token into.
+		"the explicit full list on an admin account": testutil.NewAPIToken(t, f.store, f.adminID, "read,write,delete,mcp,admin"),
 	}
 
 	for _, route := range adminGateRoutes {

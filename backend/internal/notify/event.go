@@ -74,6 +74,30 @@ const (
 	EventUpdateApplied EventType = "update_applied"
 )
 
+// operatorEvents are the alarms above: things only an administrator can act on
+// (upgrade the server, fix a replica, free a disk). They are recorded as
+// broadcasts — one row, no user — and the bell used to hand every broadcast to
+// every signed-in person, so a plain user read "filex v0.42.2 yayınlandı — Bu
+// sunucu 0.1.0-dev sürümünde çalışıyor" about a server they cannot touch
+// (release-candidate sweep, 2026-09-21). The read path keeps them out of a
+// non-administrator's bell and badge (Bell.never, applied by Service.List /
+// UnreadCount); the row, the admin audit list and the webhook are unchanged.
+//
+// ⚠ The rule is by EVENT, not by address: a row of one of these kinds that is
+// addressed to a plain user is kept out of their bell too. No emitter does
+// that today (all of them broadcast); one that wants to tell a person about
+// their own quota must use a person-facing event, not borrow an alarm.
+//
+// ⚠ A broadcast is NOT operator-only by itself: `admin_test` from the
+// notifications page and an app's instance-wide `plugin.notice` are meant for
+// everybody, and e2e 109 reads the former from a non-admin's bell. Who reads
+// which broadcast is decided in ONE place — bell.go.
+var operatorEvents = []EventType{
+	EventReplicaFail, EventReplicaFailSpike, EventReplicaReconcileDone, EventReplicaStatusReport,
+	EventPrimaryReadFail, EventQuotaNearFull, EventQuotaFull, EventQueueStuck, EventAuthFailSpike,
+	EventDiskFull, EventUpdateAvailable, EventUpdateApplied,
+}
+
 // Canonical file/share events (webhook v2 — "Bağlan" (Connect) wave). Emitted
 // asynchronously from the API mutation handlers; webhook targets filter
 // on these names via their per-target events allow-list.
@@ -140,6 +164,19 @@ const (
 	// event that is not a constant here is invisible to everything that reads
 	// this block. catalog_test.go now refuses that shape.
 	EventE2EEscrowUsed EventType = "e2e.escrow_used"
+	// EventPluginNotice is an app plugin (internal/wasmplugin) speaking to
+	// people through the notify_send host function: a signature request, a
+	// finished conversion, anything the plugin's author phrased. The row's
+	// Title/Body are the plugin's English text; meta carries `plugin` (its
+	// name), `title_en`/`title_tr`/`body_en`/`body_tr` for the reader's
+	// language, and `job` when sent from a queued action.
+	EventPluginNotice EventType = "plugin.notice"
+	// EventAdminTest is the admin notifications page's "Send test
+	// notification": one broadcast through the bell and every webhook, so an
+	// operator can see the plumbing work. It names nothing and is meant for
+	// every bell (bell.go → everyoneEvents); e2e 109 seeds a non-admin's bell
+	// with it.
+	EventAdminTest EventType = "admin_test"
 )
 
 // Target is the typed "where does a click on this notification go" —
@@ -157,14 +194,32 @@ type Target = model.NotificationTarget
 // TargetKind re-exports model.NotificationTargetKind.
 type TargetKind = model.NotificationTargetKind
 
-// The four target kinds, re-exported so an emitter never imports model just
+// The six target kinds, re-exported so an emitter never imports model just
 // to name one.
 const (
 	TargetNone  = model.TargetNone
 	TargetFile  = model.TargetFile
 	TargetDir   = model.TargetDir
 	TargetShare = model.TargetShare
+	TargetTrash = model.TargetTrash
+	TargetApp   = model.TargetApp
 )
+
+// TrashTarget addresses the Trash view with the item that was deleted FROM
+// origPath selected — the target of a soft delete and of an antivirus
+// quarantine. origPath is where the file lived, never its `.filex-trash/…`
+// key: the Trash view lists items by where they came from, and the key is a
+// path no surface serves (syspath.Sealed).
+func TrashTarget(origPath string) *Target {
+	return &Target{Kind: TargetTrash, Path: cleanTargetPath(origPath)}
+}
+
+// AppTarget addresses one of an app plugin's home pages, optionally at a
+// section of it. The plugin and view are checked by the caller (the host's
+// notify_send answers only for the app's own `home` views).
+func AppTarget(plugin, view, section string) *Target {
+	return &Target{Kind: TargetApp, Open: &model.NotificationOpen{Plugin: plugin, View: view, Section: section}}
+}
 
 // FileTarget addresses one file by its path inside its storage. The click
 // opens the file's FOLDER with the file selected — the folder is derived by
@@ -269,8 +324,10 @@ type Event struct {
 	Target *Target `json:"target,omitempty"`
 
 	// UserID, when non-nil, scopes the in-app notification to a single
-	// user. Otherwise the row is broadcast (admin-visible to everyone
-	// with role=admin). The webhook delivery is unaffected.
+	// user. Otherwise the row is broadcast, and who reads it is bell.go's
+	// rule: by kind, then — for a member — only when the file it names is one
+	// the member can see (handlers/notifications.go). The webhook delivery is
+	// unaffected.
 	UserID *int64 `json:"-"`
 }
 

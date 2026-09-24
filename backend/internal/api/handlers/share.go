@@ -27,11 +27,17 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/wasmplugin"
+	"github.com/brf-tech/filex/backend/internal/writegate"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 	"github.com/brf-tech/filex/backend/internal/zipstream"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
@@ -63,7 +69,21 @@ type Share struct {
 	Body *filebody.Resolver
 	// Tenants resolves which origin a minted /s/ or /d/ link is built on.
 	Tenants tenanturl.Resolver
+	// Shell is the SPA document a JavaScript browser gets at /s/{token}; the
+	// pages in this file are the no-JS answer behind it. nil (frontend not
+	// bundled) means every visitor gets the Go pages. See public_shell.go for
+	// which request gets which.
+	Shell http.Handler
+	// Apps lets the no-JS page list the copies an app link exposed. nil means
+	// an app link falls back to "this needs a browser with JavaScript".
+	Apps *AppPlugins
+	// Index keeps the search index in step when sharing records a file the
+	// catalogue had not seen yet (catalogueOnDemand). nil-safe.
+	Index *search.Index
 }
+
+// AttachIndex wires the search index for on-demand cataloguing.
+func (h *Share) AttachIndex(idx *search.Index) { h.Index = idx }
 
 // AttachTenants wires the shared per-request origin resolver (internal/tenanturl).
 func (h *Share) AttachTenants(rv tenanturl.Resolver) { h.Tenants = rv }
@@ -97,6 +117,12 @@ func (h *Share) chrome(r *http.Request) publicChrome { return publicChromeFor(h.
 // AttachACL wires the RBAC resolver so minting a public share link requires
 // ≥editor on the target node (sharing grants outside access — a write action).
 func (h *Share) AttachACL(r *acl.Resolver) { h.ACL = r }
+
+// AttachShell wires the SPA document served to JavaScript browsers.
+func (h *Share) AttachShell(shell http.Handler) { h.Shell = shell }
+
+// AttachApps wires the app-plugin handler for the no-JS app page.
+func (h *Share) AttachApps(a *AppPlugins) { h.Apps = a }
 
 // NewShare constructs a Share handler. zipCache enables the folder-share ZIP
 // cache (pass a disabled/nil cache to stream fresh on every folder download).
@@ -181,6 +207,14 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if nodeID == 0 && req.Path != "" {
 		resolved, err := h.resolveNodeIDFromPath(r.Context(), req.Path)
 		if err != nil {
+			// ⚠ The file may be on the storage and not in the catalogue yet —
+			// the explorer lists it from the driver, so a person can pick it
+			// and press Share, and this answered 404 "file not found".
+			if n := h.catalogueForShare(r, req.Path); n != nil {
+				resolved, err = n.ID, nil
+			}
+		}
+		if err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 			return
 		}
@@ -231,6 +265,12 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	// Same 404 as the miss above.
 	if !rootAllows(r.Context(), h.Store, node.StorageID, node.Path) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	// A public link to `.filex-trash` would hand every deleted file on the
+	// storage to whoever holds the URL; to `.filex-open`, other people's
+	// open documents.
+	if gate(w, r, h.ACL, node.StorageID, writegate.Names(node.Path)) {
 		return
 	}
 
@@ -365,6 +405,7 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	h.warmFolderThumbs(node)
 
+	auth.SetAuditTarget(r.Context(), strconv.FormatInt(sh.ID, 10), node.Path)
 	// Dual envelope: nested `share` for the SFC + flat fields at the
 	// top level for legacy embed.js. Cheap to ship both.
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -510,7 +551,7 @@ func (h *Share) warmFolderThumbs(node *model.Node) {
 				if rendered >= prewarmThumbMax || ctx.Err() != nil {
 					return
 				}
-				if browseSkipNames[o.Name] {
+				if browseSkip(o.Name) {
 					continue
 				}
 				child := joinShareRel(dir, o.Name)
@@ -685,6 +726,46 @@ func (h *Share) resolveNodeIDFromPath(ctx context.Context, fullPath string) (int
 	return node.ID, nil
 }
 
+// catalogueForShare records, for the Share dialog, an entry the storage has
+// and the catalogue has not seen yet (catalogueOnDemand), or answers nil.
+//
+// ⚠ Every question HandleCreate asks of a node is asked of the PATH first,
+// because this writes a row: the storage has to be one the caller's tenant
+// reaches (ListEnabledStorages is the confined listing), the path has to be
+// inside a root-confined token's folder, and the caller needs editor rights
+// on it. A caller who fails any of them gets the same 404 a missing file
+// gets, and nothing is written.
+func (h *Share) catalogueForShare(r *http.Request, fullPath string) *model.Node {
+	ctx := r.Context()
+	adapter, rel := splitAdapterPath(strings.ReplaceAll(fullPath, "\\", "/"))
+	clean := strings.TrimRight(path.Clean("/"+rel), "/")
+	if adapter == "" || clean == "" {
+		return nil
+	}
+	storages, err := h.Store.ListEnabledStorages(ctx)
+	if err != nil {
+		return nil
+	}
+	var st *model.Storage
+	for _, s := range storages {
+		if s.Name == adapter {
+			st = s
+		}
+	}
+	if st == nil || !rootAllows(ctx, h.Store, st.ID, clean) {
+		return nil
+	}
+	if h.ACL != nil && !aclAllowID(ctx, h.ACL, h.Store, st.ID, clean, acl.LevelEditor) {
+		return nil
+	}
+	n, err := catalogueOnDemand(ctx, h.Store, h.StorageResolver,
+		protocolsync.New(h.Store, h.Index, h.Thumbs, writehook.OriginManager), st.ID, clean)
+	if err != nil {
+		return nil
+	}
+	return n
+}
+
 // randomPIN returns an n-char numeric PIN (digits only — easier to type
 // from a phone than a mixed-case string).
 func randomPIN(n int) string {
@@ -767,14 +848,41 @@ func (h *Share) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	var reg *wasmplugin.Registry
+	if h.Apps != nil {
+		reg = h.Apps.Registry
+	}
+	appLinkEnded(r.Context(), reg, sh, "revoked")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// appLinkEnded is called wherever a PERSON ends a link — My shares' revoke,
+// the administrator's Revoke and Delete. For a link an app opened, it brings
+// that app's hourly wake-up forward (wasmplugin.Registry.WakeSoon), and the
+// app's own `tick` asks after its links and finds this one gone.
+//
+// ⚠⚠ Why this exists: a signing link revoked from Shares stopped working, and
+// the signature request it belonged to stayed "Sent · 0/1 signed" — the file
+// frozen, the requester waiting — because nothing ever told the app. Measured
+// 2026-09-21: revoke, then a wake-up that saw the request and scheduled
+// nothing. The app now asks on every wake-up; this makes the asking prompt.
+//
+// ⚠ Nothing is sent TO the app — no event, no payload. The links are the
+// app's own facts to read, and a second channel beside the wake-up would be a
+// second thing to deliver, order and retry. nil-safe on every argument, and a
+// link no app opened is not the app layer's business at all.
+func appLinkEnded(ctx context.Context, reg *wasmplugin.Registry, sh *model.Share, how string) {
+	if reg == nil || sh == nil || sh.PluginID == 0 {
+		return
+	}
+	reg.WakeSoon(ctx, sh.PluginID, "one of its links (share "+strconv.FormatInt(sh.ID, 10)+") was "+how+" from Shares")
 }
 
 // HandleMetadata returns metadata for a share token (no PIN check).
 //
 // Used by the embed.js viewer to decide whether to render a PIN prompt.
 func (h *Share) HandleMetadata(w http.ResponseWriter, r *http.Request) {
-	tok := chi.URLParam(r, "token")
+	tok := pathParam(r, "token")
 	sh, err := h.Store.GetShareByToken(r.Context(), tok)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -796,7 +904,7 @@ func (h *Share) HandleMetadata(w http.ResponseWriter, r *http.Request) {
 		resp["mime"] = node.Mime
 		resp["is_directory"] = node.Type == "dir"
 		if sh.MaxDownloads != nil {
-			remaining := *sh.MaxDownloads - sh.DownloadCount
+			remaining := *sh.MaxDownloads - sh.CappedCount()
 			if remaining < 0 {
 				remaining = 0
 			}
@@ -812,7 +920,14 @@ func (h *Share) HandleMetadata(w http.ResponseWriter, r *http.Request) {
 // (with a PIN field) is what the form submits to. ?pin= and X-Filex-Pin
 // are also accepted for programmatic access.
 func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
-	tok := chi.URLParam(r, "token")
+	// A JavaScript browser gets the branded public surface; everything else
+	// — no-JS browsers, curl, download managers, the PIN form's own POST —
+	// falls through to the pages below (public_shell.go says why).
+	if wantsPublicShell(r, h.Shell) {
+		h.Shell.ServeHTTP(w, r)
+		return
+	}
+	tok := pathParam(r, "token")
 	pin := h.extractPIN(r)
 
 	sh, err := h.Store.GetShareByToken(r.Context(), tok)
@@ -825,26 +940,44 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// PIN required path: render the form on GET when no PIN supplied.
-	if sh.PinHash != "" && pin == "" {
+	// ⚠ An unlock cookie counts as having answered: the visitor entered the
+	// PIN on this browser — possibly in the SPA shell, before JavaScript
+	// failed or before they followed a plain link — and asking a second time
+	// for something already answered is how a public page loses the person it
+	// was sent to.
+	unlocked := sh.PinHash == "" || shareUnlocked(h.Service, r, sh)
+
+	// PIN required and none supplied: the form.
+	if !unlocked && pin == "" {
 		h.renderPINForm(w, r, tok, "")
 		return
 	}
 
-	// Resolve runs the PIN bcrypt check + recomputes expiry.
-	resolved, err := h.Service.Resolve(r.Context(), tok, pin)
-	switch {
-	case errors.Is(err, share.ErrExpired):
-		h.renderErrorPage(w, r, http.StatusNotFound, "expired")
-		return
-	case errors.Is(err, share.ErrBadPIN):
-		// Re-render with a friendly error rather than a flat 401.
-		h.renderPINForm(w, r, tok, "pin_wrong")
-		return
-	case err != nil:
-		h.renderErrorPage(w, r, http.StatusNotFound, "notfound")
-		return
+	// The PIN gate: bcrypt PLUS the five-strikes-then-ten-minutes lock
+	// (internal/share/pin.go).
+	//
+	// ⚠ Not Service.Resolve any more. That one compares the hash and counts
+	// nothing, so a four-digit PIN on a /s/ link could be walked through at
+	// the speed of HTTP — the lock existed, but only on the app-plugin pages.
+	// One gate now, for every public link.
+	if sh.PinHash != "" && pin != "" {
+		switch err := h.Service.CheckPIN(r.Context(), sh, pin); {
+		case errors.Is(err, share.ErrLocked):
+			h.renderPINForm(w, r, tok, "pin_locked")
+			return
+		case err != nil:
+			h.renderPINForm(w, r, tok, "pin_wrong")
+			return
+		}
+		// Mint the unlock so the visitor's NEXT request — the confirmed
+		// download, a file off an app page — carries no PIN at all.
+		http.SetCookie(w, &http.Cookie{
+			Name: share.CookieName(sh.Token), Value: h.Service.MintUnlock(sh.Token),
+			Path: "/", HttpOnly: true, Secure: requestIsHTTPS(r), SameSite: http.SameSiteLaxMode,
+			MaxAge: int(share.UnlockTTL().Seconds()),
+		})
 	}
+	resolved := sh
 
 	// Confirmed download step — when a PIN-protected share's POST
 	// successfully resolved and the client hasn't yet seen the
@@ -853,14 +986,37 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// stream comes second. This gives the user clear feedback that
 	// the PIN matched before the browser hijacks the page with an
 	// `attachment` Content-Disposition.
-	if sh.PinHash != "" && r.URL.Query().Get("confirmed") != "1" && r.Method == http.MethodPost {
+	//
+	// ⚠ Skipped for an app link: nothing is about to be attached there, so
+	// the interstitial would put a second page between the visitor and the
+	// thing they were sent for.
+	if sh.PinHash != "" && !resolved.IsApp() && r.URL.Query().Get("confirmed") != "1" && r.Method == http.MethodPost {
 		h.renderUnlockedPage(w, r, tok, pin)
+		return
+	}
+
+	// An app link's body is the app's surface, and the only bytes a visitor
+	// may have are the copies the app exposed. ⚠ The node behind it is the
+	// ANCHOR the app's state and its follow-up job hang on — never a
+	// download: no storage driver is opened for an anonymous request, which
+	// is the property the app pages had before they became shares.
+	if resolved.IsApp() {
+		h.renderAppPage(w, r, tok, resolved)
 		return
 	}
 
 	node, err := h.Store.GetNode(r.Context(), resolved.NodeID)
 	if err != nil {
 		http.Error(w, "node missing", http.StatusNotFound)
+		return
+	}
+	// A link never serves filex's own bookkeeping. The storage root has no row
+	// and cannot be shared, but a row INSIDE `.versions/` can exist (older
+	// scans minted one per snapshot folder and file), and a share names a row
+	// by id: such a link listed, zipped and streamed the previous contents of
+	// somebody's files.
+	if syspath.Hidden(node.Path) {
+		h.renderErrorPage(w, r, http.StatusNotFound, "notfound")
 		return
 	}
 	drv, err := h.StorageResolver(node.StorageID)
@@ -1180,9 +1336,11 @@ func (h *Share) renderZipWaitPage(w http.ResponseWriter, r *http.Request, name, 
 	// for PIN shares (which already require JS via the unlock page).
 	_ = zipWaitTemplate.Execute(w, map[string]any{
 		"Lang":      lang,
+		"Dir":       pageDir(lang),
 		"T":         t,
 		"Name":      name,
-		"Sub":       fmt.Sprintf(t["zip_sub"], name),
+		"Sub":       publicFill(t, "zip_sub", map[string]string{"name": name}),
+		"Hint":      publicLinkSentence(t, "zip_hint", "zip_link", "dl", "?zip=wait"),
 		"PinQuery":  pinQuery,
 		"BrandCSS":  chrome.BrandCSS,
 		"BrandHead": chrome.BrandHead,
@@ -1193,7 +1351,7 @@ func (h *Share) renderZipWaitPage(w http.ResponseWriter, r *http.Request, name, 
 // zipWaitTemplate is a dependency-free progress page for a folder-share ZIP
 // that's still being built.
 var zipWaitTemplate = template.Must(template.New("zipwait").Parse(`<!doctype html>
-<html lang="{{.Lang}}"><head>
+<html lang="{{.Lang}}" dir="{{.Dir}}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.T.zip_title}}</title>
@@ -1216,7 +1374,7 @@ var zipWaitTemplate = template.Must(template.New("zipwait").Parse(`<!doctype htm
 <p class="sub">{{.Sub}}</p>
 <div class="track" aria-hidden="true"><div id="bar" class="bar"></div></div>
 <div class="pct"><span id="pct">%0</span></div>
-<p class="hint">{{.T.zip_hint_a}}<a id="dl" href="?zip=wait">{{.T.zip_hint_b}}</a>{{.T.zip_hint_c}}</p>
+<p class="hint">{{.Hint}}</p>
 </div>
 {{.Footer}}
 </main>
@@ -1326,7 +1484,7 @@ h1 { font-size: 1.25rem; margin: 0 0 6px; letter-spacing: -0.01em; }
 .brand svg { width: 16px; height: 16px; flex: none; }
 .brand a { color: inherit; font-weight: 600; text-decoration: none; }
 .brand a:hover { text-decoration: underline; color: var(--px-accent); }
-.spinner { width: 15px; height: 15px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; display: inline-block; vertical-align: -2px; animation: px-spin 0.8s linear infinite; opacity: 0.5; margin-right: 8px; }
+.spinner { width: 15px; height: 15px; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; display: inline-block; vertical-align: -2px; animation: px-spin 0.8s linear infinite; opacity: 0.5; margin-inline-end: 8px; }
 @keyframes px-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } .btn { transition: none; } }
 /* wiring:e1 — branding chrome (logo/name header + custom footer) */
@@ -1348,12 +1506,8 @@ h1 { font-size: 1.25rem; margin: 0 0 6px; letter-spacing: -0.01em; }
 // wave after the others went blue (2026-09-13, found by the duplicate gate).
 const publicBrandMark = `<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#2f6ceb"/><path d="M7 11a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11z" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M11.5 17.5l3 2.5 5.5-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 
-// Public-page footers. Each template keeps its existing content language, so
-// there is a Turkish and an English variant of the same modest brand line.
-const (
-	publicFooterTR = `<footer class="brand">` + publicBrandMark + `<span><a href="https://filex.sh" target="_blank" rel="noopener">filex</a> ile paylaşıldı</span></footer>`
-	publicFooterEN = `<footer class="brand">` + publicBrandMark + `<span>Shared with <a href="https://filex.sh" target="_blank" rel="noopener">filex</a></span></footer>`
-)
+// The public-page footer line ("Shared with filex") is built per language by
+// publicFooterLine (public_i18n.go) from the server catalogue.
 
 // Inline line-style icons (currentColor) for the public pages.
 const (
@@ -1366,7 +1520,7 @@ const (
 // pinFormTemplate is a dependency-free HTML page rendered when a share
 // requires a PIN and none was provided.
 var pinFormTemplate = template.Must(template.New("pin").Parse(`<!doctype html>
-<html lang="{{.Lang}}"><head>
+<html lang="{{.Lang}}" dir="{{.Dir}}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.T.pin_title}}</title>
@@ -1409,6 +1563,7 @@ func (h *Share) renderPINForm(w http.ResponseWriter, r *http.Request, token, err
 	}
 	_ = pinFormTemplate.Execute(w, map[string]any{
 		"Lang":      lang,
+		"Dir":       pageDir(lang),
 		"T":         t,
 		"Action":    shareURLPath(token),
 		"Error":     errMsg,
@@ -1430,6 +1585,7 @@ func (h *Share) renderUnlockedPage(w http.ResponseWriter, r *http.Request, token
 	w.WriteHeader(http.StatusOK)
 	_ = unlockedTemplate.Execute(w, map[string]any{
 		"Lang":      lang,
+		"Dir":       pageDir(lang),
 		"T":         t,
 		"Action":    shareURLPath(token) + "?confirmed=1",
 		"PIN":       pin,
@@ -1452,6 +1608,7 @@ func (h *Share) renderErrorPage(w http.ResponseWriter, r *http.Request, status i
 	w.WriteHeader(status)
 	_ = errorPageTemplate.Execute(w, map[string]any{
 		"Lang":      lang,
+		"Dir":       pageDir(lang),
 		"T":         t,
 		"Title":     t["err_"+key+"_title"],
 		"Body":      t["err_"+key+"_body"],
@@ -1463,7 +1620,7 @@ func (h *Share) renderErrorPage(w http.ResponseWriter, r *http.Request, status i
 }
 
 var unlockedTemplate = template.Must(template.New("unlocked").Parse(`<!doctype html>
-<html lang="{{.Lang}}"><head>
+<html lang="{{.Lang}}" dir="{{.Dir}}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.T.unlocked_title}}</title>
@@ -1486,7 +1643,7 @@ var unlockedTemplate = template.Must(template.New("unlocked").Parse(`<!doctype h
 </body></html>`))
 
 var errorPageTemplate = template.Must(template.New("err").Parse(`<!doctype html>
-<html lang="{{.Lang}}"><head>
+<html lang="{{.Lang}}" dir="{{.Dir}}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}}</title>

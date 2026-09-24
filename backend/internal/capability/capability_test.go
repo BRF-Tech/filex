@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/brf-tech/filex/backend/internal/enginebin"
 	"github.com/brf-tech/filex/backend/internal/testutil/dbtest"
 )
 
@@ -359,4 +360,53 @@ func TestService_OnlyOfficeNeedsItsSecretBeforeItCountsAsConfigured(t *testing.T
 	st, err = svc.ProbeExternal(ctx, "drawio")
 	require.NoError(t, err)
 	assert.Equal(t, "ok", st.State)
+}
+
+// The About page's engine flags are enginebin's ONE answer — the one Apps and
+// the converter read. Before v0.43.0 this package probed `magick || convert`
+// itself, and on Windows `convert` is System32\convert.exe (the disk
+// converter): About said "ImageMagick: OK" while Apps said "not installed".
+func TestService_EnginesAreTheOneProbesAnswer(t *testing.T) {
+	_, store := dbtest.NewTestDB(t)
+
+	restore := enginebin.SetForTest(map[string]string{enginebin.ImageMagick: "/opt/im/magick", enginebin.FFmpeg: "/opt/ff/ffmpeg"})
+	caps, err := New(store).Get(context.Background())
+	restore()
+	require.NoError(t, err)
+	assert.True(t, caps.Thumbs.ImageMagick, "the probe found ImageMagick, so About must say so")
+	assert.True(t, caps.Thumbs.Video)
+	assert.False(t, caps.Thumbs.Office, "no LibreOffice in the probe's answer")
+
+	restore = enginebin.SetForTest(map[string]string{})
+	caps, err = New(store).Get(context.Background())
+	restore()
+	require.NoError(t, err)
+	assert.False(t, caps.Thumbs.ImageMagick, "the probe found no ImageMagick; About must not find one of its own")
+	assert.False(t, caps.Thumbs.Video)
+	assert.False(t, caps.Thumbs.PDF)
+}
+
+// A refresh is shared work — every caller for the next hour reads what it
+// cached — so one caller's cancelled request must not decide it. Found while
+// running the v0.43.0 e2e suite (2026-09-22): a page navigation aborted the
+// capabilities fetch that happened to trigger a refresh, ListExternalServices
+// failed with "context canceled", and `external` was cached EMPTY for an hour
+// — every client read "no ONLYOFFICE, no draw.io" (e2e 82 went red two specs
+// later, reproducibly, in the full run only).
+func TestService_RefreshIsNotDecidedByOneCancelledCaller(t *testing.T) {
+	_, store := dbtest.NewTestDB(t)
+	require.NoError(t, store.UpsertExternalService(context.Background(), "drawio", true, "http://127.0.0.1:1", "", "{}", time.Now(), "unknown"))
+	svc := New(store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	caps, err := svc.Get(ctx)
+	require.NoError(t, err)
+	_, ok := caps.External["drawio"]
+	assert.True(t, ok, "the refresh ran on the caller's cancelled context and cached no external services")
+
+	again, err := svc.Get(context.Background())
+	require.NoError(t, err)
+	_, ok = again.External["drawio"]
+	assert.True(t, ok, "the cached snapshot must carry the external services")
 }

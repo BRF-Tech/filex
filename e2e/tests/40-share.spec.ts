@@ -64,12 +64,22 @@ test.describe('Share — create, public access with PIN', () => {
     // ── the admin list renders the share ──────────────────────────────────
     await loginAs(page);
     await page.goto('/admin/shares');
-    const row = page.locator('tbody tr', { has: page.locator(`[data-token="${token}"]`) });
+    // ⚠ `.fe-list__row`, not `tbody tr`: the admin Shares page is the
+    // explorer's table (DataTable) since v0.43 — flex rows with role="row",
+    // no <table> at all.
+    const row = page.locator('.fe-list__row', { has: page.locator(`[data-token="${token}"]`) });
     await expect(row).toHaveCount(1, { timeout: 10_000 });
     // The cell shows a truncated token — enough to recognise the share,
     // never the whole secret.
     await expect(row.getByTestId('share-token')).toHaveText(new RegExp(`^${token.slice(0, 10)}`));
-    await expect(row.getByText('PIN', { exact: true })).toBeVisible();
+    // …and the badge beside it says this link asks the visitor for a PIN.
+    // ⚠ The badge now reads "PIN required" / "PIN gerekli" rather than the
+    // bare "PIN" it carried before the row moved onto the shared table, so it
+    // is addressed by its handle and its WORDS are asserted in both languages
+    // — the fact the badge states is what matters, not one English spelling.
+    const pin = row.getByTestId('share-pin');
+    await expect(pin).toBeVisible();
+    await expect(pin).toHaveText(/PIN (required|gerekli)/);
 
     // ── the public entry point is PIN-gated ───────────────────────────────
     const ctx = await browser.newContext();

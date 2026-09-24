@@ -19,7 +19,7 @@ test.describe('Smoke — server up and serving', () => {
   test('admin login page renders core controls', async ({ page }) => {
     await page.goto('/admin/login');
     await expect(page.getByLabel(/e-?mail|kullanıcı adı/i)).toBeVisible();
-    await expect(page.getByLabel(/password|şifre/i)).toBeVisible();
+    await expect(page.getByLabel(/password|parola/i)).toBeVisible();
     // OIDC-enabled builds also show "Sign in with SSO" — match
     // the local-auth submit by exact name to dodge the strict-mode clash.
     await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();

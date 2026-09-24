@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Plus, RefreshCcw, Send, Webhook as WebhookIcon, Pencil, Trash2 } from 'lucide-vue-next';
 
@@ -8,7 +8,8 @@ import type { WebhookTarget } from '@/api/types';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import { formatDate, formatRelative } from '@/lib/format';
-import { WEBHOOK_EVENTS, webhookEventKey } from '@/lib/webhookEvents';
+import { WEBHOOK_EVENTS, eventOffReason, webhookEventKey } from '@/lib/webhookEvents';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -16,9 +17,23 @@ import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
 import Modal from '@/components/ui/Modal.vue';
-import TableScroll from '@/components/ui/TableScroll.vue';
+import GlobalWebhookCard from '@/components/GlobalWebhookCard.vue';
+import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
+const caps = useCapabilitiesStore();
+
+/**
+ * The line under an event's box: its wire name, and — when the service it
+ * depends on is off here — why it will not fire yet (lib/webhookEvents
+ * eventOffReason). ⚠ The box stays tickable: an operator may subscribe ahead
+ * of switching the service on. The settings dialog offered these to people
+ * as if they could happen (QA #39).
+ */
+function eventNote(ev: string): string {
+  const off = eventOffReason(ev, caps.data);
+  return off ? `${ev} — ${t(off)}` : ev;
+}
 const toast = useToastStore();
 
 const items = ref<WebhookTarget[]>([]);
@@ -41,7 +56,7 @@ async function load() {
   try {
     items.value = await WebhooksApi.list();
   } catch (e: unknown) {
-    toast.error(extractError(e, 'Failed to load webhooks'));
+    toast.error(extractError(e, t('errors.loadFailed')));
   } finally {
     loading.value = false;
   }
@@ -49,7 +64,51 @@ async function load() {
 
 onMounted(load);
 
+/* The explorer's table (DataTable), remembered under `admin.webhooks`. Every
+ * target arrives in one answer, so the table sorts them itself. The status
+ * column sorts by WHEN the last delivery happened — the one ordering of it
+ * that answers a question ("which one fired last"). */
+function lastDeliveryMs(w: WebhookTarget): number | null {
+  const at = w.last_delivery_at || w.last_status?.at;
+  return at ? Date.parse(at) : null;
+}
+const columns = computed<DataColumn<WebhookTarget>[]>(() => [
+  { id: 'name', label: t('common.name'), sortable: true, width: 180 },
+  { id: 'url', label: 'URL', sortable: true, width: 260 },
+  {
+    id: 'events',
+    label: t('webhooks.fields.events'),
+    sortable: true,
+    width: 220,
+    sortValue: (w) => (w.events.length ? w.events.join(',') : null),
+  },
+  {
+    id: 'secret',
+    label: t('webhooks.fields.secret'),
+    sortable: true,
+    width: 120,
+    sortValue: (w) => (w.secret_set ? 1 : 0),
+  },
+  {
+    id: 'last_status',
+    label: t('webhooks.fields.lastStatus'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 200,
+    sortValue: lastDeliveryMs,
+  },
+  {
+    id: 'enabled',
+    label: t('webhooks.fields.enabled'),
+    sortable: true,
+    width: 100,
+    sortValue: (w) => (w.enabled ? 1 : 0),
+  },
+]);
+
 function openCreate() {
+  formTried.value = false;
+  formFailure.value = '';
   editingId.value = null;
   formName.value = '';
   formUrl.value = '';
@@ -62,6 +121,8 @@ function openCreate() {
 }
 
 function openEdit(target: WebhookTarget) {
+  formTried.value = false;
+  formFailure.value = '';
   editingId.value = target.id;
   formName.value = target.name;
   formUrl.value = target.url;
@@ -80,13 +141,34 @@ function toggleEvent(ev: string, on: boolean) {
   formEvents.value = next;
 }
 
+/*
+ * ⚠ Name and URL are required and SAID to be (the star), checked before the
+ * request, and every refusal is shown in the dialog. Before: neither box was
+ * marked, an empty save answered with a toast drawn BEHIND the dialog's
+ * backdrop, and a URL that was not http(s) came back as the server's English
+ * ("url must start with http:// or https://") — release-candidate sweep,
+ * 2026-09-21. The URL rule is the server's (validWebhookURL).
+ */
+const formTried = ref(false);
+const formFailure = ref('');
+watch([formName, formUrl], () => {
+  formFailure.value = '';
+});
+const nameError = computed(() =>
+  formTried.value && !formName.value.trim() ? t('webhooks.errName') : '',
+);
+const urlError = computed(() => {
+  const u = formUrl.value.trim();
+  if (!u) return formTried.value ? t('webhooks.errUrl') : '';
+  return /^https?:\/\/[^\s/]+/i.test(u) ? '' : t('webhooks.errUrlScheme');
+});
+
 async function save() {
+  formTried.value = true;
+  formFailure.value = '';
   const name = formName.value.trim();
   const url = formUrl.value.trim();
-  if (!name || !url) {
-    toast.error(t('webhooks.errNameUrl'));
-    return;
-  }
+  if (nameError.value || urlError.value) return;
   saving.value = true;
   try {
     const events = Array.from(formEvents.value);
@@ -109,7 +191,7 @@ async function save() {
     showForm.value = false;
     await load();
   } catch (e: unknown) {
-    toast.error(extractError(e, 'Save failed'));
+    formFailure.value = extractError(e, t('errors.generic'));
   } finally {
     saving.value = false;
   }
@@ -120,7 +202,7 @@ async function toggleEnabled(target: WebhookTarget, enabled: boolean) {
     await WebhooksApi.update(target.id, { enabled });
     target.enabled = enabled;
   } catch (e: unknown) {
-    toast.error(extractError(e, 'Update failed'));
+    toast.error(extractError(e, t('errors.updateFailed')));
     await load();
   }
 }
@@ -132,7 +214,7 @@ async function removeTarget(target: WebhookTarget) {
     toast.success(t('webhooks.deleted'));
     await load();
   } catch (e: unknown) {
-    toast.error(extractError(e, 'Delete failed'));
+    toast.error(extractError(e, t('errors.deleteFailed')));
   }
 }
 
@@ -168,10 +250,27 @@ async function testTarget(target: WebhookTarget) {
     }
     await load();
   } catch (e: unknown) {
-    toast.error(extractError(e, 'Test failed'));
+    toast.error(extractError(e, t('errors.actionFailed')));
   } finally {
     testingId.value = null;
   }
+}
+
+/** The row's verbs, behind its one pinned `Actions` control. `Test` fires a
+ *  live delivery, so it is disabled while one is already in flight for this
+ *  row rather than being clickable twice. */
+function rowActions(row: WebhookTarget): ContextAction[] {
+  return [
+    { key: 'test', label: t('webhooks.test'), icon: 'upload', disabled: testingId.value === row.id },
+    { key: 'edit', label: t('common.edit'), icon: 'rename' },
+    { key: 'delete', label: t('common.delete'), icon: 'delete', danger: true },
+  ];
+}
+
+function onRowAction(key: string, row: WebhookTarget) {
+  if (key === 'test') testTarget(row);
+  else if (key === 'edit') openEdit(row);
+  else if (key === 'delete') removeTarget(row);
 }
 </script>
 
@@ -196,84 +295,85 @@ async function testTarget(target: WebhookTarget) {
 
     <p class="text-sm text-zinc-600 dark:text-zinc-400">{{ t('webhooks.subtitle') }}</p>
 
-    <TableScroll class="rounded-xl border border-zinc-200 dark:border-zinc-800">
-      <table class="w-full text-sm">
-        <thead class="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
-          <tr>
-            <th class="px-3 py-2 text-left">{{ t('common.name') }}</th>
-            <th class="px-3 py-2 text-left">URL</th>
-            <th class="px-3 py-2 text-left">{{ t('webhooks.fields.events') }}</th>
-            <th class="px-3 py-2 text-left">{{ t('webhooks.fields.secret') }}</th>
-            <th class="px-3 py-2 text-left">{{ t('webhooks.fields.lastStatus') }}</th>
-            <th class="px-3 py-2 text-left">{{ t('webhooks.fields.enabled') }}</th>
-            <th class="px-3 py-2 text-right tbl-actions">{{ t('webhooks.fields.actions') }}</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
-          <tr v-for="w in items" :key="w.id" class="bg-white dark:bg-zinc-950">
-            <td class="px-3 py-2 font-medium">{{ w.name }}</td>
-            <td class="px-3 py-2 font-mono text-xs"><div class="max-w-xs truncate" :title="w.url">{{ w.url }}</div></td>
-            <td class="px-3 py-2 text-xs">
-              <template v-if="w.events.length">
-                <span
-                  v-for="ev in w.events"
-                  :key="ev"
-                  class="mr-1 inline-block rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] dark:bg-zinc-800"
-                  >{{ ev }}</span
-                >
-              </template>
-              <span v-else class="text-zinc-500">{{ t('webhooks.allEvents') }}</span>
-            </td>
-            <td class="px-3 py-2">
-              <Badge v-if="w.secret_set" tone="emerald">{{ t('webhooks.secretSet') }}</Badge>
-              <Badge v-else tone="zinc">{{ t('webhooks.secretUnset') }}</Badge>
-            </td>
-            <td class="px-3 py-2 text-xs">
-              <template v-if="w.last_http_status != null">
-                <Badge :tone="deliveryOk(w) ? 'emerald' : 'rose'" :title="deliveryTooltip(w)">
-                  {{ deliveryBadgeText(w) }}
-                </Badge>
-              </template>
-              <template v-else-if="w.last_status">
-                <Badge :tone="w.last_status.status === 'sent' ? 'emerald' : 'rose'">
-                  {{ w.last_status.status === 'sent' ? t('webhooks.statusSent') : t('webhooks.statusFailed') }}
-                </Badge>
-                <span v-if="w.last_status.error" class="ml-1 text-rose-500">— {{ w.last_status.error }}</span>
-                <div class="mt-0.5 text-[11px] text-zinc-500">{{ formatDate(w.last_status.at, locale) }}</div>
-              </template>
-              <span v-else class="text-zinc-500">—</span>
-            </td>
-            <td class="px-3 py-2">
-              <Toggle :model-value="w.enabled" @update:model-value="(v: boolean) => toggleEnabled(w, v)" />
-            </td>
-            <td class="px-3 py-2 tbl-actions">
-              <div class="flex justify-end gap-1">
-                <Button size="xs" variant="outline" :loading="testingId === w.id" @click="testTarget(w)">
-                  <Send class="h-3.5 w-3.5" />
-                  {{ t('webhooks.test') }}
-                </Button>
-                <Button size="xs" variant="ghost" @click="openEdit(w)" :aria-label="t('common.edit')">
-                  <Pencil class="h-3.5 w-3.5" />
-                </Button>
-                <Button size="xs" variant="ghost" @click="removeTarget(w)" :aria-label="t('common.delete')">
-                  <Trash2 class="h-3.5 w-3.5 text-rose-500" />
-                </Button>
-              </div>
-            </td>
-          </tr>
-          <tr v-if="!items.length && !loading">
-            <td colspan="7" class="px-3 py-8 text-center text-zinc-500 dark:text-zinc-400">
-              {{ t('webhooks.empty') }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </TableScroll>
+    <!-- The default webhook sits beside the targets so every place an event
+         goes is set on ONE page (it used to be on the notifications page). -->
+    <GlobalWebhookCard />
+
+    <DataTable
+      table-id="admin.webhooks"
+      :columns="columns"
+      :rows="items"
+      :loading="loading"
+      :empty="t('webhooks.empty')"
+      row-key="id"
+      :row-actions="(row: WebhookTarget) => rowActions(row)"
+      :row-actions-test-id="(row: WebhookTarget) => `webhook-actions-${row.id}`"
+      @row-action="(key: string, row: WebhookTarget) => onRowAction(key, row)"
+    >
+      <template #cell-url="{ row }">
+        <span class="tbl-mono tbl-clamp" :title="row.url">{{ row.url }}</span>
+      </template>
+
+      <!-- ⚠ Wrapped: a DataTable cell is a flex row, and the badges would
+           otherwise run off its right edge instead of wrapping. -->
+      <template #cell-events="{ row }">
+        <div v-if="row.events.length">
+          <Badge v-for="ev in row.events" :key="ev" tone="zinc" size="xs" class="me-1">{{ ev }}</Badge>
+        </div>
+        <span v-else class="tbl-sub">{{ t('webhooks.allEvents') }}</span>
+      </template>
+
+      <template #cell-secret="{ row }">
+        <Badge v-if="row.secret_set" tone="emerald">{{ t('webhooks.secretSet') }}</Badge>
+        <Badge v-else tone="zinc">{{ t('webhooks.secretUnset') }}</Badge>
+      </template>
+
+      <template #cell-last_status="{ row }">
+        <template v-if="row.last_http_status != null">
+          <Badge :tone="deliveryOk(row) ? 'emerald' : 'rose'" :title="deliveryTooltip(row)">
+            {{ deliveryBadgeText(row) }}
+          </Badge>
+        </template>
+        <div v-else-if="row.last_status">
+          <Badge :tone="row.last_status.status === 'sent' ? 'emerald' : 'rose'">
+            {{ row.last_status.status === 'sent' ? t('webhooks.statusSent') : t('webhooks.statusFailed') }}
+          </Badge>
+          <span v-if="row.last_status.error" class="ms-1 text-rose-500">— {{ row.last_status.error }}</span>
+          <span class="tbl-sub">{{ formatDate(row.last_status.at, locale) }}</span>
+        </div>
+        <span v-else>—</span>
+      </template>
+
+      <template #cell-enabled="{ row }">
+        <Toggle :model-value="row.enabled" @update:model-value="(v: boolean) => toggleEnabled(row, v)" />
+      </template>
+
+    </DataTable>
 
     <Modal v-model="showForm" :title="editingId == null ? t('webhooks.add') : t('webhooks.edit')" size="lg">
-      <form class="space-y-4" @submit.prevent="save">
-        <Input v-model="formName" :label="t('common.name')" :placeholder="t('webhooks.namePlaceholder')" />
-        <Input v-model="formUrl" label="URL" placeholder="https://example.com/hooks/filex" />
+      <!-- ⚠ novalidate: the boxes are marked `required` for the star and for
+           assistive tech, but the checking is ours (said in the panel's
+           language, inside the dialog). Without it the browser intercepts
+           Enter / a submit button with its own bubble, in the BROWSER's
+           language, and our check never runs (seen in the RC re-test,
+           2026-09-21: an empty New webhook save showed no message of ours). -->
+      <form class="space-y-4" novalidate @submit.prevent="save">
+        <Input
+          v-model="formName"
+          :label="t('common.name')"
+          :placeholder="t('webhooks.namePlaceholder')"
+          required
+          :error="nameError || null"
+          name="webhook-name"
+        />
+        <Input
+          v-model="formUrl"
+          label="URL"
+          placeholder="https://example.com/hooks/filex"
+          required
+          :error="urlError || null"
+          name="webhook-url"
+        />
         <div>
           <Input
             v-model="formSecret"
@@ -300,12 +400,14 @@ async function testTarget(target: WebhookTarget) {
               :key="ev"
               :model-value="formEvents.has(ev)"
               :label="t(webhookEventKey(ev))"
-              :description="ev"
+              :description="eventNote(ev)"
+              :data-testid="`webhook-event-${ev}`"
               @update:model-value="(v: boolean) => toggleEvent(ev, v)"
             />
           </div>
         </div>
         <Toggle v-model="formEnabled" :label="t('webhooks.fields.enabled')" />
+        <p v-if="formFailure" class="error-text" role="alert" data-testid="webhook-form-error">{{ formFailure }}</p>
         <div class="flex justify-end gap-2">
           <Button type="button" size="sm" variant="ghost" @click="showForm = false">{{ t('common.cancel') }}</Button>
           <Button type="submit" size="sm" variant="primary" :loading="saving">{{ t('common.save') }}</Button>

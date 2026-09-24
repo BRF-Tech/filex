@@ -32,6 +32,7 @@ import type {
   StorageWrite,
 } from '../types/Connections';
 import { useFileApi } from './useFileApi';
+import { serverWords } from '../lib/errorWords';
 
 /**
  * The URL prefix the `/api/...` routes hang off.
@@ -108,9 +109,14 @@ export function useConnections(config: ExplorerConfig) {
     return (e as { status?: number } | null)?.status;
   }
 
+  /** A refusal, said — lib/errorWords `serverWords`, the one rule every
+   *  connection panel shares (it used to print the server's `error` field as
+   *  it came: an environment variable, to a regular user). ⚠ The locale is
+   *  passed because what comes back may be the SERVER's own sentence: it
+   *  never met a translator, and an Arabic panel needs its machine runs
+   *  isolated (lib/direction `foreignText`). */
   function messageOf(e: unknown): string {
-    const err = e as { message?: string } | null;
-    return err?.message || String(e);
+    return serverWords(e, config.locale);
   }
 
   /** The full picture, in as few round-trips as the permission allows. */

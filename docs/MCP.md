@@ -7,6 +7,10 @@ files — with no browser session. The same surface speaks **Model Context
 Protocol** (MCP) at `/api/ai/mcp`, so an MCP-capable model gets filex as a native
 tool set.
 
+The interface calls these credentials **API keys** (the admin panel's **API / MCP**
+page, the explorer's **API keys** entry); the HTTP API and this page call them
+tokens (`X-Filex-Token`, `fxt_…`) — they are the same thing.
+
 Everything here is authenticated by an **API token** (never a cookie), scoped to
 a set of verbs, optionally locked to a single sub-folder, and gated by the same
 [RBAC](RBAC.md) grants that apply to the interactive UI. A token can therefore be
@@ -43,19 +47,21 @@ with its `kind`:
 
 | Kind | What it is | Minted by | Identity surfaces |
 |---|---|---|---|
-| `user` | one person's own credential — their CLI, WebDAV/SFTP/FTPS/S3 client, `filex mount` | `POST /api/tokens` (self-service) | all of them |
+| `user` | one person's own credential — their CLI, WebDAV/SFTP/FTPS/S3 client, `filex mount`, the desktop app | `POST /api/tokens` (self-service); the desktop app's sign-in (`POST /api/auth/desktop/complete`, browser session only — see [DESKTOP.md](DESKTOP.md#the-token-the-app-is-given)) | all of them |
 | `app` | an integration — a host app's proxy, a bot, an MCP client | `POST /api/admin/ai-tokens` | suppressed |
 
 For an `app` token filex refuses every **self-service credential surface** with
 403 — `/api/tokens`, `/api/auth/s3-keys`, `/api/auth/ssh-keys`,
-`/api/auth/nfs-exports` — and the explorer's navigation panel drops **API
-keys**, **Recent**, **Starred** and **Shared with me**. Nothing else changes:
+`/api/auth/nfs-exports`, and reading a share link's PIN back
+(`GET /api/shares/{id}/pin`) — and the explorer's navigation panel drops **API
+keys**, **Recent**, **Starred** and **Shared with me** (and **My shares**, where
+the host draws it). Nothing else changes:
 same scopes, same RBAC, same confinement, and the panel keeps Upload, the
 storage list, Trash and "How to connect". Inside "How to connect" the guides
 stay and the mint forms are replaced by a line saying this session cannot
 create credentials.
 
-All four refuse from one implementation (`handlers.RequirePersonalCaller`),
+All of them refuse from one implementation (`handlers.RequirePersonalCaller`),
 because they answer one question: *show me, and let me mint, the credentials of
 the person calling.* Gating only the first of them still let an embed visitor
 mint an S3 access key bound to the token's owner — the same hole, a different
@@ -101,8 +107,10 @@ Authorization: Bearer <token>
 
 ### Creating a token
 
-Two creation paths, both authenticated by a **logged-in session** (you mint a
-token from the panel, not from another token):
+Two creation paths. The admin door needs an **admin session**; the
+self-service door takes a browser session **or a person's own `user`
+token** — and since v0.43.0 a token caller may only mint a credential no
+wider than itself (see *Ceiling rules*). An `app` token is refused outright:
 
 **1. Admin — `POST /api/admin/ai-tokens`** (admin session). Full control: bind to
 any user, set any scopes, label, and expiry.
@@ -124,9 +132,12 @@ curl -X POST https://files.example.com/api/admin/ai-tokens \
   integrations' credentials, so it defaults to `app`; pass `"user"` when an
   admin is minting a personal token on somebody's behalf. An unknown value is
   rejected (400) rather than folded into `app`.
-- `scopes` — comma-separated allow-list (see [Scopes](#scopes)). **Empty ==
-  every scope** (full access for the bound user's role). Any scope outside the
-  canonical set is rejected up front (so a typo can't silently grant nothing).
+- `scopes` — comma-separated allow-list (see [Scopes](#scopes)), **required:
+  at least one verb**. An empty list is refused with `400 scopes_required`
+  (since v0.43.0 — before, it granted every scope, `admin` included). `admin`
+  is granted only when it is in the list. Any scope outside the canonical set
+  is rejected up front (`400 scope_unknown`), so a typo can't silently grant
+  nothing.
 - `label` / `expires_in_days` — optional.
 
 `GET /api/admin/ai-tokens` lists all tokens (no secrets); `DELETE
@@ -147,11 +158,20 @@ Ceiling rules (privilege-escalation guards):
 
 - **`admin` scope is never allowed** here.
 - A **viewer** account may only mint `read` + `mcp`; `write`/`delete` are rejected.
-- **Empty scopes are never stored** — they would mean "all" (including admin), so
-  they are filled with a role-appropriate default (`read,mcp` for a viewer;
-  `read,write,delete,mcp` for a user).
+- **At least one verb is required**, exactly as on the admin door: an empty
+  list (or a `root:` scope with no verb) is refused with `400 scopes_required`.
+  Until v0.43.0 this door quietly filled a default instead.
 - A `root:` scope must be **⊆ the caller's own grants** at that path (≥ viewer,
   or ≥ editor when the token also carries write/delete).
+- ⚠⚠ **Since v0.43.0 the calling credential is a ceiling of its own.** When
+  the caller is a token rather than a browser session, what it mints must
+  hold a subset of the caller's verbs, a `root:` confinement inside the
+  caller's, and an expiry no later than the caller's; and a narrow caller
+  cannot borrow a wider parent token. A wider request is refused with
+  **`403`, `reason: "token_ceiling"`**, naming what was too wide. The same
+  rule guards `POST /api/auth/s3-keys`, `/api/auth/ssh-keys` and
+  `/api/auth/nfs-exports`. A browser session has no ceiling to exceed, and
+  credentials that already exist are untouched.
 
 `GET /api/tokens` lists the caller's own tokens; `PATCH /api/tokens/{id}` edits
 its label / usernames; `DELETE /api/tokens/{id}` revokes one
@@ -164,8 +184,18 @@ token both work exactly as before.
 
 ### Scopes
 
-`RequireScope` gates each verb. A token with an **empty** scope field grants
-**everything** (full access for the bound user's role).
+> ⚠ **The interface calls these permissions.** Since v0.43.0 the API keys
+> panel, its table and the app install review all say *permission*; the
+> request field, the error codes and this reference still say `scopes`,
+> because that is the name the API accepts. Only the word a person reads
+> changed — `{"scopes": "read,write,mcp"}` is unchanged on the wire.
+
+`RequireScope` gates each verb. A token grants **exactly the scopes in its
+list** — an empty list grants **nothing** (since v0.43.0; until then it
+granted everything, `admin` included). No door issues an empty list any more,
+and the upgrade to v0.43.0 rewrote every existing empty list as the explicit
+full list `read,write,delete,mcp,admin`, so an old token kept exactly the
+access it had — see the CHANGELOG's upgrade note, and review those tokens.
 
 | Scope | Grants |
 |-------|--------|
@@ -203,6 +233,12 @@ ceiling** it cannot escape. `<adapter>` is a storage name (see [STORAGE.md](STOR
   confinement middleware, the path a host app uses when it proxies the embedded
   explorer per-request. On the direct `/api/ai` surface, confinement comes from
   the token's `root:` scope.
+- The **notification bell** (`/api/notifications`: the list, the unread
+  count, mark-read and mark-all-read) is confined the same way: a confined
+  token reads — and marks read — only the notices about files inside its
+  root, its owner's own notices included; a notice that names no file (the
+  admin page's test, an app's notice about a list) stays readable. The admin
+  history and the admin surface refuse a confined token outright.
 - A confined agent should call **`GET /api/ai/root`** (or the **`file_root`** MCP
   tool) first: it reports whether you're confined, your root, the storage
   adapters you can address, and a hint on how to phrase paths — so the agent
@@ -226,11 +262,13 @@ storage's root (or, when confined, your root).
 | GET | `/api/ai/info?path=` | `read` | → `{entry:{…}}` |
 | GET | `/api/ai/download?path=` | `read` | → raw bytes (stream) |
 | GET | `/api/ai/search?path=&q=` | `read` | → `{entries:[…]}` — names and `tag:` filters only; content search is the MCP `file_search` tool |
+| GET | `/api/ai/tags?path=` | `read` | → `{path, tags:[{name, kind}], can_edit_team}` — the file's tags **as the token's user sees them** ([Tags](SEARCH.md#tags--personal-and-team)) |
+| POST | `/api/ai/tags` | `write` | `{path, tags:[{name, kind}]}` — the tags that user can see become exactly this list (`[]` clears them); every item names its `kind` |
 | POST | `/api/ai/upload` | `write` | `{path, content}` / `{path, content_base64}` / multipart `file` |
 | POST | `/api/ai/upload/ticket` | `write` | `{path, expires_in_seconds?, max_bytes?}` → `{url, ticket, path, max_bytes, expires_at, curl}` |
 | PUT/POST | `/u/{ticket}` | *(none — see below)* | raw body (`curl -T`) or multipart `file` → `{entry:{…}}` |
 | POST | `/api/ai/mkdir` | `write` | `{path}` |
-| POST | `/api/ai/move` | `write` | `{src, dst}` — across storages too (see [below](#moving-files-between-storages)) |
+| POST | `/api/ai/move` | `write` | `{src, dst}` — across storages too (see [below](#moving-files-between-storages)). `409` when `dst` is already taken |
 | POST | `/api/ai/delete` | `delete` | `{path}` → soft-delete to trash |
 | POST | `/api/ai/share` | `write` | `{path, pin?, expires_in_days?, max_downloads?}` → `{url, token, pin?}` |
 | POST | `/api/ai/unshare` | `write` | `{token}` |
@@ -293,7 +331,8 @@ curl -T ./dataset.parquet 'https://files.example.com/u/9f3c…'
 filex embeds a **Model Context Protocol** server over **streamable HTTP**
 (stateless JSON-RPC: one request → one JSON response; a `GET` opens an SSE
 stream). It is mounted at `POST|GET /api/ai/mcp` behind the `mcp` scope, so any
-token used with it must carry `mcp` (or empty scopes).
+token used with it must carry `mcp`. The file tools need nothing more; the
+`admin_*` tools additionally need `admin` (and an unconfined token).
 
 Connect an MCP client by pointing it at the endpoint and supplying the token as a
 header. With the Claude Code CLI:
@@ -339,9 +378,10 @@ user's role + grants + confinement):
 | `file_write` | Create/overwrite a file (`content` text or `content_base64` binary). Content you generate — never a file off your disk. |
 | `file_upload_ticket` | Get a short-lived, **credential-free** URL (plus the ready `curl -T` line) for a LOCAL file of any size. The bytes never enter the conversation; the URL takes one upload to a fixed path. |
 | `file_delete` | Soft-delete to filex trash (recoverable from the UI). |
-| `file_move` | Move or rename a file/folder. Works across storages: the bytes are copied and verified, then the source is removed ([below](#moving-files-between-storages)). |
+| `file_move` | Move or rename a file/folder. **Never overwrites**: a destination that is already taken gets a free name beside it (`rapor-copy.txt`), so read the returned `entry.path` rather than assuming the one you asked for; `409 NO_FREE_NAME` when every candidate name is taken too. Works across storages: the bytes are copied and verified, then the source is removed — unless something was left behind (`entry.source_kept`, [below](#links-that-cannot-travel)). |
 | `file_mkdir` | Create a directory. |
-| `file_search` | Search file/folder names **and** (by default) extracted file contents in a storage. Forgiving on separators and typos; words may be in any order and may be answered by a folder (`main code` finds `Code/main.go`); supports `tag:` / `-tag:` filters; `content=false` restores name-only. |
+| `file_search` | Search file/folder names **and** (by default) extracted file contents in a storage. Forgiving on separators and typos; words may be in any order and, with the search index, may be answered by a folder (`main code` finds `Code/main.go`; without the index, or with `content=false`, every word has to be in the file's own name); supports `tag:` / `-tag:` filters (your personal and your team's tag of that name both count); `content=false` restores name-only. |
+| `file_tags` | Read a file's tags (`{path}`), or set them (`{path, set:[{name, kind}]}`). Every tag says its **kind**: `personal` (only the token's user sees it) or `team` (everyone in the tenant who can see the file; adding or removing one needs edit permission — `can_edit_team` says whether you have it). There is **no default kind** on this surface: an agent names the kind of every tag it writes. Other people's personal tags and other tenants' tags are never shown or touched. |
 | `file_share` | Public share link for a file/folder (folders → ZIP); optional PIN/expiry/max-downloads. Use this to hand a file to someone instead of streaming it back. |
 | `file_unshare` | Revoke a share by its token. |
 | `file_zip` | Pack files/folders into a `.zip` **on the server** (dest lands in storage; share it to download). |
@@ -390,8 +430,8 @@ under `/api/ai/admin`; they are reachable only through the panel's own
 ## Security
 
 - **Least privilege by scope.** Hand each agent only the verbs it needs; keep
-  `admin` for trusted operator tooling. Empty scopes = full access, so set scopes
-  explicitly on shared/automated tokens. ⚠ Bind the token to a **non-admin**
+  `admin` for trusted operator tooling. Every token names its scopes (an
+  empty list is refused, and grants nothing), and `admin` is never implied. ⚠ Bind the token to a **non-admin**
   account: the panel's `/api/admin/*` routes check the account's role rather
   than the token's scopes ([Scopes](#scopes)).
 - **Per-agent confinement.** A `root:<adapter>://<rel>` scope is a hard ceiling
@@ -438,7 +478,14 @@ really is one person's token that migration `00030` defaulted to `app` — flip 
 with `PATCH /api/admin/ai-tokens/{id}` `{"kind":"user"}`. The message names the
 token's label and id so it can be found from a proxy log.
 
-### 403 Forbidden (path outside confined root / `access denied: no permission`)
+### 403 Forbidden (`reason: "token_ceiling"`)
+A token tried to create a credential wider than itself — a verb it does not
+hold, a folder outside its `root:`, or an expiry past its own. The message
+names what was too wide. Give the automation a token that holds what it hands
+out, or create the credential from a signed-in browser (a session has no
+ceiling to exceed). Credentials created before v0.43.0 are untouched.
+
+### 403 Forbidden (path outside confined root
 The path is outside the token's `root:` ceiling, outside an `X-Filex-Root`
 narrowing, or the bound user lacks an RBAC grant there. Call `file_root` /
 `GET /api/ai/root` to see your root and use a **bare relative path** under it.
@@ -502,8 +549,64 @@ the source removed.
 
 ⚠ The source is **deleted, not trashed** — moving between storages is done to
 free the first one. A read-only destination, or a folder you have no editor
-right on, is refused before a byte moves. Same-storage moves are unchanged (a
-plain rename).
+right on, is refused before a byte moves. Same-storage moves are a plain
+rename.
+
+### A move never overwrites
+
+⚠⚠ If `dst` is already taken, the arriving item lands on a **free name beside
+it** — `rapor.txt` → `rapor-copy.txt`, then `rapor-copy-2.txt` — exactly as a
+paste in the web UI does. Nothing is replaced and nothing is lost; the
+destination folder simply ends up holding both files. Moving an item onto its
+own path is a no-op.
+
+⭐ **So read `entry.path` in the answer.** It names where the file really is,
+which is not always what you asked for:
+
+```json
+{ "entry": { "path": "cold://arsiv/rapor-copy.txt", "name": "rapor-copy.txt", "type": "file" } }
+```
+
+An agent that reports the path it requested — rather than the one it got back —
+will tell its user the file is somewhere it is not. To *replace* a file on
+purpose, `file_write` it (that one does overwrite, and the previous bytes are
+kept as a version — see [TRASH-VERSIONING.md](TRASH-VERSIONING.md)).
+
+⭐ `entry.type` is trustworthy too: `"dir"` when you moved a folder, `"file"`
+when you moved a file — the same two words `file_list` and `file_info` use. (A
+move used to answer `"file"` for everything, folders included, so do not carry
+over a habit of ignoring it.)
+
+### Links that cannot travel
+
+A folder moved **between storages** may hold symlinks the source cannot follow
+— broken, pointing outside the storage, or a remote link filex does not resolve
+— or a folder link back into itself. Those are **left behind, never read**, the
+rest of the folder is carried, and because a move deletes only what it carried,
+⚠ **the source is kept**. The answer says so:
+
+```json
+{ "entry": { "path": "cold://arsiv/proje", "name": "proje", "type": "dir",
+             "source_kept": true,
+             "left_behind": [ { "path": "hot://proje/kirik", "reason": "broken" } ] } }
+```
+
+`reason` is `broken`, `outside_root`, `unresolved`, `cycle` (a folder link into
+what was already carried), `too_deep` (more than 64 folders down — real data)
+or `link`. It is a **success**: the copy at `entry.path` is complete without
+those entries. Do not retry — a retry lands a second copy on a free name. Tell
+your user what stayed, and delete the source only if they want it gone.
+
+**`dst` is never written over — and the move is not refused either.** A taken
+`dst` gets a free name beside it (above), so read `entry.path`. Only when
+every candidate name is taken too does the move refuse, with
+`409 NO_FREE_NAME`, and then nothing moves; `503` when the backend cannot say
+whether the name is free. A move onto its own path changes nothing, and a
+case-only rename is allowed. (Before v0.43.0 the move replaced the file that
+had the name, and a transfer between storages wrote over the destination
+file.) ⚠ An explorer **rename**, where a person typed the name, answers
+`409 NAME_TAKEN` instead — de-collision is for an agent, which has nobody to
+ask.
 
 ## See also
 

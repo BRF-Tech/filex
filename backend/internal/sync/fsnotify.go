@@ -1,14 +1,14 @@
 package sync
 
 import (
+	"io/fs"
 	"log/slog"
-	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 
+	"github.com/brf-tech/filex/backend/internal/scanrule"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 )
@@ -44,7 +44,7 @@ func (s *storageSyncer) loopFSNotify() {
 	}
 	defer w.Close()
 
-	if err := addRecursive(w, root); err != nil {
+	if err := addRecursive(w, root, s.rule); err != nil {
 		slog.Warn("sync: fsnotify add roots", slog.String("err", err.Error()))
 	}
 
@@ -64,6 +64,13 @@ func (s *storageSyncer) loopFSNotify() {
 		case ev, ok := <-w.Events:
 			if !ok {
 				return
+			}
+			// A change the walk would not look at is not a reason to walk
+			// (issue #44): a download client filling `incomplete/`, or git
+			// rewriting `.git/index`, would otherwise start a full scan every
+			// two seconds for as long as it runs.
+			if !watched(root, ev.Name, s.rule) {
+				continue
 			}
 			// Add new directories on the fly.
 			if ev.Has(fsnotify.Create) {
@@ -87,15 +94,42 @@ func (s *storageSyncer) loopFSNotify() {
 	}
 }
 
-// addRecursive walks root and adds every directory to the watcher.
-func addRecursive(w *fsnotify.Watcher, root string) error {
-	return filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+// addRecursive adds every directory under root the walk would enter to the
+// watcher — the same scanrule the scan asks, so what is watched and what is
+// scanned cannot drift apart.
+//
+// ⚠ It used to skip every folder whose NAME began with a dot and still
+// descend into it: `.git` itself went unwatched while every folder inside it
+// was watched, and `.versions/<id>/` — filex's own version history — raised
+// a full scan on every snapshot. A folder the rule skips is now skipped whole
+// (SkipDir), and a hidden folder is watched like any other unless the
+// storage's exclusions say otherwise (`.*` does).
+func addRecursive(w *fsnotify.Watcher, root string, rule *scanrule.Rule) error {
+	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip
 		}
-		if info.IsDir() && !strings.HasPrefix(filepath.Base(p), ".") {
-			_ = w.Add(p)
+		if !d.IsDir() {
+			return nil
 		}
+		if p != root && !watched(root, p, rule) {
+			return filepath.SkipDir
+		}
+		_ = w.Add(p)
 		return nil
 	})
+}
+
+// watched reports whether abs, a path under the storage's root on disk, is
+// something the walk looks at.
+func watched(root, abs string, rule *scanrule.Rule) bool {
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return true
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." {
+		return true
+	}
+	return !rule.Skips(rel)
 }

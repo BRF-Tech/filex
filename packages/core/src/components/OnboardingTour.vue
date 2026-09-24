@@ -19,6 +19,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { inlineKeyStep } from '../lib/direction';
 import { shortcutHint } from '../composables/useKeyboardShortcuts';
 
 const props = defineProps<{
@@ -33,7 +34,8 @@ const emit = defineEmits<{
   (e: 'close'): void;
 }>();
 
-const { t } = useLocale(() => props.locale);
+// ⚠ RTL: `dir` goes on the teleported tour and orders its choices below.
+const { t, dir } = useLocale(() => props.locale);
 
 /* The tour teaches two keys by name, and both are remappable. Read them
  * from the registry so the sentence stays true for whoever is taking the
@@ -260,6 +262,14 @@ async function place() {
   const midX = clampX(rect.left + rect.width / 2 - cw / 2);
   const midY = clampY(rect.top + rect.height / 2 - ch / 2);
 
+  /* Beside it: toward the inline END first — right in LTR, LEFT in RTL, where
+     the reading eye goes next. ⚠ The spotlight and these numbers stay
+     PHYSICAL (they are the target's own viewport box); only which side is
+     tried first follows the direction. */
+  const toRight = { fits: sRight + GAP + cw <= vw - 12, left: sRight + GAP };
+  const toLeft = { fits: sLeft - GAP - cw >= 12, left: sLeft - GAP - cw };
+  const beside = dir.value === 'rtl' ? [toLeft, toRight] : [toRight, toLeft];
+
   let top: number;
   let left: number;
   if (sBottom + GAP + ch <= vh - 12) {
@@ -268,11 +278,11 @@ async function place() {
   } else if (sTop - GAP - ch >= 12) {
     top = sTop - GAP - ch;
     left = midX;
-  } else if (sRight + GAP + cw <= vw - 12) {
-    left = sRight + GAP;
+  } else if (beside[0].fits) {
+    left = beside[0].left;
     top = midY;
-  } else if (sLeft - GAP - cw >= 12) {
-    left = sLeft - GAP - cw;
+  } else if (beside[1].fits) {
+    left = beside[1].left;
     top = midY;
   } else {
     // Nothing fits — a target that fills the viewport. Clamp, and accept the
@@ -338,10 +348,11 @@ function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     e.stopPropagation();
     skip();
-  } else if (e.key === 'ArrowRight' || e.key === 'Enter') {
+  } else if (e.key === 'Enter' || inlineKeyStep(e.key, dir.value) === 1) {
+    // ⚠ RTL: "forward" is the arrow that points the way the line reads — ←.
     e.preventDefault();
     next();
-  } else if (e.key === 'ArrowLeft') {
+  } else if (inlineKeyStep(e.key, dir.value) === -1) {
     e.preventDefault();
     back();
   }
@@ -399,6 +410,7 @@ const themeClass = computed(() => `fe-ctx-backdrop--theme-${props.theme || 'auto
       <div
         v-if="open && step"
         class="fe-tour"
+        :dir="dir"
         :class="themeClass"
         :data-prefers-dark="prefersDark ? '1' : '0'"
         role="dialog"

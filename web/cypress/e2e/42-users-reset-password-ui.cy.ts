@@ -39,9 +39,16 @@ describe('users: reset password from the list (issue #25)', () => {
         const uid = (res.body.id ?? res.body.user?.id) as number;
 
         openUsers(email);
-        cy.contains('tr', email, { timeout: 10000 }).within(() => {
-          cy.get('svg[class*="key-round"]').closest('button').click();
-        });
+        // ⚠ The users list is the shared DataTable (one table, v0.43.0): its
+        // rows are `role="row"` flex rows, not `<tr>`, and the row's verbs moved
+        // into its Actions menu — so there is no key icon on the row to click.
+        // Both used to be selectors here and both went stale together; the
+        // first run of this release never got that far, because the login
+        // helper failed first. The menu gives every entry an address
+        // (RowActions: `<control testid>-<action key>`), which is what is used.
+        cy.contains('[role="row"]', email, { timeout: 10000 }).should('be.visible');
+        cy.get(`[data-testid="user-actions-${uid}"]`).click();
+        cy.get(`[data-testid="user-actions-${uid}-reset"]`).click();
 
         dialog().should('contain.text', email);
         dialog().invoke('text').should('not.match', /delete|\bsil/i);
@@ -72,12 +79,15 @@ describe('users: reset password from the list (issue #25)', () => {
     cy.visit('/admin/users');
     cy.contains('button', /add|new|ekle|yeni/i).filter(':visible').first().click();
     dialog().find('input[type="email"]').type(email);
-    dialog().find('input').not('[type="email"]').not('[type="password"]').first().type('SSO Fixture');
-    dialog().contains('button', /create|oluştur/i).click();
+    // Submitted with Enter, the way a keyboard does it. ⚠ Not by the button's
+    // TEXT: the form carries a hidden `sr-only` submit (for exactly this Enter)
+    // that also says "Create", and a text match found that one — covered, so
+    // the click failed with the dialog working (v0.43.0 release run).
+    dialog().find('input').not('[type="email"]').not('[type="password"]').first().type('SSO Fixture{enter}');
     cy.get('dialog[open]', { timeout: 10000 }).should('not.exist');
 
     cy.get('input[placeholder]').filter(':visible').first().type(email);
-    cy.contains('tr', email, { timeout: 10000 }).should('be.visible');
+    cy.contains('[role="row"]', email, { timeout: 10000 }).should('be.visible');
 
     cy.apiLogin().then((tok) => {
       cy.request({ url: `/api/admin/users?q=${encodeURIComponent(email)}`, headers: { Authorization: `Bearer ${tok}` } }).then((res) => {

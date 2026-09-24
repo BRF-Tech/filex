@@ -45,20 +45,42 @@
  */
 
 import { ref, type Ref } from 'vue';
+import { hasSession, registerPersonalMirror, savePref, setLocalPref } from './prefs';
 
 /** Map of `--fe-*` custom property → value. */
 export type ThemeTokenMap = Record<string, string>;
 
 export interface ThemeDef {
-  /** Stable id — persisted in localStorage, never shown to users. */
+  /** Stable id — what a palette choice stores (on the account where the host
+   *  keeps preferences there, `lib/prefs`; mirrored in localStorage for the
+   *  first paint), never shown to users. */
   id: string;
-  /** i18n catalogue key for the display name (tr + en). */
-  nameKey: string;
+  /**
+   * i18n catalogue key for the display name (tr + en).
+   *
+   * ⚠ Built-in palettes only. An operator's own theme carries `name` instead:
+   * "Acme Bulut" is not a string this product translates, and putting it
+   * through `t()` would print the key straight back at them the first time
+   * somebody named a theme something the catalogue did not contain.
+   */
+  nameKey?: string;
+  /** Literal display name — operator-defined themes only (tema:v1). */
+  name?: string;
   /** Palette applied when the resolved mode is light. */
   light: ThemeTokenMap;
   /** Palette applied when the resolved mode is dark. */
   dark: ThemeTokenMap;
 }
+
+/**
+ * tema:v1 — the prefix that keeps the two namespaces apart.
+ *
+ * An operator-defined theme's id is always `custom:<slug>`, so no name an
+ * operator types can ever shadow `night`, `forest` or `default`. The server
+ * stores the slug bare and adds the prefix on the way out
+ * (backend/internal/api/handlers/themes.go).
+ */
+export const CUSTOM_THEME_PREFIX = 'custom:';
 
 /**
  * ⚠⚠ `filex.palette`, NOT `filex.theme` — and the rename is a BUG FIX, not
@@ -476,25 +498,135 @@ export const THEMES: ThemeDef[] = [
   },
 ];
 
-export function themeById(id: string | null | undefined): ThemeDef | undefined {
-  return THEMES.find((t) => t.id === id);
+/* ------------------------------------------------------------------ */
+/* tema:v1 — operator-defined themes                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The instance's own themes, fetched once per page load from the public
+ * `GET /api/appearance` and published here.
+ *
+ * ⚠⚠ THE SERVER'S LIST IS THE ONLY DEFINITION OF "EXISTS", and that is what
+ * makes deleting a theme safe. Nothing goes and rewrites the stored choice of
+ * everybody who was using a deleted theme — there is more than one place such
+ * a choice can live (this browser's localStorage, a per-account document on
+ * the server) and a cleanup pass that missed one would leave somebody pinned
+ * to a palette that no longer paints anything. Instead every lookup RESOLVES:
+ * `themeById` returns undefined for an id the server did not send, and every
+ * caller already treats undefined as "the stock palette".
+ */
+const customThemes: Ref<ThemeDef[]> = ref([]);
+
+/**
+ * Replace the operator-defined themes. Called once at boot with the payload
+ * from `/api/appearance`.
+ *
+ * ⚠ It also RE-RESOLVES the active selection, which is the client half of
+ * "deleting a theme puts anybody using it back on the default": a browser
+ * holding `custom:acme` in localStorage keeps it across the fetch, and the
+ * moment a list arrives that does not contain it, the selection drops to
+ * `default`.
+ *
+ * ⚠⚠ The correction is LOCAL — `applyStoredPalette`, never `setTheme`. Third
+ * merge repair, and the most destructive of the three had it been left.
+ * `setTheme` now writes the account, so correcting through it would send a
+ * fact the SERVER just told us straight back to the server, as though the
+ * person had chosen it. That is harmless only when the correction is right.
+ * It is not always right: this browser's mirror can hold a stale id from
+ * before the account was read, the two fetches have no ordering, and a
+ * correction fired from that stale value would overwrite the account's real
+ * choice — on every device — for a theme that was never deleted.
+ *
+ * Leaving the account's dead id untouched costs nothing: every read resolves
+ * it to the stock palette anyway, which is the whole point of building
+ * deletion as resolution rather than as a cleanup pass. The first deliberate
+ * pick the person makes writes a live id over it.
+ */
+export function setCustomThemes(defs: ThemeDef[]): void {
+  customThemes.value = Array.isArray(defs) ? defs : [];
+  if (themeId.value !== DEFAULT_THEME_ID && !themeById(themeId.value)) {
+    applyStoredPalette(DEFAULT_THEME_ID);
+  }
 }
 
-/** Every token key ANY theme touches — used to fully clear inline overrides
- *  when switching themes (a theme that skips a token must not inherit the
- *  previous theme's value for it). */
-const ALL_TOKEN_KEYS: string[] = Array.from(
-  new Set(THEMES.flatMap((t) => [...Object.keys(t.light), ...Object.keys(t.dark)])),
-);
+/** Reactive handle for components that render the palette list. */
+export function useCustomThemes(): { customThemes: Ref<ThemeDef[]> } {
+  return { customThemes };
+}
+
+/**
+ * Every palette a person may pick: the built-ins, then the instance's own.
+ *
+ * ⚠ Operator themes come LAST and are never interleaved. The built-in order
+ * is the order of the gallery cards people have learned, and a theme named
+ * "Amber Kurumsal" sorting itself between Amber and Lilac would move the card
+ * under somebody's cursor the first time a theme was added.
+ */
+export function allThemes(): ThemeDef[] {
+  return [...THEMES, ...customThemes.value];
+}
+
+export function themeById(id: string | null | undefined): ThemeDef | undefined {
+  if (!id) return undefined;
+  return THEMES.find((t) => t.id === id) ?? customThemes.value.find((t) => t.id === id);
+}
+
+/** The display name of a theme, translated for built-ins and literal for an
+ *  operator's own. */
+export function themeName(theme: ThemeDef, t: (key: string) => string): string {
+  return theme.name ?? (theme.nameKey ? t(theme.nameKey) : theme.id);
+}
+
+/**
+ * Every token key ANY theme touches — used to fully clear inline overrides
+ * when switching themes (a theme that skips a token must not inherit the
+ * previous theme's value for it).
+ *
+ * ⚠⚠ A FUNCTION, not the constant it used to be. Computed once at module load
+ * it covered only the built-in palettes, so switching FROM an operator theme
+ * that set a token no built-in declares would leave that token's inline value
+ * on the root element — the new palette applied, and one stray colour from the
+ * old one survived it. It has to be recomputed against the list that is
+ * actually installed.
+ */
+function allTokenKeys(): string[] {
+  return Array.from(
+    new Set(allThemes().flatMap((t) => [...Object.keys(t.light), ...Object.keys(t.dark)])),
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /* Shared reactive state + persistence                                 */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Whether an id is worth holding on to before the server's theme list has
+ * arrived.
+ *
+ * ⚠ `themeById` cannot answer this at module load: the operator themes are
+ * fetched over the network and the first paint happens long before they land.
+ * A boot check that rejected every `custom:` id would silently reset the
+ * palette of anybody whose choice was an operator theme, on every page load —
+ * the preference would look like it never saved. So a prefixed id is kept on
+ * trust here and re-resolved for real by `setCustomThemes` once the list is
+ * in. Until then nothing paints it, which is the stock palette: correct, and
+ * the same thing the person would see anyway while the fetch is in flight.
+ */
+function plausibleThemeId(v: string | null): boolean {
+  return !!v && (!!themeById(v) || v.startsWith(CUSTOM_THEME_PREFIX));
+}
+
 function readStoredThemeId(): string {
+  // ⚠⚠ THE MIRROR BELONGS TO A PERSON, so with nobody signed in it is not read
+  // at all (`lib/prefs` → `hasSession`). It is not a machine's palette: it is a
+  // cache of ONE ACCOUNT's answer, and handing it to a signed-out window paints
+  // the last person who used this browser onto the sign-in page — which is what
+  // this line was measured doing on 2026-09-21, and is also how the operator's
+  // own default came to be suppressed (`instanceThemes.hasOwnChoice`).
+  if (!hasSession()) return DEFAULT_THEME_ID;
   try {
     const v = localStorage.getItem(THEME_LS_KEY);
-    if (v && themeById(v)) return v;
+    if (plausibleThemeId(v)) return v as string;
     // One-time carry-over from the shared key. `themeById` is what makes this
     // safe: 'light' / 'dark' / 'auto' are not palette ids, so a value the app's
     // mode wrote can never be mistaken for a palette here.
@@ -516,15 +648,105 @@ const themeId: Ref<string> = ref(
   typeof window === 'undefined' ? DEFAULT_THEME_ID : readStoredThemeId(),
 );
 
+/**
+ * Pick a palette.
+ *
+ * ⚠⚠ It is saved on the ACCOUNT, not only in this browser (`lib/prefs`).
+ * A palette lived in `localStorage` alone until v3, which meant a person who
+ * chose one on their laptop opened the product on their phone in the stock
+ * colours and had to choose again — reported by Burak as exactly that. The
+ * localStorage write stays as the FIRST-PAINT cache: it is what this browser
+ * reads before the account's answer can arrive, so the window does not flash
+ * the default on the way to the chosen one.
+ */
 export function setTheme(id: string): void {
-  const valid = themeById(id) ? id : DEFAULT_THEME_ID;
+  const valid = plausibleThemeId(id) ? id : DEFAULT_THEME_ID;
   themeId.value = valid;
   try {
-    if (valid === DEFAULT_THEME_ID) localStorage.removeItem(THEME_LS_KEY);
-    else localStorage.setItem(THEME_LS_KEY, valid);
+    // ⚠ tema:v1 — the stock palette is WRITTEN, not cleared. It used to be
+    // removed, on the reasonable-sounding grounds that "no key" and "the
+    // default" mean the same thing. They stopped meaning the same thing the
+    // moment an instance could have a default of its own: an operator whose
+    // house style is a brand theme needs to tell "this person has not chosen"
+    // from "this person deliberately chose the product's own colours", and
+    // with the key cleared those are the same state. The second one would
+    // have had the brand theme re-applied over it on every page load, which
+    // reads as a preference that will not save.
+    localStorage.setItem(THEME_LS_KEY, valid);
   } catch {
     /* quota / private mode */
   }
+  // ⚠⚠ `valid`, NEVER ''. This line is a merge repair and it must not go back.
+  // `THEME_LS_KEY` and `PREF_LS_KEYS.palette` are the SAME string,
+  // 'filex.palette'; `savePref` mirrors into local storage and `setLocalPref`
+  // DELETES the key when handed an empty value. So a `'' for stock` ternary
+  // here wrote the key on the line above and erased it on this one:
+  // `setTheme('default')` left no trace of itself, the account learned
+  // nothing, and "deliberately chose the product's own colours" collapsed back
+  // into "has never chosen" — the very state an instance default paints over,
+  // on every page load. "Never chosen" is the key being ABSENT, and nothing
+  // else.
+  savePref('palette', valid);
+}
+
+/**
+ * The account's palette has arrived: paint it, without sending it back.
+ *
+ * ⚠ Separate from `setTheme` on purpose. Echoing a value that came FROM the
+ * server back TO it is how a hydration turns into a write, and a write into
+ * another device's surprise.
+ *
+ * ⚠⚠ `plausibleThemeId`, not `themeById` — the second merge repair, and the
+ * race it closes is worth spelling out. The account's answer and the operator
+ * themes are two independent fetches with no ordering between them. When the
+ * account arrives first and says `custom:acme`, `themeById` cannot know that
+ * id yet (the list is still in flight), would call it invalid, and would drop
+ * the person onto the stock palette — writing that demotion into this
+ * browser's mirror. `setCustomThemes` then finds the selection already at the
+ * default and sees nothing to correct, so the choice is gone rather than
+ * restored. Holding a prefixed id on trust and letting the list resolve it for
+ * real is the same contract `readStoredThemeId` already follows at boot.
+ */
+export function applyStoredPalette(id: string | undefined | null): void {
+  // ⚠⚠ NOTHING is not an ANSWER. An account that carries no `palette` key has
+  // never been asked the question on this server; it has not said "the stock
+  // palette". Treating the two the same is how e2e 98-custom-theme.spec.ts:97
+  // went red: the browser painted its own `custom:e2e-acme` at boot, then
+  // `App.vue` hydrated an account document with no palette in it and called
+  // this function with `''`, which resolved to the stock id and overwrote both
+  // the selection AND this browser's mirror. `expect.poll(--fe-primary)` won
+  // the race against the fetch and the unpolled `--fe-bg` read on the very
+  // next line lost it, which is exactly what a flake caused by a real bug
+  // looks like.
+  //
+  // ⚠ The other three preferences already got this right and only the palette
+  // did not — `applyAccountTheme` (web/src/lib/theme.ts), `applyAccountDensity`
+  // (web/src/lib/density.ts) and `applyPrefLocale` (web/src/i18n) each return
+  // early on a value the account does not carry. This was the odd one out.
+  //
+  // ⚠⚠ Silence is not the same as an invalid id, either: `setCustomThemes`
+  // deliberately calls this with `DEFAULT_THEME_ID` to demote somebody off a
+  // theme the operator deleted, and that IS an answer and must still paint.
+  if (!id) return;
+  const valid = plausibleThemeId(id) ? id : DEFAULT_THEME_ID;
+  themeId.value = valid;
+  setLocalPref('palette', valid);
+}
+
+/**
+ * Paint a palette this person did not choose — the instance's own default,
+ * applied to somebody who has never expressed a preference.
+ *
+ * ⚠⚠ It records NOTHING: not the account, not this browser's mirror. An
+ * instance default is the operator's standing answer, not a personal choice,
+ * and the difference is load-bearing in both directions. Written to the
+ * account, it would overwrite on one device a choice the person made on
+ * another. Written to the mirror, it would make `hasOwnChoice()` true, so the
+ * day the operator picks a different house theme every existing person would
+ * stay pinned to the old one, permanently, with no way to tell why.
+ */
+export function applyInstanceDefault(id: string | undefined | null): void {
+  if (id && plausibleThemeId(id)) themeId.value = id;
 }
 
 /** Reactive handle for components: `{ themeId, setTheme }`. */
@@ -552,9 +774,23 @@ export type ThemeModePref = 'host' | 'auto' | 'light' | 'dark';
 
 export const THEME_MODE_LS_KEY = 'filex.thememode';
 
+/**
+ * ⚠ It is a PERSON's key, so a sign-out takes it with the rest
+ * (`lib/prefs` → `forgetPersonalPrefs`). Registered from here rather than
+ * listed over there because a storage key written down in two modules is the
+ * drift `lib/density`' header was written about.
+ */
+registerPersonalMirror(THEME_MODE_LS_KEY);
+
 const MODE_VALUES: ThemeModePref[] = ['host', 'auto', 'light', 'dark'];
 
 function readStoredThemeMode(): ThemeModePref {
+  // ⚠⚠ Same rule as the palette, same reason: light or dark is a PERSON's
+  // answer. `'host'` is the neutral one — the explorer then falls back to
+  // `config.theme || 'auto'` (FileExplorer.vue) and `'auto'` is
+  // `prefers-color-scheme`, which is exactly what the owner asked a signed-out
+  // window to follow.
+  if (!hasSession()) return 'host';
   try {
     const v = localStorage.getItem(THEME_MODE_LS_KEY) as ThemeModePref | null;
     return v && MODE_VALUES.includes(v) ? v : 'host';
@@ -578,6 +814,30 @@ export function setThemeMode(mode: ThemeModePref): void {
   }
 }
 
+/**
+ * The session answer changed — re-decide whose look this window wears.
+ *
+ * ⚠⚠ Needed because the two reads above happen at MODULE LOAD, and the only
+ * synchronous evidence available then is `hasSession()`'s stored hint. Two
+ * things can contradict it later and both must be obeyed:
+ *   • the document turns out to be a public link (`sealSessionless` in the
+ *     host's boot), and
+ *   • `/api/auth/me` answers "nobody" on a browser whose hint said otherwise —
+ *     a session that expired, or somebody who closed the tab instead of
+ *     signing out. That is the shared-machine case, and leaving it unhandled
+ *     would keep the leak alive for exactly the people most likely to hit it.
+ *
+ * ⚠ It re-READS rather than assuming: called after a sign-in it restores the
+ * person's own palette from the mirror, so the function is one answer to the
+ * question, not a one-way demotion.
+ *
+ * ⚠ It touches no storage. Nothing here is a choice anybody made.
+ */
+export function resolveSessionLook(): void {
+  themeId.value = readStoredThemeId();
+  themeMode.value = readStoredThemeMode();
+}
+
 /** Reactive handle for components: `{ themeMode, setThemeMode }`. */
 export function useThemeModeState(): {
   themeMode: Ref<ThemeModePref>;
@@ -587,10 +847,16 @@ export function useThemeModeState(): {
 }
 
 // Cross-tab sync, same contract as the theme id above.
+//
+// ⚠⚠ Gated on the session for the same reason the boot read is. A `storage`
+// event is broadcast to EVERY tab on the origin, so a signed-in tab changing
+// the mode would otherwise push that person's answer into a tab sitting on the
+// sign-in page or on somebody's share link — the leak coming back through a
+// side door after the front one was shut.
 if (typeof window !== 'undefined') {
   try {
     window.addEventListener('storage', (e) => {
-      if (e.key !== THEME_MODE_LS_KEY) return;
+      if (e.key !== THEME_MODE_LS_KEY || !hasSession()) return;
       const v = e.newValue as ThemeModePref | null;
       themeMode.value = v && MODE_VALUES.includes(v) ? v : 'host';
     });
@@ -603,8 +869,10 @@ if (typeof window !== 'undefined') {
 if (typeof window !== 'undefined') {
   try {
     window.addEventListener('storage', (e) => {
-      if (e.key !== THEME_LS_KEY) return;
-      themeId.value = e.newValue && themeById(e.newValue) ? e.newValue : DEFAULT_THEME_ID;
+      // ⚠ `hasSession()` — see the mode listener above. Same event, same
+      // origin-wide broadcast, same leak.
+      if (e.key !== THEME_LS_KEY || !hasSession()) return;
+      themeId.value = plausibleThemeId(e.newValue) ? (e.newValue as string) : DEFAULT_THEME_ID;
     });
   } catch {
     /* non-browser env */
@@ -622,7 +890,7 @@ if (typeof window !== 'undefined') {
  * root subtree is always correct regardless of host CSS.
  */
 export function applyThemeToEl(el: HTMLElement, id: string, dark: boolean): void {
-  for (const key of ALL_TOKEN_KEYS) el.style.removeProperty(key);
+  for (const key of allTokenKeys()) el.style.removeProperty(key);
   if (id === DEFAULT_THEME_ID) return;
   const theme = themeById(id);
   if (!theme) return;

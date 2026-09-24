@@ -231,6 +231,7 @@ of them tickable on a target in **Admin → Webhooks**:
 | `drop.received` | A file arrived through a public "request files" link. |
 | `comment.added` | Somebody commented on a file or folder. `meta` carries `comment_id` and the first 200 characters of the body. |
 | `e2e.escrow_used` | An encrypted folder was opened with the operator's **escrow key** instead of its owner's passphrase — not the recovery key, which the owner holds. `meta` carries `escrow_kid`, `storage`, `folder` and, when the caller was signed in, `actor_email`. |
+| `plugin.notice` | An installed app plugin (see `APP-PLUGINS.md`) sent a message through its `notify_send` host function — a signature request, a finished job. Title/body are the plugin's English wording; `meta` carries `plugin` (the app's install id), `plugin_label_<lang>` (its name as people know it — what a reader prints in front of the message, never the id), `title_<lang>`/`body_<lang>` — one of each per language the app wrote it in (`_en`/`_tr` always, at most 16 more; the reader's own language is used, then its base language, then English), `job` for a queued action, and up to eight small facts the plugin added. The app may address one person instead of the instance feed, and may attach a target: the file plus, optionally, the app screen to open on it (`target.open = {plugin, action|view}`), so a click lands in the signing screen rather than on the notifications page. |
 
 The six **write** events (`file.uploaded`, `file.updated`, `file.upload_failed`,
 `file.deleted`, `file.moved`, `file.trashed`) come from one shared post-write
@@ -254,8 +255,8 @@ one and not every intermediate upload.
 > feed. A target with an **empty** event list still receives everything.
 
 Subsystems may also emit **non-canonical** event ids — `admin_test` (the global
-test button, `POST /api/admin/notifications/test`) and `webhook_test` (the
-per-target **Test** button, which fires **one attempt with no retries**). The
+test button, `POST /api/admin/notifications/test`) and `webhook_test` (**Test**
+in a target's **Actions** menu, which fires **one attempt with no retries**). The
 webhook echoes **whatever event id is given**;
 receivers should treat the list as open-ended and match on the strings they
 care about.
@@ -282,10 +283,11 @@ bell item, and in the row the admin list returns.
 
 | Field | Type | Notes |
 |---|---|---|
-| `kind` | string | `file` · `dir` · `share` · `none`. A **closed set** — clients switch on these four and nothing else. |
+| `kind` | string | `file` · `dir` · `share` · `trash` · `app` · `none`. A **closed set** — clients switch on these six and nothing else; an older client reads an unknown kind as `none`. |
 | `storage` | string | The storage **NAME**, not its numeric id. Present on `file`/`dir`. |
-| `path` | string | Path **inside that storage**, relative, never carrying a `<storage>://` prefix. The file itself for `file`, the folder for `dir`. |
+| `path` | string | Path **inside that storage**, relative, never carrying a `<storage>://` prefix. The file itself for `file`, the folder for `dir`, the path the item was deleted **from** for `trash`. |
 | `id` | string | The share **token**, for `kind: "share"`. |
+| `open` | object | **App plugins only** (`plugin.notice`): `{plugin, action?, view?}` — one of that app's own screens to open ON the file; for `kind: "app"`, `{plugin, view, section?}` — one of the app's **home** pages, no file. The server validates the pair before storing it, so a client acts on it without re-checking. See [APP-PLUGINS-API.md](APP-PLUGINS-API.md) → *Frontend needs (v2)* §7. |
 
 Three rules the field is built on, each of which is a bug somebody would
 otherwise hit:
@@ -308,7 +310,7 @@ otherwise hit:
 > **Not the same thing as `node` / `share`.** Those stay what they always were:
 > descriptive context for a receiver. `target` is the **address**, and the two
 > genuinely differ — `file.trashed` describes the file at its original path and
-> has to open the copy in the trash; `share.created` carries both a node and a
+> has to open the Trash view; `share.created` carries both a node and a
 > share while only one of them is the thing to open.
 
 > **Rows written before this field existed** have no target and read as `none`.
@@ -321,10 +323,10 @@ otherwise hit:
 |---|---|---|
 | `file.uploaded` · `file.updated` | `file` — the file | Opens its folder with it selected. |
 | `file.moved` | `file` — the **new** path | "Where is it now" is the only useful answer to a move. |
-| `file.trashed` | `file` — the path **in the trash** | The copy that exists is the one in `.filex-trash/`, and the explorer shows it. Falls back to the original folder if the surface passed no trash path. |
+| `file.trashed` | `trash` — the **original** path | The Trash view, with the item selected: that view lists items by where they came from. ⚠ Never `.filex-trash/<key>` — it used to be, and a click opened the bin's raw folder with nothing in it to restore (fixed 2026-09-21). |
 | `file.deleted` | `dir` — the parent folder | A permanent removal leaves no row to select. |
 | `file.upload_failed` | `dir` — the parent folder | The bytes never landed; the folder they were headed for is where the user retries. |
-| `file.infected` | `file` — the **trash** path when it was quarantined, the original path when the driver had no move | Where the file actually is. |
+| `file.infected` | `trash` — the **original** path when it was quarantined; `file` — the original path when the driver had no move | Where the file actually is. |
 | `drop.received` | `dir` — the drop folder | A drop can carry several files, so there is no single row to select. |
 | `comment.added` | `file` **or** `dir` | Read from the node row's type — a comment can hang on a folder. |
 | `e2e.escrow_used` | `dir` — the encrypted folder | |
@@ -333,6 +335,30 @@ otherwise hit:
 | `update_available` · `update_applied` | `none` | Not about a file. |
 | `replica_fail` · `replica_fail_spike` · `replica_reconcile_done` · `replica_status_report` · `primary_read_fail` | **`none` — honestly cannot** | These carry a path and nothing else (`internal/replica/`): a bare path does not name a storage, and guessing which storage it belongs to would send a click into another tenant's folder whenever two storages share a folder name. |
 | `quota_near_full` · `quota_full` · `queue_stuck` · `auth_fail_spike` · `disk_full` | `none` | Declared but **not emitted** by any code — see the Emitted column above. |
+
+### filex's own directories
+
+filex keeps machinery inside every storage — the bin (`.filex-trash`), version
+history (`.versions`), legacy thumbnails (`.thumbs`) and the desktop app's
+"open with filex" working copies (`.filex-open`), one list in
+`backend/internal/syspath`. Every write, move and delete there goes through the
+same post-write gate as a person's own files, so one rule decides what reaches
+a person, applied in `notify.Service.Send` (the door every event goes through)
+and again when rows are read:
+
+| Event about… | Bell row / webhook |
+|---|---|
+| anything inside the bin, version history, thumbnails, or a keep marker | **none** — it is bookkeeping |
+| a desktop working copy being placed or swept | **none** |
+| a desktop working copy being **saved** (`file.updated`) or found **infected** | announced under the **original document's name**, with an empty `node.path`, `target: none` and `meta.open_with: true` — the original lives on the person's own computer, so no storage path names it |
+| a person's file whose address is in the bin (`file.trashed`, a quarantine) | the file's own path, `target: trash` |
+
+Rows recorded before this rule existed are filtered on **read**, never
+rewritten: a row whose body is a path inside one of these directories is left
+out of the list and of the unread count (in SQL, so the badge and the list
+agree), and an old `file.trashed` row that targeted the bin comes back
+addressed to the Trash view. The bell's copy of a row also drops
+`meta.trash_path`; the webhook body keeps it.
 
 ### Where a click goes
 
@@ -343,15 +369,20 @@ same file** — so the three cannot disagree about where a click lands.
 
 | `kind` | Web (admin/drive SPA) | Desktop app |
 |---|---|---|
-| `file` | `/{base}explore?select=<storage>://<path>#<storage>/<folder>` — the folder opens and the row is **selected** | remounts the explorer at the folder and selects the row |
+| `file` | `/{base}explore?select=<storage>://<path>#<storage>/<folder>` — the folder opens and the row is **selected**; with `open`, `&app=…&appAction=`/`&appView=…` as well, and the app's screen opens on that row | remounts the explorer at the folder and selects the row |
 | `dir` | `/{base}explore#<storage>/<folder>` | remounts the explorer at the folder |
+| `trash` | `/{base}explore?select=<storage>://<path>#.trash` — the Trash view, the item selected | remounts the explorer on the Trash view and selects the item |
+| `app` | `/{base}app/<plugin>/<view>?section=<section>` — the app's home page, in the same tab | brings the app window to the front (it has no app home pages) |
 | `share` | the public `/s/<token>` page | opened in the **system browser** — a public page is not something to load into a window holding a bearer token |
-| `none` | the notifications page | brings the app window to the front |
+| `none` | **nowhere — the row is not clickable** | brings the app window to the front |
 
-⚠ `none` lands a **non-admin** back on the explorer, not on the notifications
-page: every panel route is admin-gated and the guard redirects them. They still
-get the notification and still get every `file`/`dir`/`share` target — it is
-only the "nowhere in particular" case that has nowhere of their own to go.
+⚠⚠ `none` used to go to the notifications page. That page is the one the
+reader was most likely already looking at, and it is admin-gated — so for
+everybody else the same click was a guard bounce that threw away the folder
+they were standing in, and the row was STILL not about anything. A row that
+cannot go anywhere now takes no cursor, no hover and no click: reading it is
+the whole interaction (`isNotificationClickable`). Which is also why an event
+that CAN carry an address should carry one.
 
 ⚠ A `file` target resolves to its **folder plus a selection**, never to the file
 as a destination of its own. Opening "the file" would mean choosing between
@@ -388,11 +419,32 @@ event's [target](#click-target).
   settings row, because the permission it acts on is granted per browser
   profile and per device: a server-side flag would travel to a machine where
   the permission was never granted, and say "on" while nothing ever appeared.
-- **It degrades silently.** No API, an insecure origin, permission denied, or a
-  constructor that throws (Android Chrome, where only a service worker may
-  notify) — all no-ops, never an error.
+- **It says WHO is notifying, and shows a logo the browser can decode.** The
+  title is the instance's name — the operator's own when they set one on the
+  Branding page — and the event's sentence is the body, because a
+  notification's second line is the app's identity and the browser fills it in
+  only for an *installed* app; everywhere else it prints the bare origin. The
+  `icon` and the `badge` are **PNG** (`/admin/icons/icon-192.png`,
+  `badge-96.png`, rasterised from `icons/icon.svg` by
+  `scripts/make-icon-pngs.mjs`).
+  ⚠⚠ Not the SVG: Chromium decodes a notification's icon through its image
+  decoders and SVG is not among them, so an SVG there is not a small logo or a
+  blurry one — it is **no logo**, and the toast falls back to a generic bell.
+  Firefox draws it, which is exactly why that lasted. The badge is a
+  **monochrome alpha mask** on Android, which is why it is white on
+  transparent rather than the full-bleed square.
+- **It degrades silently.** No API, an insecure origin, permission denied —
+  all no-ops, never an error. A constructor that throws (Android Chrome, where
+  only a service worker may notify) falls back to
+  `registration.showNotification`, whose click is handled by
+  `web/public/notify-sw.js` (focus an open tab and send it to the target,
+  else open one). ⚠ The in-page path is tried FIRST, because a toast
+  constructed by the page keeps its callback — which is what marks the row
+  read and navigates inside the running SPA; the worker can only open an
+  address.
 - One toast per notification id (`tag: filex-notification-<id>`), so a
-  re-render cannot produce two.
+  re-render cannot produce two. `renotify` rides with the tag, because Android
+  replaces a same-tag notification silently otherwise.
 
 ### Desktop app
 
@@ -400,6 +452,12 @@ The desktop window is the explorer and has no bell in it, so the app polls the
 same endpoint and raises a **native OS notification** instead. A click brings
 the window to the front and opens the target; a share opens in the system
 browser. **App settings → Notifications** turns it off.
+
+The unread count goes on the app's own icon instead of on a bell: the dock /
+taskbar badge where the platform draws one (macOS and Linux desktops that
+support it; Windows has no such badge), and the tray icon's tooltip
+(`filex — 12`). See rule 3 below for why the badge and the tooltip round
+differently past 99.
 
 It never double-notifies: the browser channel refuses to fire inside the
 Electron shell, so one event produces one notification on that machine.
@@ -410,8 +468,8 @@ Both channels ride the bell's existing **15 s** unread-count poll — the one th
 bell has always run. The head of the unread list is fetched **only when that
 count goes up**, so a quiet instance costs exactly what it cost before. On the
 web the loop lives at the root of the SPA rather than in the bell component, so
-the screens that have no bell (the explorer, which is the whole product for a
-non-admin) are covered by the same loop rather than by a second one.
+the screens that draw no bell (an app's full page, the standalone editor,
+**My shares**) are covered by the same loop rather than by a second one.
 
 ⚠ **A baseline is taken before anything is announced.** A reload, or an app
 start, must not replay every unread row the user already had as toasts.
@@ -421,18 +479,120 @@ and never a credential. The title and body are the same strings the bell shows.
 
 ---
 
+## The bell, and who can reach it (product rule)
+
+⚠⚠ Three rules, written down because the product broke all three at once and
+each break is invisible from the code: the panel looked fine to the
+administrator who built it.
+
+**1. A notification is clickable exactly when it has somewhere to go.**
+Clickability is not a style, it is a fact about the row: a row whose `target`
+resolves to a place opens that place, and a row with `{"kind":"none"}` (or no
+target at all) must not look clickable — no pointer cursor, no hover lift, no
+link role. Every event that CAN name a place must carry one: a file that
+arrived opens the file, a share that was created opens the share, an app
+plugin's notice opens that app's screen on that file. An event that genuinely
+has nowhere to go says `none` and says it honestly; an event that quietly
+forgets its target is a bug, not a `none`.
+
+**2. Every person reaches ALL of their notifications without leaving the
+explorer.** The bell shows the last few; "see all" must open the full list
+**inside the explorer** — its own screen or a panel over it — and it must work
+for somebody who is not an administrator. (Today: **View all** at the foot of
+the bell opens it as a panel over the page, read from the user-scoped
+endpoints below.) ⚠ The admin notification page is
+for MANAGING the subsystem (the webhook, everybody's rows, the settings); it
+is not where an ordinary person reads their own notifications, and pointing
+"see all" at it hides a person's own mail behind a permission they do not
+have. An administrator can still walk to the admin page by themselves.
+
+**3. The count lives ON the icon.** An unread count is drawn as a badge on the
+bell icon itself — in the explorer, in the desktop app, and on mobile when it
+comes. It reads the exact number up to 99 and **`99+`** above that, never a
+raw 3-digit number and never a bare dot. It clears as rows are read, and it is
+the same component on every surface: a counter written twice is a counter that
+disagrees with itself. (One deliberate exception: the desktop app's dock /
+taskbar badge is drawn by the operating system, which has room for the real
+number, so it is handed the exact count; the same module, `unreadBadge.ts`,
+clamps the tray tooltip to `99+`.)
+
 ## In-app bell (endpoints)
 
-Authenticated user endpoints, scoped to the **current user** (they see their own
-notifications plus any broadcast notifications). All return **503** when the
-subsystem is disabled.
+Authenticated user endpoints, scoped to the **current user**. All return **503**
+when the subsystem is disabled.
+
+What a bell holds:
+
+- **Rows addressed to the user.** Routine file activity (`file.uploaded`,
+  `file.updated`, `file.moved`, `file.trashed`, `file.deleted`) is always
+  addressed to the person who did it, including when the queue finished the
+  work (a queued copy/move/delete, the commit of a staged upload): the queue
+  row names who asked, and the event is theirs.
+- **Broadcasts** (rows addressed to nobody: antivirus alerts, replica
+  reports, update notices, a drop or escrow notice with no owner on record)
+  go to **admins**. A member receives four kinds: an antivirus hit
+  (`file.infected`), an upload that never landed (`file.upload_failed`), the
+  admin page's test (`admin_test`) and an app's instance-wide notice
+  (`plugin.notice`). Whenever one of them names a file, the member gets it only
+  when that file is one they could see in the explorer: the same grants and
+  the same "ancestor folders of a grant" rule the listing uses. A row that
+  names a file by name but gives no path — an "open with filex" working copy,
+  whose path names nothing anybody can open — reaches no member (the
+  antivirus scanner addresses its own to the copy's owner). Everything else is
+  for admins: an operator alarm names no storage, a drop or share notice
+  carries the link's bearer token.
+- In **multi-tenant** mode the tenant boundary applies first: nobody receives
+  a row about another tenant's storage, a tenant admin gets the broadcasts
+  that name a file in their tenant, and a row that names no storage reaches
+  only the supertenant's readers (its admins, and — for the admin test and an
+  app's notice that names nothing — its members).
+- A broadcast of **routine** file activity (a surface that could not say who
+  asked — every queued operation before this rule existed) is in no bell at
+  all; it stays in the table and in the admin list below.
+- A **folder-confined token** (`root:<storage>://<folder>`, narrowed by an
+  `X-Filex-Root` header — the files routes' own confinement) reads only the
+  notices about files inside its folder, its owner's own notices included; a
+  notice naming a file outside it, or naming paths it cannot place (a replica
+  alarm's bare paths), is invisible to that token, and `read` / `read-all`
+  through it touch nothing else. A notice that names no file stays readable.
+
+Which broadcasts a bell takes is decided in SQL, so rows a reader may not see
+never fill their page. The badge (`unread-count`) counts exactly what the list
+would show, and so does the list's `total`: the reader's own rows are counted
+in SQL and only the broadcasts their bell admits are walked, so a page is cut
+where the reader sees it and every row they may see is on some page.
+
+**Read state is per reader** (migration 00056). A row addressed to a user is
+read when that user marks it. A broadcast is read separately for each reader,
+and marking it changes the caller's bell and nobody else's:
+
+- `read-all` reads every notification up to that moment, for the caller: one
+  write, however many there are. Broadcasts the caller's bell does not show are
+  read for them too, which changes nothing anybody sees. What arrives afterwards
+  is unread again.
+- `read` on a single broadcast marks it for the caller when their bell shows it
+  (an admin nobody confines — single-tenant, or the supertenant — may mark any
+  broadcast: they read them all in the admin history). On any other id, or an id
+  that does not exist, it answers `204` and changes nothing, so the endpoint
+  does not tell anyone which ids exist.
+- A broadcast marked read before 00056, when read state was one shared column,
+  stays read for everyone; nothing is backfilled.
+
+⚠ **Operator alarms reach administrators only.** `update_available`,
+`update_applied` and the replica, quota, queue, auth and disk alarms are
+recorded as broadcasts, but a non-administrator's list and unread count leave
+them out — they are about a server that person cannot touch (a plain user's
+bell used to read "filex v0.42.2 is available — this server runs 0.1.0-dev").
+Other broadcasts — the admin test and an app's instance-wide notice — still
+reach everybody. Nothing is dropped: the admin list and the webhook carry them
+as before.
 
 | Method & path | Purpose |
 |---|---|
 | `GET /api/notifications?unread=&limit=&offset=` | Paginated history → `{items, total, limit, offset}`. `unread=true` returns only unread rows. |
 | `GET /api/notifications/unread-count` | Bell badge number → `{count}`. |
-| `POST /api/notifications/{id}/read` | Mark one notification read → `204`. |
-| `POST /api/notifications/read-all` | Mark all of the user's notifications read → `204`. |
+| `POST /api/notifications/{id}/read` | Mark one notification read for the caller → `204` (also for an id the caller's bell does not show; nothing changes then). |
+| `POST /api/notifications/read-all` | Mark everything up to now read, for the caller → `204`. |
 | `GET /api/notifications/settings` | Read [per-user settings](#per-user-settings). |
 | `PATCH /api/notifications/settings` | Update per-user settings. |
 
@@ -452,8 +612,8 @@ Each item in `items` looks like:
 }
 ```
 
-`read_at` is **absent** until the row is marked read (then it holds the
-timestamp); `user_id` is present only on user-scoped rows (absent on
+`read_at` is **absent** until the row is marked read — for a broadcast, until
+the CALLER marked it — and then holds the timestamp; `user_id` is present only on user-scoped rows (absent on
 broadcasts); `webhook_error` appears only when the webhook for that row
 failed; and `target` is **absent** when there is nothing to open — see
 [Click target](#click-target), where an absent target and `{"kind":"none"}`
@@ -466,9 +626,15 @@ mean the same thing.
 Admin-session endpoints under `/api/admin`. These give the **global** view (all
 users' notifications plus broadcasts) and manage the webhook at runtime.
 
+⚠ In multi-tenant mode the global history, the test event and the legacy
+webhook config are **supertenant-only** (`403 supertenant_only` for a tenant
+admin): all three span every tenant — a history row names its tenant only
+inside `meta`, and the test event goes to the instance's webhook receivers. A
+tenant admin reads the tenant's own events in their bell, which is scoped.
+
 | Method & path | Purpose |
 |---|---|
-| `GET /api/admin/notifications?unread=&limit=&offset=` | Global history across every user + broadcasts. |
+| `GET /api/admin/notifications?unread=&limit=&offset=` | Global history across every user + broadcasts. A user-scoped row also carries `user_name`, the person's display name. A broadcast carries `audience` — who it reaches, by the rule above: `everyone`, `viewers` (admins and the members who can see the file it names), `admins`, or `nobody` (routine file activity recorded without the person who did it) — and `admins_only` (`audience` = `admins`). A broadcast's `read_at` (and `unread=`) is the caller's own; a user's row carries that user's. |
 | `POST /api/admin/notifications/test` | Emit an `admin_test` event through **both** channels → `{id}`. Use it to verify the webhook is wired. |
 | `GET /api/admin/notifications/webhook-config` | Current config → `{url, token_set}`. |
 | `PATCH /api/admin/notifications/webhook-config` | Set the webhook URL/token at runtime → `{ok:true}`. |
@@ -480,8 +646,9 @@ users' notifications plus broadcasts) and manage the webhook at runtime.
 
 The two families are separate on purpose: `…/notifications/webhook-config`
 governs the single legacy global webhook, `…/webhooks` governs the v2 targets.
-Both are reachable from the admin UI — **Notifications** for the global webhook
-and its history, **Webhooks** for the targets.
+Both are set up on ONE screen in the admin UI, **Webhooks** — the default
+(global) webhook above the targets — so every place an event is delivered is
+visible in one place; **Notifications** keeps the history and points there.
 
 **Changing the webhook at runtime** — `PATCH …/webhook-config` with
 `{"url": "...", "token": "..."}`:
@@ -543,8 +710,11 @@ with **no** muted events. `PATCH` replaces the whole preference (send the full
 > menu on every front door — the admin chrome, Home and the standalone
 > explorer, which between them are every screen a non-admin can be on. The
 > admin panel's own **Notifications → Your notifications** section is the same
-> two switches for an operator who is already there. `muted_events` is still
-> API-only, and both screens resend the user's existing list verbatim so
+> two switches for an operator who is already there. `muted_events` has its
+> switches in the dialog's **What to tell me about** list, one per event — and
+> only for events that can happen on this instance: no virus switch while
+> scanning is off, no escrow switch without an escrow key, no app switch while
+> apps are off. Both screens resend the user's existing list verbatim so
 > opening one cannot clear their mutes. The filtering itself is in force
 > regardless of how the row got written.
 >

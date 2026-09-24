@@ -104,12 +104,22 @@ func (c *captureNotify) Send(_ context.Context, e notify.Event) (int64, error) {
 	c.events = append(c.events, e)
 	return int64(len(c.events)), nil
 }
-func (c *captureNotify) List(context.Context, *int64, bool, int, int) ([]*model.Notification, int64, error) {
+func (c *captureNotify) List(context.Context, *int64, notify.Bell, bool, int, int) ([]*model.Notification, int64, error) {
 	return nil, 0, nil
 }
-func (c *captureNotify) UnreadCount(context.Context, *int64) (int64, error) { return 0, nil }
-func (c *captureNotify) MarkRead(context.Context, int64, *int64) error      { return nil }
-func (c *captureNotify) MarkAllRead(context.Context, *int64) error          { return nil }
+func (c *captureNotify) UnreadCount(context.Context, *int64, notify.Bell) (int64, error) {
+	return 0, nil
+}
+func (c *captureNotify) ListVisible(context.Context, int64, notify.Bell, bool, int, int, func(*model.Notification) bool, func(*model.Notification) bool) ([]*model.Notification, int64, error) {
+	return nil, 0, nil
+}
+func (c *captureNotify) History(context.Context, int64, bool, int, int) ([]*model.Notification, int64, error) {
+	return nil, 0, nil
+}
+func (c *captureNotify) MarkBroadcastsRead(context.Context, int64, []int64) error { return nil }
+func (c *captureNotify) MarkAllBroadcastsRead(context.Context, int64) error       { return nil }
+func (c *captureNotify) MarkRead(context.Context, int64, *int64) error            { return nil }
+func (c *captureNotify) MarkAllRead(context.Context, *int64) error                { return nil }
 func (c *captureNotify) GetSettings(context.Context, int64) (*model.NotificationSettings, error) {
 	return nil, nil
 }
@@ -150,6 +160,9 @@ func TestAntivirusScan_EligibleGating(t *testing.T) {
 	// Trash + version artifacts are never re-scanned.
 	assert.False(t, job.Eligible(avFileNode(1, "/.filex-trash/1-abc__a.bin", 100)))
 	assert.False(t, job.Eligible(avFileNode(1, "/.versions/7/1", 100)))
+	// ⚠ But the desktop's open-with working copy IS scanned: it is a
+	// person's document arriving from their computer, hidden or not.
+	assert.True(t, job.Eligible(avFileNode(1, "/.filex-open/0123456789ab-Plan.docx", 100)))
 	// Directories never.
 	dir := &model.Node{ID: 2, Path: "/d", Type: model.NodeTypeDirectory, Size: 1}
 	assert.False(t, job.Eligible(dir))
@@ -250,4 +263,34 @@ func TestAntivirusScan_EnqueueOnlyEligible(t *testing.T) {
 	require.Len(t, ops, 1)
 	assert.Equal(t, queue.TypeAntivirusScan, ops[0].Type)
 	assert.EqualValues(t, 1, ops[0].Payload["node_id"])
+}
+
+// An "open with filex" working copy is one person's document — the desktop put
+// it there for whoever opened it, and nobody else can list `.filex-open`. The
+// person view keeps only the document's name for such a row (no path names
+// anything anybody can open), and a name with no path cannot be checked against
+// anybody's grants, so as a broadcast it would reach no member at all — its
+// owner included (handlers/notifications.go → bellJudge). The alert is
+// addressed to the owner instead; an ordinary file's stays a broadcast for
+// everybody who can see it.
+func TestAntivirusScan_OpenWithCopyAlertGoesToItsOwner(t *testing.T) {
+	owner := int64(42)
+	cp := avFileNode(9, "/.filex-open/a1b2c3d4e5f6-Bütçe Özeti.xlsx", 64)
+	cp.OwnerID = &owner
+	plain := avFileNode(10, "/muhasebe/fatura.xlsx", 64)
+	plain.OwnerID = &owner
+	st := &fakeAVStore{nodes: map[int64]*model.Node{9: cp, 10: plain}}
+	drv := &fakeAVDriver{files: map[string][]byte{cp.StorageKey: []byte("VIRUS"), plain.StorageKey: []byte("VIRUS")}}
+	sink := &captureNotify{}
+	job := queue.NewAntivirusScanner(st, func(int64) (storage.Driver, error) { return drv, nil },
+		&fakeAVScanner{}, sink, nil, 0)
+
+	for _, id := range []int64{9, 10} {
+		require.NoError(t, job.Handle(context.Background(), queue.Op{
+			Type: queue.TypeAntivirusScan, Payload: map[string]any{"node_id": id}}))
+	}
+	require.Len(t, sink.events, 2)
+	require.NotNil(t, sink.events[0].UserID, "the working copy's alert is its owner's")
+	assert.Equal(t, owner, *sink.events[0].UserID)
+	assert.Nil(t, sink.events[1].UserID, "an ordinary file's alert stays a broadcast for everybody who can see it")
 }

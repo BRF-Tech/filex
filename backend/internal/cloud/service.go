@@ -17,6 +17,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 // Sentinel error kinds the handler maps to HTTP statuses.
@@ -116,6 +117,10 @@ type SignupRequest struct {
 	Name string `json:"name,omitempty"`
 	// Plan is a plan id from the catalog; defaults to the first plan.
 	Plan string `json:"plan,omitempty"`
+	// Locale is the language the verification mail is written in — the
+	// signing-up visitor's (the handler fills it from the request when the
+	// body does not say). Any language the server speaks; English otherwise.
+	Locale string `json:"locale,omitempty"`
 }
 
 // SignupResult reports a provisioned (but not yet verified) tenant.
@@ -200,10 +205,12 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (*SignupResult,
 	slog.Info("cloud: signup verification token minted",
 		slog.String("slug", p.Slug), slog.String("email", email), slog.String("token", token))
 	if s.mailer != nil && s.mailer.Verified() {
-		body := fmt.Sprintf(
-			"Your filex cloud tenant %q is almost ready.\n\nVerification token: %s\n\nPOST it to /api/cloud/verify to activate the tenant. The token expires in %s.\n",
-			p.Slug, token, verifyTTL)
-		if err := s.mailer.Send(ctx, email, "filex cloud: verify your tenant", body); err == nil {
+		lang := srvtext.Pick(req.Locale)
+		body := srvtext.Text(lang, "server.mail.cloud_verify.ready", srvtext.Vars{"tenant": p.Slug}) + "\n\n" +
+			srvtext.Text(lang, "server.mail.cloud_verify.token", srvtext.Vars{"token": token}) + "\n\n" +
+			srvtext.Text(lang, "server.mail.cloud_verify.how", srvtext.Vars{"ttl": verifyTTL.String()}) + "\n"
+		subject := srvtext.Text(lang, "server.mail.cloud_verify.subject", nil)
+		if err := s.mailer.Send(mailer.WithLanguage(ctx, lang), email, subject, body); err == nil {
 			res.MailSent = true
 		}
 	}

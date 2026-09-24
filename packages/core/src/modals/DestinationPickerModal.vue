@@ -42,7 +42,7 @@ import Modal from './Modal.vue';
 import { useLocale } from '../composables/useLocale';
 import type { FileApi, ManagerResponse } from '../composables/useFileApi';
 import type { LocaleCode } from '../types/ExplorerConfig';
-import { iconTile } from '../lib/fileIcons';
+import { fileIconTile, iconTile } from '../lib/fileIcons';
 import {
   DRIVES,
   type DestinationRow,
@@ -72,6 +72,13 @@ const props = defineProps<{
   moving?: string[];
   /** Titles the dialog and names its confirm button. */
   mode?: 'move' | 'copy' | 'choose';
+  /**
+   * What the answer is. `dir` (the default) is the folder you are standing in;
+   * `file` lists the files too and the answer is the one you tick — an app
+   * plugin's `file-chooser` asks for this. A file pick has no write check:
+   * the chooser reads, it never writes.
+   */
+  pick?: 'dir' | 'file';
   /** The parent is running the operation: the dialog stays up but inert. */
   busy?: boolean;
 }>();
@@ -91,6 +98,10 @@ const here = ref<ManagerResponse | undefined>(undefined);
 const failed = ref(false);
 
 const multiDrive = computed(() => (props.storages?.length ?? 0) > 1);
+const drivesLabel = computed(() => t('destpicker.drives'));
+const pickingFile = computed(() => props.pick === 'file');
+/** The file ticked in this folder — file pick only. */
+const picked = ref<string | null>(null);
 
 /**
  * One listing cache for the life of the dialog.
@@ -129,6 +140,7 @@ async function load(path: string): Promise<ManagerResponse | undefined> {
 async function goTo(path: string): Promise<void> {
   at.value = path;
   failed.value = false;
+  picked.value = null;
   if (path === DRIVES) {
     here.value = undefined;
     rows.value = driveRows(props.storages, props.moving);
@@ -142,7 +154,7 @@ async function goTo(path: string): Promise<void> {
   loading.value = false;
   here.value = resp;
   failed.value = !resp;
-  rows.value = destinationRows(resp?.files, props.moving);
+  rows.value = destinationRows(resp?.files, props.moving, { files: pickingFile.value });
 }
 
 const parent = computed(() => parentOfWire(at.value, multiDrive.value));
@@ -158,9 +170,11 @@ const hereWritable = computed(() => {
   return permAllowsWrite(here.value.perm as string | undefined);
 });
 
-const canChoose = computed(
-  () => !props.busy && at.value !== DRIVES && hereWritable.value && hereBlocked.value === null,
-);
+const canChoose = computed(() => {
+  if (props.busy || at.value === DRIVES) return false;
+  if (pickingFile.value) return picked.value !== null;
+  return hereWritable.value && hereBlocked.value === null;
+});
 
 /**
  * Is the line under the list a REFUSAL or a prompt?
@@ -170,11 +184,15 @@ const canChoose = computed(
  * colour, which is what happened the first time this was drawn, makes the very
  * first screen of the dialog look like something has gone wrong.
  */
-const reasonIsRefusal = computed(() => at.value !== DRIVES);
+const reasonIsRefusal = computed(() => at.value !== DRIVES && !(pickingFile.value && !failed.value));
 
 /** The one line under the list that says why Choose is off, if it is. */
 const reason = computed<string>(() => {
   if (at.value === DRIVES) return t('destpicker.pick_a_drive');
+  if (pickingFile.value) {
+    if (failed.value) return t('destpicker.unreadable');
+    return picked.value === null ? t('destpicker.pick_a_file') : '';
+  }
   if (hereBlocked.value === 'self') return t('destpicker.blocked.self');
   if (hereBlocked.value === 'descendant') return t('destpicker.blocked.descendant');
   if (failed.value) return t('destpicker.unreadable');
@@ -185,16 +203,28 @@ const reason = computed<string>(() => {
 const title = computed(() => {
   if (props.mode === 'move') return t('destpicker.title.move');
   if (props.mode === 'copy') return t('destpicker.title.copy');
-  return t('destpicker.title.choose');
+  return pickingFile.value ? t('destpicker.title.choose_file') : t('destpicker.title.choose');
 });
 
 const confirmLabel = computed(() => {
   if (props.mode === 'move') return t('destpicker.confirm.move');
   if (props.mode === 'copy') return t('destpicker.confirm.copy');
-  return t('destpicker.confirm.choose');
+  return pickingFile.value ? t('destpicker.confirm.choose_file') : t('destpicker.confirm.choose');
 });
 
+/** What the line under the list names: the ticked file, else the folder. */
+const targetName = computed(() =>
+  pickingFile.value && picked.value !== null
+    ? labelOfWire(picked.value, drivesLabel.value)
+    : labelOfWire(at.value, drivesLabel.value),
+);
+
+function rowIcon(row: DestinationRow): string {
+  return row.kind === 'file' ? fileIconTile({ type: 'file', basename: row.label }) : iconTile('folder');
+}
+
 function rowTitle(row: DestinationRow): string {
+  if (row.kind === 'file') return row.label;
   if (row.blocked === 'self') return t('destpicker.blocked.self');
   if (row.blocked === 'descendant') return t('destpicker.blocked.descendant');
   if (!row.writable) return t('destpicker.readonly');
@@ -202,6 +232,11 @@ function rowTitle(row: DestinationRow): string {
 }
 
 function openRow(row: DestinationRow): void {
+  // A file is the answer, not a place to go.
+  if (row.kind === 'file') {
+    picked.value = row.path;
+    return;
+  }
   // A blocked row is a dead end — everything under it is blocked too — so
   // walking into it would be navigation that cannot end anywhere.
   if (row.blocked) return;
@@ -210,10 +245,8 @@ function openRow(row: DestinationRow): void {
 
 function choose(): void {
   if (!canChoose.value) return;
-  emit('pick', at.value);
+  emit('pick', pickingFile.value && picked.value !== null ? picked.value : at.value);
 }
-
-const drivesLabel = computed(() => t('destpicker.drives'));
 </script>
 
 <template>
@@ -278,22 +311,32 @@ const drivesLabel = computed(() => t('destpicker.drives'));
       <ul class="fe-destpick__rows" data-testid="destpicker-rows">
         <li v-if="loading" class="fe-destpick__note">{{ t('destpicker.loading') }}</li>
         <li v-else-if="failed" class="fe-destpick__note">{{ t('destpicker.unreadable') }}</li>
-        <li v-else-if="!rows.length" class="fe-destpick__note">{{ t('destpicker.empty') }}</li>
+        <li v-else-if="!rows.length" class="fe-destpick__note">
+          {{ pickingFile ? t('destpicker.empty_files') : t('destpicker.empty') }}
+        </li>
         <li v-for="row in rows" :key="row.path">
           <button
             type="button"
             class="fe-destpick__row"
-            :class="{ 'is-locked': !row.writable, 'is-blocked': !!row.blocked }"
+            :class="{
+              'is-locked': !row.writable,
+              'is-blocked': !!row.blocked,
+              'is-file': row.kind === 'file',
+              'is-picked': row.kind === 'file' && picked === row.path,
+            }"
             :disabled="!!row.blocked"
             :title="rowTitle(row)"
+            :aria-pressed="row.kind === 'file' ? picked === row.path : undefined"
             :data-testid="'destpicker-row-' + row.label"
             @click="openRow(row)"
           >
-            <span class="fe-destpick__rowicon" aria-hidden="true" v-html="iconTile('folder')"></span>
-            <span class="fe-destpick__rowname">{{ row.label }}</span>
+            <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons -->
+            <span class="fe-destpick__rowicon" aria-hidden="true" v-html="rowIcon(row)"></span>
+            <span class="fe-destpick__rowname"><bdi>{{ row.label }}</bdi></span>
             <span v-if="row.blocked" class="fe-destpick__rowtag">{{ t('destpicker.tag.blocked') }}</span>
             <span v-else-if="!row.writable" class="fe-destpick__rowtag">{{ t('destpicker.readonly') }}</span>
             <svg
+              v-if="row.kind === 'dir'"
               class="fe-destpick__rowinto"
               viewBox="0 0 24 24"
               fill="none"
@@ -319,7 +362,7 @@ const drivesLabel = computed(() => t('destpicker.drives'));
         {{ reason }}
       </p>
       <p v-else class="fe-destpick__target" data-testid="destpicker-target">
-        {{ t('destpicker.target', { name: labelOfWire(at, drivesLabel) }) }}
+        {{ t('destpicker.target', { name: targetName }) }}
       </p>
     </div>
 

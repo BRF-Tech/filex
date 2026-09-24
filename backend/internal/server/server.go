@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -20,12 +21,8 @@ import (
 	"github.com/brf-tech/filex/backend/internal/api"
 	"github.com/brf-tech/filex/backend/internal/api/handlers"
 	"github.com/brf-tech/filex/backend/internal/auth"
-	authapitoken "github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
-	authldap "github.com/brf-tech/filex/backend/internal/auth/drivers/ldap"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
-	"github.com/brf-tech/filex/backend/internal/auth/drivers/multioidc"
-	authoidc "github.com/brf-tech/filex/backend/internal/auth/drivers/oidc"
-	authproxyheader "github.com/brf-tech/filex/backend/internal/auth/drivers/proxyheader"
+	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -49,12 +46,15 @@ import (
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/replica"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/secretbox"
 	"github.com/brf-tech/filex/backend/internal/sftpsrv"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/tenantstore"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
@@ -62,8 +62,10 @@ import (
 	"github.com/brf-tech/filex/backend/internal/usage"
 	"github.com/brf-tech/filex/backend/internal/version"
 	"github.com/brf-tech/filex/backend/internal/versioning"
+	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 
 	// register storage and DB drivers via their init() blocks
+	"github.com/brf-tech/filex/backend/internal/acl"
 	_ "github.com/brf-tech/filex/backend/internal/db/drivers/mysql"
 	_ "github.com/brf-tech/filex/backend/internal/db/drivers/postgres"
 	_ "github.com/brf-tech/filex/backend/internal/db/drivers/sqlite"
@@ -113,6 +115,9 @@ type Server struct {
 	// started — an orphaned plugin would keep a socket and the storage
 	// credentials it was handed.
 	plugins *plugin.Manager
+	// appPlugins is the in-process wasm registry; closed at shutdown so the
+	// compiled modules and the call spool go with the process.
+	appPlugins *wasmplugin.Registry
 	// protocolAuth is the shared credential resolver every non-HTTP protocol
 	// authenticates through. Held here for the revalidation sweep, which is what
 	// makes revoking a credential reach a session that is already open.
@@ -131,6 +136,13 @@ type Server struct {
 }
 
 // New constructs and wires a Server but does not Start it.
+// catalogueEmbedPath is the English string catalogue inside the embedded
+// admin SPA — every key a language pack may translate (wasmplugin
+// SetCatalogue). Served to browsers at /admin/i18n/filex-catalogue-en.json
+// too, which is where a translator can take the exact catalogue of the
+// version they run.
+const catalogueEmbedPath = "admin/i18n/filex-catalogue-en.json"
+
 func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, error) {
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("server: mkdir datadir: %w", err)
@@ -173,7 +185,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// or one whose naming lost a race at creation time, is repaired here
 	// instead of quietly lacking an SFTP/FTPS login forever.
 	if named, err := identitystore.Backfill(ctx, store); err != nil {
-		slog.Warn("identity: username backfill failed; accounts without a username can still sign in by e-mail", slog.Any("err", err))
+		slog.Warn("identity: username backfill failed; accounts without a username can still sign in by email", slog.Any("err", err))
 	} else if named > 0 {
 		slog.Info("identity: named existing accounts", slog.Int("count", named))
 	}
@@ -230,37 +242,34 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	}
 	/* /wiring:e2 */
 
-	// Auth drivers — local always present.
-	var localDrv auth.LoginDriver
-	var oidcDrv auth.OIDCDriver
-	// loginDrvs collects every driver that can judge a password, in the order
-	// the operator listed them. They are chained below.
+	// Auth drivers.
 	//
-	// ⚠⚠ This slice is the fix for a two-month-old silent hole: `localDrv` was
-	// assigned in the "local" case ONLY, so a configured LDAP driver was
-	// initialised, appended to `enabled`, printed in the boot banner — and
-	// never reachable, because the login handler holds exactly one LoginDriver
-	// and the middleware only ever calls Authenticate (which a login driver
-	// refuses by definition). `FILEX_AUTH_DRIVERS=local,ldap` answered every
-	// directory account 401 in under a millisecond, well under one LDAPS round
-	// trip, with nothing in the log.
-	var loginDrvs []auth.LoginDriver
-	// dirDrv is the password authority the non-HTTP protocols consult when the
-	// local users table cannot judge — see internal/protocolauth.
-	var dirDrv protocolauth.Directory
-	enabled := []auth.Driver{}
-
+	// ⚠⚠ Every provider is built through authsetup.Build: the environment's
+	// here, the Identity providers page's inside authsetup.Live — ONE
+	// construction path. Until v0.43.0 the page's settings were read by
+	// nothing; now the page adds its providers AFTER the environment's (never
+	// in front of `local`) and changes them without a restart. The environment
+	// wins where both name the same provider, and password sign-in plus the
+	// recovery sign-in stay the environment's alone, so the page cannot lock
+	// the instance out. See internal/authsetup.
+	//
+	// ⚠ The login chain the handlers hold is a proxy over the running set.
+	// Before chaining existed a configured LDAP driver was initialised, printed
+	// in the boot banner and never reachable (the login handler held exactly
+	// one LoginDriver): `FILEX_AUTH_DRIVERS=local,ldap` answered every
+	// directory account 401 in under a millisecond. authsetup's assemble
+	// chains every login driver, in order, exactly as this block used to.
+	driversFrom := cfg.Auth.DriversFrom
+	var envAuth []authsetup.Entry
 	for _, name := range cfg.Auth.Drivers {
 		switch normalizeDriverName(name) {
 		case "local":
-			d := authlocal.New(store)
-			if err := d.Init(ctx, nil); err != nil {
+			d, err := authsetup.Build(ctx, store, "local", nil)
+			if err != nil {
 				return nil, fmt.Errorf("auth init local: %w", err)
 			}
-			enabled = append(enabled, d)
-			loginDrvs = append(loginDrvs, d)
+			envAuth = append(envAuth, authsetup.NewEnvEntry("local", driversFrom, nil, d, nil, false))
 		case "oidc":
-			d := authoidc.New(store)
 			oidcCfg := map[string]any{
 				"issuer":        cfg.Auth.OIDC.Issuer,
 				"client_id":     cfg.Auth.OIDC.ClientID,
@@ -273,8 +282,11 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			// boot together (compose restart, host reboot). One 502 used to
 			// leave SSO offline until a manual `docker restart` — this loop
 			// gives the IdP ~60s to come up before we give up.
+			var d auth.Driver
 			oidcErr := initWithBackoff(ctx, "oidc", func(c context.Context) error {
-				return d.Init(c, oidcCfg)
+				var err error
+				d, err = authsetup.Build(c, store, "oidc", oidcCfg)
+				return err
 			}, []time.Duration{0, 2 * time.Second, 5 * time.Second, 10 * time.Second, 15 * time.Second, 30 * time.Second})
 			if oidcErr != nil {
 				// The failure itself was just logged at ERROR by
@@ -284,13 +296,10 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 				slog.Warn("oidc: SSO disabled until restart",
 					slog.String("driver", "oidc"),
 					slog.String("reason", oidcErr.Error()))
-				continue
 			}
-			enabled = append(enabled, d)
-			oidcDrv = d
+			envAuth = append(envAuth, authsetup.NewEnvEntry("oidc", driversFrom, oidcCfg, d, oidcErr, false))
 		case "ldap":
-			d := authldap.New(store)
-			if err := d.Init(ctx, map[string]any{
+			ldapCfg := map[string]any{
 				"url":           cfg.Auth.LDAP.URL,
 				"bind_dn":       cfg.Auth.LDAP.BindDN,
 				"bind_password": cfg.Auth.LDAP.BindPassword,
@@ -304,18 +313,14 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 				// provider, which is the confine-exempt supertenant.
 				"multi_tenant": cfg.MultiTenant,
 				"provider":     cfg.Auth.LDAP.Provider,
-			}); err != nil {
+			}
+			d, err := authsetup.Build(ctx, store, "ldap", ldapCfg)
+			if err != nil {
 				slog.Warn("ldap driver init failed", slog.String("err", err.Error()))
-				continue
 			}
-			enabled = append(enabled, d)
-			loginDrvs = append(loginDrvs, d)
-			if cfg.Auth.LDAP.ProtocolLogin {
-				dirDrv = d
-			}
+			envAuth = append(envAuth, authsetup.NewEnvEntry("ldap", driversFrom, ldapCfg, d, err, cfg.Auth.LDAP.ProtocolLogin))
 		case "proxy-header", "proxyheader", "header-proxy":
-			d := authproxyheader.New(store)
-			if err := d.Init(ctx, map[string]any{
+			phCfg := map[string]any{
 				"header_user":     "X-Auth-User",
 				"header_email":    cfg.Auth.Header.EmailHeader,
 				"header_roles":    cfg.Auth.Header.GroupHeader,
@@ -323,69 +328,53 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 				"admin_role":      cfg.Auth.Header.AdminGroup,
 				"multi_tenant":    cfg.MultiTenant,
 				"provider":        cfg.Auth.Header.Provider,
-			}); err != nil {
-				slog.Warn("proxy-header driver init failed", slog.String("err", err.Error()))
-				continue
 			}
-			enabled = append(enabled, d)
+			d, err := authsetup.Build(ctx, store, "proxy-header", phCfg)
+			if err != nil {
+				slog.Warn("proxy-header driver init failed", slog.String("err", err.Error()))
+			}
+			envAuth = append(envAuth, authsetup.NewEnvEntry("proxy-header", driversFrom, phCfg, d, err, false))
 		default:
 			slog.Warn("unknown auth driver", slog.String("name", name))
 		}
 	}
 
-	// Sessions are validated whatever login drivers are enabled — see
-	// withSessionAuthenticator (issue #24).
-	enabled = withSessionAuthenticator(enabled, store)
-
-	// API-token driver is always enabled (independent of cfg.Auth.Drivers)
-	// so AI agents / the work.example.com FilexClient / MCP clients can
-	// authenticate against /api/files and /api/ai with X-Filex-Token or a
-	// Bearer token. Tokens are minted from /api/admin/ai-tokens.
-	{
-		atDrv := authapitoken.New(store)
-		if err := atDrv.Init(ctx, nil); err != nil {
-			return nil, fmt.Errorf("auth init api-token: %w", err)
-		}
-		enabled = append(enabled, atDrv)
+	// The same key the app-plugin settings and the S3 access keys are sealed
+	// with: one mechanism for every secret filex must read back.
+	authBox, err := secretbox.New(cfg.SecretKey)
+	if err != nil {
+		return nil, fmt.Errorf("secret key: %w", err)
 	}
-	auth.SetEnabled(enabled)
-
-	// Recovery sign-in for the bootstrap administrator when password sign-in
-	// is otherwise off — see withRecoveryLogin.
-	var recoveryLogin bool
-	loginDrvs, recoveryLogin = withRecoveryLogin(loginDrvs, cfg.Auth.RecoveryLogin, store)
+	authLive, err := authsetup.New(ctx, authsetup.Options{
+		Store:         store,
+		Box:           authBox,
+		MultiTenant:   cfg.MultiTenant,
+		RecoveryLogin: cfg.Auth.RecoveryLogin,
+		PublicURL:     cfg.PublicURL,
+		RetryBackoff:  []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second},
+	}, envAuth)
+	if err != nil {
+		return nil, fmt.Errorf("auth: %w", err)
+	}
+	authLive.Start(ctx)
+	authSet := authLive.Current()
+	recoveryLogin := authSet.Recovery()
 	if recoveryLogin {
 		slog.Info("auth: password sign-in is off; the bootstrap administrator can still use it, for recovery",
 			slog.String("disable_with", "FILEX_AUTH_RECOVERY_LOGIN=false"))
 	}
-
-	// One LoginDriver reaches the login handler, so several become a chain.
-	// A single driver is passed through unwrapped: the chain would be a
-	// no-op layer, and the boot line below is more useful when it names the
-	// driver rather than a wrapper around it.
-	switch {
-	case len(loginDrvs) == 0:
-		localDrv = nil
+	if !authSet.PasswordLogin() {
 		slog.Warn("auth: no password login driver is enabled; sign-in is SSO/token only")
-	case len(loginDrvs) == 1:
-		localDrv = loginDrvs[0]
-	default:
-		chain := auth.NewLoginChain(loginDrvs...)
-		localDrv = chain
-		slog.Info("auth: password login chain", slog.String("order", chain.Name()))
 	}
-	if dirDrv != nil {
+	var localDrv auth.LoginDriver = authLive.Login()
+	var oidcDrv auth.OIDCDriver = authLive.OIDC()
+	var dirDrv protocolauth.Directory = authLive.Dir()
+	if authSet.HasDirectory() {
 		slog.Info("auth: directory passwords accepted on the file protocols",
 			slog.String("driver", "ldap"))
 	}
-
-	// Multi-tenant mode: dispatch OIDC per tenant realm — request host →
-	// provider row → that realm's driver (JIT stamps the tenant). Hosts with no
-	// tenant OIDC config fall back to the config-file driver above, so the
-	// operator's own login keeps working. See docs/MULTI-TENANCY.md.
-	if cfg.MultiTenant {
-		oidcDrv = multioidc.New(store, oidcDrv)
-	}
+	slog.Info("auth: sign-in", slog.String("methods", strings.Join(authSet.Names(), ",")),
+		slog.String("password_chain", authLive.LoginName()))
 
 	// One boot line naming the accounts an earlier build stranded in the
 	// confine-exempt supertenant. Reports only -- see auditSupertenantAccounts
@@ -406,7 +395,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	caps := capability.New(store)
 	caps.SetRecoveryLogin(recoveryLogin)
 	caps.SetStaticInventory(
-		cfg.Auth.Drivers,
+		authSet.Names(),
 		storage.Names(),
 		cfg.DB.Driver,
 		cfg.Search.Enabled,
@@ -418,6 +407,12 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		cfg.DefaultLocale,
 		cfg.Auth.OIDC.AutoRedirect,
 	)
+	// The login page learns of a provider switched on or off on the Identity
+	// providers page at once, not at the next restart.
+	authLive.OnSwap(func(set *authsetup.Set) {
+		caps.SetAuthDrivers(set.Names())
+		caps.SetRecoveryLogin(set.Recovery())
+	})
 
 	// Sync worker. Bind the search index so every create/update/delete
 	// during a sync run also updates Bleve — without this, the in-toolbar
@@ -485,8 +480,14 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	pipeline := thumb.New(store, cfg.Thumbs.CacheDir, pipelineCaps)
 	pipeline.AttachBody(bgBody)
 
-	// Share service.
+	// Share service. It owns the PIN gate for EVERY public link — /s/, /d/
+	// and an app plugin's page — so it is also what signs the unlock cookie a
+	// visitor gets for answering one. ⚠ Without the instance secret the
+	// cookie is signed with a per-process key: correct, but every visitor is
+	// asked again after a restart and two instances behind one address never
+	// agree.
 	shareSvc := share.NewService(store)
+	shareSvc.AttachSecret(cfg.SecretKey)
 
 	// Storage plugins — drivers that live outside this binary. Started BEFORE
 	// the resolver pre-warms storages below: a storage on `plugin:foo` can
@@ -518,15 +519,81 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		}
 	}
 
+	// App plugins — in-process wasm modules (internal/wasmplugin). Loaded
+	// after the storage plugins, before the router: a job reads storages
+	// through the resolver (wired below) and never needs the storage
+	// plugins to be up first.
+	var appPlugins *wasmplugin.Registry
+	appPluginsReason := ""
+	switch {
+	case cfg.AppPluginsDisabled:
+		appPluginsReason = "app plugins are disabled on this instance (FILEX_APP_PLUGINS_DISABLED)"
+	case !wasmplugin.ArchSupported():
+		appPluginsReason = "app plugins need an amd64 or arm64 host (no wasm compiler for " + goruntime.GOARCH + ")"
+	default:
+		wasmplugin.HostVersion = version.String()
+		appPlugins, err = wasmplugin.New(wasmplugin.Options{
+			// The tenant-scoped wrapper: inert without a scope on the context
+			// (plugin rows are instance-wide), and the directory chokepoint
+			// once a job or request carries one (users_lookup).
+			Store: tenantstore.New(store),
+			// An app's public page IS a share (00046), so it is minted by the
+			// same service every other link is — same expiry ceiling, same PIN
+			// gate, same Shares list the administrator revokes from.
+			Share:          shareSvc,
+			Dir:            filepath.Join(cfg.DataDir, "app-plugins"),
+			SecretKey:      cfg.SecretKey,
+			TrustedKeys:    cfg.PluginTrustedKeys,
+			Demo:           cfg.Demo.Mode,
+			Log:            slog.Default(),
+			MaxInputBytes:  int64(cfg.AppPluginMaxInputMB) << 20,
+			MaxOutputBytes: int64(cfg.AppPluginMaxOutputMB) << 20,
+			MaxWasmBytes:   int64(cfg.AppPluginMaxWasmMB) << 20,
+		})
+		if err != nil {
+			slog.Warn("app-plugins: runtime unavailable; continuing without them", slog.Any("err", err))
+			appPluginsReason = err.Error()
+			appPlugins = nil
+		} else if err := appPlugins.Load(ctx); err != nil {
+			slog.Warn("app-plugins: load failed; continuing", slog.Any("err", err))
+		}
+		// The interface's string catalogue, so the Apps screens can say how
+		// much of it a language pack covers. The web build writes it
+		// (web/vite.config.ts → scripts/lib/i18n-catalogue.mjs) next to the
+		// SPA it describes, so the numbers are always about THIS binary's
+		// interface. A binary built without the web build has none, and the
+		// screens say "coverage unknown" rather than inventing a percentage.
+		if appPlugins != nil {
+			if b, err := embedFS.ReadFile(catalogueEmbedPath); err == nil {
+				if keys, err := wasmplugin.ParseCatalogue(b); err == nil {
+					appPlugins.SetCatalogue(keys)
+				} else {
+					slog.Warn("app-plugins: string catalogue unreadable; language coverage unknown", slog.Any("err", err))
+				}
+			}
+		}
+	}
+	// What the SERVER writes to a person — e-mails, the no-JS public pages,
+	// the install review — speaks the language packs' languages too, and
+	// falls back to the instance default before English (internal/srvtext).
+	// ⚠ Only a live registry: a nil *Registry in the interface would be a
+	// non-nil Packs that answers nothing, which reads the same but hides the
+	// "plugins off" case from anybody debugging it.
+	srvtext.SetDefault(cfg.DefaultLocale)
+	if appPlugins != nil {
+		srvtext.SetPacks(appPlugins)
+	}
+
 	srvObj := &Server{
-		cfg:      cfg,
-		plugins:  pluginMgr,
-		store:    store,
-		sqlDB:    sqlDB,
-		worker:   worker,
-		idx:      idx,
-		pipeline: pipeline,
-		storages: map[int64]storage.Driver{},
+		cfg:        cfg,
+		plugins:    pluginMgr,
+		appPlugins: appPlugins,
+		store:      store,
+		sqlDB:      sqlDB,
+		worker:     worker,
+		idx:        idx,
+		pipeline:   pipeline,
+		storages:   map[int64]storage.Driver{},
 	}
 
 	// External services (OnlyOffice, drawio, converter) resolve from the
@@ -632,10 +699,44 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 
 	// Async ops queue — DB-backed, restart-safe.
 	opsSvc := ops.NewForDialect(sqlDB, cfg.DB.Driver, resolver)
+	opsSvc.SetDeleteWorkers(cfg.Ops.DeleteWorkers)
 	if err := opsSvc.Migrate(ctx); err != nil {
 		slog.Warn("ops: migrate", slog.String("err", err.Error()))
 	}
 	srvObj.ops = opsSvc
+	if appPlugins != nil {
+		appPlugins.SetStorageResolver(resolver)
+		if cfg.MultiTenant {
+			appPlugins.SetUserScope(func(ctx context.Context, u *model.User) context.Context {
+				return tenant.WithScope(ctx, auth.ScopeForUser(ctx, store, u))
+			})
+		}
+		// state_list answers with files, so it answers through the ACL: a
+		// plugin may keep state on a document this person was never given.
+		aclRes := acl.New(store)
+		appPlugins.SetVisibility(func(ctx context.Context, u *model.User, storageID int64, rel string) bool {
+			if u == nil {
+				return false
+			}
+			st, err := store.GetStorage(ctx, storageID)
+			if err != nil || st == nil {
+				return false
+			}
+			set, err := aclRes.LoadSet(ctx, u, st)
+			if err != nil || set == nil {
+				return false
+			}
+			return set.CanSee(rel)
+		})
+		opsSvc.SetPluginRunner(appPlugins)
+		opsSvc.SetDecorator(appPlugins.DecorateOps)
+		// The other direction: scheduled work (the hourly wake-up an app
+		// with the `schedule` permission gets) is handed to this same queue
+		// as an ordinary plugin-action op, so unattended work and a person's
+		// work run through one executor.
+		appPlugins.SetJobQueue(opsSvc)
+		caps.SetAppPlugins(model.AppPluginsCapabilities{Enabled: true, Engines: appPlugins.Engines()})
+	}
 
 	// Driver-based persistent queue. Bound to the same *sql.DB for the
 	// sqlite default; postgres/redis open their own connection from
@@ -885,6 +986,17 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 
 	// Mailer for invite/share notices — verified periodically in Start().
 	srvObj.mailer = mailer.New(store)
+	if appPlugins != nil {
+		appPlugins.SetNotify(srvObj.notify)
+		appPlugins.SetMailer(srvObj.mailer)
+		appPlugins.SetPublicURL(cfg.PublicURL)
+		appPlugins.StartSweeper(ctx)
+		// Last, because a due item needs the queue, the notifier and the
+		// mailer already wired. Demo mode turns it off from the inside;
+		// FILEX_APP_PLUGINS_DISABLED never gets here, because it leaves
+		// appPlugins nil.
+		appPlugins.StartScheduler(ctx)
+	}
 
 	// Handlers see the tenant-scoped store: storage listings are confined to the
 	// request's tenant (no-op unless multi-tenant mode is on — the wrapper only
@@ -1011,38 +1123,41 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	}
 
 	deps := &api.Deps{
-		Cfg:             cfg,
-		Store:           scopedStore,
-		Updater:         updater,
-		Worker:          worker,
-		Index:           idx,
-		Caps:            caps,
-		External:        extResolver,
-		Thumbs:          pipeline,
-		Share:           shareSvc,
-		OnlyOffice:      ooSvc,
-		Ops:             opsSvc,
-		Trash:           trashSvc,
-		Quota:           quotaSvc,
-		Versions:        versionsSvc,
-		Queue:           srvObj.queue,
-		Notify:          srvObj.notify,
-		ReplicaService:  srvObj.replicaSvc,
-		ReplicaCron:     srvObj.replicaCron,
-		ReplicaReloader: srvObj.replicaReloader,
-		StorageResolver: resolver,
-		ForgetStorage:   forgetStorage,
-		Plugins:         pluginMgr,
-		Embed:           embedFS,
-		LocalAuth:       localDrv,
-		OIDCAuth:        oidcDrv,
-		Directory:       dirDrv,
-		Mailer:          srvObj.mailer,
-		ZipCache:        zipCache,
-		FileCache:       fileCache,
-		AVScan:          avEnqueue,          /* koru:k2 av */
-		AVScanAfterSave: avEnqueueAfterSave, /* koru:k2 av — debounced editor save */
-		E2EEscrow:       escrowKey,          /* wiring:e2 — nil when escrow is off */
+		Cfg:                      cfg,
+		Store:                    scopedStore,
+		Updater:                  updater,
+		Worker:                   worker,
+		Index:                    idx,
+		Caps:                     caps,
+		External:                 extResolver,
+		Thumbs:                   pipeline,
+		Share:                    shareSvc,
+		OnlyOffice:               ooSvc,
+		Ops:                      opsSvc,
+		Trash:                    trashSvc,
+		Quota:                    quotaSvc,
+		Versions:                 versionsSvc,
+		Queue:                    srvObj.queue,
+		Notify:                   srvObj.notify,
+		ReplicaService:           srvObj.replicaSvc,
+		ReplicaCron:              srvObj.replicaCron,
+		ReplicaReloader:          srvObj.replicaReloader,
+		StorageResolver:          resolver,
+		ForgetStorage:            forgetStorage,
+		Plugins:                  pluginMgr,
+		AppPlugins:               appPlugins,
+		AppPluginsDisabledReason: appPluginsReason,
+		Embed:                    embedFS,
+		LocalAuth:                localDrv,
+		OIDCAuth:                 oidcDrv,
+		Directory:                dirDrv,
+		AuthLive:                 authLive,
+		Mailer:                   srvObj.mailer,
+		ZipCache:                 zipCache,
+		FileCache:                fileCache,
+		AVScan:                   avEnqueue,          /* koru:k2 av */
+		AVScanAfterSave:          avEnqueueAfterSave, /* koru:k2 av — debounced editor save */
+		E2EEscrow:                escrowKey,          /* wiring:e2 — nil when escrow is off */
 	}
 	// WebDAV server (/dav/<storage>/<path>, HTTP Basic) — the handler itself
 	// is composed inside api.BuildRouter (single Mount line, see
@@ -1499,6 +1614,9 @@ func (s *Server) Start(ctx context.Context) error {
 		if s.plugins != nil {
 			s.plugins.Shutdown()
 		}
+		if s.appPlugins != nil {
+			s.appPlugins.Close(context.Background())
+		}
 		s.worker.Stop()
 		if s.ops != nil {
 			s.ops.Stop()
@@ -1781,47 +1899,10 @@ func logThumbCapabilities(c thumb.Capabilities) {
 		slog.String("note", "the default docker image ships all of these; the slim image deliberately does not"))
 }
 
-// withRecoveryLogin appends the recovery sign-in driver when no enabled login
-// driver is `local` and recovery is on, and reports whether it did.
-//
-// The owner's ruling, 2026-09-14: on an installation that signs in through an
-// identity provider alone, the administrator created at installation must
-// still be able to sign in with a password — for recovery only. Without it an
-// unreachable IdP, an expired client secret or a broken realm locks out the
-// one person who can repair filex's side of it. local.RecoveryLogin accepts
-// that account and no other, so password sign-in stays off for everyone else.
-//
-// It goes LAST: a directory driver in the list judges its own accounts first.
-func withRecoveryLogin(loginDrvs []auth.LoginDriver, enabled bool, store db.Store) ([]auth.LoginDriver, bool) {
-	if !enabled {
-		return loginDrvs, false
-	}
-	for _, d := range loginDrvs {
-		if n, ok := d.(interface{ Name() string }); ok && (n.Name() == "local" || n.Name() == authlocal.RecoveryLoginName) {
-			return loginDrvs, false
-		}
-	}
-	return append(loginDrvs, authlocal.NewRecoveryLogin(store)), true
-}
-
-// withSessionAuthenticator makes sure something in the chain can turn a filex
-// session back into a user, whichever login drivers the operator enabled.
-//
-// ⚠⚠ Issue #24. Every sign-in — a password, an LDAP bind, an OIDC callback —
-// ends in the same sessions row and the same `filex_session` cookie, but only
-// the `local` driver's Authenticate reads that row: OIDC's and LDAP's answer
-// "unauthorized" by design. With `FILEX_AUTH_DRIVERS=oidc` the callback minted
-// a session the very next request refused, so nobody could sign in and every
-// open session died on the restart that applied the setting.
-//
-// The validator is not a LoginDriver, so it enables no password sign-in; and
-// when `local` is already in the list it adds nothing, because that driver
-// does the same lookup.
-func withSessionAuthenticator(enabled []auth.Driver, store db.Store) []auth.Driver {
-	for _, d := range enabled {
-		if d.Name() == "local" || d.Name() == authlocal.SessionAuthenticatorName {
-			return enabled
-		}
-	}
-	return append(enabled, authlocal.NewSessionAuthenticator(store))
-}
+// withRecoveryLogin and withSessionAuthenticator live in internal/authsetup
+// now, beside the one construction path that uses them; the names stay here
+// for the tests that pin their behaviour.
+var (
+	withRecoveryLogin        = authsetup.WithRecoveryLogin
+	withSessionAuthenticator = authsetup.WithSessionAuthenticator
+)

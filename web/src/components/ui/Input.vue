@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, useId } from 'vue';
+import { computed, ref, useId } from 'vue';
+import { onFieldInvalid } from '@/lib/formCheck';
 
 interface Props {
   modelValue?: string | number | null;
@@ -38,7 +39,14 @@ const emit = defineEmits<{
 const fallbackId = useId();
 const inputId = computed(() => props.name ?? fallbackId);
 
+/* The browser's verdict on this box (`required`, `type="url"`, `min`…), said
+ * in the panel's language under the box — its own bubble is suppressed
+ * (lib/formCheck). Cleared as soon as the person types. */
+const nativeError = ref('');
+const shownError = computed(() => props.error || nativeError.value);
+
 function onInput(ev: Event) {
+  nativeError.value = '';
   const target = ev.target as HTMLInputElement;
   let v: string | number = target.value;
   if (props.type === 'number' && target.value !== '') v = target.valueAsNumber;
@@ -77,20 +85,21 @@ const padding = computed(() => {
       :min="min"
       :max="max"
       :step="step"
-      :aria-invalid="error ? 'true' : undefined"
-      :aria-describedby="error ? `${inputId}-err` : hint ? `${inputId}-hint` : undefined"
+      :aria-invalid="shownError ? 'true' : undefined"
+      :aria-describedby="shownError ? `${inputId}-err` : hint ? `${inputId}-hint` : undefined"
       :class="[
         'input-base',
         padding,
         monospace && 'font-mono',
-        error && 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30',
+        shownError && 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30',
       ]"
+      @invalid="(e) => (nativeError = onFieldInvalid(e))"
       @input="onInput"
       @blur="(e) => emit('blur', e)"
       @focus="(e) => emit('focus', e)"
       @keydown.enter="emit('enter')"
     />
-    <p v-if="error" :id="`${inputId}-err`" class="error-text">{{ error }}</p>
+    <p v-if="shownError" :id="`${inputId}-err`" class="error-text" data-testid="field-error">{{ shownError }}</p>
     <p v-else-if="hint" :id="`${inputId}-hint`" class="help-text">{{ hint }}</p>
   </div>
 </template>

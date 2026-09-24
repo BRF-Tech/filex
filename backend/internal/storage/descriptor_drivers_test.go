@@ -257,3 +257,36 @@ func sortedKeys(m map[string]bool) []string {
 	sort.Strings(out)
 	return out
 }
+
+// TestScanFieldsAreDescribedAndCollideWithNoDriver — the scan settings live
+// in the same config map as the driver's own keys (issue #44). A driver that
+// declared one of them would have the scan reading its setting, so no driver
+// may; and they carry the same label/help/i18n contract as any field.
+func TestScanFieldsAreDescribedAndCollideWithNoDriver(t *testing.T) {
+	scan := storage.ScanFields()
+	if len(scan) == 0 {
+		t.Fatal("no scan fields")
+	}
+	for _, f := range scan {
+		if f.Label == "" || f.I18nKey == "" || f.Help == "" || f.HelpI18nKey == "" {
+			t.Errorf("scan field %q: needs Label, I18nKey, Help and HelpI18nKey", f.Key)
+		}
+		for _, name := range storage.Names() {
+			d, _ := storage.DescriptorFor(name)
+			for _, k := range d.Keys() {
+				if k == f.Key {
+					t.Errorf("driver %q declares %q, which is a scan setting every storage has", name, k)
+				}
+			}
+		}
+	}
+	for _, d := range storage.Descriptors() {
+		if len(d.ScanFields) != len(scan) {
+			t.Errorf("%s: Descriptors() must carry the scan fields", d.Driver)
+		}
+	}
+	scan[0].Key = "edited"
+	if storage.ScanFields()[0].Key == "edited" {
+		t.Error("ScanFields handed out its own slice")
+	}
+}

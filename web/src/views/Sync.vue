@@ -7,11 +7,12 @@ import { useSyncStore } from '@/stores/sync';
 import { useStoragesStore } from '@/stores/storages';
 import type { SyncRun } from '@/api/types';
 import { formatDate, formatDuration } from '@/lib/format';
+import { syncStateLabel, syncTone } from '@/lib/syncTone';
 
 import Button from '@/components/ui/Button.vue';
 import Select from '@/components/ui/Select.vue';
 import Badge from '@/components/ui/Badge.vue';
-import Table, { type Column } from '@/components/ui/Table.vue';
+import { DataTable, type DataColumn } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
 const sync = useSyncStore();
@@ -36,25 +37,11 @@ watch([storageId, state], () => {
   load();
 });
 
-const stateTone = (s: SyncRun['state']) => {
-  switch (s) {
-    case 'ok':
-      return 'emerald';
-    case 'error':
-      return 'rose';
-    case 'running':
-      return 'sky';
-    case 'aborted':
-      return 'amber';
-    default:
-      return 'zinc';
-  }
-};
-
 function duration(r: SyncRun): string {
   if (!r.finished_at) return '—';
   return formatDuration(
     (new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()) / 1000,
+    locale.value,
   );
 }
 
@@ -63,31 +50,93 @@ const storageOptions = computed(() => [
   ...storages.items.map((s) => ({ value: s.id, label: s.name })),
 ]);
 
-const stateOptions = [
+/** The states a run can be filtered by. */
+const RUN_STATES = ['ok', 'error', 'running', 'aborted'] as const;
+
+/** A run's state in words; an unknown one as sent. ⚠ These were raw wire
+ *  values AND a plain array built once at setup, so even the "All" label kept
+ *  the language the page was opened in when the language changed — and the
+ *  table's cells kept printing "ok" after the filter had been translated. */
+function stateLabel(s: string): string {
+  return syncStateLabel(s, t);
+}
+
+const stateOptions = computed(() => [
   { value: '', label: t('common.all') },
-  { value: 'ok', label: 'ok' },
-  { value: 'error', label: 'error' },
-  { value: 'running', label: 'running' },
-  { value: 'aborted', label: 'aborted' },
-];
+  ...RUN_STATES.map((s) => ({ value: s, label: stateLabel(s) })),
+]);
 
 function num(n: number | null | undefined): string {
   return typeof n === 'number' && Number.isFinite(n) ? String(n) : '0';
 }
 
-const columns = computed<Column<SyncRun>[]>(() => [
-  { key: 'storage_name', label: t('sync.fields.storage') },
+/** How long a run took, in ms — what Duration SORTS by ("2m" after "45s",
+ *  not before it). Unfinished runs sort last. */
+function durationMs(r: SyncRun): number | null {
+  if (!r.finished_at) return null;
+  return new Date(r.finished_at).getTime() - new Date(r.started_at).getTime();
+}
+
+/* The explorer's table (DataTable), remembered on the account under
+ * `admin.sync`. ⚠ The runs are paged by the SERVER, which has no sort
+ * parameter, so while they span more than one page DataTable closes the
+ * headers and says why instead of re-ordering one page of 50. */
+const columns = computed<DataColumn<SyncRun>[]>(() => [
+  { id: 'storage_name', label: t('sync.fields.storage'), sortable: true, width: 180 },
   {
-    key: 'started_at',
+    id: 'started_at',
     label: t('sync.fields.started'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 170,
     format: (r) => (r.started_at ? formatDate(r.started_at, locale.value) : '—'),
+    sortValue: (r) => (r.started_at ? Date.parse(r.started_at) : null),
   },
-  { key: 'duration', label: t('sync.fields.duration'), format: duration },
-  { key: 'state', label: t('sync.fields.state'), cell: 'slot' },
-  { key: 'scanned', label: t('sync.fields.scanned'), align: 'right', format: (r) => num(r.scanned) },
-  { key: 'added', label: '+', align: 'right', format: (r) => num(r.added) },
-  { key: 'updated', label: '~', align: 'right', format: (r) => num(r.updated) },
-  { key: 'deleted', label: '-', align: 'right', format: (r) => num(r.deleted) },
+  {
+    id: 'duration',
+    label: t('sync.fields.duration'),
+    sortable: true,
+    width: 110,
+    format: duration,
+    sortValue: durationMs,
+  },
+  { id: 'state', label: t('sync.fields.state'), sortable: true, width: 110, sortValue: (r) => stateLabel(r.state) },
+  {
+    id: 'scanned',
+    label: t('sync.fields.scanned'),
+    align: 'right',
+    sortable: true,
+    width: 100,
+    format: (r) => num(r.scanned),
+    sortValue: (r) => r.scanned ?? 0,
+  },
+  {
+    id: 'added',
+    label: '+',
+    align: 'right',
+    sortable: true,
+    width: 70,
+    format: (r) => num(r.added),
+    sortValue: (r) => r.added ?? 0,
+  },
+  {
+    id: 'updated',
+    label: '~',
+    align: 'right',
+    sortable: true,
+    width: 70,
+    format: (r) => num(r.updated),
+    sortValue: (r) => r.updated ?? 0,
+  },
+  {
+    id: 'deleted',
+    label: '-',
+    align: 'right',
+    sortable: true,
+    width: 70,
+    format: (r) => num(r.deleted),
+    sortValue: (r) => r.deleted ?? 0,
+  },
 ]);
 
 onMounted(async () => {
@@ -108,7 +157,8 @@ onMounted(async () => {
       </Button>
     </div>
 
-    <Table
+    <DataTable
+      table-id="admin.sync"
       :columns="columns"
       :rows="sync.items"
       :loading="sync.loading"
@@ -117,7 +167,7 @@ onMounted(async () => {
       :page-size="pageSize"
       :total="sync.runs.total"
       row-key="id"
-      @page="(p) => ((page = p), load())"
+      @page="(p: number) => ((page = p), load())"
     >
       <template #toolbar>
         <Select
@@ -134,10 +184,10 @@ onMounted(async () => {
         />
       </template>
       <template #cell-state="{ row }">
-        <Badge :tone="stateTone((row as SyncRun).state)" size="xs">
-          {{ (row as SyncRun).state }}
+        <Badge :tone="syncTone((row as SyncRun).state)" size="xs" data-testid="sync-run-state">
+          {{ stateLabel((row as SyncRun).state) }}
         </Badge>
       </template>
-    </Table>
+    </DataTable>
   </div>
 </template>

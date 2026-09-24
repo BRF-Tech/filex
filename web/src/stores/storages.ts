@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { StoragesApi } from '@/api/storages';
 import type { StorageCreateRequest, StorageRef, StorageUpdateRequest } from '@/api/types';
 import { extractError } from '@/api/client';
+import { t } from '@/i18n';
 
 export const useStoragesStore = defineStore('storages', () => {
   const items = ref<StorageRef[]>([]);
@@ -18,7 +19,7 @@ export const useStoragesStore = defineStore('storages', () => {
     try {
       items.value = await StoragesApi.list();
     } catch (e: unknown) {
-      error.value = extractError(e, 'Failed to load storages');
+      error.value = extractError(e, t('errors.loadFailed'));
     } finally {
       loading.value = false;
     }
@@ -50,12 +51,13 @@ export const useStoragesStore = defineStore('storages', () => {
     try {
       await StoragesApi.syncNow(id);
     } finally {
-      // ⚠ The run is over by the time this resolves — the endpoint executes it
-      // synchronously — so the row on screen is now stale, not pending. Without
-      // this refetch the optimistic 'running' was the LAST thing the store ever
-      // wrote: the storage kept reading "Never ran" until a full page reload,
-      // which is exactly what issue #16 reported. Refresh on failure too, so a
-      // failed run shows its state instead of spinning for ever.
+      // ⚠ The endpoint answers 202 as soon as the run has STARTED (it walks in
+      // the background), so what the refetch shows is the run's real state —
+      // running, or finished if it was quick. Without this refetch the
+      // optimistic 'running' was the LAST thing the store ever wrote: the
+      // storage kept reading "Never ran" until a full page reload, which is
+      // exactly what issue #16 reported. Refresh on failure too, so a failed
+      // request shows the storage's state instead of spinning for ever.
       await fetch();
     }
   }

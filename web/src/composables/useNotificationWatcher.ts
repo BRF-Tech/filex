@@ -24,7 +24,13 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationsStore } from '@/stores/notifications';
 import { openNotificationTarget } from '@/lib/notificationNav';
-import { canShowBrowserNotification, showBrowserNotification } from '@/lib/browserNotify';
+import {
+  isNotificationClickable,
+  notificationHref,
+  resolveNotificationTarget,
+} from '@/lib/notificationTarget';
+import { currentMountBase } from '@/router';
+import { canShowBrowserNotification, raiseBrowserNotification } from '@/lib/browserNotify';
 import { useNotificationText } from '@/composables/useNotificationText';
 
 /** Same cadence the bell has always polled at. */
@@ -67,15 +73,34 @@ export function useNotificationWatcher() {
     const fresh = notif.feed.filter((n) => n.id > since && !n.read_at).sort((a, b) => a.id - b.id);
     for (const n of fresh) {
       const text = notificationText(n);
-      showBrowserNotification(
+      // ⚠⚠ Rule 1 applies to the TOAST as well as to the bell row: a
+      // notification is clickable exactly when it has somewhere to go. The
+      // bell renders an inert row as plain text — but this loop handed the
+      // toast for that same row an `onClick` and an empty `url`, and an empty
+      // url is what made the service worker fall back to `/admin/explore`
+      // (notify-sw.js). So one row was inert in the popover and, four inches
+      // away in the OS, took a non-admin to an admin address.
+      //
+      // ⚠ The address is carried as well as the callback for the rows that DO
+      // go somewhere. The callback is the good path — it marks the row read
+      // and navigates inside the running SPA — but on a device where only a
+      // service worker may notify there is no callback to run, and the worker
+      // can open nothing but a URL. Same resolver for both, so the two cannot
+      // land in two different places.
+      const goes = isNotificationClickable(n.target);
+      const url = goes ? notificationHref(resolveNotificationTarget(n.target), currentMountBase()) : '';
+      void raiseBrowserNotification(
         {
           title: text.title,
           body: text.body,
           tag: `filex-notification-${n.id}`,
-          onClick: () => {
-            void notif.markRead(n.id).catch(() => {});
-            void openNotificationTarget(router, n.target);
-          },
+          url,
+          onClick: goes
+            ? () => {
+                void notif.markRead(n.id).catch(() => {});
+                void openNotificationTarget(router, n.target);
+              }
+            : undefined,
         },
         auth.user?.id,
       );

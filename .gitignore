@@ -1,4 +1,6 @@
 # --- Build outputs ---
+# `node scripts/i18n-export.mjs` without --out (the translator's catalogue).
+/filex-catalogue/
 /bin/
 /goreleaser-dist/
 /backend/dist/

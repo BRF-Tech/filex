@@ -37,6 +37,9 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	"unicode/utf8"
+
+	"github.com/brf-tech/filex/backend/internal/namefold"
 )
 
 // Score thresholds, verbatim from VS Code. They are what keeps the
@@ -112,6 +115,9 @@ func (q PreparedQuery) Empty() bool { return len(q.pieces) == 0 }
 // good tag search would return nothing. Asserted by
 // TestPrepareQuery_RawTagTokenWouldDropEverything.
 func PrepareQuery(raw string) PreparedQuery {
+	// Composed, like every candidate ScoreName compares it with: a name
+	// pasted from a Finder window arrives decomposed. See namefold.Canonical.
+	raw = namefold.Canonical(raw)
 	q := PreparedQuery{raw: raw}
 	unified := strings.Map(func(r rune) rune {
 		switch r {
@@ -127,11 +133,11 @@ func PrepareQuery(raw string) PreparedQuery {
 	}, raw)
 	var norm strings.Builder
 	for _, field := range strings.Fields(unified) {
-		norm.WriteString(strings.ToLower(field))
+		norm.WriteString(namefold.String(field))
 		runes := []rune(field)
 		lower := make([]rune, len(runes))
 		for i, r := range runes {
-			lower[i] = unicode.ToLower(r)
+			lower[i] = namefold.Rune(r)
 		}
 		q.pieces = append(q.pieces, queryPiece{runes: runes, lower: lower})
 	}
@@ -179,6 +185,11 @@ func (q PreparedQuery) ScoreName(name, path string) NameScore {
 		// been reindexed yet must lose ranking quality, never results.
 		return NameScore{OK: true, Tier: TierName}
 	}
+	// A decomposed `ü` is two runes, and neither of them is the `ü` in the
+	// query, so an uncomposed name fails every piece that has one. The
+	// fallback hands in database rows, which hold the name as it was
+	// uploaded. Free for a name that is already composed.
+	name, path = namefold.Canonical(name), namefold.Canonical(path)
 
 	rel := strings.TrimPrefix(path, "/")
 	if rel == "" {
@@ -188,10 +199,10 @@ func (q PreparedQuery) ScoreName(name, path string) NameScore {
 	// `Code/main.go` puts /Code/main.go first instead of tying with
 	// /example/main.go.
 	//
-	// EqualFold rather than ToLower: this runs on every candidate of
-	// every search, and ToLower would allocate a throwaway string per
+	// foldEqual rather than folding both: this runs on every candidate of
+	// every search, and folding would allocate a throwaway string per
 	// call just to throw it away again.
-	if strings.EqualFold(q.normalized, rel) || strings.EqualFold(q.normalized, path) {
+	if foldEqual(q.normalized, rel) || foldEqual(q.normalized, path) {
 		return NameScore{OK: true, Score: PathIdentityScore, Tier: TierExact}
 	}
 
@@ -232,6 +243,21 @@ func (q PreparedQuery) ScoreName(name, path string) NameScore {
 		tier = t
 	}
 	return NameScore{OK: true, Score: total, Tier: tier}
+}
+
+// foldEqual reports whether a and b are the same text under namefold.Rune,
+// rune by rune and without allocating. strings.EqualFold was the old test,
+// and it calls `IŞIK` and `ışık` two different words.
+func foldEqual(a, b string) bool {
+	for a != "" && b != "" {
+		ra, na := utf8.DecodeRuneInString(a)
+		rb, nb := utf8.DecodeRuneInString(b)
+		if namefold.Rune(ra) != namefold.Rune(rb) {
+			return false
+		}
+		a, b = a[na:], b[nb:]
+	}
+	return a == b
 }
 
 // labelBaseScore picks the baseline a label match starts from: a piece
@@ -280,7 +306,7 @@ func (t *scoreTarget) set(s string) scoreTarget {
 	t.lower = t.lower[:0]
 	for _, r := range s {
 		t.runes = append(t.runes, r)
-		t.lower = append(t.lower, unicode.ToLower(r))
+		t.lower = append(t.lower, namefold.Rune(r))
 	}
 	return *t
 }

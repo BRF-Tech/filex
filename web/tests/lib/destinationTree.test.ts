@@ -159,12 +159,29 @@ describe('destinationRows', () => {
 describe('driveRows', () => {
   it('turns storage names into roots', () => {
     expect(driveRows(['main', 's3'])).toEqual([
-      { path: 'main://', label: 'main', writable: true, blocked: null },
-      { path: 's3://', label: 's3', writable: true, blocked: null },
+      { path: 'main://', label: 'main', writable: true, blocked: null, kind: 'dir' },
+      { path: 's3://', label: 's3', writable: true, blocked: null, kind: 'dir' },
     ]);
   });
   it('blocks a drive whose whole root is being moved', () => {
     expect(driveRows(['main'], ['main://'])[0].blocked).toBe('self');
+  });
+});
+
+describe('destinationRows — files', () => {
+  const files = [
+    { path: 'main://docs', basename: 'docs', type: 'dir' as const },
+    { path: 'main://nda.pdf', basename: 'nda.pdf', type: 'file' as const },
+  ];
+  it('lists folders only by default', () => {
+    expect(destinationRows(files).map((r) => r.path)).toEqual(['main://docs']);
+  });
+  it('lists files too when asked, as un-blocked, readable choices', () => {
+    const rows = destinationRows(files, ['main://docs'], { files: true });
+    expect(rows.map((r) => [r.path, r.kind, r.blocked])).toEqual([
+      ['main://docs', 'dir', 'self'],
+      ['main://nda.pdf', 'file', null],
+    ]);
   });
 });
 

@@ -24,9 +24,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/go-ldap/ldap/v3"
 
@@ -83,20 +86,37 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 	if d.store == nil {
 		return errors.New("ldap: nil store")
 	}
-	d.url, _ = cfg["url"].(string)
-	d.bindDN, _ = cfg["bind_dn"].(string)
+	return d.load(cfg)
+}
+
+// load reads a configuration into the driver — everything Init does except
+// needing a store, so Probe (probe.go) tests a configuration exactly the way
+// the running driver would use it.
+//
+// ⚠ start_tls and multi_tenant are read as bools OR as the strings the
+// settings table stores ("true"); a bare type assertion to bool read the
+// panel's saved "true" as false.
+func (d *Driver) load(cfg map[string]any) error {
+	d.url = auth.CfgString(cfg, "url")
+	d.bindDN = auth.CfgString(cfg, "bind_dn")
 	d.bindPass, _ = cfg["bind_password"].(string)
-	d.baseDN, _ = cfg["base_dn"].(string)
-	if v, ok := cfg["user_filter"].(string); ok && v != "" {
+	d.baseDN = auth.CfgString(cfg, "base_dn")
+	if d.userFilter == "" {
+		d.userFilter = "(mail=%s)"
+	}
+	if d.emailAttr == "" {
+		d.emailAttr = "mail"
+	}
+	if v := auth.CfgString(cfg, "user_filter"); v != "" {
 		d.userFilter = v
 	}
-	if v, ok := cfg["email_attr"].(string); ok && v != "" {
+	if v := auth.CfgString(cfg, "email_attr"); v != "" {
 		d.emailAttr = v
 	}
-	d.startTLS, _ = cfg["start_tls"].(bool)
-	d.caFile, _ = cfg["ca_file"].(string)
-	d.homing.MultiTenant, _ = cfg["multi_tenant"].(bool)
-	d.homing.Pin, _ = cfg["provider"].(string)
+	d.startTLS = auth.CfgBool(cfg, "start_tls")
+	d.caFile = auth.CfgString(cfg, "ca_file")
+	d.homing.MultiTenant = auth.CfgBool(cfg, "multi_tenant")
+	d.homing.Pin = auth.CfgString(cfg, "provider")
 	if d.url == "" || d.baseDN == "" {
 		return errors.New("ldap: url and base_dn required")
 	}
@@ -160,6 +180,38 @@ func (d *Driver) tlsConfig() (*tls.Config, error) {
 	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, nil
 }
 
+// startTLSConfig is the TLS configuration for StartTLS on an ldap://
+// address: tlsConfig's trust roots plus the server name the certificate is
+// checked against.
+//
+// ⚠ tlsConfig answers nil when no ca_file is set, and `tls.Client(conn, nil)`
+// refuses to handshake ("either ServerName or InsecureSkipVerify must be
+// specified"), so StartTLS without a private CA never worked. Found while
+// writing the provider test (probe.go), which would otherwise have passed a
+// configuration every login then failed.
+func (d *Driver) startTLSConfig() (*tls.Config, error) {
+	tc, err := d.tlsConfig()
+	if err != nil {
+		return nil, err
+	}
+	if tc == nil {
+		tc = &tls.Config{MinVersion: tls.VersionTLS12}
+	} else {
+		tc = tc.Clone()
+	}
+	if tc.ServerName == "" {
+		if u, perr := url.Parse(d.url); perr == nil {
+			tc.ServerName = u.Hostname()
+		}
+	}
+	return tc, nil
+}
+
+// dialTimeout bounds how long a login (and a provider test) waits for the
+// directory to answer at all: a firewalled port used to hang the sign-in
+// form for as long as the operating system's own TCP timeout.
+const dialTimeout = 10 * time.Second
+
 // connect dials the directory and applies StartTLS plus the service bind.
 func (d *Driver) connect(ctx context.Context) (conn, error) {
 	if d.dial != nil {
@@ -169,7 +221,7 @@ func (d *Driver) connect(ctx context.Context) (conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ldap: ca_file: %w", err)
 	}
-	var opts []ldap.DialOpt
+	opts := []ldap.DialOpt{ldap.DialWithDialer(&net.Dialer{Timeout: dialTimeout})}
 	if tc != nil {
 		opts = append(opts, ldap.DialWithTLSConfig(tc))
 	}
@@ -227,7 +279,7 @@ func (d *Driver) verify(ctx context.Context, identifier, password string) (*mode
 	defer c.Close()
 
 	if d.startTLS {
-		tc, err := d.tlsConfig()
+		tc, err := d.startTLSConfig()
 		if err != nil {
 			return nil, fmt.Errorf("ldap: ca_file: %w", err)
 		}

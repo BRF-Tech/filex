@@ -27,6 +27,7 @@ export const WEBHOOK_EVENTS = [
   'drop.received',
   'comment.added',
   'e2e.escrow_used',
+  'plugin.notice',
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
@@ -68,4 +69,55 @@ export function webhookEventKey(event: string): string {
  */
 export function userEventKey(event: string): string {
   return `userSettings.notifications.events.${eventSlug(event)}`;
+}
+
+/** The instance facts that decide whether an event can happen here at all. */
+export interface EventPossibility {
+  antivirus?: boolean;
+  e2e_escrow?: { enabled?: boolean } | null;
+  app_plugins?: { enabled?: boolean } | null;
+}
+
+/**
+ * Can this event happen on THIS instance? A person choosing what to be told
+ * about is offered only what can reach them.
+ *
+ * ⚠ Measured in the release-candidate sweep (2026-09-21): the settings dialog
+ * offered "A virus is found in a file" on an instance with scanning off, and
+ * "An encrypted folder is opened with the escrow key" on one with no escrow
+ * key — two switches that can never fire, read by somebody deciding what
+ * matters to them. Each rule names the one capability the event depends on;
+ * every other event can happen anywhere.
+ *
+ * ⚠ For the person's own switches only. An operator wiring a webhook target
+ * may subscribe ahead of turning a service on, so the Webhooks screen keeps
+ * the whole catalogue.
+ */
+export function eventPossible(event: string, caps: EventPossibility): boolean {
+  return eventOffReason(event, caps) === null;
+}
+
+/**
+ * WHY an event cannot happen on this instance — the i18n key of the sentence
+ * that says which service is off and where it is switched on — or null when
+ * it can.
+ *
+ * ⚠ The same split as every other "needs a service" entry (packages/core
+ * lib/serviceGate `gateOnService`, the owner's rule of 2026-09-21): an
+ * administrator, who can switch the service on, sees the switch greyed with
+ * this sentence; everybody else is not offered it at all. The Webhooks screen
+ * keeps every event subscribable (an operator may subscribe ahead of turning
+ * the service on) and prints the sentence beside the box instead.
+ */
+export function eventOffReason(event: string, caps: EventPossibility): string | null {
+  switch (event) {
+    case 'file.infected':
+      return caps.antivirus === true ? null : 'webhooks.offReason.antivirus';
+    case 'e2e.escrow_used':
+      return caps.e2e_escrow?.enabled === true ? null : 'webhooks.offReason.escrow';
+    case 'plugin.notice':
+      return caps.app_plugins?.enabled === true ? null : 'webhooks.offReason.appPlugins';
+    default:
+      return null;
+  }
 }

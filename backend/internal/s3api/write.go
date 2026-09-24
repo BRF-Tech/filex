@@ -18,7 +18,9 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -292,7 +294,12 @@ func (h *Handler) writable(p *protocolauth.Principal, set *acl.Set, key string) 
 	// could PUT over .versions/42/1 could destroy the very history the
 	// overwrite guard exists to keep, and the guard skips internal paths so
 	// nothing would snapshot it first.
-	if hiddenPath(key) {
+	//
+	// writegate: filex's own directories (syspath.Mounted — InDir; the keep
+	// marker is an ordinary object here) and app locks, the question every
+	// write door asks. The set is this request's own, so a freeze taken a
+	// second ago counts.
+	if writegate.Check(set, 0, writegate.Writes(key).As(syspath.Mounted)) != nil {
 		return false
 	}
 	if c := p.Confine; c != nil && c.Rel != "" {

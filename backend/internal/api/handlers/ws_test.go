@@ -399,9 +399,12 @@ func TestWSDesktopClientPresence(t *testing.T) {
 	require.Equal(t, "Ada (filex desktop)", got.Name,
 		"the person leads; the platform detail belongs in the token list, not in the presence bar")
 
-	// A user with no display name still gets a person-shaped entry.
-	nameless := &model.User{ID: 4, Email: "grace@example.com"}
-	require.Equal(t, "grace (filex desktop)", mintVia(t, nameless, desktop, "", nil).Name)
+	// A user with no display name is named the way every screen names them
+	// (model.PersonLabel): the username. It used to be the address's local
+	// part — a rule of the presence strip's own, so a co-viewer read "grace"
+	// where the Owner column said "grace.h".
+	nameless := &model.User{ID: 4, Username: "grace.h", Email: "grace@example.com"}
+	require.Equal(t, "grace.h (filex desktop)", mintVia(t, nameless, desktop, "", nil).Name)
 
 	// A label with nothing to trim survives whole.
 	cli := &model.APIToken{ID: 13, UserID: 3, Label: "filex cli"}

@@ -190,6 +190,8 @@ const props = withDefaults(
     folderKey?: string;
     /** Print each row's parent folder (a search, a cross-folder view). */
     showParentPath?: boolean;
+    /** These rows are the Trash (ListView `trash`: deleted-on, deleted-from, time left). */
+    trash?: boolean;
     /** Paths that were cut — dimmed, and never dragged. */
     clipped?: Set<string>;
     /** A second narrowing composed AFTER this pane's own filter row (the
@@ -910,6 +912,7 @@ watch(panePath, () => {
         :selected="selected"
         :clipped="clipped"
         :show-parent-path="showParentPath"
+        :trash="trash"
         :locale="locale"
         :loading="paneLoading"
         :folder-key="folderKey"

@@ -216,7 +216,9 @@ export const SCREENSHOTS = [
   },
   {
     file: `${SHOTS_ROOT_REL}/admin-plugins.png`,
-    depicts: ['web/src/views/Plugins.vue'],
+    // The storage-plugins table moved into a tab when Apps arrived; the page
+    // shell draws the tab strip, the tab draws what the picture shows.
+    depicts: ['web/src/views/Plugins.vue', 'web/src/components/plugins/StoragePluginsTab.vue'],
   },
   {
     file: `${SHOTS_ROOT_REL}/driveshell/driveshell-hero-1440.png`,
@@ -249,5 +251,110 @@ export const SCREENSHOTS = [
   {
     file: `${SHOTS_ROOT_REL}/sidenav/apikeys-minted-1440.png`,
     depicts: ['packages/core/src/components/TokensPanel.vue'],
+  },
+  // ── v0.43.0: Apps, and the signing round that debuts them ──────────────
+  // e2e/shots/signing.mjs, apps.mjs, appearance.mjs and symlinks.mjs.
+  {
+    file: `${SHOTS_ROOT_REL}/signing/sign-define-1440.png`,
+    depicts: [
+      'packages/core/src/components/plugin/nodes/SurfacePdfFields.vue',
+      'packages/core/src/components/plugin/nodes/PdfFieldEditor.vue',
+      'packages/core/src/components/plugin/PluginPageView.vue',
+    ],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/signing/sign-place-1440.png`,
+    depicts: ['packages/core/src/components/plugin/nodes/SurfacePdfFields.vue', 'packages/core/src/components/plugin/PluginPageView.vue'],
+  },
+  {
+    // The one screen a stranger ever sees. ⚠ It is a SHELL shared by every
+    // outward-facing page, so a change to any of these moves the picture.
+    file: `${SHOTS_ROOT_REL}/public-share.png`,
+    depicts: [
+      'packages/core/src/components/public/PublicShell.vue',
+      'packages/core/src/components/public/PublicShareBody.vue',
+      'packages/core/src/lib/publicLayout.ts',
+    ],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/signing/sign-outside-pin-1440.png`,
+    depicts: ['packages/core/src/components/public/PublicPinGate.vue', 'packages/core/src/components/public/PublicShell.vue'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/signing/sign-outside-fill-1440.png`,
+    depicts: [
+      'packages/core/src/components/public/PublicLinkPage.vue',
+      'packages/core/src/components/plugin/nodes/SurfaceSignaturePad.vue',
+      'packages/core/src/components/plugin/nodes/SurfaceForm.vue',
+    ],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/signing/sign-status-1440.png`,
+    depicts: ['packages/core/src/components/plugin/PluginInspectorSection.vue', 'packages/core/src/components/InspectorPanel.vue'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/apps/apps-install-review-1440.png`,
+    depicts: ['web/src/components/plugins/AppPluginInstallWizard.vue'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/apps/apps-detail-1440.png`,
+    depicts: ['web/src/components/plugins/AppPluginDetail.vue', 'web/src/components/plugins/AppPluginsTab.vue'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/apps/convert-wizard-1440.png`,
+    depicts: [
+      'packages/core/src/components/plugin/PluginViewModal.vue',
+      'packages/core/src/components/plugin/nodes/SurfaceSteps.vue',
+      'packages/core/src/components/ChoiceButtons.vue',
+    ],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/signing/bell-badge-1440.png`,
+    depicts: ['web/src/components/NotificationBell.vue', 'web/src/components/UnreadBadge.vue'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/signing/notifications-list-1440.png`,
+    depicts: ['web/src/components/NotificationsPanel.vue'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/signing/my-shares-1440.png`,
+    depicts: ['web/src/views/MyShares.vue', 'packages/core/src/components/RowActions.vue'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/signing/admin-table-actions-1440.png`,
+    depicts: ['web/src/views/Shares.vue', 'packages/core/src/components/DataTable.vue', 'packages/core/src/components/RowActions.vue'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/appearance/theme-editor-1440.png`,
+    depicts: ['web/src/views/Appearance.vue'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/appearance/themed-explorer-1440.png`,
+    depicts: ['web/src/lib/instanceThemes.ts', 'packages/core/src/lib/themes.ts'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/appearance/themed-signin-1440.png`,
+    depicts: ['web/src/views/Login.vue', 'web/src/lib/theme.ts'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/symlinks/symlink-badge-1440.png`,
+    depicts: ['packages/core/src/components/ListView.vue', 'packages/core/src/components/InspectorPanel.vue'],
+  },
+  {
+    // The Apps list itself, with a language pack in it — the row that says
+    // what a pack is and how far it goes.
+    file: `${SHOTS_ROOT_REL}/langpack/apps-list-1440.png`,
+    depicts: ['web/src/components/plugins/AppPluginsTab.vue', 'web/src/components/plugins/AppPluginLanguages.vue'],
+  },
+  {
+    // Two kinds of tag, under their own headings, with one opened.
+    file: `${SHOTS_ROOT_REL}/tags/tags-kinds-1440.png`,
+    depicts: ['web/src/views/TaggedFiles.vue', 'packages/core/src/components/TagKindIcon.vue', 'web/src/api/tags.ts'],
+  },
+  {
+    // Trash: deleted-from, deleted-on and how long is left are columns of the
+    // explorer's own table, filled by the shared "time left" sentence.
+    file: `${SHOTS_ROOT_REL}/sidenav/view-trash-1440.png`,
+    depicts: ['packages/core/src/components/ListView.vue', 'packages/core/src/lib/trashTimeLeft.ts'],
   },
 ];

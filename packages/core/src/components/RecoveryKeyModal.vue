@@ -97,7 +97,7 @@ function done() {
         {{ variant === 'upgraded' ? t('e2e.recovery.lead_upgraded') : t('e2e.recovery.lead') }}
       </p>
 
-      <output class="fe-e2e-rk__key" aria-label="recovery key">{{ recoveryKey }}</output>
+      <output class="fe-e2e-rk__key" :aria-label="t('e2e.recovery_key_aria')">{{ recoveryKey }}</output>
 
       <div class="fe-e2e-rk__actions">
         <button type="button" class="fe-btn" @click="copy">

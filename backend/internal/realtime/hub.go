@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
 // ChangeEvent describes a mutation that happened inside a folder. It is the
@@ -19,6 +21,15 @@ type ChangeEvent struct {
 	Action  string `json:"action"`             // create|delete|rename|move|upload|modify
 	Name    string `json:"name,omitempty"`     // affected item's basename
 	NewName string `json:"new_name,omitempty"` // rename target basename
+
+	// Derived marks an event that reports a recomputed AGGREGATE (folder
+	// sizes, internal/sync.SizeRefresher) rather than a change to the folder's
+	// entries. Explorers still get it — their size column is what it repaints —
+	// but recursive watchers (the desktop sync engine) do not: the real change
+	// already reached them, and obeying these would re-list every ancestor
+	// folder after every save. Not on the wire; browsers see exactly the frame
+	// they always saw.
+	Derived bool `json:"-"`
 }
 
 // PresenceUser is one person currently in a room and the file they're focused
@@ -132,6 +143,9 @@ func (p *pendingChange) frame() ChangeEvent {
 type Hub struct {
 	mu    sync.Mutex
 	rooms map[string]*room
+	// watches are the recursive, presence-less subscriptions (watch.go), by
+	// storage id.
+	watches map[int64][]*watch
 
 	// Coalescing window bounds — see room. Fields rather than constants so the
 	// tests can shrink them and stay fast; nothing outside this package sets
@@ -233,6 +247,7 @@ func (h *Hub) Subscribe(c *Client, storageID int64, dir, displayPath string) {
 // refreshes presence for the room it left.
 func (h *Hub) Unsubscribe(c *Client) {
 	h.mu.Lock()
+	h.unwatchLocked(c)
 	oldKey := c.room
 	if oldKey != "" {
 		h.removeLocked(c, oldKey)
@@ -263,8 +278,14 @@ func (h *Hub) SetFocus(c *Client, file string) {
 // single frame when the room's window elapses — see room for why, and for the
 // promise that the last event of a burst is the one that lands.
 func (h *Hub) EmitChange(storageID int64, dir string, ev ChangeEvent) {
+	if internalChange(dir, ev) {
+		return
+	}
 	key := RoomKey(storageID, dir)
 	h.mu.Lock()
+	// Watchers first and unconditionally: a folder nobody has OPEN in an
+	// explorer is exactly the folder a mirror still needs to hear about.
+	h.emitWatchesLocked(storageID, dir, ev)
 	rm := h.rooms[key]
 	if rm == nil || len(rm.clients) == 0 {
 		h.mu.Unlock()
@@ -295,6 +316,24 @@ func (h *Hub) EmitChange(storageID int64, dir string, ev ChangeEvent) {
 		h.broadcastPresenceLocked(key)
 	}
 	h.mu.Unlock()
+}
+
+// internalChange reports a change that is filex's own bookkeeping: it happened
+// inside one of filex's directories (syspath.Hidden — a trash move, a version
+// snapshot, a desktop open-with save), or it names one (a `create` of
+// `.filex-open` at the root, a `.keepdir` written into a fresh folder).
+//
+// ⚠⚠ Dropped HERE, as the first thing EmitChange does, because this is the
+// one door every frame goes through: the HTTP handlers, the protocol servers
+// (protocolsync) and the folder-size refresher all publish through
+// EmitChange, and both deliveries fan out from it — the rooms below, and
+// the recursive watches the desktop sync engine subscribes to (feat/043-sync
+// adds them as the first statement under the lock in this same function).
+// A filter in either delivery alone would leave the other one telling a
+// browser, or a mirror, that `.filex-open` exists and when somebody's copy in
+// it changed (2026-09-21).
+func internalChange(dir string, ev ChangeEvent) bool {
+	return syspath.Hidden(dir) || syspath.IsName(ev.Name) || syspath.IsName(ev.NewName)
 }
 
 // effectiveWindow is the room's current gap floor, defaulting to the hub's

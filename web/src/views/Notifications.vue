@@ -1,47 +1,34 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Bell, BellRing, RefreshCcw, Send, Webhook } from 'lucide-vue-next';
+import { RouterLink } from 'vue-router';
 
 import { useNotificationsStore } from '@/stores/notifications';
 import { useToastStore } from '@/stores/toast';
-import { useAuthStore } from '@/stores/auth';
 import { extractError } from '@/api/client';
 import { formatDate } from '@/lib/format';
 import { useNotificationText } from '@/composables/useNotificationText';
+import { eventSlug } from '@/lib/webhookEvents';
 import type { Severity } from '@/api/types';
-import {
-  browserNotifyEnabled,
-  browserNotifyPermission,
-  isDesktopShell,
-  requestBrowserNotifyPermission,
-  setBrowserNotifyEnabled,
-  type BrowserNotifyPermission,
-} from '@/lib/browserNotify';
 
 import Button from '@/components/ui/Button.vue';
-import Input from '@/components/ui/Input.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
+import { DataTable, foreignText, type DataColumn } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
 const notif = useNotificationsStore();
 const toast = useToastStore();
-const auth = useAuthStore();
 
 const refreshing = ref(false);
-const showWebhookForm = ref(false);
-const webhookUrl = ref('');
-const webhookToken = ref('');
 
 async function load() {
   refreshing.value = true;
   try {
     await Promise.all([
       notif.fetchAdminList(),
-      notif.fetchUnread(),
-      notif.fetchWebhook(),
-      notif.fetchSettings(),
+      notif.fetchAdminUnread(),
     ]);
   } finally {
     refreshing.value = false;
@@ -52,52 +39,13 @@ onMounted(load);
 
 // ── your own notification preferences ────────────────────────────────────
 //
-// ⚠ These two switches were an API with no screen: `GET/PATCH
-// /api/notifications/settings` has shipped since the bell did, and
-// docs/NOTIFICATIONS.md said in as many words that there was no UI for it. A
-// preference nobody can reach is a preference nobody has.
-
-const permission = ref<BrowserNotifyPermission>('unsupported');
-const browserOn = ref(true);
-const desktopShell = ref(false);
-
-onMounted(() => {
-  desktopShell.value = isDesktopShell();
-  permission.value = browserNotifyPermission();
-  browserOn.value = browserNotifyEnabled(auth.user?.id);
-});
-
-const inAppOn = computed(() => notif.settings?.in_app_enabled !== false);
-
-async function setInApp(v: boolean) {
-  try {
-    await notif.updateSettings({
-      in_app_enabled: v,
-      // ⚠ PATCH replaces the WHOLE preference — omitting muted_events clears
-      // every mute the user has (docs/NOTIFICATIONS.md → Per-user settings).
-      muted_events: notif.settings?.muted_events ?? [],
-    });
-    toast.success(t('notifications.prefs.saved'));
-  } catch (e: unknown) {
-    toast.error(extractError(e, 'Save failed'));
-  }
-}
-
-function setBrowser(v: boolean) {
-  browserOn.value = v;
-  setBrowserNotifyEnabled(v, auth.user?.id);
-}
-
-/**
- * ⚠ Called from a click and from nowhere else. Asking for notification
- * permission on page load is the pattern browsers punish — Chrome answers an
- * origin that asks without a gesture with a muted chip instead of a prompt,
- * which spends the permission without ever showing the user a choice.
- */
-async function askPermission() {
-  permission.value = await requestBrowserNotifyPermission(auth.user?.id);
-  if (permission.value === 'granted') setBrowser(true);
-}
+// ⚠⚠ ONE place for them: the user settings dialog (Notifications pane), which
+// every account has. This page carried a second copy of the in-app and
+// browser switches (release-candidate sweep, 2026-09-21: "the page repeats
+// the user's own settings") — two switches for one preference, drawn in two
+// styles. It now says where they are and opens that pane.
+const UserSettingsModal = defineAsyncComponent(() => import('@/components/UserSettingsModal.vue'));
+const showOwnSettings = ref(false);
 
 /* gorunum:v2 — the same localised severity the bell prints; see NotificationBell. */
 function severityLabel(sev: string): string {
@@ -116,26 +64,70 @@ async function sendTest() {
   try {
     const r = await notif.sendTest();
     toast.success(t('notifications.testSent', { id: r.id }));
-    await load();
+    await refreshAfterTest();
   } catch (e: unknown) {
-    toast.error(extractError(e, 'Test send failed'));
+    toast.error(extractError(e));
   }
 }
 
-function openWebhookForm() {
-  webhookUrl.value = notif.webhook?.url ?? '';
-  webhookToken.value = '';
-  showWebhookForm.value = true;
+/**
+ * The kind of event, in the reader's language. ⚠ The table printed the raw id
+ * (`share.created`, `update_available`) in mono next to a Turkish sentence
+ * (release-candidate sweep, 2026-09-21). The labels are `notifications.kinds`,
+ * held against the Go event list by web/tests/webhooks/eventCatalog.test.ts;
+ * an id this build does not know stays visible as itself rather than vanish.
+ */
+function eventLabel(event: string): string {
+  const key = `notifications.kinds.${eventSlug(event)}`;
+  const out = t(key);
+  return out === key ? event : out;
 }
 
-async function saveWebhook() {
-  try {
-    await notif.updateWebhook(webhookUrl.value.trim(), webhookToken.value);
-    toast.success(t('notifications.webhookSaved'));
-    showWebhookForm.value = false;
-  } catch (e: unknown) {
-    toast.error(extractError(e, 'Save failed'));
+/** Whose row it is: the person's name (the server resolves it), not `user #2`;
+ *  for a broadcast, who it reaches — the bells' own rule, said by the server
+ *  (`audience`). ⚠ After PR #42 "Everyone" beside a drop notice, an antivirus
+ *  hit or a legacy upload row would be a lie: the first reaches administrators
+ *  only, the second only those who can see the file, the third no bell. */
+const AUDIENCE_KEYS: Record<string, string> = {
+  everyone: 'notifications.scopeEveryone',
+  viewers: 'notifications.scopeViewers',
+  admins: 'notifications.scopeAdmins',
+  nobody: 'notifications.scopeNobody',
+};
+function scopeLabel(row: {
+  user_id?: number | null;
+  user_name?: string;
+  admins_only?: boolean;
+  audience?: string;
+}): string {
+  if (!row.user_id) {
+    const key = (row.audience && AUDIENCE_KEYS[row.audience]) || (row.admins_only ? AUDIENCE_KEYS.admins : AUDIENCE_KEYS.everyone);
+    return t(key);
   }
+  return row.user_name || `#${row.user_id}`;
+}
+
+/**
+ * The delivery state, localised. ⚠ `skipped` means "no webhook is set up",
+ * which the server records in English (`no webhook URL configured`) for the
+ * API's sake; this page says it in the reader's language instead of printing
+ * that string, and a real failure keeps the receiver's own error text.
+ */
+function webhookLabel(status: string): string {
+  const key = `notifications.webhookStatus.${status}`;
+  const out = t(key);
+  return out === key ? status : out;
+}
+
+function webhookReason(row: { webhook_status: string; webhook_error?: string }): string {
+  if (row.webhook_status === 'skipped') return t('notifications.webhookNone');
+  // ⚠ The RECEIVER's words, not ours — `Post "https://hooks…/x": dial tcp
+  // 10.0.0.1:443: connection refused` — so they never passed through vue-i18n
+  // and the panel's post-translation hook never isolated their machine runs.
+  // In an Arabic panel a URL's and an address's neutrals take the line's
+  // direction. This was the one text cell on the page not already going
+  // through `foreignText` (the title and body are, in useNotificationText).
+  return row.webhook_error ? foreignText(String(locale.value), row.webhook_error) : '';
 }
 
 function setUnread(v: boolean) {
@@ -143,9 +135,14 @@ function setUnread(v: boolean) {
   notif.fetchAdminList();
 }
 
+async function refreshAfterTest() {
+  await Promise.all([notif.fetchAdminList(), notif.fetchAdminUnread()]);
+}
+
 // ⚠ The SAME renderer the bell, the browser toast and the desktop app use.
-// This table has its own `event` column carrying the raw id in mono, so
-// nothing is lost by putting a sentence in the title column — and everything
+// This table has its own `event` column naming the kind (eventLabel, with the
+// raw id kept in its tooltip), so nothing is lost by putting a sentence in the
+// title column — and everything
 // is lost by not: eight of the eleven file events store no title at all, so
 // what stood here was `share.created` twice on the same row, once as data and
 // once pretending to be a title. See lib/notificationText.ts.
@@ -168,6 +165,55 @@ function currentPage(): number {
   if (notif.limit === 0) return 1;
   return Math.floor(notif.offset / notif.limit) + 1;
 }
+
+type NotificationRow = (typeof tableRows.value)[number];
+
+/* Severity sorts by how loud it is, not by the word — "critical" and "error"
+ * would otherwise land at the top only by the accident of the alphabet. */
+const SEVERITY_RANK: Record<string, number> = { critical: 0, error: 1, warning: 2, info: 3 };
+
+/* The explorer's table (DataTable), remembered on the account under
+ * `admin.notifications`. ⚠ The list is paged by the SERVER, which has no sort
+ * parameter, so while it spans more than one page DataTable closes the
+ * headers and says why instead of re-ordering one page and calling that
+ * sorted. */
+const columns = computed<DataColumn<NotificationRow>[]>(() => [
+  /* Sorted by the words the cell shows (eventLabel / scopeLabel), not by the
+   * raw event id or user number behind them — an order the reader cannot see
+   * reads as no order at all. */
+  { id: 'event', label: t('notifications.fields.event'), sortable: true, width: 200, sortValue: (r) => eventLabel(r.event) },
+  {
+    id: 'severity',
+    label: t('notifications.fields.severity'),
+    sortable: true,
+    width: 110,
+    sortValue: (r) => SEVERITY_RANK[r.severity] ?? 9,
+  },
+  {
+    id: 'title',
+    label: t('notifications.fields.title'),
+    sortable: true,
+    width: 200,
+    sortValue: (r) => r.text.title,
+  },
+  { id: 'body', label: t('notifications.fields.body'), width: 260 },
+  {
+    id: 'scope',
+    label: t('notifications.fields.scope'),
+    sortable: true,
+    width: 110,
+    sortValue: (r) => scopeLabel(r),
+  },
+  { id: 'webhook', label: t('notifications.fields.webhook'), sortable: true, width: 140, sortValue: (r) => r.webhook_status },
+  {
+    id: 'created_at',
+    label: t('notifications.fields.createdAt'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 160,
+    sortValue: (r) => (r.created_at ? Date.parse(r.created_at) : null),
+  },
+]);
 </script>
 
 <template>
@@ -189,144 +235,105 @@ function currentPage(): number {
       </div>
     </header>
 
-    <!-- Your own preferences. Above the webhook card on purpose: this is the
-         half of the page that is about the person reading it. -->
-    <div class="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <!-- Your own preferences live in ONE place — the user settings dialog. -->
+    <div
+      class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-white p-4 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+      data-testid="notif-own-prefs-pointer"
+    >
       <div class="flex items-center gap-2">
         <BellRing class="h-5 w-5 text-zinc-500" />
-        <h2 class="text-sm font-semibold">{{ t('notifications.prefs.title') }}</h2>
+        <span>{{ t('notifications.prefs.movedToSettings') }}</span>
       </div>
+      <Button variant="outline" size="sm" data-testid="notif-open-own-prefs" @click="showOwnSettings = true">
+        {{ t('notifications.prefs.openSettings') }}
+      </Button>
+    </div>
 
-      <div class="mt-3 space-y-4">
+    <!-- ⚠ Where events are DELIVERED is set up on the Webhooks page only — the
+         default webhook and the signed targets side by side. This page carried
+         a second webhook form of its own (release-candidate sweep, 2026-09-21:
+         two webhook settings, no way to tell which one was in force). -->
+    <div
+      class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-white p-4 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+      data-testid="notif-webhooks-pointer"
+    >
+      <div class="flex items-center gap-2">
+        <Webhook class="h-5 w-5 text-zinc-500" />
+        <span>{{ t('notifications.webhooksMoved') }}</span>
+      </div>
+      <RouterLink :to="{ name: 'webhooks' }" class="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400">
+        {{ t('notifications.webhooksLink') }}
+      </RouterLink>
+    </div>
+
+    <DataTable
+      table-id="admin.notifications"
+      :columns="columns"
+      :rows="tableRows"
+      :loading="notif.loading"
+      :empty="t('notifications.empty')"
+      row-key="id"
+      :row-class="(row: NotificationRow) => (row.read_at ? 'is-muted' : undefined)"
+      :page="currentPage()"
+      :page-size="notif.limit"
+      :total="notif.total"
+      @page="gotoPage"
+    >
+      <template #toolbar>
         <Toggle
-          :model-value="inAppOn"
-          :label="t('notifications.prefs.inApp')"
-          :description="t('notifications.prefs.inAppHint')"
-          name="notif-in-app"
-          @update:model-value="setInApp"
+          :model-value="notif.onlyUnread"
+          :label="t('notifications.unreadOnly')"
+          @update:model-value="setUnread"
         />
+        <!-- ⚠ The unread count of THIS list (everybody's rows), not of the
+             admin's own bell: "1 okunmamış" stood next to three unread rows. -->
+        <span data-testid="notif-admin-unread">{{ t('notifications.unreadHere', { n: notif.adminUnread }) }}</span>
+      </template>
 
-        <div class="space-y-2">
-          <Toggle
-            :model-value="browserOn"
-            :label="t('notifications.prefs.browser')"
-            :description="t('notifications.prefs.browserHint')"
-            :disabled="desktopShell || permission === 'unsupported'"
-            name="notif-browser"
-            data-testid="notif-browser-toggle"
-            @update:model-value="setBrowser"
-          />
-          <div class="flex flex-wrap items-center gap-2 pl-12 text-xs">
-            <Badge v-if="desktopShell" tone="zinc">{{ t('notifications.prefs.desktopHandled') }}</Badge>
-            <template v-else>
-              <Badge v-if="permission === 'granted'" tone="emerald">{{ t('notifications.prefs.permGranted') }}</Badge>
-              <Badge v-else-if="permission === 'denied'" tone="rose">{{ t('notifications.prefs.permDenied') }}</Badge>
-              <Badge v-else-if="permission === 'unsupported'" tone="zinc">{{ t('notifications.prefs.permUnsupported') }}</Badge>
-              <Badge v-else tone="amber">{{ t('notifications.prefs.permDefault') }}</Badge>
-              <Button
-                v-if="permission === 'default'"
-                size="xs"
-                variant="outline"
-                data-testid="notif-browser-ask"
-                @click="askPermission"
-              >
-                {{ t('notifications.prefs.enableBrowser') }}
-              </Button>
-              <span v-if="permission === 'denied'" class="text-zinc-500">{{ t('notifications.prefs.permDeniedHint') }}</span>
-            </template>
-          </div>
+      <template #cell-event="{ row }">
+        <span :title="row.event">{{ eventLabel(row.event) }}</span>
+      </template>
+      <template #cell-severity="{ row }">
+        <Badge :tone="severityTone(row.severity)">{{ severityLabel(row.severity) }}</Badge>
+      </template>
+      <template #cell-title="{ row }">{{ row.text.title }}</template>
+      <template #cell-body="{ row }">
+        <span class="tbl-clamp" :title="row.text.body">{{ row.text.body }}</span>
+      </template>
+      <template #cell-scope="{ row }">
+        <!-- `<bdi>`: it can be a PERSON's name, and a name's own letters
+             decide its direction, not the panel's. -->
+        <span data-testid="notif-scope"><bdi>{{ scopeLabel(row) }}</bdi></span>
+      </template>
+      <template #cell-webhook="{ row }">
+        <!-- ⚠⚠ ONE root. A DataTable cell is a flex ROW whose children may
+             shrink below their content (`:where(.fe-list__cell) > *
+             { min-width: 0 }`), so the badge and the reason used to be two
+             flex items side by side: when the reason wrapped, the badge was
+             squeezed narrower than its own label and the label spilled under
+             the reason — drawn over itself in Spanish and Arabic, where the
+             reason is long, and in English whenever the column was narrow
+             (v0.43.0 pack agent). Inside one block the badge is an inline
+             box and the reason flows after it and under it, like any text. -->
+        <div data-testid="notif-webhook">
+          <Badge
+            :tone="row.webhook_status === 'sent' ? 'emerald' : row.webhook_status === 'failed' ? 'rose' : 'zinc'"
+            >{{ webhookLabel(row.webhook_status) }}</Badge
+          >
+          <!-- A real space, not a margin: the reason is text, and a copy of
+               this cell read "skipped— no webhook URL configured". -->
+          <span
+            v-if="webhookReason(row)"
+            data-testid="notif-webhook-reason"
+            :class="row.webhook_status === 'failed' ? 'text-rose-500' : 'text-zinc-500'"
+            >{{ ' — ' + webhookReason(row) }}</span
+          >
         </div>
-      </div>
-    </div>
-
-    <!-- Webhook config card -->
-    <div class="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <Webhook class="h-5 w-5 text-zinc-500" />
-          <h2 class="text-sm font-semibold">{{ t('notifications.webhookConfig') }}</h2>
-        </div>
-        <Button v-if="!showWebhookForm" size="xs" variant="outline" @click="openWebhookForm">{{ t('common.edit') }}</Button>
-      </div>
-
-      <div v-if="!showWebhookForm" class="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-        <div>
-          <span class="text-xs uppercase tracking-wide text-zinc-500">{{ t('notifications.webhookUrl') }}</span>
-          <div class="mt-0.5 break-all font-mono text-xs">{{ notif.webhook?.url || t('notifications.notConfigured') }}</div>
-        </div>
-        <div>
-          <span class="text-xs uppercase tracking-wide text-zinc-500">{{ t('notifications.webhookToken') }}</span>
-          <div class="mt-0.5 font-mono text-xs">
-            <Badge v-if="notif.webhook?.token_set" tone="emerald">{{ t('notifications.tokenSet') }}</Badge>
-            <Badge v-else tone="zinc">{{ t('notifications.tokenUnset') }}</Badge>
-          </div>
-        </div>
-      </div>
-
-      <form v-else class="mt-3 space-y-3" @submit.prevent="saveWebhook">
-        <Input v-model="webhookUrl" :label="t('notifications.webhookUrl')" placeholder="https://example.com/webhook" />
-        <Input v-model="webhookToken" :label="t('notifications.webhookToken')" type="password" :placeholder="t('notifications.tokenPlaceholder')" />
-        <p class="text-xs text-zinc-500">{{ t('notifications.tokenHint') }}</p>
-        <div class="flex justify-end gap-2">
-          <Button type="button" size="sm" variant="ghost" @click="showWebhookForm = false">{{ t('common.cancel') }}</Button>
-          <Button type="submit" size="sm" variant="primary">{{ t('common.save') }}</Button>
-        </div>
-      </form>
-    </div>
-
-    <!-- Filter -->
-    <div class="flex items-center gap-3">
-      <Toggle :model-value="notif.onlyUnread" :label="t('notifications.unreadOnly')" @update:model-value="setUnread" />
-      <span class="text-xs text-zinc-500">{{ t('notifications.unreadCount', { n: notif.unreadCount }) }}</span>
-    </div>
-
-    <!-- Table -->
-    <div class="tbl-scroll rounded-xl border border-zinc-200 dark:border-zinc-800">
-      <table class="w-full text-sm">
-        <thead class="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
-          <tr>
-            <th class="px-3 py-2 text-left">{{ t('notifications.fields.event') }}</th>
-            <th class="px-3 py-2 text-left">{{ t('notifications.fields.severity') }}</th>
-            <th class="px-3 py-2 text-left">{{ t('notifications.fields.title') }}</th>
-            <th class="px-3 py-2 text-left">{{ t('notifications.fields.body') }}</th>
-            <th class="px-3 py-2 text-left">{{ t('notifications.fields.scope') }}</th>
-            <th class="px-3 py-2 text-left">{{ t('notifications.fields.webhook') }}</th>
-            <th class="px-3 py-2 text-left">{{ t('notifications.fields.createdAt') }}</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
-          <tr v-for="n in tableRows" :key="n.id" class="bg-white dark:bg-zinc-950" :class="{ 'opacity-70': n.read_at }">
-            <td class="px-3 py-2 font-mono text-xs">{{ n.event }}</td>
-            <td class="px-3 py-2"><Badge :tone="severityTone(n.severity)">{{ severityLabel(n.severity) }}</Badge></td>
-            <td class="px-3 py-2">{{ n.text.title }}</td>
-            <td class="px-3 py-2 text-xs text-zinc-600 dark:text-zinc-400">
-              <div class="max-w-md truncate" :title="n.text.body">{{ n.text.body }}</div>
-            </td>
-            <td class="px-3 py-2 text-xs">
-              <span v-if="n.user_id">user #{{ n.user_id }}</span>
-              <span v-else class="text-zinc-500">broadcast</span>
-            </td>
-            <td class="px-3 py-2 text-xs">
-              <Badge :tone="n.webhook_status === 'sent' ? 'emerald' : n.webhook_status === 'failed' ? 'rose' : 'zinc'">{{ n.webhook_status }}</Badge>
-              <span v-if="n.webhook_error" class="ml-1 text-rose-500">— {{ n.webhook_error }}</span>
-            </td>
-            <td class="px-3 py-2 whitespace-nowrap text-xs">{{ formatDate(n.created_at, locale) }}</td>
-          </tr>
-          <tr v-if="!tableRows.length && !notif.loading">
-            <td colspan="7" class="px-3 py-8 text-center text-zinc-500 dark:text-zinc-400">
-              {{ t('notifications.empty') }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div v-if="pageCount() > 1" class="flex items-center justify-between text-xs">
-      <span>{{ t('common.pageOf', { current: currentPage(), total: pageCount() }) }}</span>
-      <div class="flex gap-2">
-        <Button size="xs" variant="outline" :disabled="currentPage() <= 1" @click="gotoPage(currentPage() - 1)">{{ t('common.prev') }}</Button>
-        <Button size="xs" variant="outline" :disabled="currentPage() >= pageCount()" @click="gotoPage(currentPage() + 1)">{{ t('common.next') }}</Button>
-      </div>
-    </div>
+      </template>
+      <template #cell-created_at="{ row }">
+        <span class="whitespace-nowrap">{{ formatDate(row.created_at, locale) }}</span>
+      </template>
+    </DataTable>
+    <UserSettingsModal v-if="showOwnSettings" v-model="showOwnSettings" initial-section="notifications" />
   </section>
 </template>

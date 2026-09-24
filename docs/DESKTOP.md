@@ -77,7 +77,75 @@ machine, a portable browser the OS has no handler for, or you finished signing
 in on your phone — the waiting screen shows a copyable address, and the browser
 shows a code you can type into the app by hand. Either route works.
 
+**If a sign-in fails, you stay where you were.** A sign-in link from an earlier
+attempt, or a code the server refuses, leaves the app on the waiting screen of
+the attempt you are on — the address and the code box are still there — with
+what happened written under them. A code the server refused cannot be used
+again (so a code cannot be guessed by repeating), and **Start again in the
+browser** begins a new attempt for the same server without retyping it. Clicking
+the tray or Dock icon, or starting the app again while it waits, keeps that
+screen too. **Cancel** is the one way back to the server address. (Before
+v0.43.0 any of these threw the waiting screen away and left the attempt
+unreachable — [issue #36](https://github.com/BRF-Tech/filex/issues/36).)
+
 Add more accounts with **+** on the left rail; switch between them by clicking.
+
+**Signing in again** to the same server as the same person (with **+**) replaces
+that account's credential and keeps everything else — its synced folders, its
+filex folder, its place on the rail — and its folder sync restarts with the new
+credential by itself.
+
+**Sign out** (*Settings → Accounts*) is not the same thing. It forgets the
+account on this computer and its folder sync stops at once; the files stay where
+they are, on both sides. The folders do not come back if you sign in afterwards:
+that is a new account on this computer, and you keep them again from the
+explorer. To get a working credential back for an account you still want, use
+**Reconnect** (below) instead of signing out.
+
+### Signed out by the server
+
+When the server stops accepting this computer's credential — an admin revoked
+the token, or it expired — the app stops asking. The account's folder sync is
+stopped (the engine exits instead of retrying every 30 seconds), its bell is no
+longer polled, and it stays that way after a restart. You are told once, with a
+notification; the rail shows a red dot on the account, and its file view reads
+**Signed out of &lt;server&gt;** with two buttons:
+
+- **Reconnect** opens the same browser sign-in for the same server. Sign in as
+  the same person and the account gets its new credential and keeps everything
+  else — its synced folders, its filex folder — and sync picks up where it
+  stopped. The same button is on the account in *Settings → Accounts*.
+- **Sign out** forgets the account, as above.
+
+### The token the app is given
+
+Signing in gives the app a **personal** API token (kind `user`, see
+[MCP.md → Token kinds](MCP.md#token-kinds--user-vs-app)) that acts as you: its
+scopes are `read,write,delete`, or `read` alone for a **viewer** account — what
+you could mint for yourself on the API keys page, never more, never `admin`. It
+appears in your token list labelled *filex desktop — &lt;platform&gt;*; revoking it
+there signs that copy of the app out.
+
+The pairing is finished by your **signed-in browser session** and nothing else.
+`POST /api/auth/desktop/complete` answers `403` with `reason:
+"session_required"` to any API token of either kind, and mints nothing — a
+token must not be able to mint a wider one for its owner, and an integration's
+token must not be able to turn itself into a person's.
+
+⚠ **Pairings made before this version hold an `app` token.** The server minted
+them without a kind, which reads as `app`, so the desktop window answered `403`
+(`app_token`) on its API keys, S3 keys, SSH keys and NFS exports panels, and the
+explorer hid **Recent**, **Starred** and **Shared with me**. An existing pairing
+is not converted on upgrade; to fix one, **sign in again** to the same server as
+the same person (with **+**) — the account keeps its synced folders — then
+revoke the old *filex desktop* entry on the API keys page in your browser: the
+app forgets the old token, but nothing revokes it on the server. Or have an
+admin hand the existing token back to its person, which needs no new sign-in:
+
+```bash
+curl -X PATCH https://files.example.com/api/admin/ai-tokens/42 \
+  -H 'Content-Type: application/json' -b cookies.txt -d '{"kind":"user"}'
+```
 
 ---
 
@@ -152,7 +220,7 @@ Two things can happen, and filex picks the right one per document:
 | The document is… | What filex does |
 |---|---|
 | inside a folder you **keep on this computer** | Opens its twin on the server directly. Nothing is copied. Saving goes to the server, and sync brings it back down to that same file — the one on your disk. |
-| anywhere else | Copies it to a hidden working folder on your account (`<storage>://.filex-open`), opens that, and **writes every save back over your original file**. When you close the window the copy is deleted. |
+| anywhere else | Copies it to a hidden working folder on your account (`<storage>://.filex-open`), opens that, and **writes every save back over your original file**. When you close the window the copy is deleted. (That folder is the one place among filex's own that the server lets a person write — and only these requests: create it at the root, upload `<session>-<name>` into it, save it from the editor, delete it. See [BACKEND.md](BACKEND.md#names-filex-keeps-for-itself).) |
 
 In the second case a strip along the bottom of the editor window names the file
 on your disk that saves are landing on, for as long as the window is open. It is
@@ -219,12 +287,18 @@ nothing reloads.
 ## How it looks
 
 There is no appearance setting in *Settings*, and that is deliberate: the theme
-and the palette belong to **you**, not to this computer, so they are set where
-every other filex front door sets them — the **"..."** menu in the file list
+and the palette are a choice about the file list, so they are set where every
+other filex front door sets them — the **"..."** menu in the file list
 (*Theme*, *Compact view*). The app's own chrome — the account rail, Settings,
 the boot and sign-in screens, the dialogs — follows whatever you pick there, in
 light, dark and every palette. A second switch here would be a second answer to
 the same question.
+
+⚠ This app remembers that choice **on this computer**, in its own window
+storage. The web app keeps it on your account instead
+([`/api/me/prefs`](BACKEND.md#interface-preferences)), so a palette picked in a
+browser is not carried into this app, and one picked here is not carried into
+a browser.
 
 The window even reopens on the ground it last painted, so launching filex on a
 dark palette no longer flashes white first.
@@ -308,9 +382,59 @@ complete folder; if even that cannot be arranged, the folder is unpaired rather
 than left pointing at a partial tree, and the dialog says so.
 
 
-> Sync runs while the app does, so a folder kept a moment ago starts filling on
-> the next round (30 seconds) — no restart. The engine's rules below apply
-> unchanged: the first pass deletes nothing.
+### When filex holds items back
+
+A folder's **first** sync sometimes finds far more on this computer than the
+server has, in a server folder that already has content — which is what an old
+copy of the folder (a restored backup, a machine that was away for months) looks
+like. Uploading all of it would put stale files back on the server, so the
+engine holds those items instead and asks. The folder's card in *Settings →
+Synced folders* then says how many items on this computer are not on the server
+or differ from it, with two buttons:
+
+- **Upload them** — they are wanted: they go to the server on the next run.
+- **Move to local trash** — they are not: after one more question they move into
+  this computer's sync trash, kept for 30 days (*Removed by sync*). Nothing on
+  the server changes.
+
+Everything else in the folder keeps syncing while it waits, and after either
+answer the folder's sync restarts at once.
+
+### Bandwidth and hours
+
+A first sync of a large store can fill the server's line for hours, and
+everybody else using that server feels it. *Settings → Synced folders* has three
+rows for the engine:
+
+- **Download limit** and **Upload limit** — Unlimited, 10, 5 or 1 MB/s. The
+  limit is shared by all of one account's transfers (they run four at a time),
+  and each signed-in account has its own. It applies to folder sync only:
+  opening, previewing or dragging a file in the window is not limited.
+- **When to sync** — Any time, Evenings & nights (19:00–08:00) or Nights
+  (22:00–07:00), in this computer's local time. Outside those hours no new round
+  starts and the folder reads *waiting for the sync window*; a round still
+  running when they end stops the way Ctrl-C stops it — what it finished is
+  recorded — and carries on in the next window.
+
+A change restarts the watchers at once, so it applies to a transfer already
+running. The line under each folder in Settings says what the engine is doing
+with that folder right now — listing the server, moving files, finishing up,
+waiting for the window — or the error from its last round. While files move it
+reads, for example, *moving files — 120/11704, 1.2 GiB of 52.6 GiB — about
+8 h 10 min left*: the byte counts appear once there are bytes to move, the
+estimate after the first few seconds of transfer, from the average rate so far
+(so a limit or a busy line shows up in it).
+
+> Sync runs while the app does, so a folder kept a moment ago starts filling at
+> once — no restart — unless sync is paused (see
+> [Running in the background](#running-in-the-background)). After that, an edit
+> on either side is synced as it happens: a save in the browser is on disk
+> within about a second, and a save on this computer is on the server just as
+> fast (the numbers are in [Folder sync](SYNC.md#how-fast-a-change-arrives)).
+> Under each synced folder the app says how changes reach it — *Live*,
+> *Polling* (the server cannot announce changes; they arrive with the
+> 30-second check) or *Offline*. The engine's rules below apply unchanged: the
+> first pass deletes nothing.
 
 ---
 
@@ -393,8 +517,8 @@ limit, not a filex one, and it is what the desktop app is for.
 
 ## Sharing
 
-The share dialog is the same one the web app has — **Share / Permissions** on any
-file or folder. Create a link, copy it, email it, or hand it to the system with
+The share dialog is the same one the web app has — **Share** on any file or
+folder. Create a link, copy it, email it, or hand it to the system with
 **📤 Share**.
 
 ⚠ What that last button does depends on the platform, and it is worth saying
@@ -419,7 +543,30 @@ background*, and the window close becomes a real quit.
 *Start when I sign in* registers filex as a login item. Settings reports what the
 OS actually did with that request, not what was asked for: policies and
 sandboxes refuse it often enough that showing our own intent back would be a
-lie.
+lie. On Windows that means the Task Manager flag too — an entry that is still in
+the registry but switched off in *Startup apps* reads as off.
+
+That switch is the **only** thing that writes the login item. If you turn filex
+off in the OS's own list instead — Task Manager's *Startup apps* or *Settings →
+Apps → Startup* on Windows, *Login Items* on macOS, the autostart entry on
+Linux — the app takes that as your answer: at its next start the switch in
+Settings turns itself off to match, and filex never puts itself back. (After a
+reinstall into a different folder the switch can read off for the same reason;
+turn it on again once.)
+
+While any folder is being synced, filex keeps the computer from **idle-sleeping**
+— a first sync of a large store can take all night, and an overnight sleep used
+to cost hours of it. The screen still dims and locks as usual, and a closed lid,
+the power button or a flat battery still put the machine to sleep. The hold is
+released the moment the round settles, and on quit.
+
+**Pause sync** — in the tray menu, and as a switch at the top of *Settings →
+Synced folders* — stops every folder's sync, on every account, until you resume
+it. It is remembered: a paused filex stays paused after a restart, a reboot and
+the hidden start at sign-in, which quitting never did. The window keeps working
+while sync is paused; only the background transfers stop, and the tray icon's
+tooltip says *sync paused*. Resume starts the watchers again, and each folder
+picks up where it left off.
 
 Quit properly from the tray menu.
 
@@ -434,7 +581,10 @@ days — once the machine has been idle for ten minutes with no window open. It
 comes back where it was, in the tray. No installer window, no restart prompt.
 
 The sync watchers are stopped before the swap and start again on their own
-afterwards, so an update never lands in the middle of a transfer.
+afterwards, so an update never lands in the middle of a transfer. The idle-time
+install also **waits for sync**: an idle machine with no window open is exactly
+what an overnight first sync looks like, so it installs only once no folder is
+being worked on (or when you quit).
 
 *Settings → Updates* shows what it is doing and offers **Install it now** for
 anyone who would rather not wait. `FILEX_NO_UPDATE=1` turns the whole thing off.
@@ -549,9 +699,13 @@ application rather than a folder, so there was nowhere on disk to put the file.
 Drop into a folder (or the desktop), or keep the file on this computer first and
 drag it from there.
 
-**"Could not reach &lt;server&gt;"** on the file view — the app reached the sign-in
-step but not the file listing. Usually the token was revoked server-side; sign
-out and back in.
+**"Could not reach &lt;server&gt;"** on the file view — the server did not answer
+the file listing: it is down, or this computer is off the network. *Try again*
+once it is back. (A server that answers but refuses the credential shows
+**Signed out of &lt;server&gt;** instead — see
+[Signed out by the server](#signed-out-by-the-server). Use **Reconnect** there;
+do not sign out first: signing out forgets which folders the account was
+keeping on this computer.)
 
 **Nothing syncs, and Settings says the engine is missing** — the package could
 not find the `filex` binary it ships with. Reinstall, or point the app at a CLI
@@ -559,7 +713,9 @@ you have with `FILEX_CLI=/path/to/filex`.
 
 **A folder shows "attention"** — the line under it is the engine's own last
 message. `filex sync run --pair <id>` in a terminal shows the same thing with
-more detail.
+more detail. It is the news from that folder's LAST round, not a verdict: it
+clears by itself (and the dot on the rail turns back) as soon as a later round
+of the same folder goes through.
 
 **An Office document will not open**, or the editor area stays blank — first
 check that your server has OnlyOffice configured at all

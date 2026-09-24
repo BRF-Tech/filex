@@ -68,6 +68,25 @@ describe('fromManagerRoot', () => {
     expect(s.fileCount).toBeUndefined();
   });
 
+  it('marks a read-only drive for a person who cannot read the admin list', () => {
+    // ⚠ QA, 2026-09-21: the admin saw "Salt okunur" on the drive, a
+    // non-admin never learnt it until the menu refused them — `read_only`
+    // was only ever said for the storage being LISTED.
+    const out = fromManagerRoot({
+      storages: ['depo', 'arsiv'],
+      storage_info: [
+        { name: 'depo', read_only: false },
+        { name: 'arsiv', read_only: true },
+      ],
+    });
+    expect(out).toEqual([
+      { name: 'depo', label: 'depo', readOnly: false },
+      { name: 'arsiv', label: 'arsiv', readOnly: true },
+    ]);
+    // An older server sends no `storage_info`: nothing is marked, nothing breaks.
+    expect(fromManagerRoot({ storages: ['arsiv'], storage_info: null })).toEqual([{ name: 'arsiv', label: 'arsiv' }]);
+  });
+
   it('survives a body without a storages array', () => {
     expect(fromManagerRoot({})).toEqual([]);
     expect(fromManagerRoot(null)).toEqual([]);

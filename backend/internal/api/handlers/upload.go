@@ -7,17 +7,20 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -118,6 +121,9 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 	}
 	if pathHasDotDot(target) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+		return
+	}
+	if gate(w, r, u.ACL, storageID, writegate.Writes(target)) {
 		return
 	}
 	// RBAC: uploading writes a new file → require ≥editor on the target path.
@@ -222,6 +228,12 @@ func (u *Upload) Finalize(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusGone, map[string]string{"error": "upload expired"})
 		return
 	}
+	// Asked again at the moment the object is assembled: a freeze taken while
+	// the parts were arriving stops the upload landing on the frozen file
+	// (writegate — the same question Init asked).
+	if gate(w, r, u.ACL, cu.StorageID, writegate.Writes(cu.StorageKey)) {
+		return
+	}
 	drv, err := u.StorageResolver(cu.StorageID)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad storage: " + err.Error()})
@@ -318,6 +330,7 @@ func (u *Upload) Finalize(w http.ResponseWriter, r *http.Request) {
 	}
 	if node != nil {
 		resp["node_id"] = node.ID
+		auth.SetAuditTarget(r.Context(), strconv.FormatInt(node.ID, 10), node.Path)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

@@ -163,9 +163,36 @@ func readError(resp *http.Response) error {
 	return pe
 }
 
+// How large a SUCCESS body may be. Error bodies were always capped (64 KiB
+// in readError); a 200 was decoded straight off the wire, so a plugin that
+// answered describe with a gigabyte was a plugin that could take filex's
+// memory. A listing is the one answer that is legitimately large.
+const (
+	maxListBody = 64 << 20
+	maxJSONBody = 1 << 20
+)
+
 // doJSON sends an optional JSON body and decodes a JSON answer into out
-// (nil out discards it).
+// (nil out discards it). The answer may be at most maxJSONBody bytes.
 func (c *Client) doJSON(ctx context.Context, method, path string, q url.Values, in, out any) error {
+	return c.doJSONLimited(ctx, method, path, q, in, out, maxJSONBody)
+}
+
+// decodeLimited decodes at most limit bytes of body into out; a body that
+// runs past the limit is reported as the plugin's mistake (invalid), not as
+// a transport failure, because it is one.
+func decodeLimited(body io.Reader, out any, limit int64, status int) error {
+	lr := &io.LimitedReader{R: body, N: limit + 1}
+	err := json.NewDecoder(lr).Decode(out)
+	if lr.N <= 0 {
+		return &pluginError{Status: status, Code: ErrCodeInvalid,
+			Message: fmt.Sprintf("response body larger than %d MiB", limit>>20)}
+	}
+	return err
+}
+
+// doJSONLimited is doJSON with an explicit ceiling on the answer.
+func (c *Client) doJSONLimited(ctx context.Context, method, path string, q url.Values, in, out any, limit int64) error {
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
@@ -190,10 +217,10 @@ func (c *Client) doJSON(ctx context.Context, method, path string, q url.Values, 
 		return readError(resp)
 	}
 	if out == nil {
-		_, _ = io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxJSONBody))
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return decodeLimited(resp.Body, out, limit, resp.StatusCode)
 }
 
 // Describe is GET /v1/describe with the answer validated.
@@ -282,7 +309,7 @@ func inst(id, op string) string { return "/v1/instances/" + url.PathEscape(id) +
 
 func (c *Client) List(ctx context.Context, id, path string) ([]Object, error) {
 	var out ListResponse
-	err := c.doJSON(ctx, http.MethodGet, inst(id, "list"), url.Values{"path": {path}}, nil, &out)
+	err := c.doJSONLimited(ctx, http.MethodGet, inst(id, "list"), url.Values{"path": {path}}, nil, &out, maxListBody)
 	return out.Objects, err
 }
 
@@ -420,7 +447,7 @@ func (c *Client) UploadPart(ctx context.Context, id, path, uploadID string, part
 		return "", readError(resp)
 	}
 	var out MultipartPartResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeLimited(resp.Body, &out, maxJSONBody, resp.StatusCode); err != nil {
 		return "", err
 	}
 	return out.Etag, nil

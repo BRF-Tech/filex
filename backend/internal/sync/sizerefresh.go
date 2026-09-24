@@ -158,7 +158,7 @@ func (r *SizeRefresher) announce(storageID int64, dirs map[string]struct{}) {
 		for {
 			if _, ok := seen[d]; !ok {
 				seen[d] = struct{}{}
-				r.emit.EmitChange(storageID, d, realtime.ChangeEvent{Action: "modify"})
+				r.emit.EmitChange(storageID, d, realtime.ChangeEvent{Action: "modify", Derived: true})
 			}
 			if d == "" {
 				break

@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
@@ -103,8 +104,12 @@ func (a *AntivirusScanner) Eligible(n *model.Node) bool {
 	if lim := a.limit(); n.Size <= 0 || (lim > 0 && n.Size > lim) {
 		return false
 	}
-	p := strings.TrimPrefix(n.Path, "/")
-	if strings.HasPrefix(p, avTrashPrefix+"/") || strings.HasPrefix(p, ".versions/") {
+	// Bytes in the trash or the version history are copies of files that were
+	// scanned when they were live (and a restore re-scans them). ⚠ The
+	// desktop's open-with working copies (`.filex-open`) ARE scanned: they
+	// are a person's document arriving from their computer, and the one place
+	// an infected one is caught. Hence syspath.Sealed, not syspath.Hidden.
+	if syspath.Sealed(n.Path) {
 		return false
 	}
 	return true
@@ -320,14 +325,27 @@ func (a *AntivirusScanner) quarantine(ctx context.Context, drv storage.Driver, n
 			TS:   time.Now(),
 		}
 		// ⚠ Where the file IS, not where it was. A quarantined file has been
-		// moved into the trash, so the click opens the trash copy; only an
-		// unquarantined one is still at its original path (the driver had no
-		// move — the warning above).
+		// moved into the trash, so the click opens the Trash VIEW with it
+		// selected — addressed by its original path, the way that view lists
+		// it, and never by its `.filex-trash/` key (a path nothing serves; see
+		// notify.TrashTarget). Only an unquarantined one is still at its
+		// original path (the driver had no move — the warning above).
 		if quarantined {
 			ev.Meta["trash_path"] = avNormalizePath(trashRel)
-			ev.Target = notify.FileTarget(avNormalizePath(trashRel))
+			ev.Target = notify.TrashTarget(n.Path)
 		} else {
 			ev.Target = notify.FileTarget(n.Path)
+		}
+		// ⚠ An "open with filex" working copy is ONE person's: the desktop
+		// placed it for whoever opened the document, and nobody else can list
+		// `.filex-open`. The person view keeps only the document's NAME (the
+		// path names nothing anybody can open), and a name with no path cannot
+		// be checked against anybody's grants — so as a broadcast it would reach
+		// no member at all, its owner included (handlers/notifications.go →
+		// bellJudge). It is addressed to that owner instead.
+		if _, isCopy := syspath.OpenWithOriginal(n.Path); isCopy && n.OwnerID != nil {
+			owner := *n.OwnerID
+			ev.UserID = &owner
 		}
 		if _, err := a.notify.Send(ctx, ev); err != nil {
 			slog.Warn("antivirus: file.infected send failed",

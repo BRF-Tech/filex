@@ -74,6 +74,8 @@ import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import Modal from '../modals/Modal.vue';
 import { actionIconSvg } from '../lib/actionIcons';
+import { tagKey, type TagItem, type TagKind } from '../lib/tags';
+import TagKindIcon from './TagKindIcon.vue';
 import {
   EMPTY_FILTERS,
   type AroundSpan,
@@ -129,6 +131,14 @@ const props = defineProps<{
   /** Runs the real query and returns what it found. Owned by the explorer,
    *  which is the only thing holding the API client. */
   count: (req: AdvSearchRequest) => Promise<AdvCountResult>;
+  /**
+   * etiket:k2 (v0.43) — the tags the person can see, with their kind, offered
+   * under the Tags box as one-click picks. The filter itself does not take a
+   * kind (`tag:x` matches your personal x and your team's x alike — both are
+   * yours to search), but a tag on screen always says which kind it is, here
+   * as everywhere else. Optional: an embed that passes none gets the box only.
+   */
+  knownTags?: TagItem[];
 }>();
 
 const emit = defineEmits<{
@@ -156,6 +166,20 @@ const queryEl = ref<HTMLInputElement | null>(null);
 const text = ref('');
 const scope = ref<AdvScope>('name');
 const tagsRaw = ref('');
+
+/** The known tags, Personal then Team, for the picks under the Tags box. */
+const knownTagGroups = computed(() =>
+  (['personal', 'team'] as TagKind[])
+    .map((kind) => ({ kind, list: (props.knownTags ?? []).filter((tag) => tag.kind === kind) }))
+    .filter((g) => g.list.length > 0),
+);
+
+/** A pick appends its name to the box, once (by the server's sameness). */
+function pickTag(name: string) {
+  const current = parseTagList(tagsRaw.value);
+  if (current.some((c) => tagKey(c) === tagKey(name))) return;
+  tagsRaw.value = [...current, name].join(', ');
+}
 const excludeRaw = ref('');
 const type = ref<TypeFilter>('any');
 const modified = ref<ModifiedFilter>('any');
@@ -731,6 +755,31 @@ function submit() {
               />
             </label>
             <p class="fe-advsearch__hint fe-advsearch__hint--block">{{ t('advsearch.tags.hint') }}</p>
+            <div
+              v-if="knownTagGroups.length"
+              class="fe-advsearch__tagpicks"
+              data-testid="advsearch-known-tags"
+            >
+              <template v-for="g in knownTagGroups" :key="g.kind">
+                <span class="fe-advsearch__tagkind">
+                  <TagKindIcon :kind="g.kind" />
+                  {{ t(`tags.kind.${g.kind}`) }}
+                </span>
+                <button
+                  v-for="tag in g.list"
+                  :key="`${g.kind}:${tag.name}`"
+                  type="button"
+                  class="fe-advsearch__tagpick"
+                  :data-tag-kind="g.kind"
+                  :title="t(`tags.chip.${g.kind}`, { tag: tag.name })"
+                  :aria-label="t(`tags.chip.${g.kind}`, { tag: tag.name })"
+                  @click="pickTag(tag.name)"
+                >
+                  <TagKindIcon :kind="g.kind" />
+                  {{ tag.name }}
+                </button>
+              </template>
+            </div>
           </div>
         </div>
 

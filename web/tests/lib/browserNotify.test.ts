@@ -12,6 +12,7 @@ import {
   canShowBrowserNotification,
   isDesktopShell,
   requestBrowserNotifyPermission,
+  raiseBrowserNotification,
   setBrowserNotifyEnabled,
   showBrowserNotification,
 } from '@/lib/browserNotify';
@@ -67,10 +68,60 @@ describe('the guards in front of a toast', () => {
     const n = showBrowserNotification({ title: 'New upload', body: 'report.pdf', tag: 'filex-notification-9' }, 1);
     expect(n).not.toBeNull();
     expect(calls).toHaveLength(1);
-    expect(calls[0].title).toBe('New upload');
-    expect(calls[0].options?.body).toBe('report.pdf');
     // The tag is what stops one event becoming two toasts.
     expect(calls[0].options?.tag).toBe('filex-notification-9');
+  });
+
+  it('says WHO is notifying, and shows a logo the browser can actually decode', () => {
+    // ⚠⚠ Measured as "the app name and the logo do not show up properly".
+    // Two separate causes, both here:
+    //   • the title carried the EVENT and nothing else, so the toast printed
+    //     the bare origin as its second line instead of the app's name;
+    //   • the icon was an SVG, which Chromium's notification decoder cannot
+    //     read at all — not a small logo, NO logo. (Firefox draws it, which
+    //     is exactly why it lasted.)
+    const { calls } = stubNotification('granted');
+    showBrowserNotification({ title: 'New file: report.pdf', body: '2.4 MB', tag: 't' }, 1);
+    expect(calls[0].title).toBe('filex');
+    // Neither half of the sentence is dropped to make room for the name.
+    expect(calls[0].options?.body).toContain('New file: report.pdf');
+    expect(calls[0].options?.body).toContain('2.4 MB');
+    expect(calls[0].options?.icon).toMatch(/\.png$/);
+    expect(calls[0].options?.badge).toMatch(/\.png$/);
+  });
+
+  it('a body-less row still reads as a sentence', () => {
+    const { calls } = stubNotification('granted');
+    showBrowserNotification({ title: 'Replica failed' }, 1);
+    expect(calls[0].options?.body).toBe('Replica failed');
+  });
+
+  it('falls back to the service worker where the constructor throws (Android)', async () => {
+    // ⚠ The case is real, not theoretical: on Android Chrome only a worker
+    // may notify, so without this path every filex notification on every
+    // phone was silently dropped.
+    stubNotification('granted', { throws: true });
+    const shown = vi.fn(async () => undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (navigator as any).serviceWorker = { getRegistration: async () => ({ showNotification: shown }) };
+    await expect(raiseBrowserNotification({ title: 'x', url: '/admin/explore' }, 1)).resolves.toBe('sw');
+    expect(shown).toHaveBeenCalledTimes(1);
+    expect(shown.mock.calls[0][0]).toBe('filex');
+    expect((shown.mock.calls[0][1] as NotificationOptions).data).toEqual({ url: '/admin/explore' });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (navigator as any).serviceWorker;
+  });
+
+  it('prefers the page over the worker, so the click keeps its callback', async () => {
+    const { calls } = stubNotification('granted');
+    const shown = vi.fn(async () => undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (navigator as any).serviceWorker = { getRegistration: async () => ({ showNotification: shown }) };
+    await expect(raiseBrowserNotification({ title: 'x' }, 1)).resolves.toBe('window');
+    expect(calls).toHaveLength(1);
+    expect(shown).not.toHaveBeenCalled();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (navigator as any).serviceWorker;
   });
 
   it('the per-user switch turns it off, and is per user', () => {

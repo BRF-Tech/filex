@@ -181,18 +181,18 @@ func TestList_UserScopedAndBroadcast(t *testing.T) {
 	_, err = svc.Send(context.Background(), notify.Event{Event: "e3", Severity: notify.SeverityInfo, Title: "t3"})
 	require.NoError(t, err)
 
-	rows1, total1, err := svc.List(context.Background(), &uid1, false, 100, 0)
+	rows1, total1, err := svc.List(context.Background(), &uid1, notify.AdminBell, false, 100, 0)
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, total1, "user 1 sees own + broadcast")
 	assert.Len(t, rows1, 2)
 
-	rows2, total2, err := svc.List(context.Background(), &uid2, false, 100, 0)
+	rows2, total2, err := svc.List(context.Background(), &uid2, notify.AdminBell, false, 100, 0)
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, total2, "user 2 sees own + broadcast")
 	assert.Len(t, rows2, 2)
 
 	// Admin (nil) sees them all.
-	all, totalAll, err := svc.List(context.Background(), nil, false, 100, 0)
+	all, totalAll, err := svc.List(context.Background(), nil, notify.AdminBell, false, 100, 0)
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, totalAll)
 	assert.Len(t, all, 3)
@@ -210,13 +210,13 @@ func TestMarkAllRead(t *testing.T) {
 	_, err = svc.Send(context.Background(), notify.Event{Event: "b", Severity: notify.SeverityInfo, Title: "b", UserID: &uid})
 	require.NoError(t, err)
 
-	count, err := svc.UnreadCount(context.Background(), &uid)
+	count, err := svc.UnreadCount(context.Background(), &uid, notify.AdminBell)
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, count)
 
 	require.NoError(t, svc.MarkAllRead(context.Background(), &uid))
 
-	count, err = svc.UnreadCount(context.Background(), &uid)
+	count, err = svc.UnreadCount(context.Background(), &uid, notify.AdminBell)
 	require.NoError(t, err)
 	assert.EqualValues(t, 0, count)
 }

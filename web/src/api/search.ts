@@ -8,6 +8,8 @@ export type SearchHitEx = SearchHit & {
   snippet?: string;
   /** Where the hit matched: name | content | both. */
   matched?: 'name' | 'content' | 'both';
+  /** A folder (the node's `type` is `dir`). */
+  is_dir?: boolean;
 };
 
 export interface SearchParams {
@@ -21,7 +23,11 @@ export interface SearchParams {
 }
 
 export interface SearchIndexStats {
+  /** Every indexed node, folders included. */
   document_count: number;
+  /** Files and folders apart (the Panel counts files); absent on an older server. */
+  file_count?: number;
+  folder_count?: number;
   index_size_bytes: number;
   last_built_at: string | null;
   rebuilding: boolean;
@@ -48,6 +54,7 @@ export const SearchApi = {
         updated_at?: string;
         snippet?: string;
         matched?: 'name' | 'content' | 'both';
+        type?: string;
       }>;
     }>('/files/search', { params });
     const nodes = data.results ?? [];
@@ -64,6 +71,7 @@ export const SearchApi = {
       // bul:s3 — contract fields, undefined-safe on older backends.
       snippet: typeof n.snippet === 'string' ? n.snippet : undefined,
       matched: n.matched,
+      is_dir: n.type === 'dir',
     }));
     return {
       items,

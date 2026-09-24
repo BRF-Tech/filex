@@ -18,14 +18,16 @@ import { useStoragesStore } from '@/stores/storages';
 import { useSyncStore } from '@/stores/sync';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
-import { formatBytes, formatDate, formatNumber, formatRelative } from '@/lib/format';
+import { fileCountOf, formatBytes, formatDate, formatNumber, formatRelative } from '@/lib/format';
 
 import StatCard from '@/components/ui/StatCard.vue';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
+import { DataTable, StorageTags, personName, type DataColumn } from '@brftech/filex-core';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import Spinner from '@/components/ui/Spinner.vue';
-import { syncTone } from '@/lib/syncTone';
+import OnlyOfficeSecretAlert from '@/components/OnlyOfficeSecretAlert.vue';
+import { syncStateLabel, syncTone } from '@/lib/syncTone';
 import { auditActionLabel, auditTargetLabel } from '@/lib/auditLabel';
 
 const { t, te, locale } = useI18n();
@@ -40,21 +42,6 @@ const RECENT_SYNCS = 5;
 const stats = ref<DashboardStats | null>(null);
 const loading = ref(true);
 const syncingId = ref<number | null>(null);
-
-const driverIcon = (driver: string): string => {
-  switch (driver) {
-    case 'local':
-      return '\uD83D\uDCC1';
-    case 's3':
-      return 'S3';
-    case 'sftp':
-      return 'SFTP';
-    case 'webdav':
-      return 'DAV';
-    default:
-      return '\uD83D\uDCBE';
-  }
-};
 
 async function load() {
   loading.value = true;
@@ -96,14 +83,72 @@ async function syncOne(id: number) {
 }
 
 
-/** How many files a storage card counts — the number the "N files" label pluralises on. */
-const fileCountOf = (s: { stats?: { file_count?: number } | null; file_count?: number }) =>
-  s.stats?.file_count ?? s.file_count ?? 0;
 
 const totalBytesLabel = computed(() => formatBytes(stats.value?.total_bytes ?? 0, locale.value));
 const totalFilesLabel = computed(() => formatNumber(stats.value?.total_files ?? 0, locale.value));
 
 onMounted(load);
+
+/* ⚠ The two footer cards were `<ul class="divide-y divide-zinc-200
+   dark:divide-zinc-800">` — an action with a time on the right and a second
+   line underneath, which is three columns pretending to be a list, in two
+   frozen zinc hexes the palette cannot move. They are the one table now —
+   DataTable, the explorer's own — with the card's heading and its "More" link
+   in the table's toolbar slot, so the dashboard's lists are the same object as
+   every other listing in the product: they resize, hide, move and sort, and
+   the arrangement is remembered on the account. Both lists are a finished
+   "latest N", so sorting them in the browser is honest. */
+type AuditRow = NonNullable<NonNullable<typeof stats.value>['recent_audit']>[number];
+type SyncRow = (typeof sync.items)[number];
+
+const activityColumns = computed<DataColumn<AuditRow>[]>(() => [
+  {
+    id: 'action',
+    label: t('audit.fields.action'),
+    sortable: true,
+    width: 240,
+    sortValue: (r) => auditActionLabel(r.action, t, te),
+  },
+  {
+    id: 'user_email',
+    label: t('audit.fields.user'),
+    sortable: true,
+    width: 180,
+    sortValue: (r) => personName({ name: r.user_name, email: r.user_email }) || null,
+  },
+  {
+    id: 'at',
+    label: t('common.when'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 130,
+    sortValue: (r) => (r.at ? Date.parse(r.at) : null),
+  },
+]);
+
+const syncColumns = computed<DataColumn<SyncRow>[]>(() => [
+  { id: 'storage_name', label: t('sync.fields.storage'), sortable: true, width: 180 },
+  { id: 'state', label: t('sync.fields.state'), sortable: true, width: 110, sortValue: (r) => syncStateLabel(r.state, t) },
+  {
+    id: 'changes',
+    label: t('common.changes'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 150,
+    sortValue: (r) => (r.added ?? 0) + (r.updated ?? 0) + (r.deleted ?? 0),
+  },
+  {
+    id: 'started_at',
+    label: t('sync.fields.started'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 170,
+    format: (r) => formatDate(r.started_at, locale.value),
+    sortValue: (r) => (r.started_at ? Date.parse(r.started_at) : null),
+  },
+]);
+
+const recentSyncs = computed(() => sync.items.slice(0, RECENT_SYNCS));
 </script>
 
 <template>
@@ -120,6 +165,9 @@ onMounted(load);
         {{ t('common.refresh') }}
       </Button>
     </div>
+
+    <!-- ⚠ Persistent, not dismissible: see OnlyOfficeSecretAlert. -->
+    <OnlyOfficeSecretAlert />
 
     <!-- Stats grid -->
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -198,26 +246,31 @@ onMounted(load);
               >
                 {{ s.name }}
               </RouterLink>
-              <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                <span class="font-mono">{{ driverIcon(s.driver) }}</span>
-                {{ s.driver }}
-                · {{ formatBytes(s.stats?.total_size_bytes ?? s.total_bytes ?? 0, locale) }}
-                · {{
-                  t('dashboard.fileCount', { n: formatNumber(fileCountOf(s), locale) }, fileCountOf(s))
-                }}
+              <!-- ⚠ The driver by NAME, and read-only / disabled in the same
+                   words as every other storage list (StorageTags, QA #34) —
+                   it printed the raw id ("local") behind an emoji. -->
+              <p class="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+                <StorageTags :driver="s.driver" :read-only="s.read_only" :enabled="s.enabled" :locale="locale" />
+                <span>
+                  {{ formatBytes(s.stats?.total_size_bytes ?? s.total_bytes ?? 0, locale) }}
+                  · {{
+                    t('dashboard.fileCount', { n: formatNumber(fileCountOf(s), locale) }, fileCountOf(s))
+                  }}
+                </span>
               </p>
             </div>
-            <Badge :tone="syncTone(s.last_sync_state)" dot>
-              {{
-                s.last_sync_state === 'running'
-                  ? t('common.running')
-                  : s.last_sync_state ?? t('common.neverRan')
-              }}
+            <!-- ⚠ In words: this printed the wire value ("ok") in every
+                 language (release-candidate sweep, 2026-09-21). -->
+            <Badge :tone="syncTone(s.last_sync_state)" dot data-testid="dashboard-storage-state">
+              {{ syncStateLabel(s.last_sync_state, t) || t('common.neverRan') }}
             </Badge>
           </div>
           <p class="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+            <!-- ⚠ The colon is IN the message: French puts a space before it
+                 (translator report, 2026-09-22), which a colon glued on in
+                 the template could never do. -->
             <template v-if="s.last_sync_at">
-              {{ t('dashboard.lastSync') }}: {{ formatRelative(s.last_sync_at, locale) }}
+              {{ t('dashboard.lastSyncAt', { when: formatRelative(s.last_sync_at, locale) }) }}
             </template>
             <template v-else>
               {{ t('common.neverRan') }}
@@ -252,70 +305,68 @@ onMounted(load);
 
     <!-- Two-column footer: recent activity + recent syncs -->
     <div class="grid gap-4 lg:grid-cols-2">
-      <div class="card">
-        <header class="card-header flex items-center justify-between">
+      <DataTable
+        table-id="admin.dashboard.activity"
+        :columns="activityColumns"
+        :rows="stats?.recent_audit ?? []"
+        :loading="loading"
+        :empty="t('dashboard.noActivity')"
+        row-key="id"
+        data-testid="dashboard-recent-activity"
+      >
+        <template #toolbar>
           <h2 class="text-sm font-semibold">{{ t('dashboard.recentActivity') }}</h2>
           <RouterLink
             :to="{ name: 'audit' }"
-            class="text-xs text-brand-600 dark:text-brand-400 hover:underline"
+            class="ms-auto text-xs text-brand-600 dark:text-brand-400 hover:underline"
           >
             {{ t('common.more') }}
           </RouterLink>
-        </header>
-        <div v-if="loading" class="card-body text-center text-zinc-500"><Spinner /></div>
-        <ul
-          v-else-if="stats?.recent_audit?.length"
-          class="divide-y divide-zinc-200 dark:divide-zinc-800"
-        >
-          <li v-for="row in stats.recent_audit" :key="row.id" class="px-4 py-2 text-sm">
-            <div class="flex items-center justify-between gap-2">
-              <span class="font-medium" :title="row.action" data-testid="dashboard-activity-action">{{
-                auditActionLabel(row.action, t, te)
-              }}</span>
-              <span class="text-xs text-zinc-500">{{ formatRelative(row.at, locale) }}</span>
-            </div>
-            <p class="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-              {{ row.user_email ?? '—' }}
-              <template v-if="row.target_type">
-                · {{ auditTargetLabel(row.target_type, row.target_id, t, te) }}
-              </template>
-            </p>
-          </li>
-        </ul>
-        <EmptyState v-else :title="t('dashboard.noActivity')" size="sm" />
-      </div>
+        </template>
+        <template #cell-action="{ row }">
+          <span class="font-medium" :title="row.action" data-testid="dashboard-activity-action">{{
+            auditActionLabel(row.action, t, te)
+          }}</span>
+          <span v-if="row.target_type || row.target_name" class="tbl-sub" data-testid="dashboard-activity-target">
+            {{ auditTargetLabel(row.target_type, row.target_id, t, te, row.target_name) }}
+          </span>
+        </template>
+        <template #cell-user_email="{ row }">{{ personName({ name: row.user_name, email: row.user_email }) || '—' }}</template>
+        <template #cell-at="{ row }">{{ formatRelative(row.at, locale) }}</template>
+      </DataTable>
 
-      <div class="card">
-        <header class="card-header flex items-center justify-between">
+      <DataTable
+        table-id="admin.dashboard.syncs"
+        :columns="syncColumns"
+        :rows="recentSyncs"
+        :loading="loading"
+        :empty="t('sync.noResults')"
+        row-key="id"
+        data-testid="dashboard-recent-syncs"
+      >
+        <template #toolbar>
           <h2 class="text-sm font-semibold">{{ t('dashboard.recentSyncs') }}</h2>
           <RouterLink
             :to="{ name: 'sync' }"
-            class="text-xs text-brand-600 dark:text-brand-400 hover:underline"
+            class="ms-auto text-xs text-brand-600 dark:text-brand-400 hover:underline"
           >
             {{ t('common.more') }}
           </RouterLink>
-        </header>
-        <div v-if="loading" class="card-body text-center text-zinc-500"><Spinner /></div>
-        <ul
-          v-else-if="sync.items.length"
-          class="divide-y divide-zinc-200 dark:divide-zinc-800"
-          data-testid="dashboard-recent-syncs"
-        >
-          <li v-for="r in sync.items.slice(0, RECENT_SYNCS)" :key="r.id" class="px-4 py-2 text-sm">
-            <div class="flex items-center justify-between gap-2">
-              <span class="truncate font-medium">{{ r.storage_name }}</span>
-              <Badge :tone="syncTone(r.state)" size="xs">{{ r.state }}</Badge>
-            </div>
-            <p class="text-xs text-zinc-500 dark:text-zinc-400">
-              <span title="added">+{{ r.added }}</span>
-              · <span title="updated">~{{ r.updated }}</span>
-              · <span title="deleted">-{{ r.deleted }}</span>
-              · {{ formatDate(r.started_at, locale) }}
-            </p>
-          </li>
-        </ul>
-        <EmptyState v-else :title="t('sync.noResults')" size="sm" />
-      </div>
+        </template>
+        <template #cell-storage_name="{ row }">
+          <span class="font-medium">{{ row.storage_name }}</span>
+        </template>
+        <template #cell-state="{ row }">
+          <Badge :tone="syncTone(row.state)" size="xs" data-testid="dashboard-sync-state">{{
+            syncStateLabel(row.state, t)
+          }}</Badge>
+        </template>
+        <template #cell-changes="{ row }">
+          <span :title="t('sync.fields.added')">+{{ row.added }}</span>
+          · <span :title="t('sync.fields.updated')">~{{ row.updated }}</span>
+          · <span :title="t('sync.fields.deleted')">-{{ row.deleted }}</span>
+        </template>
+      </DataTable>
     </div>
   </div>
 </template>

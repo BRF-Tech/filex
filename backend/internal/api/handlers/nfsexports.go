@@ -103,6 +103,14 @@ func (h *NFSExports) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		tok = t
 	}
+	// Same rule as an S3 key (token_ceiling.go).
+	if c := ceilingOf(r); c != nil && c.narrowerThanOwner(u) {
+		if tok != nil && tok.ID != c.tok.ID {
+			refuseWider(w, "an export may only inherit from the token that creates it")
+			return
+		}
+		tok = c.tok
+	}
 
 	issued, err := h.Auth.IssueExport(r.Context(), protocolauth.IssueExportRequest{
 		User: u, Token: tok, Label: req.Label,

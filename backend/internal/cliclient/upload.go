@@ -2,7 +2,9 @@
 // core in api.go. Only existing server verbs are used: `newfolder` to
 // materialize directories (empty ones included) and the streaming
 // multipart `upload` for files. Symlinks are never followed — they are
-// reported and skipped, so a cyclic link can't wedge the walk.
+// reported and skipped, so a cyclic link can't wedge the walk. Named pipes,
+// sockets and devices are reported and skipped too: opening a pipe nobody
+// writes to never returns (issue #38).
 package cliclient
 
 import (
@@ -12,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/brf-tech/filex/backend/internal/regfile"
 )
 
 // Tree event kinds delivered to a TreeProgress callback.
@@ -19,12 +23,13 @@ const (
 	TreeDir     = "dir"     // remote directory ensured (created or existing)
 	TreeFile    = "file"    // file uploaded
 	TreeSymlink = "symlink" // local symlink skipped
+	TreeSpecial = "special" // local named pipe, socket or device skipped
 	TreeErr     = "error"   // one item failed (walk continues)
 )
 
 // TreeEvent is one progress notification from UploadTree.
 type TreeEvent struct {
-	Kind   string     // TreeDir | TreeFile | TreeSymlink | TreeErr
+	Kind   string     // TreeDir | TreeFile | TreeSymlink | TreeSpecial | TreeErr
 	Local  string     // local path of the item
 	Remote RemotePath // resolved remote target (zero for symlink/local errors)
 	Err    error      // set when Kind == TreeErr
@@ -47,6 +52,7 @@ type TreeReport struct {
 	Files    int         // files uploaded successfully
 	Dirs     int         // remote directories ensured (created or pre-existing)
 	Symlinks []string    // local symlinks skipped (never followed)
+	Special  []string    // local named pipes, sockets and devices skipped (never opened)
 	Errors   []TreeError // items that failed (upload, mkdir, walk)
 }
 
@@ -156,6 +162,11 @@ func (c *Client) UploadTree(ctx context.Context, localDir, remote string, progre
 			progress(TreeEvent{Kind: TreeSymlink, Local: p})
 			return nil
 		}
+		if regfile.Special(d.Type()) {
+			rep.Special = append(rep.Special, p)
+			progress(TreeEvent{Kind: TreeSpecial, Local: p})
+			return nil
+		}
 		target, err := relRemote(destRoot, localDir, p)
 		if err != nil {
 			fail(p, RemotePath{}, err)
@@ -173,7 +184,7 @@ func (c *Client) UploadTree(ctx context.Context, localDir, remote string, progre
 			progress(TreeEvent{Kind: TreeDir, Local: p, Remote: target})
 			return nil
 		}
-		if _, err := c.uploadFile(ctx, target.Dir(), target.Base(), p); err != nil {
+		if _, err := c.uploadFile(ctx, target.Dir(), target.Base(), p, ""); err != nil {
 			fail(p, target, err)
 			return nil
 		}

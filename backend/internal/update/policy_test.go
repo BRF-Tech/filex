@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 func TestParseVersion(t *testing.T) {
@@ -192,4 +194,29 @@ func TestManifestLatestIgnoresPrereleasesAndOrder(t *testing.T) {
 	require.True(t, ok)
 	// v0.7.10 > v0.7.9 numerically, not lexically — and the rc is skipped.
 	assert.Equal(t, "v0.7.10", got.Version)
+}
+
+// Every decision carries its sentence as a key of the server catalogue, so the
+// admin page says it in the reader's language. ⚠ The page printed Reason, the
+// English: the Turkish panel read "policy is manual — updates are announced,
+// not applied" (release-candidate sweep, 2026-09-21).
+func TestDecide_EveryReasonIsInTheCatalogue(t *testing.T) {
+	cases := []Decision{
+		decide(t, "v0.7.5", PolicyManual, ModeBinary, rel("v0.7.6")),
+		decide(t, "v0.7.5", PolicyOff, ModeBinary, rel("v0.7.6")),
+		decide(t, "v0.7.5", PolicyPatch, ModeDocker, rel("v0.7.6")),
+		decide(t, "v0.7.6", PolicyPatch, ModeBinary, rel("v0.7.6")),
+		decide(t, "v0.7.5", PolicyPatch, ModeBinary, rel("v1.0.0")),
+		decide(t, "v0.7.5", PolicyPatch, ModeBinary, rel("v0.8.0")),
+		decide(t, "v0.7.5", PolicyMinor, ModeBinary, rel("v0.8.0")),
+	}
+	en, tr := srvtext.Builtin("en"), srvtext.Builtin("tr")
+	for _, d := range cases {
+		require.NotEmpty(t, d.ReasonKey, "a decision without a catalogue key: %q", d.Reason)
+		assert.NotEmpty(t, en[d.ReasonKey], "%s is not in en.json", d.ReasonKey)
+		assert.NotEmpty(t, tr[d.ReasonKey], "%s is not in tr.json", d.ReasonKey)
+		for k := range d.ReasonVars {
+			assert.Contains(t, en[d.ReasonKey], "{"+k+"}", "%s carries a value its sentence does not use", d.ReasonKey)
+		}
+	}
 }

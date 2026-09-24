@@ -45,6 +45,10 @@ var instanceWideNoTenantForm = []struct {
 	{"webhook targets list", http.MethodGet, "/api/admin/webhooks", nil},
 	{"webhook target create", http.MethodPost, "/api/admin/webhooks",
 		map[string]any{"url": "https://attacker.example/hook", "events": []string{"file.uploaded"}}},
+	// Every tenant's event history, in one table with no tenant column. The
+	// tenant's own events reach its admins through the bell, which IS scoped.
+	{"notification history", http.MethodGet, "/api/admin/notifications", nil},
+	{"notification test event", http.MethodPost, "/api/admin/notifications/test", map[string]any{}},
 	{"legacy webhook config read", http.MethodGet, "/api/admin/notifications/webhook-config", nil},
 	{"legacy webhook config write", http.MethodPatch, "/api/admin/notifications/webhook-config",
 		map[string]any{"url": "https://attacker.example/hook"}},
@@ -83,7 +87,7 @@ func TestInstanceWideNoTenantForm_SupertenantStillPasses(t *testing.T) {
 	for _, path := range []string{
 		"/api/admin/webhooks", "/api/admin/replication-targets",
 		"/api/admin/replica/rules", "/api/admin/replica/settings",
-		"/api/admin/search/stats", "/api/admin/queue",
+		"/api/admin/search/stats", "/api/admin/queue", "/api/admin/notifications",
 	} {
 		status, body := doJSON(t, client, http.MethodGet, srv.URL+path, nil)
 		assert.NotEqual(t, http.StatusForbidden, status,
@@ -99,7 +103,7 @@ func TestInstanceWideNoTenantForm_SingleTenantAdminUnaffected(t *testing.T) {
 	for _, path := range []string{
 		"/api/admin/webhooks", "/api/admin/replication-targets",
 		"/api/admin/replica/rules", "/api/admin/replica/settings",
-		"/api/admin/search/stats", "/api/admin/queue",
+		"/api/admin/search/stats", "/api/admin/queue", "/api/admin/notifications",
 	} {
 		status, body := doJSON(t, client, http.MethodGet, srv.URL+path, nil)
 		assert.NotEqual(t, http.StatusForbidden, status,

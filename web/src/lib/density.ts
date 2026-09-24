@@ -16,9 +16,27 @@
 // (another tab) and for the `filex:density` event this module fires (same tab,
 // where the browser sends no storage event to the window that wrote).
 
+import { savePref, setLocalPref } from '@brftech/filex-core';
+
 export const DENSITY_KEY = 'filex.density';
 
 export type Density = 'comfortable' | 'compact';
+
+/**
+ * The account's density has arrived: apply it, without sending it back.
+ *
+ * Fires the same `filex:density` event a click would, so an explorer already
+ * on screen re-lays-out instead of waiting for a navigation.
+ */
+export function applyAccountDensity(d: string | undefined | null): void {
+  if (d !== 'comfortable' && d !== 'compact') return;
+  setLocalPref('density', d);
+  try {
+    window.dispatchEvent(new CustomEvent('filex:density', { detail: d }));
+  } catch {
+    /* older engine without CustomEvent constructor */
+  }
+}
 
 export function getDensity(): Density {
   try {
@@ -36,6 +54,10 @@ export function setDensity(d: Density): void {
   } catch {
     /* a display preference is never worth taking the page down for */
   }
+  // ⚠ v3 — and on the ACCOUNT, so the next browser opens the same list
+  // (`@brftech/filex-core` → lib/prefs). localStorage above is now the
+  // first-paint cache, not the preference.
+  savePref('density', d);
   // A tab does not receive its own `storage` event, so say it out loud. The
   // explorer may not be mounted, and nobody has to be listening.
   try {

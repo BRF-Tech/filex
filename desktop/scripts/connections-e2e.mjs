@@ -3,9 +3,16 @@
 // The point of this script is that the desktop app does NOT have its own
 // connections screen. It mounts `<filex-connections>` from the same npm
 // package as the file explorer, so what is measured here is the shared
-// component running inside Electron: the driver form (fields supplied by
-// the server's own descriptors), a real create against a real server, and
-// the generated "how to connect" page.
+// component running inside Electron: the generated "how to connect" page,
+// built from the live deployment.
+//
+// ⚠⚠ There is no storage form here any more. v0.43.0 removed the panel's
+// Storages tab on every surface — the owner, testing the release: "bu depolar
+// sekmesine hiç ihtiyaç yok". Storages are created and edited in the admin
+// panel, so this script CREATES its storage through the API (the guide needs
+// one to name) instead of typing it into a form that no longer exists. Do not
+// re-add the form checks: they would be measuring a screen the product does
+// not have.
 //
 // It also re-measures the trap that cost a shipped bug in v0.19.0: a
 // language switch must change the TEXT ON SCREEN inside the component, not
@@ -15,7 +22,8 @@
 //   FILEX_SERVER=http://127.0.0.1:5299 FILEX_EMAIL=… FILEX_PASSWORD=… \
 //     node scripts/connections-e2e.mjs
 //
-// ⚠ Point it at a THROWAWAY server. It creates and deletes a storage.
+// ⚠ Point it at a THROWAWAY server. It creates and deletes a storage
+// (through the admin API, not the UI).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -48,6 +56,21 @@ async function dropStorage() {
 }
 await dropStorage();
 
+// The storage the guide names. ⚠ Through the API: the desktop app has no
+// storage form since v0.43.0, and the admin panel is where one is typed.
+{
+  const res = await api(
+    '/api/admin/storages',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: STORAGE, driver: 'local', config: { path: MOUNT } }),
+    },
+    adminToken,
+  );
+  check('a storage exists for the guide to name', res.ok, `HTTP ${res.status}`);
+}
+
 // ── the entry point: Settings, not the admin panel ───────────────────
 await win.evaluate(() => {
   const gear = [...document.querySelectorAll('.rail-btn')].pop();
@@ -70,62 +93,21 @@ check('…and it is the SHARED component, not a copy in app.html',
   await win.evaluate(() => !!document.querySelector('filex-connections [data-testid="connections-panel"]')));
 check('…with the explorer hidden behind it',
   await win.evaluate(() => document.querySelector('#explorer-host')?.style.display === 'none'));
-await shot(win, 'desktop-connections-list');
+await shot(win, 'desktop-connections-guide-open');
 
-// ── create a storage FROM THE DESKTOP APP ────────────────────────────
-await win.evaluate(() => document.querySelector('[data-testid="storage-add"]')?.click());
-await sleep(400);
-
-// ⚠ The fields are whatever the SERVER's descriptor declared. Filling
-// `#fe-cf-path` proves the desktop app rendered the driver's real contract
-// — the failure this whole mechanism exists to stop is a surface that
-// collects a key the backend never reads.
-const set = (sel, value, kind = 'input') =>
-  win.evaluate(
-    ({ sel, value, kind }) => {
-      const el = document.querySelector(sel);
-      if (!el) return false;
-      const proto = kind === 'change' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
-      Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
-      el.dispatchEvent(new Event(kind, { bubbles: true }));
-      return true;
-    },
-    { sel, value, kind },
-  );
-
-await set('[data-testid="storage-name"]', STORAGE);
-await set('[data-testid="storage-driver"]', 'local', 'change');
-// ⚠ After the render the change triggers, not in the same turn: switching
-// driver replaces the whole field set, and asking for the new field in the
-// evaluate that caused the switch measures the OLD form.
-await sleep(400);
-check('the form renders the local driver contract from the server',
-  await win.evaluate(() => !!document.querySelector('#fe-cf-path')));
-
-await set('#fe-cf-path', MOUNT);
-await sleep(200);
-
-await win.evaluate(() => document.querySelector('[data-testid="storage-test"]')?.click());
-await sleep(2500);
-const testText = await win.evaluate(
-  () => document.querySelector('[data-testid="test-result"]')?.innerText ?? '');
-check('the connection test answers before anything is saved', /Connected|Could not connect/.test(testText), testText);
-await shot(win, 'desktop-connections-form');
-
-await win.evaluate(() => document.querySelector('[data-testid="storage-save"]')?.click());
-await sleep(2500);
-
-// The server is the authority.
-const listed = await (await api('/api/admin/storages', {}, adminToken)).json();
-const made = listed.find((s) => s.name === STORAGE);
-check('the storage really exists on the server now', !!made, made ? `id=${made.id}` : 'not found');
-check('…with the path the descriptor asked for, under the key the driver reads',
-  made?.config?.path === MOUNT, JSON.stringify(made?.config ?? {}));
-check('…and it shows up in the list on screen',
-  await win.evaluate((n) => !!document.querySelector(`[data-testid="storage-edit-${n}"]`), STORAGE));
+// ── nothing but the guides ───────────────────────────────────────────
+// ⚠ The absence IS the feature here. A tab strip or a storage form appearing
+// in Electron while the web app has neither would be exactly the per-surface
+// drift this shared component exists to prevent.
+const stray = await win.evaluate(() =>
+  ['tab-storages', 'tab-connect', 'storage-list', 'storage-add', 'storage-form', 'no-admin']
+    .filter((id) => !!document.querySelector(`[data-testid="${id}"]`)));
+check('the panel is the guides only — no tab strip, no storage form',
+  stray.length === 0, stray.join(', ') || 'none');
+check('…and the protocol picker is on screen without anything being clicked',
+  await win.evaluate(() => !!document.querySelector('[data-testid="guide-protocol"]')));
 
 // ── the instruction page ─────────────────────────────────────────────
-await win.evaluate(() => document.querySelector('[data-testid="tab-connect"]')?.click());
 await sleep(900);
 const facts = await win.evaluate(
   () => document.querySelector('[data-testid="guide-facts"]')?.innerText ?? '');
@@ -165,7 +147,7 @@ await sleep(1200);
 const trText = await win.evaluate(
   () => document.querySelector('filex-connections')?.innerText ?? '');
 check('the connections panel itself is in Turkish, not just its locale property',
-  /Depo bağlantıları/.test(trText) && /Depolar/.test(trText),
+  /Depo bağlantıları/.test(trText) && /Protokol/.test(trText),
   trText.split('\n').filter(Boolean).slice(0, 3).join(' · ') || 'empty');
 // ⚠ Case-sensitive above, on purpose. The desktop shell styles `h2` with
 // text-transform: uppercase for its own headings and that reaches into this
@@ -174,17 +156,14 @@ check('the connections panel itself is in Turkish, not just its locale property'
 // until the package started stating its own heading type. A
 // case-insensitive check would have let that straight through.
 
-// The panel keeps the tab it was left on — it was reopened, not remounted,
-// which is exactly what makes the check above meaningful.
-await win.evaluate(() => document.querySelector('[data-testid="tab-storages"]')?.click());
-await sleep(400);
-await win.evaluate(() => document.querySelector('[data-testid="storage-add"]')?.click());
-await sleep(600);
-const trForm = await win.evaluate(
-  () => document.querySelector('[data-testid="storage-form"]')?.innerText ?? '');
-check('…including the labels the server descriptor named',
-  /Görünen isim/.test(trForm) && /Dizin yolu|Temel yol|Bucket/.test(trForm),
-  trForm.split('\n').filter(Boolean).slice(0, 5).join(' · ') || 'empty');
+// The guide's own body, not just the chrome: the instructions are the thing
+// a Turkish reader came for, and they are generated rather than translated
+// wholesale, so they are where a missing catalogue key actually shows.
+const trGuide = await win.evaluate(
+  () => document.querySelector('.fe-guide__body')?.innerText ?? '');
+check('…including the generated instructions, not only the headings',
+  /Dosya Gezgini|Bağlan|Sürücü/.test(trGuide),
+  trGuide.split('\n').filter(Boolean).slice(0, 5).join(' · ') || 'empty');
 await shot(win, 'desktop-connections-tr');
 
 // back to English so the profile is not left mid-experiment

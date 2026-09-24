@@ -251,6 +251,16 @@ const GLYPHS: Record<string, string> = {
   link:
     '<path d="M10 13.5a4.5 4.5 0 0 0 6.8.5l2.7-2.7a4.5 4.5 0 0 0-6.36-6.36L11.6 6.5"/>' +
     '<path d="M14 10.5a4.5 4.5 0 0 0-6.8-.5l-2.7 2.7a4.5 4.5 0 0 0 6.36 6.36l1.53-1.53"/>',
+  /* baglan:b1 — "How to connect". A PLUG, deliberately not the chain above:
+     the empty screen's account menu draws both rows one under the other
+     ("Paylaştıklarım", then "Bağlantılar"), and one mark on two adjacent rows
+     is the misreading this set exists to stop. It is also the mark the admin
+     panel's own Connections entry already wears (Sidebar.vue, lucide `Cable`),
+     so the two ways into the same screen agree on what it looks like. */
+  connect:
+    '<path d="M9 8.5V3"/><path d="M15 8.5V3"/>' +
+    '<path d="M6 8.5h12v4.5a4.5 4.5 0 0 1-4.5 4.5h-3A4.5 4.5 0 0 1 6 13z"/>' +
+    '<path d="M12 17.5V21"/>',
 
   /* === ikon:emoji — the command palette's own rows =======================
    * The palette printed `{{ it.icon }}` as TEXT: `➜ 📁 ⬆ ▦ 🗑 ⟳ ↑ 🎨 ⌨ 🎓 ⧉ ◫
@@ -293,6 +303,20 @@ const GLYPHS: Record<string, string> = {
    * a fallback screen's 48px mark was the only full-colour thing on a grey
    * page. `progress` is drawn as an open ring because it is SPUN by CSS
    * (`@keyframes fe-spin`) — an hourglass cannot say "still going". */
+  /* An app plugin's row when its manifest names no glyph this set draws: a
+     puzzle piece, the mark every extension surface already wears. Rows whose
+     manifest icon IS a key here (`convert`, `lock`, …) get that glyph instead
+     — lib/pluginMenu decides, this only draws. */
+  plugin:
+    '<path d="M9.5 4.5a2 2 0 1 1 4 0h3a1.5 1.5 0 0 1 1.5 1.5v3a2 2 0 1 1 0 4v3a1.5 1.5 0 0 1-1.5 1.5h-3a2 2 0 1 1-4 0h-3A1.5 1.5 0 0 1 5 16v-3a2 2 0 1 1 0-4V6a1.5 1.5 0 0 1 1.5-1.5z"/>',
+  /* A pen signing on a line — the e-signature app's own icon (manifest
+     `icon: "sign"`). ⚠ Drawn here because a key the catalogue does not know
+     falls back to the generic plugin piece: the sidebar and every menu showed
+     the Signatures app as "some app" until it was (2026-09-21, a tester). */
+  sign:
+    '<path d="M12.5 20.5h8"/>' +
+    '<path d="M16.2 3.9a2.05 2.05 0 0 1 2.9 2.9L8 17.9l-3.9 1 1-3.9z"/>' +
+    '<path d="M14.6 5.5l2.9 2.9"/>',
   check: '<path d="M4.8 12.6l4.7 4.7L19.2 6.9"/>',
   alert:
     '<path d="M10.7 4.6L2.9 18.2a1.5 1.5 0 0 0 1.3 2.25h15.6a1.5 1.5 0 0 0 1.3-2.25L13.3 4.6a1.5 1.5 0 0 0-2.6 0z"/>' +
@@ -300,6 +324,27 @@ const GLYPHS: Record<string, string> = {
     '<circle cx="12" cy="17.4" r="0.9" fill="currentColor" stroke="none"/>',
   progress: '<path d="M20.5 12a8.5 8.5 0 1 1-8.5-8.5"/>',
 };
+
+/**
+ * ⚠ RTL — the glyphs that MEAN a direction along the line, and so are drawn
+ * mirrored in a right-to-left interface (`fe-aicon--dir`, one rule in
+ * base.css; `:dir(rtl)` on the icon itself, so an English explorer inside an
+ * Arabic page keeps its arrows):
+ *
+ *   restore    — the undo arrow ("put it back") points toward the start;
+ *   goto       — the arrow goes INTO the box, reading forward;
+ *   sign-out   — the arrow leaves through the door on the END side;
+ *   copy-path  — its `›` is a path separator, which points the way a path
+ *                reads (the breadcrumb's does the same);
+ *   nav, inspector — a panel on the start / end side of the window, and in RTL
+ *                the navigation panel IS on the right.
+ *
+ * Deliberately NOT here: `open` (↗ "open in a new tab" points up and out, not
+ * along the line), `refresh` (a clock turns the same way in every script),
+ * `convert` (two opposed arrows, already symmetric), and everything vertical
+ * (upload, download, go-up, subfolders, density).
+ */
+const DIRECTIONAL = new Set(['restore', 'goto', 'sign-out', 'copy-path', 'nav', 'inspector']);
 
 const SVG_CACHE = new Map<string, string>();
 
@@ -316,7 +361,7 @@ export function actionIconSvg(key: string): string {
   if (cached !== undefined) return cached;
   const glyph = GLYPHS[key];
   const svg = glyph
-    ? '<svg class="fe-aicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    ? `<svg class="${DIRECTIONAL.has(key) ? 'fe-aicon fe-aicon--dir' : 'fe-aicon'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
       'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" ' +
       `aria-hidden="true" focusable="false">${glyph}</svg>`
     : '';

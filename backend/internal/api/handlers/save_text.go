@@ -56,7 +56,6 @@ import (
 	"net/http"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -66,6 +65,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -166,6 +166,12 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
 		return
 	}
+	// The text editor never opens anything among filex's own (the desktop's
+	// working copies are office documents, saved by the document editor).
+	// …and a document an app has frozen is not saved over (writegate).
+	if gate(w, r, h.ACL, storageID, writegate.Writes(rel)) {
+		return
+	}
 	// RBAC: editing file content needs ≥editor.
 	if !aclAllowID(r.Context(), h.ACL, h.Store, storageID, rel, acl.LevelEditor) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
@@ -242,8 +248,14 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 
 	// Refresh cache metadata so the next listing carries the new size.
 	if existing != nil {
-		_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, int64(len(body)), existing.Mime, existing.Etag, time.Now())
-		existing.Size = int64(len(body))
+		// What landed: size, etag and mtime from the backend. The row's own etag
+		// is the PRE-edit file's, and indexing against it below would leave the
+		// old text searchable (search.ContentFingerprint prefers the etag).
+		size, etag, mtime := storage.Landed(r.Context(), drv, rel, int64(len(body)))
+		_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, size, existing.Mime, etag, mtime)
+		existing.Size = size
+		existing.Etag = etag
+		existing.BackendMtime = &mtime
 		// ⚠ Re-index, or the document keeps the pre-edit text for good:
 		// nothing else ever revisits a file whose path did not change.
 		sy.IndexNode(r.Context(), existing)
@@ -271,17 +283,20 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("save-text: parent folders",
 				slog.String("path", clean), slog.String("err", perr.Error()))
 		}
+		lsize, etag, mtime := storage.Landed(r.Context(), drv, rel, int64(len(body)))
 		created, cerr := h.Store.CreateNode(r.Context(), &model.Node{
-			StorageID:  storageID,
-			ParentID:   parentID,
-			Name:       path.Base(clean),
-			Path:       clean,
-			PathHash:   hash,
-			StorageKey: clean,
-			Type:       model.NodeTypeFile,
-			Size:       int64(len(body)),
-			Mime:       "text/plain; charset=utf-8",
-			SyncState:  model.SyncStateSynced,
+			StorageID:    storageID,
+			ParentID:     parentID,
+			Name:         path.Base(clean),
+			Path:         clean,
+			PathHash:     hash,
+			StorageKey:   clean,
+			Type:         model.NodeTypeFile,
+			Size:         lsize,
+			Mime:         "text/plain; charset=utf-8",
+			Etag:         etag,
+			BackendMtime: &mtime,
+			SyncState:    model.SyncStateSynced,
 		})
 		if cerr != nil {
 			slog.Warn("save-text: node create",

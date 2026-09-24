@@ -16,6 +16,8 @@ import { computed, onMounted, ref } from 'vue';
 import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { NFSExport } from '../types/NFSExports';
 import { useLocale } from '../composables/useLocale';
+import DataTable, { type DataColumn } from './DataTable.vue';
+import type { ContextAction } from './ContextMenu.vue';
 import { useNFSExports } from '../composables/useNFSExports';
 import { resolveLocale } from '../locales/resolve';
 
@@ -92,6 +94,61 @@ async function mint() {
   } finally {
     busy.value = false;
   }
+}
+
+/** The row's verbs, behind its one `Actions` control. ⚠ `revoke` keeps the
+ *  two-step confirmation it had as a loose button. */
+function rowActions(e: NFSExport): ContextAction[] {
+  /* The whole control used to be `:disabled="busy"`; the table draws the
+     control now, so each verb carries it. */
+  return [
+    {
+      key: 'toggle',
+      label: e.disabled_at ? t('conn.nfs.enable') : t('conn.nfs.disable'),
+      icon: e.disabled_at ? 'check' : 'lock',
+      disabled: busy.value,
+    },
+    {
+      key: 'revoke',
+      label: confirmRemove.value === e.id ? t('conn.nfs.confirm') : t('conn.nfs.revoke'),
+      icon: 'delete',
+      danger: true,
+      disabled: busy.value,
+    },
+  ];
+}
+
+/** The list's columns — the product's one table (DataTable). */
+const columns = computed<DataColumn<NFSExport>[]>(() => [
+  {
+    id: 'label',
+    label: t('conn.nfs.col.label'),
+    sortable: true,
+    width: 180,
+    format: (e) => e.label || t('conn.nfs.noLabel'),
+  },
+  { id: 'scope', label: t('conn.nfs.col.scope'), sortable: true, width: 180, format: scopeOf },
+  {
+    id: 'mode',
+    label: t('conn.nfs.col.mode'),
+    sortable: true,
+    width: 120,
+    format: (e) => (e.read_only ? t('conn.nfs.modeRead') : t('conn.nfs.modeWrite')),
+  },
+  {
+    id: 'lastUsed',
+    label: t('conn.nfs.col.lastUsed'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 140,
+    format: (e) => (e.last_used_at ? shortDate(e.last_used_at) : t('conn.nfs.neverUsed')),
+    sortValue: (e) => (e.last_used_at ? new Date(e.last_used_at).getTime() : null),
+  },
+]);
+
+function onRowAction(key: string, e: NFSExport) {
+  if (key === 'toggle') void toggle(e);
+  else if (key === 'revoke') void drop(e);
 }
 
 async function toggle(e: NFSExport) {
@@ -234,35 +291,26 @@ function scopeOf(e: NFSExport): string {
       </button>
     </div>
 
+    <!-- ⚠ THE table (DataTable — the explorer's own), not a table of its own:
+         reachable from the admin panel's Connections menu and from the
+         explorer, so it resizes, sorts, hides and moves columns and remembers
+         that on the account (`conn.nfs`), like every other table. (It once had
+         no scroll container at all, so its actions cell could not pin; the
+         one table owns that now.) -->
     <p v-if="loading" class="fe-s3keys__muted">…</p>
-    <table v-else-if="exports.length" class="fe-s3keys__table">
-      <thead>
-        <tr>
-          <th>{{ t('conn.nfs.col.label') }}</th>
-          <th>{{ t('conn.nfs.col.scope') }}</th>
-          <th>{{ t('conn.nfs.col.mode') }}</th>
-          <th>{{ t('conn.nfs.col.lastUsed') }}</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="e in exports" :key="e.id" :class="{ 'is-off': !!e.disabled_at }">
-          <td>{{ e.label || t('conn.nfs.noLabel') }}</td>
-          <td>{{ scopeOf(e) }}</td>
-          <td>{{ e.read_only ? t('conn.nfs.modeRead') : t('conn.nfs.modeWrite') }}</td>
-          <td>{{ e.last_used_at ? shortDate(e.last_used_at) : t('conn.nfs.neverUsed') }}</td>
-          <td class="fe-s3keys__actions">
-            <button class="fe-s3keys__link" :disabled="busy" @click="toggle(e)">
-              {{ e.disabled_at ? t('conn.nfs.enable') : t('conn.nfs.disable') }}
-            </button>
-            <button class="fe-s3keys__link is-danger" :disabled="busy" @click="drop(e)">
-              {{ confirmRemove === e.id ? t('conn.nfs.confirm') : t('conn.nfs.revoke') }}
-            </button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-    <p v-else-if="canMint" class="fe-s3keys__muted">{{ t('conn.nfs.empty') }}</p>
+    <DataTable
+      v-else
+      table-id="conn.nfs"
+      :columns="columns"
+      :rows="exports"
+      row-key="id"
+      :locale="locale"
+      :empty="t('conn.nfs.empty')"
+      :row-class="(e: NFSExport) => (e.disabled_at ? 'is-muted' : undefined)"
+      :row-actions="rowActions"
+      :row-actions-test-id="(e: NFSExport) => `nfs-export-actions-${e.id}`"
+      @row-action="(key: string, e: NFSExport) => onRowAction(key, e)"
+    />
   </section>
 </template>
 

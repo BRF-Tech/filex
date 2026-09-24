@@ -14,14 +14,21 @@ import Modal from '@/components/ui/Modal.vue';
 import StorageDriverFields from '@/components/StorageDriverFields.vue';
 import { extractError } from '@/api/client';
 import { formatDate } from '@/lib/format';
-import type { ReplicaMode, ReplicaRule, ReplicaRuleInput, ReplicaSettings } from '@/api/types';
+import type {
+  ReplicaFailure,
+  ReplicaMode,
+  ReplicaRule,
+  ReplicaRuleInput,
+  ReplicaSettings,
+} from '@/api/types';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
-import TableScroll from '@/components/ui/TableScroll.vue';
+import { DataTable, StorageTags, type ContextAction, type DataColumn } from '@brftech/filex-core';
+import { driverName } from '@/lib/storageWords';
 
 type Tab = 'rules' | 'failures' | 'report' | 'settings';
 
@@ -208,7 +215,7 @@ async function saveRule() {
     editing.value = null;
     ruleDraft.value = { path_pattern: '', mode: 'mirror', priority: 100, enabled: true, description: '' };
   } catch (e: unknown) {
-    toast.error(extractError(e, 'Save failed'));
+    toast.error(extractError(e, t('errors.saveFailed')));
   }
 }
 
@@ -218,7 +225,7 @@ async function deleteRule(r: ReplicaRule) {
     await replica.deleteRule(r.id);
     toast.success(t('replica.rules.deleted'));
   } catch (e: unknown) {
-    toast.error(extractError(e, 'Delete failed'));
+    toast.error(extractError(e, t('errors.deleteFailed')));
   }
 }
 
@@ -228,7 +235,7 @@ async function fixAll() {
     const r = await replica.fixAll();
     toast.success(t('replica.failures.queued', { n: r.queued }, r.queued));
   } catch (e: unknown) {
-    toast.error(extractError(e, 'Fix all failed'));
+    toast.error(extractError(e, t('errors.actionFailed')));
   }
 }
 
@@ -237,7 +244,7 @@ async function fixOne(path: string, op: string) {
     await replica.fixOne(path, op);
     toast.success(t('replica.failures.queuedOne'));
   } catch (e: unknown) {
-    toast.error(extractError(e, 'Fix failed'));
+    toast.error(extractError(e, t('errors.actionFailed')));
   }
 }
 
@@ -257,7 +264,7 @@ async function runReport() {
     await replica.runReportNow();
     toast.success(t('replica.report.ran'));
   } catch (e: unknown) {
-    toast.error(extractError(e, 'Run report failed'));
+    toast.error(extractError(e, t('errors.actionFailed')));
   }
 }
 
@@ -273,7 +280,7 @@ async function saveSettings() {
     await replica.updateSettings(settingsDraft.value);
     toast.success(t('replica.settings.saved'));
   } catch (e: unknown) {
-    toast.error(extractError(e, 'Save failed'));
+    toast.error(extractError(e, t('errors.saveFailed')));
   }
 }
 
@@ -281,6 +288,125 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
   if (m === 'mirror') return 'emerald';
   if (m === 'append_only') return 'amber';
   return 'zinc';
+}
+
+/* ⚠ The replication TARGETS were a `<ul>` with `divide-zinc-200` — a
+   header row in bold, a value per line and a delete button on the right, i.e.
+   a table that had opted out of being one, and out of the palette with it
+   (those two zinc hexes cannot follow the theme). It is the explorer's table
+   now (DataTable), with the title and the Add button in its toolbar slot. Each
+   of the three tables on this page is remembered on the account under its own
+   id (`admin.replica.targets` / `.rules` / `.failures`). */
+const targetColumns = computed<DataColumn<ReplicationTarget>[]>(() => [
+  { id: 'name', label: t('replica.targets.fields.name'), sortable: true, width: 240 },
+  {
+    id: 'driver',
+    label: t('replica.targets.fields.driver'),
+    sortable: true,
+    width: 160,
+    format: (r) => driverName(r.driver, t, te),
+    sortValue: (r) => driverName(r.driver, t, te),
+  },
+]);
+
+const ruleColumns = computed<DataColumn<ReplicaRule>[]>(() => [
+  /* ⚠ The PATTERN is the lead, not the priority: the lead is the column that
+     says which row this is, and a priority NUMBER does not. DataTable draws
+     the lead first and freezes it, so the pattern now opens the row and the
+     priority follows it — sortable, so "in priority order" is one click. */
+  {
+    id: 'path_pattern',
+    label: t('replica.rules.fields.pattern'),
+    lead: true,
+    sortable: true,
+    width: 240,
+  },
+  {
+    id: 'priority',
+    label: t('replica.rules.fields.priority'),
+    align: 'right',
+    sortable: true,
+    width: 90,
+    sortValue: (r) => r.priority,
+  },
+  { id: 'mode', label: t('replica.rules.fields.mode'), sortable: true, width: 130 },
+  { id: 'description', label: t('replica.rules.fields.description'), sortable: true, width: 240 },
+  {
+    id: 'enabled',
+    label: t('replica.rules.fields.enabled'),
+    sortable: true,
+    width: 90,
+    sortValue: (r) => (r.enabled ? 0 : 1),
+  },
+]);
+
+/* ⚠ Paged by the SERVER, which has no sort parameter: while the failures span
+   more than one page DataTable closes the headers and says why rather than
+   re-ordering one page and calling that sorted. */
+const failureColumns = computed<DataColumn<ReplicaFailure>[]>(() => [
+  { id: 'path', label: t('replica.failures.fields.path'), sortable: true, width: 240 },
+  { id: 'op', label: t('replica.failures.fields.op'), sortable: true, width: 100 },
+  { id: 'error_code', label: t('replica.failures.fields.errorCode'), sortable: true, width: 130 },
+  { id: 'error_msg', label: t('replica.failures.fields.error'), width: 240 },
+  {
+    id: 'attempts',
+    label: t('replica.failures.fields.attempts'),
+    align: 'right',
+    sortable: true,
+    width: 90,
+    sortValue: (r) => r.attempts,
+  },
+  {
+    id: 'last_attempt_at',
+    label: t('replica.failures.fields.lastAttempt'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 160,
+    sortValue: (r) => (r.last_attempt_at ? Date.parse(r.last_attempt_at) : null),
+  },
+  {
+    id: 'resolved_at',
+    label: t('replica.failures.fields.resolved'),
+    sortable: true,
+    width: 120,
+    sortValue: (r) => (r.resolved_at ? 1 : 0),
+  },
+]);
+
+/** A replication target's one verb, behind its one pinned `Actions` control.
+ *  `removeReplica` keeps its own confirmation. */
+function targetActions(_row: ReplicationTarget): ContextAction[] {
+  return [{ key: 'remove', label: t('common.remove'), icon: 'delete', danger: true }];
+}
+
+function onTargetAction(key: string, row: ReplicationTarget) {
+  if (key === 'remove') removeReplica(row);
+}
+
+/** A rule's verbs, behind its one pinned `Actions` control. */
+function ruleActions(_row: ReplicaRule): ContextAction[] {
+  return [
+    { key: 'edit', label: t('common.edit'), icon: 'rename' },
+    { key: 'delete', label: t('common.delete'), icon: 'delete', danger: true },
+  ];
+}
+
+function onRuleAction(key: string, row: ReplicaRule) {
+  if (key === 'edit') openEditRule(row);
+  else if (key === 'delete') deleteRule(row);
+}
+
+/** A failure's one verb. It only applies while the failure is unresolved, so
+ *  a resolved row's control is disabled rather than absent — the column then
+ *  reads the same all the way down instead of going ragged. */
+function failureActions(row: ReplicaFailure): ContextAction[] {
+  return [
+    { key: 'fix', label: t('replica.failures.fixOne'), icon: 'refresh', hidden: !!row.resolved_at },
+  ];
+}
+
+function onFailureAction(key: string, row: ReplicaFailure) {
+  if (key === 'fix') fixOne(row.path, row.op);
 }
 </script>
 
@@ -319,38 +445,42 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
            more storages here that act as backup-only targets; they
            never appear on the Storages page (those are write-side
            primaries). -->
-      <div class="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <div class="flex items-center justify-between mb-3">
+      <DataTable
+        table-id="admin.replica.targets"
+        :columns="targetColumns"
+        :rows="replicaTargets"
+        row-key="id"
+        :empty="t('replica.targets.empty')"
+        data-testid="replica-targets"
+        :row-actions="(row: ReplicationTarget) => targetActions(row)"
+        :row-actions-test-id="(row: ReplicationTarget) => `replica-target-actions-${row.id}`"
+        @row-action="(key: string, row: ReplicationTarget) => onTargetAction(key, row)"
+      >
+        <template #toolbar>
           <h2 class="flex items-center gap-2 text-sm font-semibold">
             <Database class="h-4 w-4" />
             {{ t('replica.targets.title') }}
           </h2>
-          <Button size="xs" variant="primary" @click="openNewTargetForm">
+          <Button size="xs" variant="primary" class="ms-auto" @click="openNewTargetForm">
             <Plus class="h-3.5 w-3.5" />
             {{ t('replica.targets.add') }}
           </Button>
-        </div>
-        <div v-if="!replicaTargets.length" class="text-xs text-zinc-500">
-          {{ t('replica.targets.empty') }}
-        </div>
-        <ul v-else class="divide-y divide-zinc-100 dark:divide-zinc-800 text-xs">
-          <li v-for="t_ in replicaTargets" :key="t_.id" class="flex items-center justify-between py-2">
-            <div class="flex items-center gap-2">
-              <Badge size="xs" tone="violet">replica</Badge>
-              <strong>{{ t_.name }}</strong>
-              <span class="text-zinc-500">{{ t_.driver }}</span>
-            </div>
-            <Button size="xs" variant="ghost" @click="removeReplica(t_)">
-              <Trash2 class="h-3.5 w-3.5 text-rose-500" />
-            </Button>
-          </li>
-        </ul>
-      </div>
+        </template>
+        <template #cell-name="{ row }">
+          <span class="inline-flex items-center gap-2">
+            <Badge size="xs" tone="violet">replica</Badge>
+            <strong>{{ row.name }}</strong>
+          </span>
+        </template>
+      </DataTable>
 
       <!-- Pairings — each primary storage points at one replica
            target. PATCH /admin/storages/{primary-id} with
            replica_of_id sets the link. -->
-      <div class="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+      <!-- ⚠ `card card-body`, not `border-zinc-200 bg-white dark:…`: a
+           Tailwind colour is a hex baked into the stylesheet and cannot follow
+           the palette the person picked. `.card` is the same box in tokens. -->
+      <div class="card card-body">
         <h2 class="flex items-center gap-2 text-sm font-semibold mb-3">
           <ArrowRightLeft class="h-4 w-4" />
           {{ t('replica.pair.title') }}
@@ -362,19 +492,22 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
           <li
             v-for="prim in primaryStorages"
             :key="prim.id"
-            class="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-100 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950"
+            class="flex flex-wrap items-center gap-3 rounded-lg p-3 row-box"
           >
             <div class="flex-1 min-w-[160px]">
               <div class="flex items-center gap-2">
                 <strong class="text-sm">{{ prim.name }}</strong>
-                <span class="text-xs text-zinc-500">{{ prim.driver }}</span>
+                <StorageTags :driver="prim.driver" :read-only="prim.read_only" :locale="locale" />
               </div>
               <p class="text-[11px] text-zinc-500 mt-0.5">
-                {{ t('replica.pair.targetLabel') }}:
-                <strong v-if="prim.replica_target_id">
-                  {{ replicaNameById(prim.replica_target_id) || '#' + prim.replica_target_id }}
-                </strong>
-                <span v-else>—</span>
+                <i18n-t keypath="replica.pair.targetIs" tag="span">
+                  <template #name>
+                    <strong v-if="prim.replica_target_id">
+                      {{ replicaNameById(prim.replica_target_id) || '#' + prim.replica_target_id }}
+                    </strong>
+                    <span v-else>—</span>
+                  </template>
+                </i18n-t>
               </p>
             </div>
             <Select
@@ -422,42 +555,29 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
         </form>
       </div>
 
-      <TableScroll class="rounded-xl border border-zinc-200 dark:border-zinc-800">
-        <table class="w-full text-sm">
-          <thead class="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
-            <tr>
-              <th class="px-3 py-2 text-right">{{ t('replica.rules.fields.priority') }}</th>
-              <th class="px-3 py-2 text-left">{{ t('replica.rules.fields.pattern') }}</th>
-              <th class="px-3 py-2 text-left">{{ t('replica.rules.fields.mode') }}</th>
-              <th class="px-3 py-2 text-left">{{ t('replica.rules.fields.description') }}</th>
-              <th class="px-3 py-2 text-left">{{ t('replica.rules.fields.enabled') }}</th>
-              <th class="px-3 py-2 text-right tbl-actions"><span class="sr-only">{{ t('common.actions') }}</span></th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
-            <tr v-for="r in replica.rules" :key="r.id" class="bg-white dark:bg-zinc-950">
-              <td class="px-3 py-2 text-right">{{ r.priority }}</td>
-              <td class="px-3 py-2 font-mono text-xs">{{ r.path_pattern }}</td>
-              <td class="px-3 py-2"><Badge :tone="modeBadgeTone(r.mode)">{{ r.mode }}</Badge></td>
-              <td class="px-3 py-2 text-xs text-zinc-500 dark:text-zinc-400"><div class="max-w-md">{{ r.description }}</div></td>
-              <td class="px-3 py-2">
-                <Badge :tone="r.enabled ? 'emerald' : 'zinc'">{{ r.enabled ? 'on' : 'off' }}</Badge>
-              </td>
-              <td class="px-3 py-2 text-right tbl-actions">
-                <div class="flex justify-end gap-1">
-                  <Button size="xs" variant="outline" @click="openEditRule(r)">{{ t('common.edit') }}</Button>
-                  <Button size="xs" variant="ghost" @click="deleteRule(r)">
-                    <Trash2 class="h-3.5 w-3.5 text-rose-500" />
-                  </Button>
-                </div>
-              </td>
-            </tr>
-            <tr v-if="!replica.rules.length">
-              <td colspan="6" class="px-3 py-8 text-center text-sm text-zinc-500">{{ t('replica.rules.empty') }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </TableScroll>
+      <DataTable
+        table-id="admin.replica.rules"
+        :columns="ruleColumns"
+        :rows="replica.rules"
+        :empty="t('replica.rules.empty')"
+        row-key="id"
+        :row-actions="(row: ReplicaRule) => ruleActions(row)"
+        :row-actions-test-id="(row: ReplicaRule) => `replica-rule-actions-${row.id}`"
+        @row-action="(key: string, row: ReplicaRule) => onRuleAction(key, row)"
+      >
+        <template #cell-path_pattern="{ row }">
+          <span class="tbl-mono">{{ row.path_pattern }}</span>
+        </template>
+        <template #cell-mode="{ row }">
+          <Badge :tone="modeBadgeTone(row.mode)">{{ row.mode }}</Badge>
+        </template>
+        <template #cell-description="{ row }">
+          <span class="tbl-clamp">{{ row.description }}</span>
+        </template>
+        <template #cell-enabled="{ row }">
+          <Badge :tone="row.enabled ? 'emerald' : 'zinc'">{{ row.enabled ? 'on' : 'off' }}</Badge>
+        </template>
+      </DataTable>
     </div>
 
     <!-- ── Failures ───────────────────────────────────── -->
@@ -476,53 +596,37 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
         </div>
       </div>
 
-      <TableScroll class="rounded-xl border border-zinc-200 dark:border-zinc-800">
-        <table class="w-full text-sm">
-          <thead class="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
-            <tr>
-              <th class="px-3 py-2 text-left">{{ t('replica.failures.fields.path') }}</th>
-              <th class="px-3 py-2 text-left">{{ t('replica.failures.fields.op') }}</th>
-              <th class="px-3 py-2 text-left">{{ t('replica.failures.fields.errorCode') }}</th>
-              <th class="px-3 py-2 text-left">{{ t('replica.failures.fields.error') }}</th>
-              <th class="px-3 py-2 text-right">{{ t('replica.failures.fields.attempts') }}</th>
-              <th class="px-3 py-2 text-left">{{ t('replica.failures.fields.lastAttempt') }}</th>
-              <th class="px-3 py-2 text-left">{{ t('replica.failures.fields.resolved') }}</th>
-              <th class="px-3 py-2 text-right tbl-actions"><span class="sr-only">{{ t('common.actions') }}</span></th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
-            <tr v-for="f in replica.failures" :key="f.id" class="bg-white dark:bg-zinc-950">
-              <td class="px-3 py-2 font-mono text-xs">{{ f.path }}</td>
-              <td class="px-3 py-2">{{ f.op }}</td>
-              <td class="px-3 py-2 font-mono text-xs">{{ f.error_code }}</td>
-              <td class="px-3 py-2 text-xs text-rose-600 dark:text-rose-400"><div class="max-w-md truncate" :title="f.error_msg">{{ f.error_msg }}</div></td>
-              <td class="px-3 py-2 text-right">{{ f.attempts }}</td>
-              <td class="px-3 py-2 whitespace-nowrap text-xs">{{ formatDate(f.last_attempt_at, locale) }}</td>
-              <td class="px-3 py-2 text-xs">
-                <Badge v-if="f.resolved_at" tone="emerald">{{ t('replica.failures.resolvedYes') }}</Badge>
-                <Badge v-else tone="rose">{{ t('replica.failures.resolvedNo') }}</Badge>
-              </td>
-              <td class="px-3 py-2 text-right whitespace-nowrap tbl-actions">
-                <Button v-if="!f.resolved_at" size="xs" variant="outline" @click="fixOne(f.path, f.op)">
-                  <Wrench class="h-3.5 w-3.5" />
-                  {{ t('replica.failures.fixOne') }}
-                </Button>
-              </td>
-            </tr>
-            <tr v-if="!replica.failures.length">
-              <td colspan="8" class="px-3 py-8 text-center text-sm text-zinc-500">{{ t('replica.failures.empty') }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </TableScroll>
-
-      <div v-if="replica.failurePages > 1" class="flex items-center justify-between text-xs">
-        <span>{{ t('common.pageOf', { current: replica.failureCurrentPage, total: replica.failurePages }) }}</span>
-        <div class="flex gap-2">
-          <Button size="xs" variant="outline" :disabled="replica.failureCurrentPage <= 1" @click="gotoFailurePage(replica.failureCurrentPage - 1)">{{ t('common.prev') }}</Button>
-          <Button size="xs" variant="outline" :disabled="replica.failureCurrentPage >= replica.failurePages" @click="gotoFailurePage(replica.failureCurrentPage + 1)">{{ t('common.next') }}</Button>
-        </div>
-      </div>
+      <DataTable
+        table-id="admin.replica.failures"
+        :columns="failureColumns"
+        :rows="replica.failures"
+        :empty="t('replica.failures.empty')"
+        row-key="id"
+        :page="replica.failureCurrentPage"
+        :page-size="replica.failuresLimit"
+        :total="replica.failuresTotal"
+        :row-actions="(row: ReplicaFailure) => failureActions(row)"
+        :row-actions-test-id="(row: ReplicaFailure) => `replica-failure-actions-${row.id}`"
+        @row-action="(key: string, row: ReplicaFailure) => onFailureAction(key, row)"
+        @page="gotoFailurePage"
+      >
+        <template #cell-path="{ row }">
+          <span class="tbl-mono">{{ row.path }}</span>
+        </template>
+        <template #cell-error_code="{ row }">
+          <span class="tbl-mono">{{ row.error_code }}</span>
+        </template>
+        <template #cell-error_msg="{ row }">
+          <span class="tbl-clamp text-rose-600 dark:text-rose-400" :title="row.error_msg">{{ row.error_msg }}</span>
+        </template>
+        <template #cell-last_attempt_at="{ row }">
+          <span class="whitespace-nowrap">{{ formatDate(row.last_attempt_at, locale) }}</span>
+        </template>
+        <template #cell-resolved_at="{ row }">
+          <Badge v-if="row.resolved_at" tone="emerald">{{ t('replica.failures.resolvedYes') }}</Badge>
+          <Badge v-else tone="rose">{{ t('replica.failures.resolvedNo') }}</Badge>
+        </template>
+      </DataTable>
     </div>
 
     <!-- ── Report ─────────────────────────────────────── -->

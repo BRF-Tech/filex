@@ -3,7 +3,6 @@ package share
 import (
 	"encoding/json"
 	"errors"
-	"fmt"           /* wiring:d2 */
 	"html/template" /* wiring:d2 */
 	"mime"          /* wiring:d2 */
 	"net/http"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
 )
@@ -225,20 +225,6 @@ func MimeForName(name string) string {
 	return "application/octet-stream"
 }
 
-// HumanSize renders a byte count the way the public pages show it.
-func HumanSize(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := int64(unit), 0
-	for v := n / unit; v >= unit; v /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %s", float64(n)/float64(div), []string{"KB", "MB", "GB", "TB", "PB"}[exp])
-}
-
 // FolderPageEntry is a display-ready row/tile for the template.
 type FolderPageEntry struct {
 	Name      string
@@ -278,6 +264,15 @@ type FolderPageData struct {
 	CountsLabel string
 }
 
+// Dir is the page's `dir`, derived from Lang by the one list (wire.IsRTL):
+// a right-to-left language lays the folder page out right to left.
+func (d FolderPageData) Dir() string {
+	if wire.IsRTL(d.Lang) {
+		return "rtl"
+	}
+	return "ltr"
+}
+
 // RenderFolderPage writes the browse page HTML.
 func RenderFolderPage(w http.ResponseWriter, d FolderPageData) error {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -296,18 +291,18 @@ const (
 // folderPageTemplate is the dependency-free browse page for a shared
 // folder. Turkish copy, matching the zip-wait/unlocked pages.
 var folderPageTemplate = template.Must(template.New("sharefolder").Parse(`<!doctype html>
-<html lang="{{.Lang}}"><head>
+<html lang="{{.Lang}}" dir="{{.Dir}}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Name}} — {{.T.folder_title_suffix}}</title>
 {{.Style}}
 <style>
-.card--folder { width: 880px; max-width: 100%; text-align: left; padding: 26px 24px; }
+.card--folder { width: 880px; max-width: 100%; text-align: start; padding: 26px 24px; }
 .fhead { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
 .fhead .icon-badge { margin: 0; width: 46px; height: 46px; flex: none; }
 .fhead .icon-badge svg { width: 24px; height: 24px; }
 .fhead h1 { margin: 0; font-size: 1.15rem; overflow-wrap: anywhere; }
-.fsub { margin: 0 0 16px; padding-left: 58px; color: var(--px-muted); font-size: 0.84rem; overflow-wrap: anywhere; }
+.fsub { margin: 0 0 16px; padding-inline-start: 58px; color: var(--px-muted); font-size: 0.84rem; overflow-wrap: anywhere; }
 .factions { display: flex; gap: 8px; margin: 0 0 18px; flex-wrap: wrap; }
 .fbtn { display: inline-block; padding: 9px 16px; border-radius: 10px; font-size: 0.9rem; font-weight: 600; text-decoration: none; text-align: center; background: var(--px-accent); color: #fff; transition: background 0.15s ease; }
 .fbtn:hover { background: var(--px-accent-hover); }
@@ -327,11 +322,11 @@ var folderPageTemplate = template.Must(template.New("sharefolder").Parse(`<!doct
 .gtile img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .gtile .gicon { position: absolute; inset: 0; display: grid; place-items: center; color: var(--px-muted); }
 .gtile .gicon svg { width: 44px; height: 44px; }
-.gtile .gname { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 10px 8px; font-size: 0.78rem; color: #fff; background: linear-gradient(transparent, rgba(0, 0, 0, 0.66)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gtile .gbadge { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); color: #fff; }
+.gtile .gname { position: absolute; inset-inline: 0; bottom: 0; padding: 22px 10px 8px; font-size: 0.78rem; color: #fff; background: linear-gradient(transparent, rgba(0, 0, 0, 0.66)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gtile .gbadge { position: absolute; top: 8px; inset-inline-end: 8px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); color: #fff; }
 .gtile .gbadge svg { width: 15px; height: 15px; }
 .fempty { padding: 34px 16px; text-align: center; color: var(--px-muted); border: 1px dashed var(--px-line); border-radius: 12px; font-size: 0.9rem; }
-@media (max-width: 560px) { .fsub { padding-left: 0; } .ggrid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
+@media (max-width: 560px) { .fsub { padding-inline-start: 0; } .ggrid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
 </style>
 </head><body>
 <main class="wrap">

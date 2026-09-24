@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, useId } from 'vue';
+import { computed, ref, useId } from 'vue';
+import { onFieldInvalid } from '@/lib/formCheck';
 
 interface Props {
   modelValue?: string | null;
@@ -16,6 +17,10 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), { rows: 4 });
 const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>();
+
+/* The browser's verdict, in the panel's language (see ui/Input). */
+const nativeError = ref('');
+const shownError = computed(() => props.error || nativeError.value);
 
 const fallback = useId();
 const id = computed(() => props.name ?? fallback);
@@ -38,11 +43,12 @@ const id = computed(() => props.name ?? fallback);
       :class="[
         'input-base px-3 py-2 text-sm',
         monospace && 'font-mono',
-        error && 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30',
+        shownError && 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30',
       ]"
-      @input="(e) => emit('update:modelValue', (e.target as HTMLTextAreaElement).value)"
+      @invalid="(e) => (nativeError = onFieldInvalid(e))"
+      @input="(e) => ((nativeError = ''), emit('update:modelValue', (e.target as HTMLTextAreaElement).value))"
     />
-    <p v-if="error" class="error-text">{{ error }}</p>
+    <p v-if="shownError" class="error-text" data-testid="field-error">{{ shownError }}</p>
     <p v-else-if="hint" class="help-text">{{ hint }}</p>
   </div>
 </template>

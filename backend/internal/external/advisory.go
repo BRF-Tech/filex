@@ -289,7 +289,7 @@ func Advise(in AdvisoryInput) []Advisory {
 				Code: CodePublicURLBareHost, Field: FieldPublicURL, Severity: SeverityNote,
 				Detail: publicURL,
 				Message: fmt.Sprintf(
-					"FILEX_PUBLIC_URL is %s, a container-network name. The document server can reach it, but every share link and e-mail filex builds from it will not open in a browser outside that network. Put the browser's address here and the container's address in the callback URL.",
+					"FILEX_PUBLIC_URL is %s, a container-network name. The document server can reach it, but every share link and email filex builds from it will not open in a browser outside that network. Put the browser's address here and the container's address in the callback URL.",
 					publicURL),
 			})
 		case ClassDotted:

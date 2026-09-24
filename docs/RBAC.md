@@ -91,13 +91,22 @@ capped server-side:
 | Method | Path | Notes |
 |--------|------|-------|
 | GET | `/api/tokens` | The caller's own tokens (no secrets). |
-| POST | `/api/tokens` | `{label, scopes, expires_in_days?}`. Always minted as `kind: "user"`. Verb-scope ceiling: viewer→`read`/`mcp` only; user→`read,write,delete,mcp`; **never `admin`**. Empty scopes are never stored (would be "all"→escalation). A `root:<adapter>://<rel>` scope must be ⊆ the caller's own grants. Plaintext returned once. |
+| POST | `/api/tokens` | `{label, scopes, expires_in_days?}`. Always minted as `kind: "user"`. Verb-scope ceiling: viewer→`read`/`mcp` only; user→`read,write,delete,mcp`; **never `admin`**. At least one verb is required — an empty list is refused with `400 scopes_required` (the rule every token door shares; an empty list grants nothing). A `root:<adapter>://<rel>` scope must be ⊆ the caller's own grants. Plaintext returned once. |
 | PATCH | `/api/tokens/{id}` | Ownership-checked; label / usernames only. `kind` is admin-only. |
 | DELETE | `/api/tokens/{id}` | Ownership-checked. |
 
-⚠ **This surface — and the other three self-service credential surfaces,
-`/api/auth/s3-keys`, `/api/auth/ssh-keys`, `/api/auth/nfs-exports` — answer 403
-to an `app` token** (`reason: "app_token"`, from one shared middleware,
+⚠⚠ **Since v0.43.0 the calling credential is a second ceiling.** When the
+caller is a token, whatever it mints here — a token, an S3 access key, an SSH
+key or an NFS export — must hold a subset of that token's verbs, a confinement
+root inside its `root:`, and an expiry no later than its own; a narrow caller
+cannot borrow a wider parent token either. Otherwise: **`403`,
+`reason: "token_ceiling"`**, naming what was too wide. Browser sessions are
+unaffected, and credentials that already exist are untouched.
+
+⚠ **This surface — and the other self-service credential surfaces,
+`/api/auth/s3-keys`, `/api/auth/ssh-keys`, `/api/auth/nfs-exports`, and reading
+a share link's PIN back (`GET /api/shares/{id}/pin`) — answer 403 to an `app`
+token** (`reason: "app_token"`, from one shared middleware,
 `handlers.RequirePersonalCaller`). A token acts AS its owner, so a shared
 integration token — the one a host app's proxy injects in front of many
 visitors — would otherwise let any of them list and revoke the credential that
@@ -114,7 +123,7 @@ decides whether the surfaces that belong to one identity are drawn at all.
 
 | Method | Path | Notes |
 |--------|------|-------|
-| GET | `/api/admin/grants` | Global overview: every grant enriched with `storage_name` + `user_email`. |
+| GET | `/api/admin/grants` | Global overview: every grant enriched with `storage_name`, `user_email` and `user_name` (the person as every screen names them). |
 | DELETE | `/api/admin/grants/{id}` | Admin override revoke. |
 | POST | `/api/admin/settings/smtp-test` | `{to?}` → `{ok, error?, sent?}`. Verifies the SMTP config (auth handshake) and, with `to`, sends a real test mail. SMTP config lives in the `smtp.*` settings keys (`host/port/tls/from/username/password`). |
 

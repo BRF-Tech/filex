@@ -1,6 +1,6 @@
 # Default values for filex — a minimal install: one filex pod, SQLite on a PVC,
 # an Ingress. Enable the toggles below (or use values-full.yaml) for Postgres,
-# Redis and OnlyOffice.
+# Redis and ONLYOFFICE.
 
 # Every object is named `<release>-<nameOverride|chart name>`. Override it when
 # the chart name is not what you want in the object names — e.g. two installs
@@ -15,7 +15,7 @@ image:
   pullPolicy: IfNotPresent
 
 # The external URL users open. REQUIRED — it is baked into share links, the OIDC
-# redirect and OnlyOffice callbacks. Usually https://<ingress.host>.
+# redirect and ONLYOFFICE callbacks. Usually https://<ingress.host>.
 publicURL: "https://files.example.com"
 
 replicaCount: 1
@@ -86,9 +86,11 @@ redis:
 # Each is toggled with `enabled`. The chart wires filex to the service; run the
 # service itself (its own chart / Deployment) and give its browser-facing
 # `url` an Ingress + DNS. Set enabled=false to hide the feature in filex — e.g.
-# drop OnlyOffice later by flipping one flag.
+# drop ONLYOFFICE later by flipping one flag.
 
-# OnlyOffice — edit Word / Excel / PowerPoint in the browser.
+# ONLYOFFICE — edit Word / Excel / PowerPoint in the browser.
+# ⚠ v0.43.0 REFUSES an unsigned save callback: the Document Server must run
+# with JWT_ENABLED=true and the same jwtSecret, or its saves fail.
 onlyoffice:
   enabled: false
   url: ""                 # https://office.example.com — browser-facing
@@ -99,7 +101,7 @@ onlyoffice:
   #   callbackUrl: http://filex.default.svc.cluster.local:5212
   callbackUrl: ""
 
-# Drawio / diagrams.net — diagram editing, embedded as an iframe.
+# draw.io — diagram editing, embedded as an iframe.
 drawio:
   enabled: false
   url: ""                 # https://draw.example.com (self-host jgraph/drawio)

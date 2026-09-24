@@ -239,10 +239,18 @@ func (h *WS) wsURL(r *http.Request) string {
 // wsClientMsg is the client → server wire message. `file` is a pointer so
 // `{"type":"focus","file":null}` (clear focus) is distinguishable from absent.
 type wsClientMsg struct {
-	Type string  `json:"type"`           // subscribe | focus | ping
+	Type string  `json:"type"`           // subscribe | focus | ping | watch
 	Path string  `json:"path,omitempty"` // "<adapter>://<dir>" for subscribe
 	File *string `json:"file,omitempty"` // file name for focus (null clears)
+	// Paths is the full set of roots for `watch` (recursive, presence-less —
+	// see realtime/watch.go). It REPLACES the previous set; [] clears it.
+	Paths []string `json:"paths,omitempty"`
 }
+
+// wsMaxWatchRoots caps one connection's watch set. The desktop app watches
+// one root per paired folder; a thousand is far past any real account and
+// still a bounded amount of per-event work for the hub.
+const wsMaxWatchRoots = 1000
 
 var wsPongFrame = []byte(`{"type":"pong"}`)
 
@@ -398,6 +406,59 @@ func (h *WS) handleClientMessage(ctx context.Context, client *realtime.Client, d
 		case client.Send <- wsPongFrame:
 		default:
 		}
+	case "watch":
+		h.handleWatch(ctx, client, msg.Paths)
+	}
+}
+
+// wsWatchError is one refused root in a `watching` acknowledgement.
+type wsWatchError struct {
+	Path  string `json:"path"`
+	Error string `json:"error"`
+}
+
+// handleWatch validates every requested root exactly the way a room subscribe
+// is validated (confine, then RBAC ≥viewer), registers the accepted ones and
+// ACKNOWLEDGES — always, even when every root was refused.
+//
+// ⚠ The acknowledgement is not politeness, it is the capability probe. An
+// older server has no "watch" case and silently ignores the message, so a
+// client that never hears `watching` back knows it is talking to a server
+// without the change stream and stays on its interval poll. Without an ack
+// the two situations — "nothing has changed" and "nothing will ever be
+// announced" — would look identical from the client's side.
+func (h *WS) handleWatch(ctx context.Context, client *realtime.Client, paths []string) {
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	accepted := make([]string, 0, len(paths))
+	roots := make([]realtime.WatchRoot, 0, len(paths))
+	errs := []wsWatchError{}
+	seen := map[string]bool{}
+	for _, raw := range paths {
+		if seen[raw] {
+			continue
+		}
+		seen[raw] = true
+		if len(roots) >= wsMaxWatchRoots {
+			errs = append(errs, wsWatchError{Path: raw, Error: "too_many"})
+			continue
+		}
+		storageID, cleanDir, reason := h.resolveRoom(cctx, client, raw)
+		if reason != "" {
+			errs = append(errs, wsWatchError{Path: raw, Error: reason})
+			continue
+		}
+		roots = append(roots, realtime.WatchRoot{StorageID: storageID, Dir: cleanDir, Display: raw})
+		accepted = append(accepted, raw)
+	}
+	h.Hub.Watch(client, roots)
+	frame, err := json.Marshal(map[string]any{"type": "watching", "roots": accepted, "errors": errs})
+	if err != nil {
+		return
+	}
+	select {
+	case client.Send <- frame:
+	default:
 	}
 }
 
@@ -407,7 +468,25 @@ func (h *WS) handleClientMessage(ctx context.Context, client *realtime.Client, d
 func (h *WS) handleSubscribe(ctx context.Context, client *realtime.Client, rawPath string) {
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	storageID, cleanDir, reason := h.resolveRoom(cctx, client, rawPath)
+	if reason != "" {
+		h.sendError(client, rawPath, reason)
+		return
+	}
+	// Echo the client's OWN path (rawPath), not the absolute one, so its frame
+	// path-matching lines up; the room itself is keyed by the absolute cleanDir.
+	h.Hub.Subscribe(client, storageID, cleanDir, rawPath)
+}
 
+// resolveRoom is the one authorisation path for every kind of subscription —
+// a room (subscribe) and a recursive watch alike: it resolves the requested
+// folder, applies the ticket's confinement and checks RBAC ≥viewer. A non-empty
+// reason ("not_found" / "forbidden") means refused.
+//
+// ⚠ One function on purpose. The watch is the newer door onto the same
+// change stream, and two copies of this check would drift the way the ticketed
+// and cookie doors once did (see the tenant note in Handle).
+func (h *WS) resolveRoom(cctx context.Context, client *realtime.Client, rawPath string) (storageID int64, cleanDir, reason string) {
 	// Confined (embedded) clients may spell a folder two ways. The webcomponent
 	// itself is confine-AWARE — the backend returns storage-absolute dirnames
 	// under X-Filex-Root, so it subscribes with the ABSOLUTE path
@@ -422,8 +501,7 @@ func (h *WS) handleSubscribe(ctx context.Context, client *realtime.Client, rawPa
 	resolvePath := rawPath
 	if client.Confined && client.ConfineRel != "" {
 		if pathHasDotDot(rawPath) {
-			h.sendError(client, rawPath, "forbidden")
-			return
+			return 0, "", "forbidden"
 		}
 		_, rel := splitAdapterPath(rawPath)
 		rel = strings.Trim(path.Clean("/"+rel), "/")
@@ -434,25 +512,20 @@ func (h *WS) handleSubscribe(ctx context.Context, client *realtime.Client, rawPa
 
 	storageID, storageName, rel, cleanDir, ok := h.resolveSubscribe(cctx, resolvePath)
 	if !ok {
-		h.sendError(client, rawPath, "not_found")
-		return
+		return 0, "", "not_found"
 	}
 	// Ticket confinement: a confined (embedded) client may only watch rooms
 	// within its ticket's root — a hard boundary on top of RBAC.
 	if !client.AllowsPath(storageName, strings.Trim(cleanDir, "/")) {
-		h.sendError(client, rawPath, "forbidden")
-		return
+		return 0, "", "forbidden"
 	}
 	// RBAC: viewing a folder's live feed requires ≥viewer on it. A nil resolver
 	// (ACL unwired, e.g. tests) allows. This is the security boundary — a user
 	// can only subscribe to folders they may read.
 	if !aclAllowName(cctx, h.ACL, h.Store, storageName, rel, acl.LevelViewer) {
-		h.sendError(client, rawPath, "forbidden")
-		return
+		return 0, "", "forbidden"
 	}
-	// Echo the client's OWN path (rawPath), not the absolute one, so its frame
-	// path-matching lines up; the room itself is keyed by the absolute cleanDir.
-	h.Hub.Subscribe(client, storageID, cleanDir, rawPath)
+	return storageID, cleanDir, ""
 }
 
 // resolveSubscribe maps "<adapter>://<dir>" (or a bare dir against the first
@@ -572,20 +645,14 @@ func wsClientLabel(label string) string {
 	return s
 }
 
-// wsDisplayName picks the friendliest label for presence: display name, else
-// the email local-part, else a generic fallback.
+// wsDisplayName is the name the presence strip shows for a person: the one
+// every screen names them by (model.PersonLabel — display name, else
+// username, else e-mail). It had a rule of its own (display name, else the
+// e-mail's local part), so a co-viewer read "admin" beside an Owner column
+// that said "admin2" (QA, 2026-09-21). "user" only for an account with none.
 func wsDisplayName(u *model.User) string {
-	if u == nil {
-		return "user"
-	}
-	if n := strings.TrimSpace(u.DisplayName); n != "" {
+	if n := u.Label(); n != "" {
 		return n
-	}
-	if u.Email != "" {
-		if i := strings.IndexByte(u.Email, '@'); i > 0 {
-			return u.Email[:i]
-		}
-		return u.Email
 	}
 	return "user"
 }

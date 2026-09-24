@@ -26,8 +26,10 @@ import (
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/throughput"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -120,6 +122,12 @@ func (h *Manager) vfNewFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fullRel := path.Join(parentRel, body.Name)
+	// The one folder a person may create among filex's own names is the
+	// desktop's open-with working area, at the storage root — every desktop
+	// release since 0.29.0 makes it this way (syspath.MakeWorkArea).
+	if gate(w, r, h.ACL, current.ID, writegate.Writes(fullRel).As(syspath.MakeWorkArea)) {
+		return
+	}
 	// A folder opened on top of an existing file name is the same collision
 	// from the other side (storage.ErrKindConflict).
 	if err := storage.EnsureDirTarget(r.Context(), drv, fullRel); err != nil {
@@ -184,7 +192,11 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.Name = strings.TrimSpace(body.Name)
-	if body.Name == "" || strings.ContainsAny(body.Name, "/\\") {
+	// "." and ".." are not names: joined onto the item's folder they point at
+	// the folder itself or at its parent. sanitizeUploadName is the one leaf
+	// guard every upload surface uses; a name must not be legal to rename to
+	// and illegal to upload.
+	if _, ok := sanitizeUploadName(body.Name); !ok || strings.ContainsAny(body.Name, "/\\") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad new name"})
 		return
 	}
@@ -205,6 +217,15 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 	}
 	if srcRel == "" || pathHasDotDot(srcRel) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item path"})
+		return
+	}
+	// Neither what is renamed nor what it becomes may be one of filex's own:
+	// `report.txt` → `.versions` would vanish from every view the moment it
+	// was renamed, and a working copy renamed out of `.filex-open` would
+	// never be written back.
+	// …nor may an app's freeze be renamed away (writegate: names and
+	// locks, one call).
+	if gate(w, r, h.ACL, current.ID, writegate.Writes(srcRel), writegate.Writes(path.Join(path.Dir(srcRel), body.Name))) {
 		return
 	}
 	if !h.allowed(r.Context(), current, srcRel, acl.LevelEditor) {
@@ -229,8 +250,38 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		h.vfIndex(w, r, current, parentRel, storageNames, false)
 		return
 	}
+	// ⚠⚠ A rename never replaces what already has the name. Every driver's
+	// Move would (see destinationTaken), and the catalogue would then drop that
+	// file's row — versions, shares and comments included. Refused rather
+	// than given a "-copy" name the way a move is: the person typed this name,
+	// and the client's undo assumes the item landed exactly there.
+	taken, terr := destinationTaken(r.Context(), h.Store, drv, current.ID, srcRel, dstRel)
+	if terr != nil {
+		slog.Warn("rename refused: existence check inconclusive",
+			slog.Int64("storage", current.ID),
+			slog.String("path", dstRel),
+			slog.String("err", terr.Error()))
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": errNameCheckFailed.Error(),
+			"code":  "EXISTS_CHECK_FAILED",
+		})
+		return
+	}
+	if taken {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "something with that name already exists here",
+			"code":  "NAME_TAKEN",
+			"name":  body.Name,
+		})
+		return
+	}
 	if err := mv.Move(r.Context(), srcRel, dstRel); err != nil {
-		writeJSON(w, mapDriverErr(err), map[string]string{"error": "rename: " + err.Error()})
+		slog.Warn("rename failed",
+			slog.Int64("storage", current.ID),
+			slog.String("from", srcRel),
+			slog.String("to", dstRel),
+			slog.String("err", err.Error()))
+		writeJSON(w, mapDriverErr(err), map[string]string{"error": "rename: " + clientErrText(err)})
 		return
 	}
 
@@ -276,6 +327,17 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no items"})
 		return
 	}
+	// Checked over the WHOLE batch before anything moves — the loop below
+	// moves one item at a time, and a refusal half-way would leave half of
+	// the selection moved.
+	for _, it := range body.Items {
+		_, srcRel := splitAdapterPath(it.Path)
+		// The destination de-collides (ops.MoveDest), so it is named, not
+		// replaced; the source — and, for a folder, everything in it — leaves.
+		if gate(w, r, h.ACL, current.ID, writegate.Names(destRel), writegate.Writes(srcRel), writegate.Names(path.Join(destRel, path.Base(srcRel)))) {
+			return
+		}
+	}
 
 	drv, err := h.StorageResolver(current.ID)
 	if err != nil {
@@ -320,12 +382,22 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + it.Path})
 			return
 		}
-		dstRel := ops.MoveDest(r.Context(), drv, srcRel, path.Join(destRel, path.Base(srcRel)))
+		dstRel, derr := ops.MoveDest(r.Context(), drv, srcRel, path.Join(destRel, path.Base(srcRel)),
+			liveRowTaken(r.Context(), h.Store, current.ID))
+		if derr != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "move: " + clientErrText(derr), "code": "NO_FREE_NAME"})
+			return
+		}
 		if dstRel == srcRel {
 			continue
 		}
 		if err := mv.Move(r.Context(), srcRel, dstRel); err != nil {
-			writeJSON(w, mapDriverErr(err), map[string]string{"error": "move: " + err.Error()})
+			slog.Warn("move failed",
+				slog.Int64("storage", current.ID),
+				slog.String("from", srcRel),
+				slog.String("to", dstRel),
+				slog.String("err", err.Error()))
+			writeJSON(w, mapDriverErr(err), map[string]string{"error": "move: " + clientErrText(err)})
 			return
 		}
 		h.applyDBMove(r.Context(), current.ID, srcRel, dstRel)
@@ -390,6 +462,18 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no items"})
 		return
 	}
+	// The only thing among filex's own a person deletes by path is a
+	// desktop open-with working copy, after its edit was written back
+	// (syspath.DropWorkCopy). Nothing in `.filex-trash` is deleted by path:
+	// removing from the bin for good is the admin trash API, by id — this
+	// verb used to hard-delete `.filex-trash/<key>` for any editor, which
+	// bypassed exactly that.
+	for _, it := range body.Items {
+		_, srcRel := splitAdapterPath(it.Path)
+		if gate(w, r, h.ACL, current.ID, writegate.Writes(srcRel).As(syspath.DropWorkCopy)) {
+			return
+		}
+	}
 
 	drv, err := h.StorageResolver(current.ID)
 	if err != nil {
@@ -409,27 +493,6 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		if !h.allowed(r.Context(), current, srcRel, acl.LevelEditor) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + it.Path})
 			return
-		}
-
-		// Soft-delete inside `.filex-trash/` already? Hard delete this
-		// time (mirrors brf-mono's "delete from trash = permanent").
-		if strings.HasPrefix(srcRel, trashPrefix) {
-			if del, ok := drv.(storage.Deleter); ok {
-				if err := del.Delete(r.Context(), srcRel); err != nil && !errors.Is(err, storage.ErrNotFound) {
-					writeJSON(w, mapDriverErr(err), map[string]string{"error": "delete: " + err.Error()})
-					return
-				}
-			}
-			origClean := normalizeDBPath(srcRel)
-			hash := pathkey.Hash(current.ID, origClean)
-			if existing, err := h.Store.GetNodeByPathIncludingDeleted(r.Context(), current.ID, hash); err == nil && existing != nil {
-				_ = h.Store.HardDeleteNode(r.Context(), existing.ID)
-				h.removeFromIndex(r.Context(), existing.ID)
-			}
-			/* bag:b3 event */
-			writehook.OnFileDeleted(r.Context(), current.ID, origClean, path.Base(srcRel),
-				writehook.OriginManager, map[string]any{"purged": true})
-			continue
 		}
 
 		// Soft delete: rename to `.filex-trash/<unix>-<rand>__<basename>`.
@@ -518,10 +581,6 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 	h.vfIndex(w, r, current, parentRel, storageNames, false)
 }
 
-// trashPrefix is the in-storage directory where soft-deleted files are
-// renamed to. Listings filter it out; trash.Service.Restore renames out.
-const trashPrefix = trash.Prefix
-
 // collectSubtreeIDs walks the live cached descendants of a directory node
 // (DFS via ListNodesByParent) and returns their ids — used to purge the
 // search index when a folder is trashed (the DB rows themselves are
@@ -597,6 +656,27 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(files) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no files in upload"})
+		return
+	}
+	// Before a byte is written, over the whole batch: a file an app has
+	// locked is not overwritten (the folder grants editor, the LOCK is on the
+	// file — without this the "read-only until the signatures are in" promise
+	// would end at drag-and-drop), and the desktop's working
+	// copy (`.filex-open/<session>-<name>`, syspath.PutWorkCopy) is the one
+	// upload into filex's own names that is let through; everything else —
+	// a file dropped into `.filex-trash/`, a document named `.keepdir` — would
+	// be written and never be seen again.
+	for _, fh := range files {
+		if name, ok := sanitizeUploadName(fh.Filename); ok && gate(w, r, h.ACL, current.ID, writegate.Writes(path.Join(destRel, name)).As(syspath.PutWorkCopy)) {
+			return
+		}
+	}
+	// Optional overwrite precondition (upload_expect.go). It names ONE file's
+	// state, so it is refused on a batch rather than applied to whichever part
+	// happens to come first.
+	expect := r.FormValue("expect")
+	if expect != "" && len(files) != 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expect needs exactly one file"})
 		return
 	}
 
@@ -682,6 +762,16 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Checked as late as possible — after every other refusal, right
+		// before the snapshot and the write — so the window in which a
+		// concurrent save can slip between the check and the bytes is as
+		// narrow as this handler can make it.
+		if !uploadExpectHolds(r.Context(), h.Store, current.ID, fullRel, expect) {
+			_ = src.Close()
+			writePreconditionFailed(w)
+			return
+		}
+
 		// The last moment at which the bytes we are about to replace still
 		// exist. A refusal here is a refusal to overwrite -- see
 		// writehook/overwrite.go.
@@ -739,7 +829,10 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		clean := normalizeDBPath(fullRel)
 		hash := pathkey.Hash(current.ID, clean)
 		if existing, _ := h.Store.GetNodeByPath(r.Context(), current.ID, hash); existing != nil {
-			_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, fh.Size, mime, existing.Etag, time.Now())
+			// What landed — never `existing.Etag`, the etag of the file this
+			// upload just replaced (see storage.Landed).
+			size, etag, mtime := storage.Landed(r.Context(), drv, fullRel, fh.Size)
+			_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, size, mime, etag, mtime)
 			// Refresh the row pointer so the index entry carries the
 			// new size/mime — IndexNode keys off node fields.
 			if fresh, _ := h.Store.GetNode(r.Context(), existing.ID); fresh != nil {
@@ -753,17 +846,20 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
+		lsize, etag, mtime := storage.Landed(r.Context(), drv, fullRel, fh.Size)
 		n2 := &model.Node{
-			StorageID:  current.ID,
-			ParentID:   parentID,
-			Name:       name,
-			Path:       clean,
-			PathHash:   hash,
-			StorageKey: clean,
-			Type:       model.NodeTypeFile,
-			Size:       fh.Size,
-			Mime:       mime,
-			SyncState:  model.SyncStateSynced,
+			StorageID:    current.ID,
+			ParentID:     parentID,
+			Name:         name,
+			Path:         clean,
+			PathHash:     hash,
+			StorageKey:   clean,
+			Type:         model.NodeTypeFile,
+			Size:         lsize,
+			Mime:         mime,
+			Etag:         etag,
+			BackendMtime: &mtime,
+			SyncState:    model.SyncStateSynced,
 		}
 		if created, err := h.Store.CreateNode(r.Context(), n2); err != nil {
 			slog.Warn("manager: upload db create",
@@ -1059,6 +1155,11 @@ func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, fi
 		return nil, storage.ErrUnsupported
 	}
 	fullRel := path.Join(destRel, name)
+	// A visitor's file named `.keepdir` or `.filex-trash` would be written
+	// and hidden from the very owner who asked for it.
+	if err := writegate.Check(h.ACL.Locks(ctx, st.ID), 0, writegate.Writes(fullRel)); err != nil {
+		return nil, err
+	}
 	// The ceiling, before a byte is written. For the public drop link the
 	// account measured is the LINK CREATOR (quotastore.OwnerFrom), because
 	// theirs is the disk being filled — the uploader has no account at all.
@@ -1129,7 +1230,9 @@ func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, fi
 	clean := normalizeDBPath(fullRel)
 	hash := pathkey.Hash(st.ID, clean)
 	if existing, _ := h.Store.GetNodeByPath(ctx, st.ID, hash); existing != nil {
-		_ = h.Store.UpdateNodeMeta(ctx, existing.ID, size, mime, existing.Etag, time.Now())
+		// What landed, not the replaced file's etag (see storage.Landed).
+		lsize, etag, mtime := storage.Landed(ctx, drv, fullRel, size)
+		_ = h.Store.UpdateNodeMeta(ctx, existing.ID, lsize, mime, etag, mtime)
 		if fresh, _ := h.Store.GetNode(ctx, existing.ID); fresh != nil {
 			h.indexNode(ctx, fresh)
 			h.dispatchThumb(fresh)
@@ -1138,17 +1241,20 @@ func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, fi
 		return existing, nil
 	}
 	parentID, _ := h.ensureDirChain(ctx, st.ID, path.Dir(clean))
+	lsize, etag, mtime := storage.Landed(ctx, drv, fullRel, size)
 	node := &model.Node{
-		StorageID:  st.ID,
-		ParentID:   parentID,
-		Name:       name,
-		Path:       clean,
-		PathHash:   hash,
-		StorageKey: clean,
-		Type:       model.NodeTypeFile,
-		Size:       size,
-		Mime:       mime,
-		SyncState:  model.SyncStateSynced,
+		StorageID:    st.ID,
+		ParentID:     parentID,
+		Name:         name,
+		Path:         clean,
+		PathHash:     hash,
+		StorageKey:   clean,
+		Type:         model.NodeTypeFile,
+		Size:         lsize,
+		Mime:         mime,
+		Etag:         etag,
+		BackendMtime: &mtime,
+		SyncState:    model.SyncStateSynced,
 	}
 	created, err := h.Store.CreateNode(ctx, node)
 	if err != nil {

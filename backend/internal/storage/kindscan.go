@@ -36,9 +36,15 @@ func ScanKindCollisions(ctx context.Context, d Driver, root string) ([]Collision
 	}
 	var out []Collision
 	seen := map[string]bool{}
+	// ⚠ seen above is keyed on the LOGICAL path and cannot stop a symlink
+	// cycle: `real/cycle -> root` yields /real, /real/cycle/real,
+	// /real/cycle/real/cycle/real … all different strings. The guard keys on
+	// the driver's resolved target instead. Both are kept — the logical map
+	// still collapses a directory reached twice by the same name.
+	guard := NewCycleGuard()
 
-	var walk func(dir string) error
-	walk = func(dir string) error {
+	var walk func(dir string, depth int) error
+	walk = func(dir string, depth int) error {
 		if seen[dir] {
 			return nil
 		}
@@ -51,7 +57,7 @@ func ScanKindCollisions(ctx context.Context, d Driver, root string) ([]Collision
 		}
 
 		kinds := map[string]map[ObjectKind]bool{}
-		var subdirs []string
+		var subdirs []Object
 		for _, e := range entries {
 			name := e.Name
 			if name == "" {
@@ -65,7 +71,8 @@ func ScanKindCollisions(ctx context.Context, d Driver, root string) ([]Collision
 			}
 			kinds[name][e.Kind] = true
 			if e.Kind == KindDirectory {
-				subdirs = append(subdirs, path.Join(dir, name))
+				e.Path = path.Join(dir, name)
+				subdirs = append(subdirs, e)
 			}
 		}
 		for name, ks := range kinds {
@@ -77,14 +84,17 @@ func ScanKindCollisions(ctx context.Context, d Driver, root string) ([]Collision
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := walk(sd); err != nil {
+			if !guard.Enter(sd, depth+1) {
+				continue
+			}
+			if err := walk(sd.Path, depth+1); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 
-	if err := walk(root); err != nil {
+	if err := walk(root, 0); err != nil {
 		return out, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })

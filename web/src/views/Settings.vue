@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Save, Mail, Paintbrush } from 'lucide-vue-next';
+import { Save, Mail, FolderOpen } from 'lucide-vue-next';
+import { readInstanceFolderDefault, setInstanceFolderDefault } from '@brftech/filex-core';
 
 import { useSettingsStore } from '@/stores/settings';
 import { useToastStore } from '@/stores/toast';
@@ -13,8 +14,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Spinner from '@/components/ui/Spinner.vue';
-import Textarea from '@/components/ui/Textarea.vue';
-import { applyCustomCss } from '@/lib/customCss';
+import Checkbox from '@/components/ui/Checkbox.vue';
 
 const { t } = useI18n();
 const settings = useSettingsStore();
@@ -56,13 +56,20 @@ async function save() {
 const smtp = reactive({ host: '', port: '587', tls: 'starttls', from: '', username: '', password: '' });
 const smtpTesting = ref(false);
 const smtpTestMsg = ref('');
+/** The raw SMTP error behind `smtpTestMsg` — this screen is an
+ *  administrator's, so it is shown, but as a second line and not as the
+ *  answer (QA, 2026-09-21: the Go error WAS the answer). */
+const smtpTestDetail = ref('');
 const smtpVerified = computed(() => !!settings.data['smtp.verified_at']);
 const smtpPwSet = computed(() => !!settings.data['smtp.password']);
-const tlsOptions = [
+// ⚠ computed, and "None" in words: the third option printed the English
+// "None" in every language (release-candidate sweep, 2026-09-21), and a plain
+// const would have kept the language the page was opened in.
+const tlsOptions = computed(() => [
   { value: 'starttls', label: 'STARTTLS (587)' },
   { value: 'tls', label: 'TLS (465)' },
-  { value: 'none', label: 'None' },
-];
+  { value: 'none', label: t('settings.smtp.encryptionNone') },
+]);
 watchEffect(() => {
   const d = settings.data;
   smtp.host = (d['smtp.host'] as string) ?? '';
@@ -98,6 +105,10 @@ function askSmtpTest() {
   smtpTestTo.value = auth.user?.email || smtp.from.trim() || '';
   smtpTestAsking.value = true;
 }
+const SMTP_REASONS = ['not_configured', 'host', 'connect', 'tls', 'starttls', 'auth', 'recipient', 'rejected', 'other'];
+function smtpReasonKey(reason: string | undefined): string {
+  return reason && SMTP_REASONS.includes(reason) ? reason : 'other';
+}
 async function sendSmtpTest() {
   const to = smtpTestTo.value.trim();
   if (!to || !to.includes('@')) {
@@ -106,10 +117,11 @@ async function sendSmtpTest() {
   }
   smtpTesting.value = true;
   smtpTestMsg.value = '';
+  smtpTestDetail.value = '';
   try {
     // Real end-to-end send to the chosen address. Client-side timeout as a
     // backstop — the backend also bounds the SMTP dial.
-    const { data } = await api.post<{ ok: boolean; sent?: boolean; stage?: string; error?: string }>(
+    const { data } = await api.post<{ ok: boolean; sent?: boolean; stage?: string; reason?: string; error?: string }>(
       '/admin/settings/smtp-test', { to }, { timeout: 45000 },
     );
     if (data.ok && data.sent) {
@@ -118,7 +130,10 @@ async function sendSmtpTest() {
     } else if (data.ok) {
       smtpTestMsg.value = t('settings.smtp.testOk');
     } else {
-      smtpTestMsg.value = `${t('settings.smtp.testFail')}: ${data.error ?? ''}`;
+      // The server names the reason (mailer.Reason); an older server that
+      // does not is `other`, never the raw error as the sentence.
+      smtpTestMsg.value = t(`settings.smtp.reason.${smtpReasonKey(data.reason)}`);
+      smtpTestDetail.value = data.error ?? '';
     }
     await settings.fetch();
   } catch (e: unknown) {
@@ -128,40 +143,87 @@ async function sendSmtpTest() {
   }
 }
 
-// ── gorunum:v1 — the operator's own stylesheet ──
+// ── tablo:t3 — the INSTANCE default folder view ─────────────────────────
 //
-// Reader: backend/internal/api/handlers/branding.go puts `ui.custom_css` on
-// the public /api/branding payload (`cfg.CustomCSS = customCSSFromSettings(m)`),
-// and web/src/lib/customCss.ts injects it as the last <style> in <head> on
-// every page load. This field is not one of the write-only rows lesson #92 is
-// about — follow that line and you reach a browser.
+// What a folder opens as for a person who has neither changed that folder
+// nor set a default of their own (Settings → Default folder view). The
+// owner's model, 2026-09-21: "person AND instance default, the same model as
+// the theme" — folder → person → THIS → filex's own (list, name ↑).
 //
-// The cap is bytes, not characters, because that is what the server counts;
-// a sheet with Turkish comments in it would otherwise disagree with the
-// number printed under the box.
-const CUSTOM_CSS_MAX_BYTES = 64 * 1024;
-const customCss = ref('');
-watchEffect(() => {
-  customCss.value = (settings.data['ui.custom_css'] as string) ?? '';
+// ⚠ Changing it never touches a folder anybody changed, nor a person's own
+// default: it only moves what untouched folders open as, for the people who
+// have not chosen. And it is the OPERATOR's answer: the explorer is handed it
+// beside the person's document and never saves it into that document (the
+// palette made exactly that mistake this release — web/src/lib/
+// instanceThemes.ts `applyInstanceDefault`). The server refuses the key to a
+// tenant admin (`allowSettingWrite`), like `ui.default_theme`.
+const FV_KEY = 'ui.default_folder_view';
+const fv = reactive<{ v: string; k: string; d: string; hidden: string[] }>({
+  v: '',
+  k: '',
+  d: 'asc',
+  hidden: [],
 });
-const customCssBytes = computed(() => new TextEncoder().encode(customCss.value).length);
-const customCssTooBig = computed(() => customCssBytes.value > CUSTOM_CSS_MAX_BYTES);
-
-async function saveCustomCss() {
-  if (customCssTooBig.value) {
-    toast.error(t('settings.customCss.tooBig'));
-    return;
+watchEffect(() => {
+  const cur = readInstanceFolderDefault(settings.data[FV_KEY]);
+  fv.v = cur.v ?? '';
+  fv.k = cur.k ?? '';
+  fv.d = cur.d ?? (cur.k === 'modified' ? 'desc' : 'asc');
+  fv.hidden = [...(cur.hidden ?? [])];
+});
+const fvViewOptions = computed(() => [
+  { value: '', label: t('settings.folderView.builtin', { value: t('settings.folderView.view_list') }) },
+  { value: 'list', label: t('settings.folderView.view_list') },
+  { value: 'grid', label: t('settings.folderView.view_grid') },
+  { value: 'gallery', label: t('settings.folderView.view_gallery') },
+]);
+const fvSortOptions = computed(() => [
+  { value: '', label: t('settings.folderView.builtin', { value: `${t('settings.folderView.sort_name')} ↑` }) },
+  { value: 'name', label: t('settings.folderView.sort_name') },
+  { value: 'type', label: t('settings.folderView.sort_type') },
+  { value: 'modified', label: t('settings.folderView.sort_modified') },
+  { value: 'size', label: t('settings.folderView.sort_size') },
+]);
+const fvDirOptions = computed(() => [
+  { value: 'asc', label: t('settings.folderView.dir_asc') },
+  { value: 'desc', label: t('settings.folderView.dir_desc') },
+]);
+const FV_COLUMNS = ['type', 'location', 'owner', 'modified', 'size'] as const;
+function fvToggleHidden(col: string, hide: boolean) {
+  const set = new Set(fv.hidden);
+  if (hide) set.add(col);
+  else set.delete(col);
+  fv.hidden = FV_COLUMNS.filter((c) => set.has(c));
+}
+async function saveFolderView() {
+  const value: Record<string, unknown> = {};
+  if (fv.v) value.v = fv.v;
+  if (fv.k) {
+    value.k = fv.k;
+    value.d = fv.d;
   }
+  if (fv.hidden.length) value.hidden = fv.hidden;
+  const raw = Object.keys(value).length ? JSON.stringify(value) : '';
   try {
-    await settings.update({ 'ui.custom_css': customCss.value });
-    // Wear it immediately. The boot payload is cached for 60s, so without this
-    // the operator who just saved would be the last person to see the change.
-    applyCustomCss(customCss.value);
+    await settings.update({ [FV_KEY]: raw });
+    /* This admin's own explorer follows at once; everybody else picks it up
+       on their next load (it travels with the view-prefs answer). */
+    setInstanceFolderDefault(raw);
     toast.success(t('settings.savedOk'));
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
   }
 }
+
+// ── tema:v1 — the operator's own stylesheet MOVED to admin → Appearance ──
+//
+// ⚠⚠ It is not a settings field any more, and the move is the point rather
+// than tidying. The sheet has to be editable from a screen it cannot itself
+// restyle, and Settings is not that screen: it is one route among many, wears
+// whatever the sheet says, and has no reason to suspend it. Appearance
+// (views/Appearance.vue) takes the <style> element OUT of the document while
+// it is open, which is the only guard that survives `:root { display: none }`.
+// Editing the sheet from here would have quietly reintroduced the lock-out.
 
 onMounted(() => settings.fetch());
 </script>
@@ -191,35 +253,60 @@ onMounted(() => settings.fetch());
       </div>
     </form>
 
-    <!-- gorunum:v1 — operator custom CSS -->
-    <form v-if="!settings.loading" class="card card-body space-y-3" @submit.prevent="saveCustomCss">
+
+    <!-- tablo:t3 — the instance default folder view -->
+    <form
+      v-if="!settings.loading"
+      class="card card-body space-y-3"
+      data-testid="settings-folder-view"
+      @submit.prevent="saveFolderView"
+    >
       <h2 class="text-base font-semibold flex items-center gap-2">
-        <Paintbrush class="h-4 w-4" /> {{ t('settings.customCss.title') }}
+        <FolderOpen class="h-4 w-4" /> {{ t('settings.folderView.title') }}
       </h2>
-      <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('settings.customCss.help') }}</p>
-      <p class="text-sm text-amber-600 dark:text-amber-400">{{ t('settings.customCss.scope') }}</p>
-      <Textarea
-        :model-value="customCss"
-        :rows="10"
-        monospace
-        data-testid="custom-css"
-        :placeholder="'.fe { --fe-primary: #2f6ceb; }'"
-        :error="customCssTooBig ? t('settings.customCss.tooBig') : null"
-        :hint="t('settings.customCss.hint')"
-        @update:model-value="(v) => (customCss = v as string)"
-      />
-      <div class="flex items-center gap-3">
-        <span
-          class="text-xs tabular-nums"
-          :class="customCssTooBig ? 'text-rose-500' : 'text-zinc-500 dark:text-zinc-400'"
-          data-testid="custom-css-count"
-        >{{ t('settings.customCss.count', { used: customCssBytes, max: CUSTOM_CSS_MAX_BYTES }) }}</span>
-        <div class="ml-auto">
-          <Button type="submit" :loading="settings.saving" :disabled="customCssTooBig">
-            <Save class="h-4 w-4" />
-            {{ t('common.save') }}
-          </Button>
+      <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('settings.folderView.help') }}</p>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Select
+          :model-value="fv.v"
+          :options="fvViewOptions"
+          :label="t('settings.folderView.view')"
+          data-testid="settings-folder-view-mode"
+          @update:model-value="(v) => (fv.v = v as string)"
+        />
+        <Select
+          :model-value="fv.k"
+          :options="fvSortOptions"
+          :label="t('settings.folderView.sort')"
+          data-testid="settings-folder-view-sort"
+          @update:model-value="(v) => ((fv.k = v as string), (fv.d = v === 'modified' ? 'desc' : 'asc'))"
+        />
+        <Select
+          v-if="fv.k"
+          :model-value="fv.d"
+          :options="fvDirOptions"
+          :label="t('settings.folderView.dir')"
+          data-testid="settings-folder-view-dir"
+          @update:model-value="(v) => (fv.d = v as string)"
+        />
+      </div>
+      <div class="space-y-1">
+        <span class="text-sm font-medium">{{ t('settings.folderView.hiddenTitle') }}</span>
+        <div class="flex flex-wrap gap-4">
+          <Checkbox
+            v-for="c in FV_COLUMNS"
+            :key="c"
+            :name="`fv-hidden-${c}`"
+            :model-value="fv.hidden.includes(c)"
+            :label="t(`settings.folderView.col_${c}`)"
+            @update:model-value="(on: boolean) => fvToggleHidden(c, on)"
+          />
         </div>
+      </div>
+      <div class="flex justify-end pt-2">
+        <Button type="submit" :loading="settings.saving">
+          <Save class="h-4 w-4" />
+          {{ t('common.save') }}
+        </Button>
       </div>
     </form>
 
@@ -264,8 +351,13 @@ onMounted(() => settings.fetch());
           <Button type="button" variant="ghost" @click.prevent="smtpTestAsking = false">{{ t('common.cancel') }}</Button>
         </div>
         <div class="flex items-center gap-3">
-          <span v-if="smtpTestMsg" class="text-xs text-zinc-500 dark:text-zinc-400">{{ smtpTestMsg }}</span>
-          <div class="ml-auto flex gap-2">
+          <span v-if="smtpTestMsg" class="text-xs text-zinc-500 dark:text-zinc-400" data-testid="smtp-test-msg">{{ smtpTestMsg }}</span>
+          <span
+            v-if="smtpTestDetail"
+            class="block text-[11px] font-mono text-zinc-400 dark:text-zinc-500 break-all"
+            data-testid="smtp-test-detail"
+          >{{ smtpTestDetail }}</span>
+          <div class="ms-auto flex gap-2">
             <Button type="button" variant="outline" @click.prevent="askSmtpTest">{{ t('settings.smtp.test') }}</Button>
             <Button type="submit" :loading="settings.saving"><Save class="h-4 w-4" />{{ t('common.save') }}</Button>
           </div>

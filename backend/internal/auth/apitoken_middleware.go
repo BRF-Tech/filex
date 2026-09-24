@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/httpx"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -31,8 +32,12 @@ type tokenCtxKey struct{}
 // tokenUserCtxKey carries the resolved token username for the request.
 type tokenUserCtxKey struct{}
 
-// WithToken stores the matched API token on ctx.
+// WithToken stores the matched API token on ctx, and notes its id (never the
+// secret) on the request's access-log holder, like WithUser does the account.
 func WithToken(ctx context.Context, t *model.APIToken) context.Context {
+	if t != nil {
+		httpx.RequestLogFrom(ctx).NoteToken(t.ID)
+	}
 	return context.WithValue(ctx, tokenCtxKey{}, t)
 }
 
@@ -192,8 +197,8 @@ func AnnotateToken(store db.Store) func(http.Handler) http.Handler {
 }
 
 // RequireScope rejects requests whose token does not grant `scope`. A token
-// with an empty Scopes field grants everything. Must run after
-// APITokenMiddleware.
+// grants only what its list names; an empty list grants nothing. Must run
+// after APITokenMiddleware.
 func RequireScope(scope string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

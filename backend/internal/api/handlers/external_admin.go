@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/external"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 // redactedSecret is what List puts in place of a stored secret. PATCH ignores
@@ -189,6 +191,17 @@ func (h *ExternalAdmin) Update(w http.ResponseWriter, r *http.Request) {
 	if req.OptionsJSON != nil {
 		options = *req.OptionsJSON
 	}
+	// ⚠ An address the service can be reached at, or none. "bu-bir-adres-
+	// degil" was stored and then probed (release-candidate sweep, 2026-09-22,
+	// QA #38); the admin page checks the same rule (web lib/formCheck
+	// isHttpUrl) before it sends anything.
+	if !httpAddress(url) || (req.CallbackURL != nil && !httpAddress(*req.CallbackURL)) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":   "url_invalid",
+			"message": srvtext.Text(langOf(r), "server.external.url_invalid", nil),
+		})
+		return
+	}
 	if req.CallbackURL != nil {
 		merged, err := external.WithCallbackURL(options, *req.CallbackURL)
 		if err != nil {
@@ -318,6 +331,16 @@ func (h *ExternalAdmin) Test(w http.ResponseWriter, r *http.Request) {
 }
 
 func nowOrZero() time.Time { return time.Now() }
+
+// httpAddress: empty (no address), or an absolute http(s) URL with a host.
+func httpAddress(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return true
+	}
+	u, err := neturl.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
 
 // _ keeps db pkg import alive even if linter complains (we use db.Store).
 var _ db.Store = nil

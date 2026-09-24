@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('filexApp', {
   // accounts
   addAccount: () => ipcRenderer.invoke('auth:add'),
   signOut: (id: string) => ipcRenderer.invoke('auth:signOut', id),
+  /** The browser sign-in again, for the same server — after the server stopped
+   *  accepting this account's token. Keeps the account's folders. */
+  reconnect: (id: string) => ipcRenderer.invoke('auth:reconnect', id),
   switchAccount: (id: string) => ipcRenderer.invoke('auth:switch', id),
   /** Opens the SERVER's admin panel in the system browser, not in here. */
   openAdmin: (id: string) => ipcRenderer.invoke('account:openAdmin', id),
@@ -45,6 +48,10 @@ contextBridge.exposeInMainWorld('filexApp', {
   addSync: (remotePath: string) => ipcRenderer.invoke('sync:add', remotePath),
   removeSync: (id: string) => ipcRenderer.invoke('sync:remove', id),
   syncTrash: () => ipcRenderer.invoke('sync:trash'),
+  /** Items the engine holds for a decision: send them, or move them to this
+   *  computer's sync trash (the main process asks first). */
+  syncHoldUpload: (pairId: string) => ipcRenderer.invoke('sync:holdUpload', pairId),
+  syncHoldDiscard: (pairId: string) => ipcRenderer.invoke('sync:holdDiscard', pairId),
   openLocal: (p: string) => ipcRenderer.invoke('shell:openPath', p),
 
   // app settings

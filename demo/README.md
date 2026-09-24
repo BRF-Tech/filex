@@ -78,13 +78,16 @@ docker run -p 5212:5212 \
 ```
 
 ⚠ **Files above the 8 MiB chunk size need `Content-Range` in the CORS
-allow-list.** Each chunk is a `PUT` carrying that header. It is in the default
-list since filex 0.41.1; on an older server, or if you set your own list in
-`config.yaml`, include it:
+allow-list**, and a ranged read needs `Range`. Each chunk is a `PUT` carrying
+the first header. `Content-Range` has been in the default list since filex
+0.41.1, and `Range` and `X-Filex-Accept-Prepare` joined it in 0.43.0 (which
+also exposes `Content-Range` and `Retry-After`). On an older server, or if you
+set your own list in `config.yaml`, include all of them — a list copied from
+before 0.43.0 silently loses ranged reads and the `202` "preparing" opt-in:
 
 ```yaml
 cors:
-  allowed_headers: [Authorization, Content-Type, X-Filex-Pin, Content-Range]
+  allowed_headers: [Authorization, Content-Type, X-Filex-Pin, Content-Range, Range, X-Filex-Accept-Prepare]
 ```
 
 In production you'd serve filex behind the same origin as your app, so
@@ -119,4 +122,4 @@ The demos use `@latest` by default. To pin a version, edit the
 - Sort / filter / search
 - Keyboard shortcuts (`Delete`, `F2` rename, `Ctrl+C/X/V`, `Esc`)
 - Dark / light / auto theming
-- TR / EN locale toggle
+- Language: English, Turkish, and any language the server has a pack for

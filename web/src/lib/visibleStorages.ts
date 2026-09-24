@@ -66,13 +66,30 @@ export function fromAdminStorages(items: readonly StorageRef[]): VisibleStorage[
   }));
 }
 
-/** Map the manager root's `storages` array onto the shared shape. */
+/**
+ * Map the manager root's `storages` array onto the shared shape.
+ *
+ * ⚠ `storage_info` carries each drive's `read_only` beside the names. Without
+ * it a person who cannot read `/api/admin/storages` never learnt a drive was
+ * read-only until they were inside it: the admin saw "Salt okunur" and no
+ * "New" there, the non-admin a "New" menu of greyed entries and no reason
+ * (QA, 2026-09-21). An older server sends no `storage_info`, and the drive is
+ * then simply not marked — the listing inside it still says so.
+ */
 export function fromManagerRoot(body: unknown): VisibleStorage[] {
-  const names = (body as { storages?: unknown })?.storages;
+  const b = body as { storages?: unknown; storage_info?: unknown };
+  const names = b?.storages;
   if (!Array.isArray(names)) return [];
+  const ro = new Map<string, boolean>();
+  if (Array.isArray(b.storage_info)) {
+    for (const i of b.storage_info) {
+      const row = i as { name?: unknown; read_only?: unknown };
+      if (typeof row?.name === 'string') ro.set(row.name, row.read_only === true);
+    }
+  }
   return names
     .filter((n): n is string => typeof n === 'string' && n !== '')
-    .map((n) => ({ name: n, label: n }));
+    .map((n) => (ro.has(n) ? { name: n, label: n, readOnly: ro.get(n) } : { name: n, label: n }));
 }
 
 /**

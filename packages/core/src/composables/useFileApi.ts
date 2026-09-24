@@ -23,6 +23,13 @@
 
 import type { ExplorerConfig, AuthConfig, EndpointMap } from '../types/ExplorerConfig';
 import { resolveLocale } from '../locales/resolve';
+import { listingAddress } from '../lib/internalPaths';
+import { localeTag } from './useLocale';
+import { networkFailure, requestFailure } from '../lib/errorWords';
+// ⚠ The same folding rule the web app's axios layer applies, applied by the
+// request layer an EMBED uses — one notice for a connection that is down, and
+// no surface-specific copy of the decision (lib/connection).
+import { kindOfMethod, noteRequestFailed, noteRequestSucceeded } from '../lib/connection';
 import type {
   FileNode,
   ShareInfo,
@@ -31,6 +38,13 @@ import type {
   ArchiveEntry,
   TrashEntry,
 } from '../types/FileNode';
+import type {
+  PluginActionsResponse,
+  PluginRunResult,
+  PluginSurface,
+  PluginUsersResponse,
+  PluginViewEventBody,
+} from '../types/Plugins';
 
 /** Server-side PendingOp DTO (mirror of Modules\FishApp\Models\PendingOp::toApiArray). */
 export interface PendingOpDto {
@@ -75,6 +89,11 @@ export interface ManagerResponse {
   e2e?: boolean;
   e2e_root?: string;
   files: FileNode[];
+  /** `action=search` only: more rows matched than came back — the index
+   *  filled its page, or the index-less fallback filled its window — so the
+   *  list is not the whole answer. Absent on other actions and on servers
+   *  older than the flag. */
+  truncated?: boolean;
 }
 
 /** A single ACL grant row (RBAC permissions panel). */
@@ -86,6 +105,8 @@ export interface Grant {
   level: 'viewer' | 'editor' | 'owner';
   user_email?: string;
   user_display_name?: string;
+  /** The person as every screen names them (server model.PersonLabel). */
+  user_name?: string;
   inherited?: boolean;
 }
 
@@ -107,13 +128,14 @@ export interface PermissionsResponse {
 
 export interface ResolveEmailResponse {
   found: boolean;
-  user?: { id: number; email: string; display_name: string; role: string };
+  user?: { id: number; email: string; display_name: string; username?: string; role: string };
 }
 
 export interface UserSuggestion {
   id: number;
   email: string;
   display_name: string;
+  username?: string;
   role: string;
 }
 
@@ -249,6 +271,13 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     /* wiring:e2 — escrow proof-of-possession, then the owner is told. */
     e2eEscrowChallenge: derive(config.e2eEscrowChallenge, '/api/files/e2e/escrow/challenge'),
     e2eEscrowUsed: derive(config.e2eEscrowUsed, '/api/files/e2e/escrow/used'),
+    /* App plugins — docs/APP-PLUGINS-API.md. */
+    pluginActions: derive(config.pluginActions, '/api/files/plugins/actions'),
+    pluginActionRun: derive(config.pluginActionRun, '/api/files/plugins/actions/{plugin}/{action}/run'),
+    pluginView: derive(config.pluginView, '/api/files/plugins/views/{plugin}/{view}'),
+    pluginViewEvent: derive(config.pluginViewEvent, '/api/files/plugins/views/{plugin}/{view}/event'),
+    pluginUsers: derive(config.pluginUsers, '/api/files/plugins/users'),
+    opsCancel: derive(config.opsCancel, '/api/files/ops/{id}/cancel'),
   };
 }
 
@@ -346,47 +375,52 @@ export function useFileApi(config: ExplorerConfig) {
     return authConf.kind === 'csrf' ? 'include' : 'same-origin';
   }
 
-  // Map an HTTP status to a short, human-readable message in the explorer's
-  // locale. The raw JSON body is attached as `.detail` for debugging but never
-  // shown in the toast (Ada, translated from Turkish: "when it gives a 404/403
-  // or whatever, I see raw json").
-  function statusMessage(status: number): string {
-    const tr = resolveLocale(config.locale) !== 'en';
-    const m: Record<number, [string, string]> = {
-      400: ['Geçersiz istek', 'Bad request'],
-      401: ['Oturum gerekli, tekrar giriş yapın', 'Sign-in required'],
-      403: ['Bu işlem için yetkiniz yok', 'You are not allowed to do this'],
-      404: ['Bulunamadı', 'Not found'],
-      409: ['Zaten var / çakışma', 'Already exists / conflict'],
-      413: ['Dosya çok büyük', 'File too large'],
-      415: ['Bu dosya türü desteklenmiyor', 'Unsupported file type'],
-      422: ['Geçersiz veri', 'Invalid data'],
-      429: ['Çok fazla istek, biraz bekleyin', 'Too many requests'],
-      500: ['Sunucu hatası', 'Server error'],
-      501: ['Bu işlem desteklenmiyor', 'Not supported'],
-      503: ['Servis şu an kullanılamıyor', 'Service unavailable'],
-    };
-    const e = m[status];
-    if (e) return tr ? e[0] : e[1];
-    return tr ? `Hata (${status})` : `Error (${status})`;
-  }
+  /* ⚠⚠ Every refusal this client meets is said by lib/errorWords — ONE table
+     of status words and refusal codes for every screen (a read-only drive,
+     a missing encryption key, a quota, the statuses). It used to live here
+     as an inline table and was copied, differently, into each component that
+     called `fetch` itself; those printed "save failed: 500 {…}" and
+     "Config fetch 503: {…}". The raw body rides along as `.detail`, for an
+     administrator's second line and for `lockedRefusal`, never the sentence. */
+  const lang = () => resolveLocale(config.locale);
 
   async function jsonFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
     const headers = {
+      // ⚠⚠ The language on SCREEN, not the one the browser was installed in.
+      // Everything the server writes for a person — a plugin's surface, the
+      // labels inside it, the message on a queued job — is rendered with the
+      // request's `Accept-Language`. Chrome sends `en-US` whatever filex is
+      // set to, so a Turkish window asked a signing wizard for its screens
+      // and got "Identity" and an English help line in the middle of Turkish
+      // ones. The window's own language is the only right answer here.
+      'Accept-Language': localeTag(resolveLocale(config.locale)),
       ...(await authHeaders()),
       ...((init.headers as Record<string, string> | undefined) ?? {}),
     };
-    const res = await fetch(url, {
-      ...init,
-      headers,
-      credentials: credentialsMode(),
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        ...init,
+        headers,
+        credentials: credentialsMode(),
+      });
+    } catch (e) {
+      // An abort is the caller's own decision — handed back untouched, callers
+      // branch on `name === 'AbortError'`.
+      if ((e as Error)?.name === 'AbortError') throw e;
+      // No answer at all: said as a network failure, not as the browser's
+      // "TypeError: Failed to fetch".
+      // ⚠ Told to the shared notice as well, so an embedded explorer folds a
+      // storm of failed listings and thumbnails the same way the panel does.
+      noteRequestFailed(kindOfMethod(init.method));
+      throw networkFailure(lang(), e);
+    }
+    // Any answer — a 404 and a 500 included — means the connection is not
+    // what is wrong, and the shared notice must not keep saying it is.
+    noteRequestSucceeded();
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      const err = new Error(statusMessage(res.status)) as Error & { status?: number; detail?: string };
-      err.status = res.status;
-      err.detail = text.slice(0, 300);
-      throw err;
+      throw requestFailure(res.status, text, lang());
     }
     // ⚠⚠ A 204 carries NO BODY, and several endpoints answer with one (every
     // delete does). Parsing it throws "Unexpected end of JSON input" AFTER the
@@ -454,12 +488,22 @@ export function useFileApi(config: ExplorerConfig) {
     return `${endpoints.manager}${sep}${qs({ q: action, action, ...params })}`;
   }
 
+  // ⚠⚠ A listing of one of filex's own directories is answered with the
+  // storage's root instead (lib/internalPaths → listingAddress). The server
+  // refuses the trash/versions/thumbs trees outright, but it has to keep
+  // serving `.filex-open` by exact path — every desktop release since 0.29.0
+  // reads its working copies that way — so the explorer is the only place
+  // that can tell "a person navigated here" from "the desktop is checking
+  // its copy". The explorer arrives wherever the response's `dirname` says,
+  // so a stale hash, an old tab or a notification from before this release
+  // lands in the storage instead of in the machinery (measured 2026-09-21:
+  // `#docs/.filex-open` opened a folder of working copies).
   async function index(path: string): Promise<ManagerResponse> {
-    return jsonFetch<ManagerResponse>(managerUrl('index', { path }));
+    return jsonFetch<ManagerResponse>(managerUrl('index', { path: listingAddress(path) }));
   }
 
   async function search(path: string, filter: string): Promise<ManagerResponse> {
-    return jsonFetch<ManagerResponse>(managerUrl('search', { path, filter }));
+    return jsonFetch<ManagerResponse>(managerUrl('search', { path: listingAddress(path), filter }));
   }
 
   /* === bul:s3 — global "search everywhere" ===
@@ -675,6 +719,7 @@ export function useFileApi(config: ExplorerConfig) {
         }
       };
       xhr.onload = () => {
+        noteRequestSucceeded();
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             resolve(JSON.parse(xhr.responseText));
@@ -682,10 +727,16 @@ export function useFileApi(config: ExplorerConfig) {
             reject(e);
           }
         } else {
-          reject(new Error(`${xhr.status} ${xhr.statusText}: ${xhr.responseText.slice(0, 200)}`));
+          reject(requestFailure(xhr.status, xhr.responseText || '', lang()));
         }
       };
-      xhr.onerror = () => reject(new Error('Network error'));
+      // ⚠ `action`, not `background`: an upload is something the person
+      // started and is waiting on, so it is NEVER folded into the shared
+      // notice — it says for itself that it did not go.
+      xhr.onerror = () => {
+        noteRequestFailed('action');
+        reject(networkFailure(lang()));
+      };
       xhr.send(fd);
     });
   }
@@ -729,9 +780,7 @@ export function useFileApi(config: ExplorerConfig) {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(
-        `${res.status} ${res.statusText}${text ? ' — ' + text.slice(0, 200) : ''}`,
-      );
+      throw requestFailure(res.status, text, lang());
     }
     const blob = await res.blob();
     const mime = blob.type || res.headers.get('content-type') || '';
@@ -752,9 +801,7 @@ export function useFileApi(config: ExplorerConfig) {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(
-        `${res.status} ${res.statusText}${text ? ' — ' + text.slice(0, 200) : ''}`,
-      );
+      throw requestFailure(res.status, text, lang());
     }
     return res.arrayBuffer();
   }
@@ -782,6 +829,91 @@ export function useFileApi(config: ExplorerConfig) {
       };
     }
     return jsonFetch<Capabilities>(endpoints.capabilities);
+  }
+
+  /* ── App plugins (docs/APP-PLUGINS-API.md) ─────────────────────────── */
+
+  /** Fill `{name}` placeholders of an endpoint template. */
+  function fillTemplate(tpl: string, vars: Record<string, string | number>): string {
+    return Object.entries(vars).reduce(
+      (acc, [k, v]) => acc.replaceAll(`{${k}}`, encodeURIComponent(String(v))),
+      tpl,
+    );
+  }
+
+  /** `GET /api/files/plugins/actions` — what applies to the caller. */
+  async function pluginActions(): Promise<PluginActionsResponse> {
+    if (!endpoints.pluginActions) return { actions: [], views: [] };
+    const res = await jsonFetch<Partial<PluginActionsResponse>>(endpoints.pluginActions);
+    return { actions: res?.actions ?? [], views: res?.views ?? [] };
+  }
+
+  /**
+   * `POST …/actions/{plugin}/{action}/run`. `paths` are adapter-qualified
+   * wire paths (`docs://reports/nda.pdf`) — the same form copy/move send.
+   * Answers `{op}` (queued) or `{surface}` (the action opens a view first).
+   */
+  async function pluginActionRun(
+    plugin: string,
+    action: string,
+    body: { paths: string[]; params?: Record<string, unknown> },
+  ): Promise<PluginRunResult> {
+    if (!endpoints.pluginActionRun) throw new Error('pluginActionRun endpoint not configured');
+    return jsonFetch<PluginRunResult>(fillTemplate(endpoints.pluginActionRun, { plugin, action }), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** `GET …/views/{plugin}/{view}?path=` — the initial surface (event `open`). */
+  /**
+   * `GET …/views/{plugin}/{view}` — a view's opening surface. `section` opens
+   * a home page at one of its sections (`surface.sections`): the frame keeps
+   * it in its own address, so Back and a link land where they were.
+   */
+  async function pluginView(
+    plugin: string,
+    view: string,
+    path?: string,
+    section?: string,
+  ): Promise<{ surface: PluginSurface }> {
+    if (!endpoints.pluginView) throw new Error('pluginView endpoint not configured');
+    const url = fillTemplate(endpoints.pluginView, { plugin, view });
+    const q = [
+      path ? `path=${encodeURIComponent(path)}` : '',
+      section ? `section=${encodeURIComponent(section)}` : '',
+    ].filter(Boolean);
+    return jsonFetch<{ surface: PluginSurface }>(url + (q.length ? `?${q.join('&')}` : ''));
+  }
+
+  /** `POST …/views/{plugin}/{view}/event` — answers a surface, or `{op}` when it enqueued a job. */
+  async function pluginViewEvent(plugin: string, view: string, body: PluginViewEventBody): Promise<PluginRunResult> {
+    if (!endpoints.pluginViewEvent) throw new Error('pluginViewEvent endpoint not configured');
+    return jsonFetch<PluginRunResult>(fillTemplate(endpoints.pluginViewEvent, { plugin, view }), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * `GET …/plugins/users?plugin=<name>&q=` — the people-picker's lookup of
+   * internal users. Answers only for a plugin that holds `users:lookup`;
+   * 403 (and 404 on an older server) mean "free e-mail entry only" and the
+   * caller reads the status off the thrown error.
+   */
+  async function pluginUsers(plugin: string, q: string): Promise<PluginUsersResponse> {
+    if (!endpoints.pluginUsers) throw Object.assign(new Error('pluginUsers endpoint not configured'), { status: 404 });
+    const url = `${endpoints.pluginUsers}?plugin=${encodeURIComponent(plugin)}&q=${encodeURIComponent(q)}`;
+    const res = await jsonFetch<Partial<PluginUsersResponse>>(url);
+    return { users: res?.users ?? [] };
+  }
+
+  /** `POST /api/files/ops/{id}/cancel`. */
+  async function opsCancel(id: number): Promise<void> {
+    if (!endpoints.opsCancel) throw new Error('opsCancel endpoint not configured');
+    await jsonFetch<unknown>(fillTemplate(endpoints.opsCancel, { id }), { method: 'POST' });
   }
 
   /* wiring:e2 — escrow use is announced, not merely performed.
@@ -1003,6 +1135,13 @@ export function useFileApi(config: ExplorerConfig) {
     /* wiring:e2 */
     e2eEscrowChallenge,
     e2eEscrowUsed,
+    /* App plugins */
+    pluginActions,
+    pluginActionRun,
+    pluginView,
+    pluginViewEvent,
+    pluginUsers,
+    opsCancel,
     createShare,
     listShares,
     revokeShare,

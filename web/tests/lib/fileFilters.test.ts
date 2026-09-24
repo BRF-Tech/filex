@@ -211,6 +211,19 @@ describe('drive filters — the name box', () => {
     expect(names(applyFilters(tree, F({ name: 'odev' }), NOW))).toEqual(['Ödev.pdf']);
   });
 
+  it('treats the four Latin i letters as one, like the server search and tags', () => {
+    // A name a Mac wrote decomposed, an all-caps Turkish name, and its lower case.
+    const tree = [
+      ...TREE,
+      file({ basename: 'IŞIK.pdf', size: 2000 }),
+      file({ basename: 'ışık notları.txt', size: 2000 }),
+      file({ basename: 'Gürel.pdf'.normalize('NFD'), size: 2000 }),
+    ];
+    expect(names(applyFilters(tree, F({ name: 'ışık' }), NOW))).toEqual(['IŞIK.pdf', 'ışık notları.txt']);
+    expect(names(applyFilters(tree, F({ name: 'IŞIK' }), NOW))).toEqual(['IŞIK.pdf', 'ışık notları.txt']);
+    expect(names(applyFilters(tree, F({ name: 'gürel' }), NOW))).toEqual(['Gürel.pdf'.normalize('NFD')]);
+  });
+
   it('matches folders too — hiding the folder you just typed is the one result you meant', () => {
     expect(names(applyFilters(TREE, F({ name: 'photo' }), NOW))).toContain('Photos');
   });

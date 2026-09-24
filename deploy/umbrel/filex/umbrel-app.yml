@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.42.2"
+version: "0.43.0"
 releaseNotes: |-
-  filex v0.42.2 — 2026-09-19
-  • Presigned URLs are off by default on S3 storages
-  • The top search field says what it searches.
-  • The context menu is the same everywhere.
-  • Admin tables keep their actions column in view.
-  • The admin Shares page copies the right link.
+  filex v0.43.0 — 2026-09-24
+  • Apps (app plugins) — a sandboxed plugin that adds things to do with files.
+  • Language packs — filex can be translated without a release.
+  • Right-to-left layout.
+  • Appearance: the instance can wear your colours.
+  • Desktop sync is live: an edit on either side arrives in about a second.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-
@@ -29,7 +29,7 @@ description: >-
   Browsing opens on Home — your storages, what you opened last, what you
   starred. + New makes a folder or a document: Markdown, text, CSV or code
   straight away, and Word, Excel, PowerPoint or OpenDocument once an
-  OnlyOffice server is connected. The templates are real documents compiled
+  ONLYOFFICE server is connected. The templates are real documents compiled
   into the binary, so nothing here needs LibreOffice installed. Select a dozen
   files and Download hands back one ZIP, streamed rather than assembled, so a
   large archive costs the server almost no memory. Every file records its
@@ -47,7 +47,7 @@ description: >-
   (OIDC/LDAP), a desktop app with two-way folder sync, an embeddable web
   component, and an AI/MCP API for agents. An open folder keeps itself current
   over a WebSocket, so a file somebody else uploads appears without a refresh.
-  OnlyOffice and draw.io can be connected for in-browser document and diagram
+  ONLYOFFICE and draw.io can be connected for in-browser document and diagram
   editing, and so can a ClamAV container: give filex its address and every
   file written is scanned, with infected ones quarantined into the trash.
 

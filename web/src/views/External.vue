@@ -31,6 +31,8 @@ import Input from '@/components/ui/Input.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Spinner from '@/components/ui/Spinner.vue';
+import OnlyOfficeSecretAlert from '@/components/OnlyOfficeSecretAlert.vue';
+import { isHttpUrl } from '@/lib/formCheck';
 
 const { t, te, locale } = useI18n();
 const ext = useExternalServicesStore();
@@ -70,8 +72,19 @@ async function load() {
   void ext.probeAllBrowser();
 }
 
+/**
+ * An address the service can be reached at, or none: empty, or absolute
+ * http(s). ⚠ "bu-bir-adres-degil" was saved and then "tested" (QA #38, forms
+ * that accept what can never work); the server refuses the same thing
+ * (handlers/external_admin.go), this says it under the box first.
+ */
+function urlError(v: string | null | undefined): string {
+  return isHttpUrl(v) ? '' : t('forms.url');
+}
+
 async function save(s: ExternalService) {
   const d = ensureDraft(s);
+  if (urlError(d.url) || (callsBack(s) && urlError(d.callback_url))) return;
   savingId.value = s.id;
   try {
     await ext.update(s.id, {
@@ -260,6 +273,19 @@ const diagnosticBrowserCmd = computed(() => {
 const diagnosticCallbackCmd = 'podman exec -it onlyoffice curl -I "$FILEX_PUBLIC_URL/healthz"';
 
 onMounted(load);
+
+/**
+ * A service's NAME, the one its own project uses — the same name every other
+ * screen says (the menus, the viewers, the "not set up" sentences). The id
+ * was printed capitalised ("Drawio", "Onlyoffice"), which made draw.io three
+ * different words across the product (QA, 2026-09-21).
+ */
+function serviceName(id: string): string {
+  if (id === 'onlyoffice') return 'ONLYOFFICE';
+  if (id === 'drawio') return 'draw.io';
+  if (id === 'convert') return t('external.names.convert');
+  return id;
+}
 </script>
 
 <template>
@@ -269,16 +295,19 @@ onMounted(load);
       <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('external.subtitle') }}</p>
     </div>
 
+    <!-- ⚠ Persistent until a secret is saved (owner, 2026-09-22). -->
+    <OnlyOfficeSecretAlert no-link />
+
     <!-- ⚠ The three-address requirement lives HERE, where the field is filled
          in — not only in a prerequisites list further down a docs page. A
          green Test outranks a prerequisites list; that is how the reporter
          hit this twice. -->
     <div
-      class="card card-body space-y-2 border-l-4 border-l-sky-400 dark:border-l-sky-500"
+      class="card card-body space-y-2 border-s-4 border-s-sky-400 dark:border-s-sky-500"
       data-testid="three-addresses"
     >
       <h2 class="text-sm font-semibold">{{ t('external.threeAddresses.title') }}</h2>
-      <ul class="text-xs text-zinc-600 dark:text-zinc-300 space-y-1 list-disc pl-4">
+      <ul class="text-xs text-zinc-600 dark:text-zinc-300 space-y-1 list-disc ps-4">
         <li>{{ t('external.threeAddresses.browser') }}</li>
         <li>{{ t('external.threeAddresses.server') }}</li>
         <li>
@@ -312,7 +341,7 @@ onMounted(load);
                  ("Server-Reachable Only"), and in Turkish it would recase
                  words the language does not recase that way. -->
             <h2 class="text-sm font-semibold flex items-center gap-2">
-              <span class="capitalize">{{ s.id }}</span>
+              <span>{{ serviceName(s.id) }}</span>
               <Badge :tone="overallTone[overall(s)]" dot :data-testid="`overall-${s.id}`">
                 {{ t(`external.overall.${overall(s)}`) }}
               </Badge>
@@ -322,6 +351,15 @@ onMounted(load);
             </h2>
             <p v-if="s.env_managed" class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
               {{ t('external.envManagedHint') }}
+            </p>
+            <!-- ⚠ The iframe converter is retiring; the Convert app replaces
+                 it, and the file menu offers only one of the two. -->
+            <p
+              v-if="s.id === 'convert'"
+              class="text-xs text-amber-600 dark:text-amber-400 mt-0.5"
+              data-testid="external-convert-legacy"
+            >
+              {{ t('external.convertLegacy') }}
             </p>
             <p
               v-if="
@@ -431,8 +469,10 @@ onMounted(load);
         <Input
           v-model="ensureDraft(s).url"
           :label="t('external.fields.url')"
+          :error="urlError(ensureDraft(s).url) || undefined"
           monospace
           placeholder="https://example.com"
+          :data-testid="`external-url-${s.id}`"
         />
         <!-- Advisories sit next to the field they are about. Never a refusal:
              a container-internal address is correct for somebody browsing from
@@ -465,6 +505,7 @@ onMounted(load);
           v-if="callsBack(s)"
           v-model="ensureDraft(s).callback_url"
           :label="t('external.fields.callbackUrl')"
+          :error="urlError(ensureDraft(s).callback_url) || undefined"
           monospace
           :placeholder="publicUrlDisplay"
           :hint="t('external.fields.callbackUrlHint')"

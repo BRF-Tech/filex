@@ -12,35 +12,18 @@
 
 import type { RouteLocationNormalized } from 'vue-router';
 
-import { BrandingApi } from '@/api/branding';
+import { brandName, loadBrandName, onBrandName } from '@/lib/brand';
 import { t } from '@/i18n';
 
-const DEFAULT_NAME = 'filex';
-
-let instanceName = DEFAULT_NAME;
-let brandingRequested = false;
 let lastRoute: RouteLocationNormalized | null = null;
 
-/**
- * Fetch the instance name once per page load. Best-effort and non-blocking:
- * the title is set immediately from the default and re-applied if a branded
- * name arrives, because a title that waits on a network round-trip is a title
- * the user watches change.
- */
-async function loadInstanceName(): Promise<void> {
-  if (brandingRequested) return;
-  brandingRequested = true;
-  try {
-    const branding = await BrandingApi.boot();
-    const name = branding?.name?.trim();
-    if (name && name !== instanceName) {
-      instanceName = name;
-      if (lastRoute) applyDocumentTitle(lastRoute);
-    }
-  } catch {
-    /* /api/branding is public but optional — the default name is fine. */
-  }
-}
+// ⚠ ONE source for the instance's name (`lib/brand`), shared with the
+// notification toast and the login wordmark. This file used to fetch and
+// cache it privately, which is how the tab could read "Acme Files" while a
+// notification from the same page still said "filex".
+onBrandName(() => {
+  if (lastRoute) applyDocumentTitle(lastRoute);
+});
 
 export function applyDocumentTitle(to: RouteLocationNormalized): void {
   lastRoute = to;
@@ -52,15 +35,15 @@ export function applyDocumentTitle(to: RouteLocationNormalized): void {
   if (to.name === 'files.edit') {
     const raw = typeof to.query.path === 'string' ? to.query.path : '';
     const base = raw.split('/').filter(Boolean).pop() ?? '';
-    document.title = base || instanceName;
-    void loadInstanceName();
+    document.title = base || brandName();
+    loadBrandName();
     return;
   }
   // `requiresAdmin` is the panel's own marker (router/index.ts), so this stays
   // correct when a route is added: a new admin page is admin-flavoured because
   // it is admin-gated, not because someone remembered to add it to a list.
   document.title = to.meta.requiresAdmin
-    ? t('title.admin', { name: instanceName })
-    : instanceName;
-  void loadInstanceName();
+    ? t('title.admin', { name: brandName() })
+    : brandName();
+  loadBrandName();
 }

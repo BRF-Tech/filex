@@ -2,6 +2,10 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import dts from 'vite-plugin-dts';
 import { resolve } from 'path';
+// ⚠ The SAME plugin `packages/core` uses. `web/tests/deploy/packageLook.test.ts`
+// compares the two shipped stylesheets byte for byte, so this build cannot
+// inline the signing faces while core emits them as files.
+import { fontsAsFiles } from '../../scripts/vite-fonts-as-files.mjs';
 
 /**
  * Vite config for @brftech/filex (Web Component).
@@ -15,6 +19,7 @@ import { resolve } from 'path';
  */
 export default defineConfig({
   plugins: [
+    fontsAsFiles(resolve(__dirname, '../core/src/assets/fonts'), resolve(__dirname, 'dist')),
     vue({ customElement: false }),
     dts({
       entryRoot: 'src',

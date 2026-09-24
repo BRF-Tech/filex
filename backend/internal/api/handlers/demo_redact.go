@@ -7,8 +7,6 @@
 package handlers
 
 import (
-	"strings"
-
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
@@ -59,44 +57,10 @@ func maskAuditRecent(rows []*model.AuditEntry) {
 	}
 }
 
-// maskNestedSecrets masks provider config values that CARRY a credential
-// inside them, for the auth-providers listing on a demo.
-//
-// ⚠ The existing per-leaf masking (isSecretKey) works on the leaf NAME, and
-// the admin SPA saves the whole provider config as one leaf called `config`
-// holding a JSON document. So a name-based check sees "config", finds nothing
-// secret about it, and passes the document through with `client_secret` in it.
-// Measured on a local demo: GET /api/admin/auth-providers returned
-// `"client_secret":"…"` in clear, under a field named `config_redacted`.
-//
-// A demo cannot afford the nuance, so a value that MENTIONS a credential field
-// is replaced whole. On a normal install nothing here runs: the operator is
-// entitled to read back what they configured, and blanking it would make the
-// provider form unable to show its own settings.
-func maskNestedSecrets(cfg map[string]interface{}) {
-	for k, v := range cfg {
-		s, ok := v.(string)
-		if !ok || s == "" {
-			continue
-		}
-		if namesCredential(s) {
-			cfg[k] = "***"
-		}
-	}
-}
-
-// namesCredential reports that a serialized config blob names a credential
-// field — the only thing that can be told about it without parsing every
-// driver's private shape.
-func namesCredential(blob string) bool {
-	lower := strings.ToLower(blob)
-	for _, needle := range []string{`"client_secret"`, `"secret"`, `"password"`, `"bind_password"`, `"token"`} {
-		if strings.Contains(lower, needle) {
-			return true
-		}
-	}
-	return false
-}
+// (maskNestedSecrets lived here: it masked, on a demo only, an auth-provider
+// config blob that carried a secret. Since v0.43.0 the identity providers
+// page never sends a secret back at all, on any install — secrets are sealed
+// and listed only as "set" — so there is nothing left for a demo to mask.)
 
 // newDemoAwareDashboard / newDemoAwareAudit / newDemoAwareAuthProviders build
 // the /api/ai/admin copies of the three redacting handlers.
@@ -106,7 +70,7 @@ func namesCredential(blob string) bool {
 // a demo rule ends up applying to the cookie route and not to the token route
 // serving the same data.
 func newDemoAwareDashboard(d AIAdminDeps) *Dashboard {
-	h := NewDashboard(d.Store, d.Caps, d.Worker)
+	h := NewDashboard(d.Store, d.Caps, d.Queue)
 	h.DemoMode = d.DemoMode
 	return h
 }
@@ -118,7 +82,7 @@ func newDemoAwareAudit(d AIAdminDeps) *Audit {
 }
 
 func newDemoAwareAuthProviders(d AIAdminDeps) *AuthProviders {
-	h := NewAuthProviders(d.Store)
+	h := NewAuthProviders(d.Store, d.AuthLive)
 	h.DemoMode = d.DemoMode
 	return h
 }

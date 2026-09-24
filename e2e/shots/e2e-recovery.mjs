@@ -408,7 +408,18 @@ async function main(expectedKid) {
   await page.waitForTimeout(2500);
 
   const onDisk = path.join(STORAGE_ROOT, folderName, 'secret.txt');
-  const head = fs.existsSync(onDisk) ? fs.readFileSync(onDisk).subarray(0, 8).toString() : '';
+  /* ⚠ POLL, do not sleep and hope. The upload is a round trip: on a loaded
+     machine the fixed wait above expired before the bytes reached the disk,
+     this read returned `magic=` (no file at all), and the run stopped here
+     — at a scene that is not about timing, in the middle of a release
+     (v0.43.0). Waiting for the eight bytes to BE there is the same check,
+     without the race; a file that never appears still fails, 15s later. */
+  let head = '';
+  for (let i = 0; i < 60; i++) {
+    head = fs.existsSync(onDisk) ? fs.readFileSync(onDisk).subarray(0, 8).toString() : '';
+    if (head.length === 8) break;
+    await page.waitForTimeout(250);
+  }
   check('the uploaded file is ciphertext on disk', head === 'filexe2e', `magic=${head}`);
 
   // ── 4. the move guard ─────────────────────────────────────────────

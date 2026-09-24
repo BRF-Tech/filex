@@ -133,6 +133,14 @@ release:
   replace_existing_draft: true
   prerelease: auto
   name_template: "v{{ .Version }}"
+  # The interface's string catalogue — every key, its English, and which
+  # grammar a translation of it follows — so a translator can start a
+  # language pack from the release alone (docs/PLUGIN-KIT.md → "Writing a
+  # language pack"). The web build writes it (web/vite.config.ts) and the
+  # embed step copies it here with the SPA, so it is always the catalogue of
+  # THIS release's interface.
+  extra_files:
+    - glob: ./backend/embed/admin/i18n/filex-catalogue-*.json
   header: |
     ## filex v{{ .Version }}
 

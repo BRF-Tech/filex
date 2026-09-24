@@ -25,7 +25,7 @@
  */
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { THEMES, type ThemeDef } from '../lib/themes';
+import { allThemes, themeName, type ThemeDef } from '../lib/themes';
 
 const props = defineProps<{
   locale: LocaleCode;
@@ -52,7 +52,7 @@ function cardVars(th: ThemeDef): Record<string, string> {
   <p v-if="hint !== false" class="fe-themes__hint">{{ t('theme.hint') }}</p>
   <div class="fe-themes" role="listbox" :aria-label="t('theme.title')">
     <button
-      v-for="th in THEMES"
+      v-for="th in allThemes()"
       :key="th.id"
       type="button"
       class="fe-themecard"
@@ -83,7 +83,7 @@ function cardVars(th: ThemeDef): Record<string, string> {
         </span>
       </span>
       <span class="fe-themecard__name">
-        {{ t(th.nameKey) }}
+        {{ themeName(th, t) }}
         <span v-if="th.id === current" class="fe-themecard__check" :title="t('theme.selected')">✓</span>
       </span>
     </button>
@@ -121,7 +121,7 @@ function cardVars(th: ThemeDef): Record<string, string> {
   background: var(--fe-bg);
   cursor: pointer;
   overflow: hidden;
-  text-align: left;
+  text-align: start;
   transition: transform 0.12s ease, box-shadow 0.12s ease;
   font: inherit;
 }

@@ -17,8 +17,10 @@ import (
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 )
 
 // One session's view of the tree, in the shape ftpserverlib asks for.
@@ -33,21 +35,11 @@ import (
 // actually reach are implemented; the rest return ErrUnsupported rather than a
 // plausible-looking approximation of a filesystem filex does not have.
 
-// hiddenNames are the filex-internal buckets no protocol exposes.
-var hiddenNames = map[string]bool{
-	".filex-trash": true,
-	".versions":    true,
-	".thumbs":      true,
-}
-
-func hiddenPath(rel string) bool {
-	for _, seg := range strings.Split(rel, "/") {
-		if hiddenNames[seg] {
-			return true
-		}
-	}
-	return false
-}
+// ⚠ filex's own directories (trash, version history, thumbnails, the desktop
+// app's open-with working area) are judged by syspath.InDir, the one list
+// every surface shares. This file used to carry its own three-name copy that
+// did not know `.filex-open`, so an FTPS client was shown the desktop's
+// working copies beside the person's own files (2026-09-21).
 
 type fs struct {
 	srv       *Server
@@ -96,7 +88,7 @@ func (f *fs) resolve(p string) (target, error) {
 	if name == "" {
 		return target{}, nil
 	}
-	if hiddenPath(rel) {
+	if syspath.InDir(rel) {
 		return target{}, os.ErrNotExist
 	}
 	st, err := storageref.Resolve(f.ctx, f.srv.cfg.Store, name)
@@ -166,7 +158,8 @@ func (f *fs) canRead(t target) bool {
 }
 
 func (f *fs) canWrite(t target) bool {
-	if t.Storage == nil || t.Storage.ReadOnly {
+	if t.Storage == nil || t.Storage.ReadOnly ||
+		writegate.RefusesMounted(f.srv.cfg.ACL.Locks(f.ctx, t.Storage.ID), t.Rel) {
 		return false
 	}
 	return t.Set != nil && t.Set.Effective(t.Rel) >= acl.LevelEditor
@@ -233,7 +226,7 @@ func (f *fs) ReadDir(name string) ([]os.FileInfo, error) {
 	out := make([]os.FileInfo, 0, len(objs))
 	for _, o := range objs {
 		rel := path.Join(t.Rel, o.Name)
-		if hiddenPath(rel) {
+		if syspath.InDir(rel) {
 			continue
 		}
 		// ⚠ FILTER, never reject: a listing that fails because one entry is out

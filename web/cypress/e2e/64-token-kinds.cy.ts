@@ -34,6 +34,18 @@ const GATED = [
   '/api/auth/nfs-exports',
 ];
 
+/** The permissions every token here is minted with.
+ *
+ *  ⚠⚠ Explicit, never left out. This spec used to mint `{ label, kind }` and
+ *  lean on the old rule that no scopes meant EVERY scope — the hole v0.43.0
+ *  closed (an empty list is now refused, and a stored empty row means
+ *  nothing). The v0.43.0 release run caught it: all five cases failed at the
+ *  mint with `400 scopes_required`, the product doing exactly what the
+ *  release promised. `read,write` is what an embed or a CLI actually holds;
+ *  the gate under test is about the token's KIND, which no scope changes, so
+ *  the kind is still what decides every answer below. */
+const SCOPES = 'read,write';
+
 /** Mint a token of `kind` for the calling admin and hand back the plaintext.
  *  `POST /api/admin/ai-tokens` returns it exactly once. */
 function mint(kind: 'app' | 'user', label: string) {
@@ -43,7 +55,7 @@ function mint(kind: 'app' | 'user', label: string) {
         method: 'POST',
         url: '/api/admin/ai-tokens',
         headers: { Authorization: `Bearer ${admin}` },
-        body: { label, kind },
+        body: { label, kind, scopes: SCOPES },
       })
       .then((res) => {
         expect(res.status, `mint a ${kind} token`).to.eq(201);
@@ -70,6 +82,42 @@ describe('app token vs user token', () => {
           failOnStatusCode: false,
         });
       }
+    });
+  });
+
+  // The fix this spec used to lean on, proved instead. A token with no scopes
+  // is refused at the door with the reason in words, for either kind — and
+  // nothing is minted, so there is no row to clean up afterwards.
+  it('a token without scopes is refused: 400 scopes_required, and nothing is minted', () => {
+    cy.apiLogin().then((admin) => {
+      for (const kind of ['app', 'user'] as const) {
+        cy.request({
+          method: 'POST',
+          url: '/api/admin/ai-tokens',
+          headers: { Authorization: `Bearer ${admin}` },
+          body: { label: `cypress-no-scopes-${kind}`, kind },
+          failOnStatusCode: false,
+        }).then((res) => {
+          expect(res.status, `${kind} token without scopes`).to.eq(400);
+          const body = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
+          expect(body.error, 'refusal code').to.eq('scopes_required');
+          expect(body.message, 'the refusal says it in words').to.be.a('string').and.not.be.empty;
+          expect(body.token, 'no plaintext handed back').to.be.undefined;
+        });
+      }
+      // …and the refusal left nothing behind.
+      cy.request({
+        method: 'GET',
+        url: '/api/admin/ai-tokens',
+        headers: { Authorization: `Bearer ${admin}` },
+      }).then((res) => {
+        const body = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
+        // ⚠ Strict on the shape: a fallback to `[]` would make "no row was
+        // created" pass against a list it could not read.
+        expect(body.tokens, 'the admin token list').to.be.an('array');
+        const labels = (body.tokens as Array<{ label?: string }>).map((r) => r.label ?? '');
+        expect(labels.filter((l) => l.startsWith('cypress-no-scopes-')), 'no row was created').to.deep.equal([]);
+      });
     });
   });
 
@@ -225,10 +273,15 @@ describe('app token vs user token', () => {
         method: 'POST',
         url: '/api/admin/ai-tokens',
         headers: { Authorization: `Bearer ${admin}` },
+        // ⚠ Verbs AND a root. `root:` narrows WHERE a token reaches; it grants
+        // nothing on its own, and a scope list with no verb is refused
+        // (400 scopes_required) since v0.43.0 — this case used to mint a bare
+        // `root:` and ride on "no verbs means every verb". The release run
+        // caught it after the other five had been fixed.
         body: {
           label: 'cypress-kind-confined-user',
           kind: 'user',
-          scopes: `root:${storage}://`,
+          scopes: `${SCOPES},root:${storage}://`,
         },
       }).then((res) => {
         expect(res.status, `mint a confined user token: ${JSON.stringify(res.body)}`).to.eq(

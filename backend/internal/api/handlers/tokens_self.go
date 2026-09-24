@@ -73,8 +73,21 @@ func (h *SelfTokens) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	scopes, err := h.cappedScopes(r.Context(), u, req.Scopes)
 	if err != nil {
+		var unknown *apitoken.UnknownScopeError
+		if errors.Is(err, apitoken.ErrScopesRequired) || errors.As(err, &unknown) {
+			writeScopeRefusal(w, r, err)
+			return
+		}
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 		return
+	}
+	// A token caller mints nothing wider than itself (token_ceiling.go).
+	ceiling := ceilingOf(r)
+	if ceiling != nil {
+		if why := ceiling.allowsToken(scopes); why != "" {
+			refuseWider(w, why)
+			return
+		}
 	}
 	usernames, uerr := normalizeUsernames(req.Usernames)
 	if uerr != nil {
@@ -101,6 +114,11 @@ func (h *SelfTokens) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ExpiresInDays > 0 {
 		exp := time.Now().AddDate(0, 0, req.ExpiresInDays)
+		row.ExpiresAt = &exp
+	}
+	// …nor longer-lived: a token minted by an expiring one expires with it.
+	if ceiling != nil && ceiling.tok.ExpiresAt != nil && (row.ExpiresAt == nil || row.ExpiresAt.After(*ceiling.tok.ExpiresAt)) {
+		exp := *ceiling.tok.ExpiresAt
 		row.ExpiresAt = &exp
 	}
 	created, cerr := h.store.CreateAPIToken(r.Context(), row)
@@ -221,25 +239,19 @@ func (h *SelfTokens) Delete(w http.ResponseWriter, r *http.Request) {
 //
 // Hard rules (defense against privilege escalation):
 //   - `admin` scope is NEVER allowed here.
-//   - EMPTY scopes are NEVER stored (an empty Scopes means "all" and would let
-//     RequireScope("admin") pass) — we fill a role-appropriate safe default.
+//   - the list must name at least one verb — apitoken.ParseIssued, the rule
+//     every door shares. ⚠ It used to FILL a default when nothing was
+//     ticked, a second copy of a guard the admin door did not have; an empty
+//     list is now refused on every door, in words (writeScopeRefusal).
 //   - `write`/`delete` are rejected for viewer accounts (read-only).
 //   - each `root:<adapter>://<rel>` scope must be within the caller's own
 //     grants (≥viewer, or ≥editor when the token also carries write/delete).
 func (h *SelfTokens) cappedScopes(ctx context.Context, u *model.User, raw string) (string, error) {
-	var verbs, roots []string
-	for _, p := range strings.Split(raw, ",") {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		if strings.HasPrefix(p, apitoken.ScopeRootPrefix) {
-			if strings.TrimSpace(strings.TrimPrefix(p, apitoken.ScopeRootPrefix)) == "" {
-				return "", errors.New("malformed root scope")
-			}
-			roots = append(roots, p)
-			continue
-		}
+	verbs, roots, err := apitoken.ParseIssued(raw)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range verbs {
 		switch p {
 		case apitoken.ScopeAdmin:
 			return "", errors.New("admin scope is not allowed for self-service tokens")
@@ -247,19 +259,6 @@ func (h *SelfTokens) cappedScopes(ctx context.Context, u *model.User, raw string
 			if u.IsViewer() {
 				return "", errors.New("viewer accounts can only mint read-only tokens")
 			}
-			verbs = append(verbs, p)
-		case apitoken.ScopeRead, apitoken.ScopeMCP:
-			verbs = append(verbs, p)
-		default:
-			return "", errors.New("unknown scope: " + p)
-		}
-	}
-	// Never persist empty verb scopes (empty == all == includes admin).
-	if len(verbs) == 0 {
-		if u.IsViewer() {
-			verbs = []string{apitoken.ScopeRead, apitoken.ScopeMCP}
-		} else {
-			verbs = []string{apitoken.ScopeRead, apitoken.ScopeWrite, apitoken.ScopeDelete, apitoken.ScopeMCP}
 		}
 	}
 	// A root scope may not exceed the caller's own effective access there.
@@ -286,5 +285,5 @@ func (h *SelfTokens) cappedScopes(ctx context.Context, u *model.User, raw string
 			}
 		}
 	}
-	return strings.Join(append(verbs, roots...), ","), nil
+	return apitoken.JoinScopes(verbs, roots), nil
 }

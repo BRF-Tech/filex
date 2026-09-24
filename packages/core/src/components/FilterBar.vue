@@ -68,6 +68,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useLocale } from '../composables/useLocale';
+import { clampAlongInline, inlineStartX } from '../lib/direction';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import type { FileNode } from '../types/FileNode';
 import type { DriveFilters, ModifiedFilter, SizeFilter, TypeFilter } from '../lib/fileFilters';
@@ -153,7 +154,9 @@ const emit = defineEmits<{
   (e: 'select-all'): void;
 }>();
 
-const { t } = useLocale(() => props.locale);
+// ⚠ RTL: `dir` goes on the teleported popover (under <body> it would take the
+// host page's direction) and steers where it hangs from its chip.
+const { t, dir } = useLocale(() => props.locale);
 
 /** surucu:d1-scope — everything except the name box is drawn only in `full`. */
 const full = computed(() => (props.mode ?? 'full') === 'full');
@@ -356,7 +359,9 @@ async function toggle(id: PopId) {
     return;
   }
   const r = anchorEls.value[id]?.getBoundingClientRect();
-  pos.value = { x: r ? r.left : 8, y: r ? r.bottom + 6 : 8 };
+  // ⚠ RTL: hung from the chip's START edge — its right side in RTL.
+  const anchor = r ? inlineStartX(r, dir.value) : 8;
+  pos.value = { x: anchor, y: r ? r.bottom + 6 : 8 };
   openPop.value = id;
   await nextTick();
   // Keep it on screen: a chip near the right edge would otherwise open a panel
@@ -364,9 +369,10 @@ async function toggle(id: PopId) {
   const panel = panelEl.value;
   if (panel) {
     const box = panel.getBoundingClientRect();
-    if (box.right > window.innerWidth - 8) {
-      pos.value = { ...pos.value, x: Math.max(8, window.innerWidth - 8 - box.width) };
-    }
+    /* ⚠ RTL: it runs toward the inline END of the chip (leftward in RTL) and is
+       pushed back from that edge — lib/direction; LTR is the arithmetic this
+       block always did. */
+    pos.value = { ...pos.value, x: clampAlongInline(anchor, box.width, window.innerWidth, dir.value) };
     if (box.bottom > window.innerHeight - 8) {
       const r2 = anchorEls.value[id]?.getBoundingClientRect();
       pos.value = { ...pos.value, y: Math.max(8, (r2 ? r2.top : 0) - box.height - 6) };
@@ -675,6 +681,7 @@ onBeforeUnmount(() => {
         v-if="openPop"
         ref="panelEl"
         class="fe-filterpop"
+        :dir="dir"
         :class="{
           'fe--theme-light': theme === 'light',
           'fe--theme-dark': theme === 'dark',

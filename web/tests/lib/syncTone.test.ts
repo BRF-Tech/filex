@@ -22,6 +22,13 @@ describe('syncTone', () => {
     expect(syncTone('pending')).toBe('amber');
   });
 
+  // A run the server stopped in the middle of is closed as 'aborted' when it
+  // next starts. It is neither a failure nor nothing: the catalogue is behind
+  // the backend until the next sync — the same amber the sync-runs list uses.
+  it('paints an interrupted run as a warning, not as never-synced', () => {
+    expect(syncTone('aborted')).toBe('amber');
+  });
+
   it('is neutral only when there is genuinely nothing to report', () => {
     expect(syncTone(undefined)).toBe('zinc');
     expect(syncTone(null)).toBe('zinc');

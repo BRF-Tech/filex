@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('filexShell', {
   getState: () => ipcRenderer.invoke('state:get'),
   beginAuth: (serverUrl: string) => ipcRenderer.invoke('auth:begin', serverUrl),
   completeManual: (code: string) => ipcRenderer.invoke('auth:completeManual', code),
+  cancelAuth: () => ipcRenderer.invoke('auth:cancel'),
   __testDeepLink: (url: string) => ipcRenderer.invoke('test:deepLink', url),
 });

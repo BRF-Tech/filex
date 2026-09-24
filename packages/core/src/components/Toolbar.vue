@@ -20,6 +20,7 @@ import ContextMenu, { type ContextAction } from './ContextMenu.vue';
  * `.fe-subhead__actions`), so the header and the crumb row can no longer end
  * up offering different view modes — which is what two mount points cost. */
 import { useLocale } from '../composables/useLocale';
+import { inlineEndX } from '../lib/direction';
 import { actionIconSvg } from '../lib/actionIcons';
 import { eventMatchesShortcut, menuShortcutHint, shortcutHint } from '../composables/useKeyboardShortcuts';
 
@@ -253,7 +254,7 @@ function toggleDensity() {
   emit('update:density', density.value);
 }
 
-const { t } = useLocale(() => props.locale);
+const { t, dir } = useLocale(() => props.locale);
 
 const searchEl = ref<HTMLInputElement | null>(null);
 const localSearch = ref(props.searchQuery);
@@ -333,11 +334,30 @@ const hasSelection = computed(() => mode.value !== 'none');
 const barSplit = computed(() => {
   const icons: ContextAction[] = [];
   const rest: ContextAction[] = [];
-  for (const a of toolbarItems.value) {
+  /* ⚠ Walks the parent's list WITH its dividers, not `toolbarItems`. The "⋯"
+   * is a dropdown drawn by the same ContextMenu as the right click, and the
+   * dividers are what group it: the owner asked for a line between every
+   * app's actions (lib/pluginMenu → one `sep-plugin:*` per app), and a "⋯"
+   * built from the divider-free list ran Open, Rename, Tags and two apps'
+   * verbs together as one undivided column while the right click beside it
+   * drew the lines. An icon never takes a divider; ContextMenu collapses the
+   * ones that end up leading, trailing or doubled once the icons are pulled
+   * out. `restCount` is the number of REAL entries — a "⋯" whose menu is
+   * nothing but dividers would open an empty box. */
+  let restCount = 0;
+  for (const a of props.actions) {
+    if (a.hidden) continue;
+    if (a.divider) {
+      rest.push(a);
+      continue;
+    }
     if (BAR_ICON_KEYS.has(a.key) && iconFor(a)) icons.push(a);
-    else rest.push(a);
+    else {
+      rest.push(a);
+      restCount++;
+    }
   }
-  return { icons, rest };
+  return { icons, rest: restCount ? rest : [], restCount };
 });
 
 /* ── folding (kept from ui-fix, moved onto the bar) ───────────────────
@@ -412,7 +432,9 @@ watch(
 
 function openBarMore() {
   const r = selMoreBtnEl.value?.getBoundingClientRect();
-  selMoreRef.value?.show({ clientX: r ? r.right : 0, clientY: r ? r.bottom + 4 : 0 } as MouseEvent, []);
+  // ⚠ RTL: from the button's END edge (its left in RTL) — ContextMenu flips it
+  // back under the button from there, in either direction.
+  selMoreRef.value?.show({ clientX: r ? inlineEndX(r, dir.value) : 0, clientY: r ? r.bottom + 4 : 0 } as MouseEvent, []);
 }
 
 /* ── where the bar lands ──────────────────────────────────────────────── */
@@ -894,7 +916,7 @@ const menuActions = computed<ContextAction[]>(() => {
 
 function openMore() {
   const r = moreBtnEl.value?.getBoundingClientRect();
-  moreRef.value?.show({ clientX: r ? r.right : 0, clientY: r ? r.bottom + 4 : 0 }, []);
+  moreRef.value?.show({ clientX: r ? inlineEndX(r, dir.value) : 0, clientY: r ? r.bottom + 4 : 0 }, []); // ⚠ RTL: END edge, see openBarMore
 }
 
 function onMoreSelect(a: ContextAction) {

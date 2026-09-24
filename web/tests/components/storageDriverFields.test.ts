@@ -24,7 +24,7 @@ const descriptors: StorageDriverDescriptor[] = [
       { key: 'prefix', type: 'string', label: 'Prefix', i18n_key: 'storages.fields.prefix', required: true, secret: false, root: true, monospace: true },
       { key: 'secret_key', type: 'password', label: 'Secret key', i18n_key: 'storages.fields.secretKey', required: false, secret: true },
       { key: 'path_style', type: 'bool', label: 'Use path-style URLs', i18n_key: 'storages.fields.pathStyle', required: false, secret: false, default: true },
-      { key: 'disable_presign', type: 'bool', label: 'Disable presigned URLs', i18n_key: 'storages.fields.disablePresign', required: false, secret: false, advanced: true },
+      { key: 'disable_presign', type: 'bool', label: 'Stream transfers through filex', i18n_key: 'storages.fields.disablePresign', required: false, secret: false, advanced: true },
     ],
   },
   {
@@ -74,7 +74,7 @@ describe('StorageDriverFields', () => {
     expect(text).toContain('Prefix'); // the field the old form never had
     expect(text).toContain('Secret key');
     // Advanced fields stay collapsed until asked for.
-    expect(text).not.toContain('Disable presigned URLs');
+    expect(text).not.toContain('Stream transfers through filex');
     expect(w.text()).toContain('Advanced settings');
   });
 
@@ -106,7 +106,7 @@ describe('StorageDriverFields', () => {
     const disclosure = w.findAll('button').find((b) => b.text().includes('Advanced settings'));
     expect(disclosure, 'advanced disclosure button').toBeTruthy();
     await disclosure!.trigger('click');
-    expect(w.text()).toContain('Disable presigned URLs');
+    expect(w.text()).toContain('Stream transfers through filex');
   });
 
   it('emits the config under the key the driver reads', async () => {

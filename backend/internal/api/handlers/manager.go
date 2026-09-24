@@ -23,8 +23,10 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
+	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
@@ -57,6 +59,9 @@ type Manager struct {
 	// or filex's staging area while a staged upload is still transferring.
 	// nil is fine and degrades to driver-only reads (filebody.Resolver).
 	Body *filebody.Resolver
+	// Changes answers `action=changes` (manager_changes.go). nil = 501, and a
+	// sync client falls back to walking its tree.
+	Changes *realtime.ChangeLog
 	// Quota enforces the per-user ceiling on the SYNCHRONOUS write paths.
 	// Large writes reach the staged path, which checks at `begin`; without
 	// this the small-file path had no ceiling at all, and a user could sail
@@ -333,21 +338,63 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 	}
 
 	storageNames := make([]string, 0, len(storages))
+	infos := make([]storageInfo, 0, len(storages))
 	for _, s := range storages {
 		storageNames = append(storageNames, s.Name)
+		infos = append(infos, storageInfo{Name: s.Name, ReadOnly: s.ReadOnly})
 	}
+	r = r.WithContext(withStorageInfo(r.Context(), infos))
 
 	// Pick the adapter (= storage name) from the path prefix; fall
 	// back to the first storage when the caller didn't specify one.
 	adapter, rel := splitAdapterPath(pathStr)
+	// ⚠⚠ The LISTING branch had no traversal guard while download, preview and
+	// every mutating verb did, and that asymmetry was the whole exploit: on a
+	// Windows host `?action=index&path=..\depo-gizli` answered 200 with a
+	// directory outside the storage root, while `action=download` on the very
+	// same path answered 400 "bad path". Names, sizes and timestamps are not
+	// nothing — with numbered roots (`storage1` reaching `storage10`) that is
+	// another tenant's file list.
+	//
+	// ⚠ This is defence in depth, NOT the fix. The fix is in the driver, which
+	// now cleans host separators before it cleans the path and tests the root
+	// boundary as a path rather than as a string prefix. This guard is here
+	// because it protects EVERY driver — including a third-party plugin
+	// backend with its own idea of resolve — and because a listing endpoint
+	// that is the only unguarded one is how this went unnoticed.
+	if pathHasDotDot(rel) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+		return
+	}
+	// ⚠⚠ filex's own trash, version history and thumbnail trees are never
+	// served by path — not listed, not searched, not previewed, not
+	// downloaded. Each has its own API keyed by something other than a path
+	// (the trash by original path + node id, versions by node id, thumbnails
+	// by node id), so no legitimate caller asks for these here.
+	//
+	// Measured 2026-09-21 before this guard: a `file.trashed` notification
+	// targeted `.filex-trash/<key>`, and clicking it answered this index with
+	// 200 and a breadcrumb reading `docs › .filex-trash`. The answer is the
+	// same 404 a folder that does not exist gets, so the refusal says nothing
+	// about what is inside.
+	//
+	// `.filex-open` is deliberately NOT refused here (syspath.OpenWith): the
+	// desktop app lists, uploads to and downloads from it by exact path, and a
+	// refusal would read to it as "unchanged" and drop the edit. It is kept out
+	// of every listing, search and view instead.
+	if syspath.Sealed(rel) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
 	if adapter == "" {
 		if len(storages) == 0 {
 			writeJSON(w, http.StatusOK, map[string]any{
-				"adapter":   "",
-				"storages":  storageNames,
-				"dirname":   "",
-				"read_only": false,
-				"files":     []any{},
+				"adapter":      "",
+				"storages":     storageNames,
+				"storage_info": infos,
+				"dirname":      "",
+				"read_only":    false,
+				"files":        []any{},
 			})
 			return
 		}
@@ -369,6 +416,9 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 	switch action {
 	case "index", "subfolders":
 		h.vfIndex(w, r, current, rel, storageNames, action == "subfolders")
+		return
+	case "changes":
+		h.vfChanges(w, r, current, rel)
 		return
 	case "search":
 		filter := q.Get("filter")
@@ -466,11 +516,19 @@ func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Stor
 	//   - Only a request with NO Range header can be answered "not yet". A
 	//     Range is a resume or a seek from a client already committed to a
 	//     body, and 202 is not an answer it can use.
+	//   - Only a caller that can USE "not yet" gets it: a browser navigation
+	//     (the wait page) or a client that sends X-Filex-Accept-Prepare
+	//     (acceptsPrepare). Everyone else asked for a file and gets the file,
+	//     and no preparation is started behind its back. Until v0.42 every
+	//     non-browser caller got the 202 JSON, and filex's own sync client took
+	//     the 2xx for the file: it wrote the JSON to disk and uploaded it over
+	//     the real one. Old clients stay in the field for months, so the fix
+	//     has to live here, where it protects all of them at once.
 	if r.URL.Query().Get("cache") == "status" {
 		writeCacheStatus(w, src.Status(r.Context(), stat))
 		return
 	}
-	if asAttachment && r.Header.Get("Range") == "" {
+	if asAttachment && r.Header.Get("Range") == "" && (wantsHTML(r) || acceptsPrepare(r)) {
 		if prep := src.Prepare(r.Context(), stat); prep != nil && !prep.Ready {
 			writeCachePreparing(w, r, path.Base(rel), prep)
 			return
@@ -672,13 +730,15 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
 		return
 	}
+	annotateAppBadges(r.Context(), h.Store, s.ID, files)
 	resp := map[string]any{
-		"adapter":   s.Name,
-		"storages":  storageNames,
-		"dirname":   joinAdapterPath(s.Name, dirname),
-		"read_only": s.ReadOnly,
-		"perm":      permString(set, rel),
-		"files":     files,
+		"adapter":      s.Name,
+		"storages":     storageNames,
+		"storage_info": storageInfoFrom(r.Context()),
+		"dirname":      joinAdapterPath(s.Name, dirname),
+		"read_only":    s.ReadOnly,
+		"perm":         permString(set, rel),
+		"files":        files,
 	}
 	/* wiring:e2 — E2E-encrypted folder awareness: badge encrypted dir rows
 	   (e2e:true) and, when the listed dir sits inside an encrypted subtree,
@@ -769,13 +829,15 @@ func (h *Manager) vfIndexFromDriver(w http.ResponseWriter, r *http.Request, s *m
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
 		return true
 	}
+	annotateAppBadges(r.Context(), h.Store, s.ID, files)
 	resp := map[string]any{
-		"adapter":   s.Name,
-		"storages":  storageNames,
-		"dirname":   joinAdapterPath(s.Name, clean),
-		"read_only": s.ReadOnly,
-		"perm":      permString(set, clean),
-		"files":     files,
+		"adapter":      s.Name,
+		"storages":     storageNames,
+		"storage_info": storageInfoFrom(r.Context()),
+		"dirname":      joinAdapterPath(s.Name, clean),
+		"read_only":    s.ReadOnly,
+		"perm":         permString(set, clean),
+		"files":        files,
 	}
 	/* wiring:e2 — cold-cache fallback: a freshly-created encrypted folder
 	   (marker uploaded seconds ago, sync not yet run) must still present
@@ -814,13 +876,11 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 		if isDir {
 			typ = "dir"
 		}
-		// Hide the same internal entries the cache projector hides.
-		if strings.Contains(o.Path, ".thumbs") || o.Name == ".keepdir" ||
-			o.Name == ".versions" || strings.Contains(o.Path, ".versions") {
-			continue
-		}
-		// Trash bucket — never expose in regular listings.
-		if o.Name == ".filex-trash" || strings.Contains(o.Path, ".filex-trash") {
+		// filex's own entries — the same syspath.IsName rule the cache
+		// projector applies, so a cold listing and a warm one agree. Judged
+		// by the entry's NAME: what is listed here are the children of the
+		// folder that was asked for (see projectFileNodes for why not the path).
+		if syspath.IsName(o.Name) {
 			continue
 		}
 		/* wiring:e2 — hide the encrypted-folder marker (same contract as
@@ -853,10 +913,33 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 		if !o.Mtime.IsZero() {
 			entry["last_modified"] = o.Mtime.UnixMilli()
 		}
+		// ⚠ A driver reports KindSymlink only for a link it will NOT follow —
+		// out of the storage root with follow_symlinks off, broken, or remote
+		// and unresolvable. `type` stays inside the closed 'file' | 'dir'
+		// union the explorer's FileNode declares, so an older client renders
+		// exactly the row it rendered before; these two keys are additive and
+		// let a client that knows about them say WHY the row will not open.
+		// Without them the user gets issue #34's original complaint back: a
+		// 0-byte file, no explanation.
+		if o.Kind == storage.KindSymlink {
+			entry["symlink"] = true
+			if st := o.Metadata[storage.MetaLinkState]; st != "" {
+				entry["link_state"] = st
+			}
+		}
 		out = append(out, entry)
 	}
 	return out
 }
+
+// The toolbar search's page sizes. The index is asked for managerSearchPage
+// hits; without it, the SQL fallback reads a window of FallbackOverFetch times
+// that from the storage — or managerCrossStoragePage times that from EACH
+// storage when the search spans them.
+const (
+	managerSearchPage       = 250
+	managerCrossStoragePage = 100
+)
 
 // vfSearch runs a search inside the storage and projects matches onto
 // the FileNode shape. The dirname stays at the requested folder so the
@@ -865,6 +948,11 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 // Strategy: try the Bleve full-text index first (handles content + name
 // matching, fuzzy, prefix). Fall back to SQL LIKE on `nodes.name` when
 // the index is missing, returns nothing, or errors.
+//
+// The response carries `truncated`: true when more rows matched than came
+// back — the index filled its page, or the fallback filled its window — so a
+// client can say "narrow your search" instead of letting a cut list read as
+// the whole answer.
 func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Storage, rel, filter string, storageNames []string) {
 	if filter == "" {
 		h.vfIndex(w, r, s, rel, storageNames, false)
@@ -915,6 +1003,14 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		if n == nil || n.DeletedAt != nil {
 			return false
 		}
+		// A hit inside filex's own directories is not a result. The index
+		// holds every catalogued node, the desktop's open-with working copies
+		// and version snapshots included, so without this the toolbar found
+		// `.filex-open/<session>-Plan.docx` for "Plan" (measured 2026-09-21).
+		// Judged by the WHOLE path: a search spans the storage, not one folder.
+		if syspath.Hidden(n.Path) {
+			return false
+		}
 		if confined && !scope.CanAccessStorage(n.StorageID) {
 			return false
 		}
@@ -929,6 +1025,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		return crossStorage || n.StorageID == s.ID
 	}
 
+	truncated := false
 	switch {
 	case parsed.HasTagFilter() && parsed.Text == "":
 		// A bare `tag:x` lists the tagged nodes; there is no text to score.
@@ -938,7 +1035,9 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 			}
 		}
 	case h.Index != nil:
-		hits := h.Index.SafeSearchFiltered(r.Context(), parsed.Text, 250, search.ScopeName, tagFilter)
+		hits := h.Index.SafeSearchFiltered(r.Context(), parsed.Text, managerSearchPage, search.ScopeName, tagFilter)
+		// The index returns at most a page; a full page is a cut answer.
+		truncated = len(hits) >= managerSearchPage
 		for _, hit := range hits {
 			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
 			if err != nil || !keep(n) {
@@ -951,6 +1050,23 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 	// 2) Fall back to SQL LIKE when the index didn't return anything.
 	if len(nodes) == 0 && parsed.Text != "" {
 		plan := search.PlanFallback(parsed.Text)
+		// What is said about the answer is said about the fallback's rows now.
+		truncated = false
+		// window reads one storage's share: every word of the query a
+		// condition, ranked in SQL before the LIMIT (the longest word — exact
+		// and prefix names first), and one row past it, because a row beyond
+		// the window is the only proof it was full.
+		window := func(storageID int64, size int) ([]*model.Node, error) {
+			rows, err := plan.Candidates(r.Context(), h.Store, storageID, size+1)
+			if err != nil {
+				return nil, err
+			}
+			if len(rows) > size {
+				truncated = true
+				rows = rows[:size]
+			}
+			return rows, nil
+		}
 		accept := func(rows []*model.Node) {
 			for _, n := range rows {
 				// ⚠ Same choke point as keep() above — the index branch runs
@@ -971,7 +1087,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 			storages, err := h.Store.ListEnabledStorages(r.Context())
 			if err == nil {
 				for _, st := range storages {
-					rows, err := h.Store.SearchNodes(r.Context(), st.ID, plan.Like, 100*search.FallbackOverFetch)
+					rows, err := window(st.ID, managerCrossStoragePage*search.FallbackOverFetch)
 					if err != nil {
 						continue
 					}
@@ -979,7 +1095,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 				}
 			}
 		} else {
-			fallback, err := h.Store.SearchNodes(r.Context(), s.ID, plan.Like, 250*search.FallbackOverFetch)
+			fallback, err := window(s.ID, managerSearchPage*search.FallbackOverFetch)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
@@ -988,8 +1104,8 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		}
 		// The toolbar is the box people actually type into, so its
 		// index-less answer is ranked by the same tiers as everybody
-		// else's. Without this the rows arrive in `ORDER BY name` and the
-		// exact match can sit below an alphabetically luckier prefix.
+		// else's. SQL ranked only by the longest word, to decide which rows
+		// make the window; this orders them by the whole query.
 		sort.SliceStable(nodes, func(a, b int) bool {
 			ra := plan.Rank(nodes[a].Name, nodes[a].Path)
 			rb := plan.Rank(nodes[b].Name, nodes[b].Path)
@@ -1039,12 +1155,15 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 	}
 
 	files := projectFileNodes(s.Name, nodes, false, nil, h.ThumbSigner, h.hydrateOwnerNames(r.Context(), nodes))
+	annotateAppBadges(r.Context(), h.Store, s.ID, files)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"adapter":   s.Name,
-		"storages":  storageNames,
-		"dirname":   joinAdapterPath(s.Name, rel),
-		"read_only": s.ReadOnly,
-		"files":     files,
+		"adapter":      s.Name,
+		"storages":     storageNames,
+		"storage_info": storageInfoFrom(r.Context()),
+		"dirname":      joinAdapterPath(s.Name, rel),
+		"read_only":    s.ReadOnly,
+		"files":        files,
+		"truncated":    truncated,
 	})
 }
 
@@ -1115,6 +1234,12 @@ func (h *Manager) Stat(w http.ResponseWriter, r *http.Request) {
 	// it (see confine_guard.go). Same 404 as the miss above, so a foreign id is
 	// indistinguishable from one that never existed.
 	if !rootAllows(r.Context(), h.Store, node.StorageID, node.Path) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	// A row inside filex's own trash / version / thumbnail trees is not
+	// described here either — the same 404 as a miss (see Read).
+	if syspath.Sealed(node.Path) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
@@ -1213,6 +1338,13 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 	// confine.Middleware; the `?id=` shape it could not reach, so a confined
 	// token read another folder's BYTES by id. Same 404 as the miss above.
 	if !rootAllows(r.Context(), h.Store, storageID, aclRel) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	// filex's own trash / version / thumbnail trees are never served by path
+	// or by the id of a row that lives in them (a trashed row's path IS its
+	// trash key). Same rule, same 404, as the manager's listVuefinder guard.
+	if syspath.Sealed(aclRel) || syspath.Sealed(filePath) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
@@ -1380,14 +1512,26 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 		if n.DeletedAt != nil {
 			continue
 		}
-		// Hide internal buckets (trash, version history, thumbnails) from
-		// regular listings — they have dedicated surfaces / are implementation
-		// detail. The trash bucket lists via /admin/trash.
-		if strings.HasPrefix(n.Path, "/.filex-trash") || strings.HasPrefix(n.Path, ".filex-trash") || n.Name == ".filex-trash" {
-			continue
-		}
-		if n.Name == ".versions" || n.Name == ".thumbs" ||
-			strings.Contains(n.Path, "/.versions") || strings.Contains(n.Path, "/.thumbs") {
+		// filex's own entries (syspath.IsName: trash, version history,
+		// thumbnails, the desktop's open-with working area, keep markers)
+		// never appear as a row. They have dedicated surfaces or are
+		// implementation detail.
+		//
+		// ⚠⚠ Judged by NAME, not by path. Every caller hands this either the
+		// children of the folder that was asked for, or hits that vfSearch's
+		// keep() has already judged by their whole path. Judging children by
+		// their full path would also hide the contents of `.filex-open` from
+		// the one client that is supposed to read them: the desktop app lists
+		// that folder to see whether the editor saved its copy, and reads an
+		// empty listing as "nothing changed" — the edit would never reach the
+		// original, and nobody would be told.
+		//
+		// ⚠ The rule used to be hand-written here and in projectDriverObjects,
+		// the two copies disagreeing (this one did not hide the keep marker;
+		// that one used `strings.Contains(o.Path, ".thumbs")`, which also hid a
+		// person's own `my.thumbs.txt`), and neither knew `.filex-open`, so it
+		// was listed to everyone (2026-09-21, the owner's report).
+		if syspath.IsName(n.Name) {
 			continue
 		}
 		/* wiring:e2 — the encrypted-folder marker is an implementation
@@ -1406,6 +1550,12 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 		if dirsOnly && !isDir {
 			continue
 		}
+		// ⚠ The wire type stays a closed 'file' | 'dir' union — the explorer's
+		// FileNode declares it that way and widening it would be a breaking
+		// change for every embedder of @brftech/filex. A symlink row is one
+		// the driver refused to follow (out of root, broken, or remote and
+		// unresolved); it is reported as a file and FLAGGED, so a client can
+		// explain it instead of drawing issue #34's unexplained 0-byte file.
 		typ := "file"
 		if isDir {
 			typ = "dir"
@@ -1420,6 +1570,9 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 			"size":      n.Size,
 			"mime_type": n.Mime,
 			"storage":   adapter,
+		}
+		if n.Type == model.NodeTypeSymlink {
+			entry["symlink"] = true
 		}
 		if n.Etag != "" {
 			entry["etag"] = n.Etag
@@ -1461,21 +1614,51 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 		// "ready" or any non-pending/non-failed state through to keep
 		// the UI optimistic; if the file isn't actually there the
 		// thumb endpoint 404s and the SFC falls back to its icon.
-		if !isDir && n.Thumb != nil && (n.Thumb.State == "ready" || n.Thumb.State == "") && n.Thumb.StorageKey != "" {
+		if !isDir && thumbServable(n.Thumb) {
 			// Stamped with a short-lived signature (thumbURL): this listing is
 			// the only place that knows the caller was allowed to see the node,
 			// and an <img> cannot carry that decision in a header.
 			entry["thumb_url"] = thumbURL(signer, n.ID)
 		}
-		if n.BackendMtime != nil {
-			entry["last_modified"] = n.BackendMtime.UnixMilli()
-		} else if !n.CreatedAt.IsZero() {
-			// No backend mtime (e.g. an empty folder on a synthetic-dir store —
-			// nothing to aggregate one from) — fall back to when filex first saw
-			// the node so the row still shows a date.
-			entry["last_modified"] = n.CreatedAt.UnixMilli()
+		// No backend mtime (e.g. an empty folder on a synthetic-dir store —
+		// nothing to aggregate one from) — listingMtimeMillis falls back to
+		// when filex first saw the node so the row still shows a date. ⚠ The
+		// upload precondition (upload_expect.go) compares against this same
+		// value; keep it the one definition.
+		if ms, ok := listingMtimeMillis(n); ok {
+			entry["last_modified"] = ms
 		}
 		out = append(out, entry)
 	}
 	return out
+}
+
+// storageInfo is what a listing says about each storage the caller can see,
+// beside the bare `storages` names older clients read.
+//
+// ⚠ Why it exists: `read_only` was only ever said for the storage being
+// LISTED, so a person who could not read `/api/admin/storages` never learnt
+// that a drive was read-only until they were inside it — the admin saw
+// "Salt okunur" on the drive and no "New" button there, the non-admin saw a
+// "New" menu of greyed entries and no reason (QA, 2026-09-21). The SPA also
+// fired `GET /api/admin/storages` on every non-admin page load to try to find
+// out, and got a 403 each time. The root listing is RBAC-filtered already, so
+// saying it here tells the caller nothing about a drive they cannot open.
+type storageInfo struct {
+	Name     string `json:"name"`
+	ReadOnly bool   `json:"read_only"`
+}
+
+type storageInfoKey struct{}
+
+// withStorageInfo carries the list into the index/search responders without
+// widening their signatures (the mutating verbs call them too, and answer
+// without it — `storage_info` is then null and a client keeps what it had).
+func withStorageInfo(ctx context.Context, infos []storageInfo) context.Context {
+	return context.WithValue(ctx, storageInfoKey{}, infos)
+}
+
+func storageInfoFrom(ctx context.Context) []storageInfo {
+	v, _ := ctx.Value(storageInfoKey{}).([]storageInfo)
+	return v
 }

@@ -115,8 +115,10 @@ means draw a moving indicator, not 0%.
 
 The explorer ships a left navigation panel — the primary **+ New** menu
 (upload files · new folder · new document · request files), the destinations
-**Home · Shared with me · Recent · Starred · Trash** (plus **My files** when
-the caller reaches at most one storage), the tags in use, and the storages the
+**Home · Shared with me · My shares · Recent · Starred · Trash** (plus **My
+files** when the caller reaches at most one storage), your tags in two groups
+(**Personal** and **Team**), an **Apps** section with one row per installed
+app's own page, and the storages the
 caller can see (a storage reached through a grant is marked *Shared*). It is on
 by default on every surface; the viewer collapses it to an icon rail from the
 control at the far left of the **top bar** — above the panel rather than inside
@@ -130,8 +132,18 @@ const config = {
   auth: { kind: 'bearer', token },
   sideNav: true,          // default; `rootPath` flips it off
   uiProfile: 'simple',    // 'standard' (default) | 'simple'
+  mySharesVisible: true,  // draw the "My shares" row — only if you handle @open-my-shares
+  appHomePage: true,      // an app's home view opens as YOUR page — handle @open-app-home
 };
 ```
+
+⚠ `mySharesVisible` and `appHomePage` are **off by default**, and not because
+the surfaces are optional: each needs the host to take an event and open a
+page of its own — `@open-my-shares` for the links this person made, and
+`@open-app-home` for an app's `home` view (`{base}app/{plugin}/{view}`, with
+the open section in `?section=`). Only this Vue component emits them; the web
+component and the React adapter do not forward them yet, so switching the keys
+on there would draw a row that goes nowhere.
 
 The panel's last section is how **How to connect** (the per-protocol guides,
 built from your deployment) and **API keys** (mint and revoke the tokens

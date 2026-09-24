@@ -1,0 +1,105 @@
+{
+  "dry_run": {
+    "kind": "language_pack",
+    "languages": [
+      {
+        "code": "ar",
+        "keys": 2410,
+        "percent": 82,
+        "rtl": true,
+        "total": 2900,
+        "translated": 2398,
+        "unknown": 12
+      },
+      {
+        "code": "es",
+        "keys": 2830,
+        "percent": 97,
+        "rtl": false,
+        "total": 2900,
+        "translated": 2830,
+        "unknown": 0
+      }
+    ],
+    "manifest": {
+      "description": {
+        "en": "The whole interface in Spanish.",
+        "tr": "Tüm arayüz İspanyolca."
+      },
+      "label": {
+        "en": "Spanish language pack",
+        "tr": "İspanyolca dil paketi"
+      },
+      "languages": [
+        "en",
+        "tr"
+      ],
+      "limits": {},
+      "manifest_version": 1,
+      "name": "lang-es",
+      "permissions": [],
+      "ui_locales": {
+        "ar": {
+          "ctx.download": "تحميل"
+        },
+        "es": {
+          "appPlugins.title": "Aplicaciones",
+          "ctx.download": "Descargar"
+        }
+      },
+      "version": "1.0.0"
+    },
+    "manifest_sha256": "5d41402abc4b2a76b9719d911017c592ae2e8e9e5d41402abc4b2a76b9719d91",
+    "permissions": [],
+    "signed": false,
+    "wasm_bytes": 0,
+    "wasm_sha256": ""
+  },
+  "row": {
+    "actions": 0,
+    "created_at": "2026-09-21T10:00:00Z",
+    "description": {
+      "en": "The whole interface in Spanish.",
+      "tr": "Tüm arayüz İspanyolca."
+    },
+    "enabled": true,
+    "id": 9,
+    "kind": "language_pack",
+    "label": {
+      "en": "Spanish language pack",
+      "tr": "İspanyolca dil paketi"
+    },
+    "languages": [
+      {
+        "code": "ar",
+        "keys": 2410,
+        "percent": 82,
+        "rtl": true,
+        "total": 2900,
+        "translated": 2398,
+        "unknown": 12
+      },
+      {
+        "code": "es",
+        "keys": 2830,
+        "percent": 97,
+        "rtl": false,
+        "total": 2900,
+        "translated": 2830,
+        "unknown": 0
+      }
+    ],
+    "name": "lang-es",
+    "permissions": [],
+    "public_pages": 0,
+    "scheduled": false,
+    "sha256": "5d41402abc4b2a76b9719d911017c592ae2e8e9e5d41402abc4b2a76b9719d91",
+    "signed": false,
+    "source": "github",
+    "source_url": "https://github.com/BRF-Tech/filex-lang-es@main",
+    "state": "running",
+    "updated_at": "2026-09-21T10:00:00Z",
+    "version": "1.0.0",
+    "views": 0
+  }
+}

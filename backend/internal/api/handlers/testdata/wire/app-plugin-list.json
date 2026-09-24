@@ -1,0 +1,45 @@
+{
+  "plugins": [
+    {
+      "actions": 1,
+      "created_at": "2026-09-20T10:00:00Z",
+      "description": {
+        "en": "Send a document out for signature.",
+        "tr": "Bir belgeyi imzaya gönderin."
+      },
+      "enabled": true,
+      "id": 7,
+      "kind": "app",
+      "label": {
+        "en": "e-Signature",
+        "tr": "e-İmza"
+      },
+      "name": "sign",
+      "permissions": [
+        "files:read",
+        "files:write",
+        "public_pages",
+        "state"
+      ],
+      "public_pages": 1,
+      "scheduled": false,
+      "sha256": "a9950e0d84a62a1b30c952736b097e5f3cde019564724dc3c0432a36f7c0d091",
+      "signed": true,
+      "source": "github",
+      "source_url": "https://github.com/BRF-Tech/filex-sign",
+      "state": "",
+      "updated_at": "2026-09-20T10:00:00Z",
+      "version": "1.2.0",
+      "views": 1
+    }
+  ],
+  "runtime": {
+    "arch_ok": true,
+    "disabled_reason": "",
+    "enabled": true,
+    "engines": {
+      "ffmpeg": true
+    },
+    "requires_signature": false
+  }
+}

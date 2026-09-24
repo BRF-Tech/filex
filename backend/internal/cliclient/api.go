@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/brf-tech/filex/backend/internal/regfile"
 )
 
 // managerPath is the server's combined browse/mutate endpoint. Every verb
@@ -154,11 +156,41 @@ func (c *Client) Upload(ctx context.Context, localPath, remote string) (RemotePa
 		name = rp.Base()
 	}
 
-	raw, err := c.uploadFile(ctx, destDir, name, localPath)
+	raw, err := c.uploadFile(ctx, destDir, name, localPath, "")
 	if err != nil {
 		return RemotePath{}, nil, err
 	}
 	return destDir.Join(name), raw, nil
+}
+
+// ErrPreconditionFailed is a conditional upload the server refused because
+// the target is no longer what the caller last saw (HTTP 412, code
+// PRECONDITION_FAILED). Nothing was written.
+var ErrPreconditionFailed = errors.New("the file changed on the server since it was listed")
+
+// UploadTo sends localPath to destDir/name with no destination probing and an
+// optional overwrite precondition — the call `filex sync` makes.
+//
+// expect is "" (no precondition), "none" (the target must not exist yet) or
+// "<size>:<last_modified-ms>" (the target must still be exactly what a listing
+// reported). A refusal comes back as ErrPreconditionFailed. An older server
+// ignores the field and writes unconditionally — no worse than before.
+//
+// ⚠ No remoteIsDir probe, unlike Upload: the caller already knows the target
+// is a file path, and the probe is a full listing round-trip in front of every
+// file — on a server behind a CDN proxy (~0.35 s per request, measured) that
+// was a third of the time a one-line edit took to leave the machine.
+func (c *Client) UploadTo(ctx context.Context, localPath string, destDir RemotePath, name, expect string) ([]byte, error) {
+	return c.uploadFile(ctx, destDir, name, localPath, expect)
+}
+
+// preconditionErr maps a 412 onto ErrPreconditionFailed.
+func preconditionErr(err error) error {
+	var ae *APIError
+	if errors.As(err, &ae) && ae.Status == http.StatusPreconditionFailed {
+		return fmt.Errorf("%w (%v)", ErrPreconditionFailed, err)
+	}
+	return err
 }
 
 // uploadFile sends one local file into destDir under name. The shared core
@@ -174,32 +206,34 @@ func (c *Client) Upload(ctx context.Context, localPath, remote string) (RemotePa
 // The decision lives here, in the one function all three commands call, rather
 // than in each command: `filex sync` is the case that matters most and it never
 // touches Upload at all.
-func (c *Client) uploadFile(ctx context.Context, destDir RemotePath, name, localPath string) ([]byte, error) {
+func (c *Client) uploadFile(ctx context.Context, destDir RemotePath, name, localPath, expect string) ([]byte, error) {
 	fi, err := os.Stat(localPath)
 	if err != nil {
 		return nil, err
 	}
 	if th := c.stagedThreshold(); th > 0 && fi.Size() >= th {
-		raw, serr := c.uploadStaged(ctx, destDir, name, localPath, fi.Size(), fi.ModTime())
+		raw, serr := c.uploadStaged(ctx, destDir, name, localPath, fi.Size(), fi.ModTime(), expect)
 		if serr == nil {
 			return raw, nil
 		}
 		if !errors.Is(serr, errStagedUnsupported) {
-			return nil, serr
+			return nil, preconditionErr(serr)
 		}
 		// An older server, or one with no staging configured. Fall through —
 		// nothing has been sent yet, so the multipart POST still has the whole
 		// file to work with.
 	}
-	return c.uploadMultipart(ctx, destDir, name, localPath)
+	raw, err := c.uploadMultipart(ctx, destDir, name, localPath, expect)
+	return raw, preconditionErr(err)
 }
 
 // uploadMultipart streams one file as a single multipart POST. The body is
 // piped, so large files never load into memory — but there is no resume: a
 // dropped connection costs the whole file. That is why anything large goes
 // through uploadStaged instead.
-func (c *Client) uploadMultipart(ctx context.Context, destDir RemotePath, name, localPath string) ([]byte, error) {
-	f, err := os.Open(localPath)
+func (c *Client) uploadMultipart(ctx context.Context, destDir RemotePath, name, localPath, expect string) ([]byte, error) {
+	// regfile, not os.Open: a named pipe would hold this open forever (#38).
+	f, err := regfile.Open(localPath)
 	if err != nil {
 		return nil, err
 	}
@@ -212,11 +246,16 @@ func (c *Client) uploadMultipart(ctx context.Context, destDir RemotePath, name, 
 			if err := mw.WriteField("path", destDir.String()); err != nil {
 				return err
 			}
+			if expect != "" {
+				if err := mw.WriteField("expect", expect); err != nil {
+					return err
+				}
+			}
 			part, err := mw.CreateFormFile("file[]", name)
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(part, f); err != nil {
+			if _, err := io.Copy(part, c.UpLimit.Reader(ctx, f)); err != nil {
 				return err
 			}
 			return mw.Close()
@@ -236,8 +275,45 @@ func (c *Client) uploadMultipart(ctx context.Context, destDir RemotePath, name, 
 
 // ───────────────────────── download ─────────────────────────
 
+// SizeMismatchError is a download whose body is not the length the caller's
+// listing reported. When the server DECLARES the other length up front
+// (Content-Length, or the total of a Content-Range) not one byte reaches the
+// writer; a body that only turns out short or long at its end has reached it,
+// and the caller — which writes to a temporary file — throws it away.
+type SizeMismatchError struct {
+	Remote string
+	Want   int64 // what the listing said
+	Got    int64 // what the server declared or sent
+}
+
+func (e *SizeMismatchError) Error() string {
+	return fmt.Sprintf("%s: the server listed %d bytes but sent %d; nothing was written", e.Remote, e.Want, e.Got)
+}
+
 // Download streams the remote file into w and returns the byte count.
+//
+// ⚠ Only a body that IS the file is ever copied: a 200, or a 206 answering this
+// request's own `bytes=0-` with the whole object. Servers from v0.20 to v0.42
+// answered an unranged download of a big file on a slow storage with
+// `202 {"state":"preparing",…}`, and the old check here — anything 2xx is the
+// file — wrote that JSON to disk under the file's name. The sync engine then
+// saw a locally edited file and uploaded the JSON over the real one: 45 files
+// of 70–290 MB on one deployment, unrecoverable from version history.
+//
+// `bytes=0-` is the request no server version answers with 202 (a Range comes
+// from a client already committed to a body), so the CLI never waits on a
+// server-side copy of a file it reads exactly once anyway. Any other 2xx is
+// still refused, and nothing of it is written.
 func (c *Client) Download(ctx context.Context, remote string, w io.Writer) (int64, error) {
+	return c.DownloadSized(ctx, remote, w, -1)
+}
+
+// DownloadSized is Download for a caller that knows how big the file is — the
+// sync engine does, from the listing it planned against. want < 0 means
+// unknown. A body of any other length is a *SizeMismatchError, which on its
+// own would have caught the 202 above: the listing said 151,983,227 bytes and
+// the body was 88.
+func (c *Client) DownloadSized(ctx context.Context, remote string, w io.Writer, want int64) (int64, error) {
 	rp, err := ParseRemotePath(remote)
 	if err != nil {
 		return 0, err
@@ -252,16 +328,98 @@ func (c *Client) Download(ctx context.Context, remote string, w io.Writer) (int6
 	if err != nil {
 		return 0, err
 	}
+	req.Header.Set("Range", "bytes=0-")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+
+	declared := int64(-1) // what the server says it is sending; -1 = not said
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// The server ignored the Range (a driver that cannot seek, or an
+		// older build) and sends the whole object — which is what we asked for.
+		declared = resp.ContentLength
+	case http.StatusPartialContent:
+		cr := resp.Header.Get("Content-Range")
+		total, ok := wholeObjectRange(cr)
+		if !ok {
+			return 0, fmt.Errorf("%s: the server answered bytes=0- with %q instead of the whole file; nothing was written", remote, cr)
+		}
+		declared = total
+	case http.StatusRequestedRangeNotSatisfiable:
+		// bytes=0- of an EMPTY object: there is no byte 0 to start from. That
+		// is an empty file — but only when the server says so and the caller
+		// was not expecting bytes.
+		if total, ok := unsatisfiedRangeTotal(resp.Header.Get("Content-Range")); ok && total == 0 && want <= 0 {
+			return 0, nil
+		}
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return 0, apiErrorFrom(resp.StatusCode, b)
+	default:
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		ae := apiErrorFrom(resp.StatusCode, b)
+		if resp.StatusCode == http.StatusAccepted {
+			ae.Message = "the server is still preparing this file and sent a status report instead of it (" + ae.Message + "); nothing was written"
+		}
+		return 0, ae
 	}
-	return io.Copy(w, resp.Body)
+	if want >= 0 && declared >= 0 && declared != want {
+		return 0, &SizeMismatchError{Remote: remote, Want: want, Got: declared}
+	}
+	n, err := io.Copy(w, c.DownLimit.Reader(ctx, resp.Body))
+	if err != nil {
+		return n, err
+	}
+	if want >= 0 && n != want {
+		return n, &SizeMismatchError{Remote: remote, Want: want, Got: n}
+	}
+	if declared >= 0 && n != declared {
+		return n, fmt.Errorf("%s: the transfer ended after %d of %d bytes", remote, n, declared)
+	}
+	return n, nil
+}
+
+// wholeObjectRange reads a 206's `Content-Range: bytes 0-(N-1)/N` and returns
+// N. Anything else — a window that does not start at 0, stops short of the
+// end, or has an unknown total — is not the file.
+func wholeObjectRange(cr string) (int64, bool) {
+	spec, ok := strings.CutPrefix(strings.TrimSpace(cr), "bytes ")
+	if !ok {
+		return 0, false
+	}
+	span, totalStr, ok := strings.Cut(spec, "/")
+	if !ok {
+		return 0, false
+	}
+	startStr, endStr, ok := strings.Cut(span, "-")
+	if !ok {
+		return 0, false
+	}
+	start, err1 := strconv.ParseInt(strings.TrimSpace(startStr), 10, 64)
+	end, err2 := strconv.ParseInt(strings.TrimSpace(endStr), 10, 64)
+	total, err3 := strconv.ParseInt(strings.TrimSpace(totalStr), 10, 64)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return 0, false
+	}
+	if start != 0 || total <= 0 || end != total-1 {
+		return 0, false
+	}
+	return total, true
+}
+
+// unsatisfiedRangeTotal reads a 416's `Content-Range: bytes */N`.
+func unsatisfiedRangeTotal(cr string) (int64, bool) {
+	spec, ok := strings.CutPrefix(strings.TrimSpace(cr), "bytes */")
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(spec), 10, 64)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 // ───────────────────────── mkdir / rm ─────────────────────────

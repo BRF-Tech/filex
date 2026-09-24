@@ -126,7 +126,7 @@ async function openPanel(w: Awaited<ReturnType<typeof setup>>['w']) {
 /** The titles the open panel is showing, top to bottom. */
 function shownTitles(): string[] {
   const panel = document.body.querySelector('[data-testid="notification-panel"]');
-  return Array.from(panel?.querySelectorAll('.fx-bell__title') ?? []).map((e) => e.textContent!.trim());
+  return Array.from(panel?.querySelectorAll('.fx-nrow__title') ?? []).map((e) => e.textContent!.trim());
 }
 
 beforeEach(() => {
@@ -165,7 +165,7 @@ describe('Explore puts the existing bell in its header', () => {
 describe('NotificationBell', () => {
   it('shows the unread count on the button and says it out loud', async () => {
     const { w } = await setup();
-    expect(w.find('[data-testid="notification-bell-count"]').text()).toBe('3');
+    expect(w.find('[data-testid="unread-badge"]').text()).toBe('3');
     expect(w.find('[data-testid="notification-bell"]').attributes('aria-label')).toBe('Notifications — 3 unread');
   });
 
@@ -177,7 +177,7 @@ describe('NotificationBell', () => {
       expect(panel, 'the panel did not open').not.toBeNull();
       // Teleported: it must not live inside the header, whose `.fe` clips it.
       expect(panel!.parentElement).toBe(document.body);
-      const titles = Array.from(panel!.querySelectorAll('.fx-bell__title')).map((e) => e.textContent!.trim());
+      const titles = Array.from(panel!.querySelectorAll('.fx-nrow__title')).map((e) => e.textContent!.trim());
       expect(titles).toHaveLength(3);
       for (const t of titles) expect(t).not.toMatch(/^[a-z_]+\.[a-z_.]+$/);
       expect(titles[0]).toBe(locale === 'tr' ? 'Yeni dosya: olcum.txt' : 'New file: olcum.txt');
@@ -201,16 +201,25 @@ describe('NotificationBell', () => {
     expect(document.body.querySelector('[data-testid="notification-panel"]')).toBeNull();
   });
 
-  it('a row with no target does not throw a non-admin off the page', async () => {
+  it('a row with nothing to open is not clickable at all', async () => {
+    // ⚠⚠ It used to be a <button> whose click went to the notifications
+    // page — the page the reader was most likely already on, and one that is
+    // admin-gated, so for everybody else the click was a guard bounce that
+    // threw away the folder they were standing in. A row that is only worth
+    // reading is now only readable.
     const { w, push } = await setup({ role: 'user' });
     await openPanel(w);
-    const noTarget = document.body.querySelectorAll<HTMLButtonElement>('[data-testid="notification-row"]')[2];
+    const rowsOnScreen = document.body.querySelectorAll<HTMLElement>('[data-testid="notification-row"]');
+    const noTarget = rowsOnScreen[2];
+    expect(noTarget.getAttribute('data-clickable')).toBe('no');
+    expect(noTarget.tagName).toBe('DIV');
     noTarget.click();
     await flushPromises();
-    expect(markRead).toHaveBeenCalledWith(51);
-    // The target-less destination is the admin audit page; the route guard
-    // would bounce a non-admin to their front door.
+    expect(markRead).not.toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();
+    // The rows that DO go somewhere are still buttons.
+    expect(rowsOnScreen[0].getAttribute('data-clickable')).toBe('yes');
+    expect(rowsOnScreen[0].tagName).toBe('BUTTON');
   });
 
   it('re-reads the list on EVERY open — a row that arrived since the last one is in it', async () => {
@@ -230,7 +239,7 @@ describe('NotificationBell', () => {
     expect(shownTitles()).toHaveLength(4);
     expect(shownTitles()[0]).toBe('New file: arrived.txt');
     // …and the badge was read at the same moment as the list.
-    expect(w.find('[data-testid="notification-bell-count"]').text()).toBe('4');
+    expect(w.find('[data-testid="unread-badge"]').text()).toBe('4');
   });
 
   it('a row that raises the badge while the panel is OPEN appears without reopening', async () => {
@@ -245,20 +254,58 @@ describe('NotificationBell', () => {
     // What the App-level watcher runs every 15 s.
     await notif.syncUnread();
     await flushPromises();
-    expect(w.find('[data-testid="notification-bell-count"]').text()).toBe('4');
+    expect(w.find('[data-testid="unread-badge"]').text()).toBe('4');
     expect(shownTitles()[0]).toBe('New file: live.txt');
     expect(shownTitles()).toHaveLength(4);
   });
 
-  it('"View all" is offered to an admin only', async () => {
+  it('"See all" is offered to EVERYBODY and opens the list without leaving the explorer', async () => {
+    // ⚠⚠ This assertion used to read "offered to an admin only", and that
+    // was the bug, not the contract. Owner, 2026-09-20: *"Tüm bildirimleri gör
+    // butonu explore'dan dışarı çıkıyor; adam admin değilse göremez."* The
+    // footer pointed at `/notifications`, the admin panel's instance-wide
+    // audit page behind `requiresAdmin`, so it was hidden from every
+    // non-admin — who then had no way at all to read their sixteenth
+    // notification. It now opens a panel over the explorer, from the
+    // user-scoped endpoints, for anybody signed in.
     const user = await setup({ role: 'user' });
     await openPanel(user.w);
-    expect(document.body.querySelector('.fx-bell__all')).toBeNull();
+    const all = document.body.querySelector<HTMLButtonElement>('[data-testid="notification-view-all"]');
+    expect(all, 'a non-admin is offered no way to see all of their notifications').not.toBeNull();
+    expect(all!.textContent!.trim()).toBe('View all');
+    // ⚠ A BUTTON, not a link: nothing navigates, so nothing can be bounced
+    // by a route guard and nothing throws away the folder they are standing in.
+    expect(all!.tagName).toBe('BUTTON');
+    expect(user.notif.panelOpen).toBe(false);
+    all!.click();
+    await flushPromises();
+    expect(user.notif.panelOpen, 'the full list did not open').toBe(true);
+    expect(user.push, 'a non-admin was navigated somewhere').not.toHaveBeenCalled();
     user.w.unmount();
     document.body.innerHTML = '';
 
     const admin = await setup({ role: 'admin' });
     await openPanel(admin.w);
-    expect(document.body.querySelector('.fx-bell__all')?.textContent?.trim()).toBe('View all');
+    expect(
+      document.body.querySelector('[data-testid="notification-view-all"]'),
+      'an admin lost the same button',
+    ).not.toBeNull();
+  });
+
+  it('the admin console is a SECOND door, and only an admin is shown it', async () => {
+    // The admin page keeps its job — managing the subsystem (the webhook,
+    // everybody's rows) — and keeps its link. It is simply no longer where
+    // anybody is sent to read their own mail.
+    const user = await setup({ role: 'user' });
+    await openPanel(user.w);
+    expect(document.body.querySelector('[data-testid="notification-manage"]')).toBeNull();
+    user.w.unmount();
+    document.body.innerHTML = '';
+
+    const admin = await setup({ role: 'admin' });
+    await openPanel(admin.w);
+    const manage = document.body.querySelector<HTMLAnchorElement>('[data-testid="notification-manage"]');
+    expect(manage).not.toBeNull();
+    expect(manage!.getAttribute('href')).toBe('/admin/notifications');
   });
 });

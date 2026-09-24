@@ -65,6 +65,7 @@ import (
 // the platform operator.
 type mtFix struct {
 	URL   string
+	Srv   *httptest.Server
 	Store db.Store // UNWRAPPED: seeding must not be confined
 	SQL   *sql.DB
 	Ops   *ops.Service
@@ -91,6 +92,10 @@ type mtFix struct {
 	// of the tenant boundary is that being an admin of your own tenant buys
 	// you nothing in somebody else's.
 	A, B, Super, AdminA *http.Client
+
+	// MultiTenant is the mode the fixture was built in. Off, every account is
+	// homed in the platform provider (see newMTFix).
+	MultiTenant bool
 }
 
 const mtUserPass = "VictimPass!1"
@@ -210,10 +215,11 @@ func newMTFix(t *testing.T, multiTenant bool) *mtFix {
 	t.Cleanup(srv.Close)
 
 	f := &mtFix{
-		URL: srv.URL, Store: store, SQL: sqlDB, Ops: opsSvc, Index: idx, Notif: notifSvc,
+		URL: srv.URL, Srv: srv, Store: store, SQL: sqlDB, Ops: opsSvc, Index: idx, Notif: notifSvc,
 		ProvA: provA, ProvB: provB, StA: stA, StB: stB, RootA: rootA, RootB: rootB,
 		StA2: stA2, RootA2: rootA2,
 		UserA: userA, UserB: userB,
+		MultiTenant: multiTenant,
 	}
 	f.A = mtLogin(t, srv, "member@alpha.test", mtUserPass)
 	f.B = mtLogin(t, srv, "member@bravo.test", mtUserPass)
@@ -275,10 +281,16 @@ func mtGet(t *testing.T, c *http.Client, url string) (int, string) {
 	return resp.StatusCode, string(buf)
 }
 
-// tag labels a node. Tags live on node_meta and are SHARED across users by
-// design, which is exactly what makes the toolbar's `tag:` branch a second
-// entrance into the cross-storage listing.
+// tag labels a node with TEAM tags of the tenant its storage belongs to — the
+// shape migration 00055 gives every pre-v0.43 tag. A team tag is shared with
+// the whole tenant, which is exactly what makes the toolbar's `tag:` branch a
+// second entrance into the cross-storage listing.
 func (f *mtFix) tag(t *testing.T, nodeID int64, tags ...string) {
 	t.Helper()
-	require.NoError(t, f.Store.SetNodeTags(context.Background(), nodeID, tags))
+	ctx := context.Background()
+	n, err := f.Store.GetNode(ctx, nodeID)
+	require.NoError(t, err)
+	tenant, _, err := f.Store.GetProviderIDForStorage(ctx, n.StorageID)
+	require.NoError(t, err)
+	testutil.TagNode(t, f.Store, nodeID, tenant, tags...)
 }

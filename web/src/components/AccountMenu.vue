@@ -35,10 +35,12 @@ import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue';
  * settings rows, which are drawn four pixels from the explorer's own toolbar —
  * so they are drawn from the explorer's own vocabulary (stroked, 24×24,
  * `currentColor`), and never from an emoji or a second icon library. */
-import { actionIconSvg } from '@brftech/filex-core';
+import { ProductVersion, actionIconSvg, localeTag, personName, productVersionLine } from '@brftech/filex-core';
 
 import { useAuthStore } from '@/stores/auth';
-import { anchorUnderRightEdge, refElement } from '@/lib/anchoredPanel';
+import { useCapabilitiesStore } from '@/stores/capabilities';
+import { anchorUnderEndEdge, refElement } from '@/lib/anchoredPanel';
+import { dirOfElement } from '@brftech/filex-core';
 
 export interface AccountAction {
   key: string;
@@ -58,7 +60,8 @@ export interface AccountAction {
 const props = defineProps<{
   /** The rows, in order. */
   actions: AccountAction[];
-  locale: 'en' | 'tr';
+  /** The active language — any offered one, a language pack's included. */
+  locale: string;
   /** Accessible name when this account has neither a name nor an address. */
   fallbackLabel: string;
 }>();
@@ -66,16 +69,11 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'select', key: string): void }>();
 
 const auth = useAuthStore();
+/** Which filex this is — the server's own answer (capabilities). */
+const caps = useCapabilitiesStore();
 
-/** The account's own words for itself, best first. */
-const displayName = computed(() => {
-  const u = auth.user;
-  return (
-    (u?.display_name || '').trim() ||
-    (u?.username || '').trim() ||
-    (u?.email || '').trim()
-  );
-});
+/** The account as every screen names a person (core personName). */
+const displayName = computed(() => personName(auth.user));
 
 const avatarUrl = computed(() => (auth.user?.avatar_url || '').trim());
 
@@ -98,14 +96,14 @@ const avatarUrl = computed(() => (auth.user?.avatar_url || '').trim());
 const initial = computed(() => {
   const s = displayName.value;
   if (!s) return '';
-  return [...s][0].toLocaleUpperCase(props.locale === 'tr' ? 'tr-TR' : 'en-US');
+  return [...s][0].toLocaleUpperCase(localeTag(props.locale));
 });
 
 const label = computed(() => displayName.value || props.fallbackLabel);
 
 /* ── where the teleported panel goes ─────────────────────────────────── */
 const btnEl = ref<InstanceType<typeof MenuButton> | null>(null);
-const pos = ref({ top: '0px', right: '0px' });
+const pos = ref<{ top: string; right?: string; left?: string }>({ top: '0px', right: '0px' });
 
 /**
  * Recorded from the button, not from the panel: the panel does not exist until
@@ -114,10 +112,16 @@ const pos = ref({ top: '0px', right: '0px' });
  * wherever the button used to be. Neither handler intercepts the event.
  */
 function syncPos() {
-  const r = refElement(btnEl.value)?.getBoundingClientRect();
+  const el = refElement(btnEl.value);
+  const r = el?.getBoundingClientRect();
   if (!r) return;
-  const { top, right } = anchorUnderRightEdge(r, { width: window.innerWidth, height: window.innerHeight });
-  pos.value = { top, right };
+  // ⚠ RTL: flush with the avatar's END edge — its left one in RTL.
+  const { top, right, left } = anchorUnderEndEdge(
+    r,
+    { width: window.innerWidth, height: window.innerHeight },
+    { dir: dirOfElement(el) },
+  );
+  pos.value = { top, right, left };
 }
 </script>
 
@@ -172,7 +176,7 @@ function syncPos() {
       >
         <MenuItems
           class="fx-acctmenu"
-          :style="{ top: pos.top, right: pos.right }"
+          :style="{ top: pos.top, right: pos.right, left: pos.left }"
           data-testid="explore-account-menu"
         >
           <!-- The signed-in identity, as a heading rather than a row: it is
@@ -198,6 +202,14 @@ function syncPos() {
               <span class="fx-acctmenu__label">{{ a.label }}</span>
             </button>
           </MenuItem>
+          <!-- Which filex this is, at the foot: a line, not a row — the same
+               piece the admin panel's account menu and user settings draw
+               (Burak, 2026-09-24: somewhere a person can find it). -->
+          <ProductVersion
+            v-if="productVersionLine(caps.data.version)"
+            :version="caps.data.version"
+            class="fx-acctmenu__version"
+          />
         </MenuItems>
       </transition>
     </Teleport>
@@ -219,7 +231,7 @@ function syncPos() {
   align-items: center;
   gap: 2px;
   height: var(--fe-h-md);
-  padding: 0 4px 0 2px;
+  padding-block: 0; padding-inline: 2px 4px;
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
@@ -303,6 +315,13 @@ function syncPos() {
   font-size: var(--fe-text-md);
   outline: none;
 }
+/* The version line at the foot: the heading's own padding, mirrored, with a
+   hairline above it so it reads as the end of the menu, not as a row. */
+.fx-acctmenu__version {
+  margin-block-start: 4px;
+  padding: 8px 10px 6px;
+  border-block-start: 1px solid var(--fe-border);
+}
 .fx-acctmenu__who {
   margin: 0;
   padding: 6px 10px 8px;
@@ -323,7 +342,7 @@ function syncPos() {
   background: transparent;
   color: var(--fe-text);
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 /* ⚠ A fixed box, drawn or not. The glyph column has to be a column: a row
@@ -363,8 +382,8 @@ function syncPos() {
 .fx-acctmenu__item.is-separated {
   margin-top: 4px;
   border-top: 1px solid var(--fe-border-soft);
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
   padding-top: 11px;
 }
 .fx-acct-in {

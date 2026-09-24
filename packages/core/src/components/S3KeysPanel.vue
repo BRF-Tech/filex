@@ -22,7 +22,8 @@ import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { S3AccessKey } from '../types/S3Keys';
 import { useLocale } from '../composables/useLocale';
 import { useS3Keys } from '../composables/useS3Keys';
-import { useScrolledX } from '../composables/useScrolledX';
+import DataTable, { type DataColumn } from './DataTable.vue';
+import type { ContextAction } from './ContextMenu.vue';
 import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
@@ -38,13 +39,13 @@ const emit = defineEmits<{
 
 const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
 const { t, formatDate } = useLocale(locale);
-const { scrolledX, onScroll } = useScrolledX();
 
 const {
   keys,
   connection,
   loading,
   error,
+  errorHint,
   canMint,
   revealed,
   guideKey,
@@ -95,6 +96,70 @@ async function mint() {
   } finally {
     busy.value = false;
   }
+}
+
+/**
+ * The row's verbs. They used to be two loose text buttons in the last cell;
+ * they are now the entries behind the row's one `Actions` control
+ * (RowActions → ContextMenu, the menu the explorer's ⋮ opens).
+ *
+ * ⚠ `revoke` keeps its two-step confirmation exactly as it was: the first
+ * pick arms it and the label becomes "Confirm", the second pick revokes.
+ * Nothing about a credential's destruction got easier in the move.
+ */
+function rowActions(k: S3AccessKey): ContextAction[] {
+  /* The whole control used to be `:disabled="busy"`; the table draws the
+     control now, so each verb carries it and RowActions greys a button with
+     nothing usable behind it. */
+  return [
+    {
+      key: 'toggle',
+      label: k.disabled_at ? t('conn.s3keys.enable') : t('conn.s3keys.disable'),
+      icon: k.disabled_at ? 'check' : 'lock',
+      disabled: busy.value,
+    },
+    {
+      key: 'revoke',
+      label: confirmRevoke.value === k.id ? t('conn.s3keys.confirm') : t('conn.s3keys.revoke'),
+      icon: 'delete',
+      danger: true,
+      disabled: busy.value,
+    },
+  ];
+}
+
+/** The list's columns — the product's one table (DataTable). */
+const columns = computed<DataColumn<S3AccessKey>[]>(() => [
+  {
+    id: 'label',
+    label: t('conn.s3keys.col.label'),
+    sortable: true,
+    width: 180,
+    format: (k) => k.label || t('conn.s3keys.noLabel'),
+  },
+  {
+    id: 'key',
+    label: t('conn.s3keys.col.key'),
+    sortable: true,
+    width: 200,
+    sortValue: (k) => k.access_key_id,
+    title: (k) => k.access_key_id,
+  },
+  { id: 'scope', label: t('conn.s3keys.col.scope'), sortable: true, width: 160, format: scopeOf },
+  {
+    id: 'lastUsed',
+    label: t('conn.s3keys.col.lastUsed'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 140,
+    format: (k) => (k.last_used_at ? shortDate(k.last_used_at) : t('conn.s3keys.neverUsed')),
+    sortValue: (k) => (k.last_used_at ? new Date(k.last_used_at).getTime() : null),
+  },
+]);
+
+function onRowAction(key: string, k: S3AccessKey) {
+  if (key === 'toggle') void toggle(k);
+  else if (key === 'revoke') void revoke(k);
 }
 
 async function toggle(k: S3AccessKey) {
@@ -183,6 +248,8 @@ function scopeOf(k: S3AccessKey): string {
 
     <p v-if="canMint === false" class="fe-s3keys__muted">{{ t('conn.s3keys.cannotMint') }}</p>
     <p v-if="error" class="fe-s3keys__warn">{{ error }}</p>
+    <!-- The fix, for an administrator the server chose to tell (admin_hint). -->
+    <p v-if="error && errorHint" class="fe-s3keys__hint" data-testid="s3keys-admin-hint">{{ errorHint }}</p>
 
     <!-- ── mint ─────────────────────────────────────────────────── -->
     <div v-if="canMint" class="fe-s3keys__form">
@@ -232,37 +299,28 @@ function scopeOf(k: S3AccessKey): string {
     </div>
 
     <!-- ── the keys ─────────────────────────────────────────────── -->
+    <!-- ⚠ THE table (DataTable — the explorer's own), not a table of its own:
+         reachable from the admin panel's Connections menu and from the
+         explorer, so it resizes, sorts, hides and moves columns and remembers
+         that on the account (`conn.s3keys`), like every other table. -->
     <p v-if="loading" class="fe-s3keys__muted">…</p>
-    <div v-else-if="keys.length" class="fe-s3keys__scroll" :class="{ 'is-scrolled-x': scrolledX }" @scroll.passive="onScroll">
-      <table class="fe-s3keys__table">
-        <thead>
-          <tr>
-            <th>{{ t('conn.s3keys.col.label') }}</th>
-            <th>{{ t('conn.s3keys.col.key') }}</th>
-            <th>{{ t('conn.s3keys.col.scope') }}</th>
-            <th>{{ t('conn.s3keys.col.lastUsed') }}</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="k in keys" :key="k.id" :class="{ 'is-off': !!k.disabled_at }">
-            <td>{{ k.label || t('conn.s3keys.noLabel') }}</td>
-            <td><code>{{ k.access_key_id }}</code></td>
-            <td>{{ scopeOf(k) }}</td>
-            <td>{{ k.last_used_at ? shortDate(k.last_used_at) : t('conn.s3keys.neverUsed') }}</td>
-            <td class="fe-s3keys__actions">
-              <button class="fe-s3keys__link" :disabled="busy" @click="toggle(k)">
-                {{ k.disabled_at ? t('conn.s3keys.enable') : t('conn.s3keys.disable') }}
-              </button>
-              <button class="fe-s3keys__link is-danger" :disabled="busy" @click="revoke(k)">
-                {{ confirmRevoke === k.id ? t('conn.s3keys.confirm') : t('conn.s3keys.revoke') }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <p v-else-if="canMint" class="fe-s3keys__muted">{{ t('conn.s3keys.empty') }}</p>
+    <DataTable
+      v-else
+      table-id="conn.s3keys"
+      :columns="columns"
+      :rows="keys"
+      row-key="id"
+      :locale="locale"
+      :empty="t('conn.s3keys.empty')"
+      :row-class="(k: S3AccessKey) => (k.disabled_at ? 'is-muted' : undefined)"
+      :row-actions="rowActions"
+      :row-actions-test-id="(k: S3AccessKey) => `s3-key-actions-${k.id}`"
+      @row-action="(key: string, k: S3AccessKey) => onRowAction(key, k)"
+    >
+      <template #cell-key="{ row }">
+        <code class="tbl-mono">{{ row.access_key_id }}</code>
+      </template>
+    </DataTable>
   </section>
 </template>
 
@@ -355,8 +413,7 @@ function scopeOf(k: S3AccessKey): string {
   color: var(--fe-text-muted);
 }
 .fe-s3keys__copy,
-.fe-s3keys__dismiss,
-.fe-s3keys__link {
+.fe-s3keys__dismiss {
   background: none;
   border: none;
   padding: 0 4px;
@@ -364,35 +421,14 @@ function scopeOf(k: S3AccessKey): string {
   font-size: 12px;
   cursor: pointer;
 }
-.fe-s3keys__link.is-danger {
-  color: var(--fe-danger);
-}
 .fe-s3keys__dismiss {
   align-self: flex-start;
 }
-.fe-s3keys__table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.fe-s3keys__table th {
-  text-align: left;
-  font-weight: 500;
-  color: var(--fe-text-muted);
-  padding: 4px 6px;
-}
-.fe-s3keys__table td {
-  padding: 5px 6px;
-  border-top: 1px solid var(--fe-border);
-  overflow-wrap: anywhere;
-}
-.fe-s3keys__table tr.is-off {
-  opacity: 0.55;
-}
-.fe-s3keys__actions {
-  white-space: nowrap;
-  text-align: right;
-}
-/* Its pinning (sticky right, ground, scroll divider) is in styles/base.css
-   next to the list view's `.fe-list__col--menu`, so the two stay one model. */
+/* ⚠ The key table's own look USED to be written here — 12px type, 4-6px
+   padding, `--fe-border` instead of `--fe-border-soft`, its own disabled-row
+   opacity and its own right-aligned actions cell. All of it is deleted rather
+   than tuned: the panel now draws `.tbl`, and the one place that says what an
+   admin table looks like is packages/core/src/styles/base.css ("THE ADMIN
+   TABLE"). Four panels shared this block, so four tables drifted together;
+   sharing the real stylesheet is what stops the next drift. */
 </style>

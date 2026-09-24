@@ -9,14 +9,19 @@
 //
 // The fix is one rule per catalogue, and these tests hold the catalogues to it:
 //
-//   • packages/core — `t()` reads `key_one` when the count is exactly one
-//     (composables/useLocale → countedKey). A counted English message needs a
-//     `_one` sibling; Turkish carries the same key with the same words, because
-//     Turkish does not inflect a noun after a number ("1 öğe", "5 öğe").
+//   • packages/core — `t()` reads `key_<category>` for the count's CLDR plural
+//     category in the active language (composables/useLocale → countedKey;
+//     for English that is `key_one` when the count is exactly one). A counted
+//     English message needs a `_one` sibling; Turkish carries the same key with
+//     the same words, because Turkish does not inflect a noun after a number
+//     ("1 öğe", "5 öğe").
 //   • web (vue-i18n) — the library's own choice syntax, `singular | plural`,
 //     with the number passed as `t(key, vars, count)`. A choice message called
 //     WITHOUT the count silently renders its first form for every number, so
 //     each call site is checked for the third argument as well.
+//
+// Other languages' forms (Arabic's six, Russian's four) and the pack-vs-English
+// lookup order are pinned in pluralCategories.test.ts.
 //
 // ⚠ English only is scanned for nouns: the Turkish side is covered by key
 // parity (coreKeys.test.ts, keys.test.ts) and must never be "pluralised".
@@ -59,6 +64,14 @@ describe('core: t() picks the singular from the count', () => {
     expect(countedKey('x.items', { n: 2 }, has)).toBe('x.items');
     expect(countedKey('x.items', { size: 1 }, has)).toBe('x.items');
     expect(countedKey('y.items', { n: 1 }, has)).toBe('y.items');
+  });
+
+  it("reads the language's own category when told the language, and English's when not", () => {
+    const ru = (k: string) => ['x.items_one', 'x.items_few', 'x.items_many'].includes(k);
+    expect(countedKey('x.items', { n: 3 }, ru, 'ru')).toBe('x.items_few');
+    expect(countedKey('x.items', { n: 5 }, ru, 'ru')).toBe('x.items_many');
+    expect(countedKey('x.items', { n: 21 }, ru, 'ru')).toBe('x.items_one');
+    expect(countedKey('x.items', { n: 3 }, ru)).toBe('x.items');
   });
 
   it('renders the details panel caption the way the screenshot should have read', () => {

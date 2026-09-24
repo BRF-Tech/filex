@@ -9,8 +9,10 @@ package auth
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -34,6 +36,8 @@ func AuditMiddleware(store db.Store) func(http.Handler) http.Handler {
 				return
 			}
 			rw := &auditRecorder{ResponseWriter: w, status: http.StatusOK}
+			ctx, detail := WithAuditDetail(r.Context())
+			r = r.WithContext(ctx)
 			next.ServeHTTP(rw, r)
 			if rw.status < 200 || rw.status >= 300 {
 				return
@@ -54,11 +58,16 @@ func AuditMiddleware(store db.Store) func(http.Handler) http.Handler {
 				uid := user.ID
 				entry.UserID = &uid
 			}
+			entry.Metadata = detail.Into(entry.Metadata)
+			entry.TargetID, entry.Metadata = detail.ApplyTarget(entry.TargetID, entry.Metadata)
 			// Token-authenticated calls stamp WHICH credential + identity acted:
 			// one account often backs several tokens (work, fishapp, MCP…), and
 			// user_id alone can't tell them apart.
 			if tok := TokenFrom(r.Context()); tok != nil {
-				entry.Metadata = map[string]interface{}{"token_id": tok.ID}
+				if entry.Metadata == nil {
+					entry.Metadata = map[string]interface{}{}
+				}
+				entry.Metadata["token_id"] = tok.ID
 				if tu := TokenUserFrom(r.Context()); tu != "" {
 					entry.Metadata["token_username"] = tu
 				}
@@ -346,17 +355,129 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 	return "", "", ""
 }
 
-// clientIP mirrors the helper in api/middleware.go so we don't pull a dep cycle.
+// clientIP is the address the request came from, without the port.
+//
+// ⚠ The port is the client's ephemeral source port — a different number on
+// every connection, meaningless to anybody reading the log, and it made the
+// Audit page's IP column read "127.0.0.1:54452" (release-candidate sweep,
+// 2026-09-21). handlers.clientIP already dropped it; this copy did not.
 func clientIP(r *http.Request) string {
 	if v := r.Header.Get("X-Forwarded-For"); v != "" {
 		// take just the first hop
 		if idx := strings.IndexByte(v, ','); idx >= 0 {
 			return strings.TrimSpace(v[:idx])
 		}
-		return v
+		return strings.TrimSpace(v)
 	}
 	if v := r.Header.Get("X-Real-IP"); v != "" {
-		return v
+		return strings.TrimSpace(v)
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
 	}
 	return r.RemoteAddr
+}
+
+// AuditDetail is what a handler adds to the audit row the middleware writes
+// for its request: the facts only the handler knows (which fields changed,
+// before and after) — so a change is ONE row that says what it did, not a
+// bare "auth_provider.update".
+//
+// ⚠ Names and flags only. Nothing a handler puts here may be a secret: the
+// audit log is read by every administrator and exported.
+type AuditDetail struct {
+	mu sync.Mutex
+	m  map[string]interface{}
+	// targetID / targetName: the thing the request acted on, when the URL
+	// does not say (a create has no id in its path; a delete's row is gone by
+	// the time anybody reads the log). See SetAuditTarget.
+	targetID, targetName string
+}
+
+type auditDetailKey struct{}
+
+// WithAuditDetail returns a context carrying an empty detail holder.
+func WithAuditDetail(ctx context.Context) (context.Context, *AuditDetail) {
+	d := &AuditDetail{}
+	return context.WithValue(ctx, auditDetailKey{}, d), d
+}
+
+// AddAuditDetail records one fact for the request's audit row; a no-op when
+// the request is not being audited.
+func AddAuditDetail(ctx context.Context, key string, v interface{}) {
+	d, _ := ctx.Value(auditDetailKey{}).(*AuditDetail)
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	if d.m == nil {
+		d.m = map[string]interface{}{}
+	}
+	d.m[key] = v
+	d.mu.Unlock()
+}
+
+// SetAuditTarget names the thing the request acted on, for the audit row the
+// middleware writes: id fills target_id when the route did not carry one,
+// name is stored as metadata["target_name"].
+//
+// ⚠⚠ Why: the Panel and the Audit page printed the KIND of thing and nothing
+// else — "Kullanıcı: oluşturuldu — Kullanıcı", "Depo: oluşturuldu — Depo"
+// (release-candidate sweep, 2026-09-21) — because a create's URL has no id and
+// the middleware never reads bodies. The handler knows what it made; this is
+// how it says so. The name is kept because it is what a reader wants AFTER the
+// thing is gone ("which user was deleted?"). A name here is a label — an
+// e-mail, a storage name, a path — never a secret.
+func SetAuditTarget(ctx context.Context, id, name string) {
+	d, _ := ctx.Value(auditDetailKey{}).(*AuditDetail)
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	if id != "" {
+		d.targetID = id
+	}
+	if name != "" {
+		d.targetName = name
+	}
+	d.mu.Unlock()
+}
+
+// ApplyTarget folds SetAuditTarget's answer into a row: the id only where the
+// route gave none, the name into meta. Nil-safe.
+func (d *AuditDetail) ApplyTarget(targetID string, meta map[string]interface{}) (string, map[string]interface{}) {
+	if d == nil {
+		return targetID, meta
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if targetID == "" {
+		targetID = d.targetID
+	}
+	if d.targetName != "" {
+		if meta == nil {
+			meta = map[string]interface{}{}
+		}
+		meta["target_name"] = d.targetName
+	}
+	return targetID, meta
+}
+
+// Into merges the recorded facts into meta (allocating it when needed).
+func (d *AuditDetail) Into(meta map[string]interface{}) map[string]interface{} {
+	if d == nil {
+		return meta
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.m) == 0 {
+		return meta
+	}
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	for k, v := range d.m {
+		meta[k] = v
+	}
+	return meta
 }

@@ -48,6 +48,18 @@ function authHeaders(): Record<string, string> {
 // the explorer's capability store.
 const onlyOfficeBase = ref<string | null>(null);
 const drawioUrl = ref<string | null>(null);
+/* Could this person set up a missing service? Only picks which sentence a
+ * missing document server gets (PreviewModal `canConfigure`). */
+const callerAdmin = ref(false);
+/**
+ * ⚠ The viewer waits for the probe. PreviewModal decides "no document server"
+ * from `onlyOfficeBase`, and it decides at mount — so mounting it before the
+ * capabilities answer arrived would tell every person opening a .docx that
+ * ONLYOFFICE is missing, on the install where it is not. (It used to decide
+ * from the config ENDPOINT alone, which this route always passes, and that is
+ * how the raw 503 reached the screen on an install where it really was.)
+ */
+const capsLoaded = ref(false);
 async function loadCapabilities(): Promise<void> {
   try {
     const res = await fetch('/api/files/capabilities', {
@@ -58,11 +70,13 @@ async function loadCapabilities(): Promise<void> {
     const caps = (await res.json()) as {
       onlyoffice_url?: string;
       drawio_url?: string;
+      caller_admin?: boolean;
       external?: {
         onlyoffice?: ExternalServiceStatus;
         drawio?: ExternalServiceStatus;
       };
     };
+    callerAdmin.value = caps.caller_admin === true;
     if (caps.external?.onlyoffice && isExternalUsable(caps.external.onlyoffice)) {
       onlyOfficeBase.value = caps.onlyoffice_url || null;
     }
@@ -71,6 +85,8 @@ async function loadCapabilities(): Promise<void> {
     }
   } catch {
     /* keep both null — viewers will surface a "not configured" fallback */
+  } finally {
+    capsLoaded.value = true;
   }
 }
 
@@ -142,7 +158,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="editor-host">
     <PreviewModal
-      v-if="node"
+      v-if="node && capsLoaded"
       :open="open"
       :file="node"
       :open-mode="mode"
@@ -151,16 +167,17 @@ onBeforeUnmount(() => {
       :download-url="downloadUrl"
       :only-office-base="onlyOfficeBase"
       :only-office-config-endpoint="'/api/files/onlyoffice/config'"
+      :can-configure="callerAdmin"
       :drawio-url="drawioUrl"
       :save-text-endpoint="'/api/files/save-text'"
       :auth-headers="authHeaders"
       :auth-credentials="'same-origin'"
-      :locale="locale === 'en' ? 'en' : 'tr'"
+      :locale="locale"
       chromeless
       @close="closeWindow"
     />
-    <div v-else class="empty">
-      <p>Missing <code>?path=</code> query parameter.</p>
+    <div v-else-if="!node" class="empty">
+      <i18n-t keypath="editor.missingPath" tag="p"><template #param><code>?path=</code></template></i18n-t>
     </div>
   </div>
 </template>

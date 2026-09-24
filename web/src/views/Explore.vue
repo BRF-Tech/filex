@@ -12,7 +12,11 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch 
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
-import { FileExplorer, type ExplorerConfig } from '@brftech/filex-core';
+// baglan:b1 — `ConnectionsPanel` is the package's screen, the same one the
+// explorer's `sidenav-connect` and the admin panel's /connections page mount.
+// It is imported (not lazily loaded) beside the explorer because the screen
+// that needs it is the screen where nothing else is loading.
+import { ConnectionsPanel, FileExplorer, type ExplorerConfig } from '@brftech/filex-core';
 // gorunum:v3-shell — `actionIconSvg` is no longer imported here. The account
 // cluster was three icon buttons drawn with the explorer's own glyph set (so
 // three marks at a foreign stroke weight would not sit in the same row); it is
@@ -38,7 +42,12 @@ const UserSettingsModal = defineAsyncComponent(
 );
 import { effectiveTheme } from '@/lib/theme';
 import { explorerAuth, openTriggerPref } from '@/lib/explorerConfig';
+import { currentMountBase } from '@/router';
 import { fetchVisibleStorages, type VisibleStorage } from '@/lib/visibleStorages';
+// ⚠ `#<storage>/<folder>` → `<storage>://<path>` is converted by the module
+// that owns both shapes, never by slicing a string here. See its note.
+import { qualifiedFromHash, sameRowPath } from '@/lib/notificationTarget';
+import { signOut } from '@/lib/signOut';
 // Live collaboration (WebSocket + presence) now lives INSIDE @brftech/filex-core's
 // FileExplorer, so every consumer (this panel + the embedded webcomponent) gets
 // it automatically — no per-page realtime wiring here anymore.
@@ -54,16 +63,38 @@ const storages = useStoragesStore();
 // `web/src/components/SelfTokensModal.vue` and `web/src/api/self-tokens.ts` are
 // gone, because two implementations of one credential screen is how one of them
 // mints tokens the other cannot see.
-// gorunum:v2-topbar — "How to connect" is NOT opened from here any more. The
-// explorer's navigation panel has carried the same door since gezinti:g1
-// (`sidenav-connect`, and it renders the very same ConnectionsPanel), so this
-// page held a second implementation of one screen — overlay, z-index, config
-// object and all. The panel's entry is the survivor; it is on screen in both
-// profiles and for admins and non-admins alike.
+// gorunum:v2-topbar — "How to connect" is NOT a button in this page's chrome
+// any more. The explorer's navigation panel has carried the same door since
+// gezinti:g1 (`sidenav-connect`, and it renders the very same
+// ConnectionsPanel), so this page held a second implementation of one screen —
+// overlay, z-index, config object and all. The panel's entry is the survivor
+// wherever there IS a panel.
+//
+// ⚠⚠ baglan:b1 — and that last clause is the whole of what was wrong. The
+// sentence here used to end "it is on screen in both profiles and for admins
+// and non-admins alike", which is false on exactly one screen: the navigation
+// panel lives INSIDE the explorer, the explorer is not mounted when
+// `roots.length === 0`, so a brand-new account and one whose grant was revoked
+// were left on the bare "nothing has been shared with you" screen with no door
+// to the guide at all. That is worse than a missing page: FTPS, WebDAV and
+// `filex mount` all tell the reader to sign in with an API token, and the only
+// surface that mints one is the panel they cannot reach — the gap
+// e2e/tests/25-connections.spec.ts closed for the has-storage case on
+// 2026-08-17, re-opened underneath it for the zero-storage one.
+//
+// So the overlay comes back for THAT screen and only that screen (see
+// `emptyStateActions` and the `<ConnectionsPanel>` at the foot of the
+// template). It is not a relapse into the duplicate above: the two doors are
+// never on screen together — the same argument "Paylaştıklarım" makes one
+// comment below — and the screen itself is still the package's. This page
+// mounts it; it does not re-draw it.
 const showSettings = ref(false);
+/** baglan:b1 — the connections guide, on the one screen with no panel to open
+ *  it. Set ONLY from `emptyStateActions`'s row; `headerActions` must never
+ *  grow one, or the explorer carries two doors a glyph apart again. */
+const showConnections = ref(false);
 async function doLogout() {
-  await auth.logout();
-  router.push({ name: 'login' });
+  await signOut(auth, router);
 }
 
 /* === gorunum:v4-hostmenu — the explorer's "⋯" moves in here ================
@@ -182,6 +213,13 @@ const headerActions = computed<AccountAction[]>(() => {
   const rows: AccountAction[] = [
     { key: 'settings', label: t('userSettings.open'), icon: 'account' },
   ];
+  // ⚠ "Paylaştıklarım" is NOT a row here any more. It lived in this menu for
+  // one day, until the explorer's own navigation grew the entry it belongs in
+  // — `sidenav-my-shares`, directly under "Shared with me", which is where
+  // somebody hunting for a link they minted actually looks. Two doors to one
+  // screen, a glyph apart in the same header, is the duplicate this wave keeps
+  // removing; the navigation one survives because it stands beside its mirror
+  // instead of under an avatar. See SideNav.vue (paylas:m1).
   // ⚠ Admins only, and it is the ONLY role check in this cluster. Everything
   // else here belongs to whoever is signed in.
   if (auth.isAdmin) rows.push({ key: 'admin', label: t('explore.gotoAdmin'), icon: 'admin' });
@@ -204,6 +242,51 @@ const headerActions = computed<AccountAction[]>(() => {
   return rows;
 });
 
+/**
+ * paylas:m1 / baglan:b1 — the SAME rows, plus the two doors that only the
+ * empty screen needs: "Paylaştıklarım" and "Bağlantılar".
+ *
+ * ⚠ It is NOT a second copy of the menu, and it is not a relapse into the
+ * duplicate the comment above describes. The navigation panel is still the one
+ * door for everybody who has an explorer — but this control is also drawn
+ * under "no storages / no access", where there IS no explorer and therefore no
+ * navigation panel at all. Without these rows:
+ *   · `my-shares` — a person whose access was revoked can still HOLD live
+ *     public links and has no way left to see or revoke them; the links keep
+ *     working while their owner is locked out of the only page that lists them;
+ *   · `connections` — a brand-new account, or that same revoked one, is told
+ *     to ask an administrator and cannot even read HOW to connect, let alone
+ *     mint the API token FTPS / WebDAV / `filex mount` all instruct them to
+ *     use. Measured 2026-09-20: `sidenav-connect` was the only remaining door
+ *     to that guide, and it is inside the explorer.
+ *
+ * ⚠ Which is why they are added HERE rather than in `headerActions`: each pair
+ * of controls is never on screen together, and the copy beside the navigation
+ * rows must stay clean — two doors a glyph apart in one header is the
+ * duplicate that was removed.
+ *
+ * ⚠ The labels are the names of the screens they open, read from the strings
+ * those screens already use (`myShares.title`, `nav.connections`) — a second
+ * string invented for a menu row is how one door starts calling itself
+ * something the page it opens has never heard of. Nothing new was added to the
+ * catalogues for either row.
+ */
+const emptyStateActions = computed<AccountAction[]>(() => {
+  const rows = [...headerActions.value];
+  if (!rows.length) return rows;
+  // Right after `settings` (row 0) — they belong with this account's own
+  // doors, above the admin verb and far above Sign out.
+  //
+  // ⚠ Two glyphs, not one twice. `link` is the chain the navigation row draws
+  // for shares, because what leaves there is a URL; `connect` is the shared
+  // set's plug, because what happens here is a client dialling in. Reusing
+  // `link` for both would put the same mark on two adjacent rows, which is the
+  // misreading this wave keeps deleting.
+  rows.splice(1, 0, { key: 'my-shares', label: t('myShares.title'), icon: 'link' });
+  rows.splice(2, 0, { key: 'connections', label: t('nav.connections'), icon: 'connect' });
+  return rows;
+});
+
 /** One place the rows are acted on, for both copies of the control. */
 function runAccountAction(key: string) {
   /* ⚠ `fe:` prefixed, so an explorer row named `settings` one day cannot
@@ -217,6 +300,17 @@ function runAccountAction(key: string) {
   }
   if (key === 'admin') void router.push({ name: 'dashboard' });
   else if (key === 'settings') showSettings.value = true;
+  // paylas:m1 — the empty screen's own door; the SAME route the navigation
+  // row's `@open-my-shares` pushes, so both ways in land on one screen.
+  else if (key === 'my-shares') void router.push({ name: 'my-shares' });
+  /* baglan:b1 — the empty screen's other door. ⚠ A flag, not a `router.push`,
+     and the difference is not style: the `connections` route lives inside the
+     AdminLayout block (`meta.requiresAdmin`), so pushing it from here would
+     bounce the exact person this row exists for — a non-admin — straight back
+     to Home, silently. The screen they need is the package's ConnectionsPanel,
+     which this page mounts below — the same component the explorer's own door
+     opens, so both ways in land on the same screen. */
+  else if (key === 'connections') showConnections.value = true;
   else if (key === 'signout') void doLogout();
 }
 
@@ -261,10 +355,12 @@ async function rediscoverStorages() {
     // Refresh pressed — WITHOUT this line the drive did not appear in the
     // panel; WITH it, it appeared and opened. The old page-level Refresh had
     // the same gap, and its remount only re-read the same stale names.
-    // Best-effort: it 403s for a non-admin, whose list comes from the manager
-    // root inside fetchVisibleStorages anyway.
-    await storages.fetch().catch(() => {});
-    roots.value = await fetchVisibleStorages(storages.items);
+    // ⚠ Administrators only. It used to be called for everybody and answered
+    // 403 for every non-admin on every Refresh (QA, 2026-09-21); their list
+    // comes from the manager root inside fetchVisibleStorages, which now
+    // carries each drive's read-only flag as well.
+    if (auth.isAdmin) await storages.fetch().catch(() => {});
+    roots.value = await fetchVisibleStorages(auth.isAdmin ? storages.items : []);
   } catch (err) {
     // A failed re-discovery leaves the previous list standing. The listing
     // reloaded regardless — the explorer does that half itself — so there is
@@ -342,6 +438,28 @@ const selectFromQuery = computed(() => {
   return typeof v === 'string' ? v : '';
 });
 
+/**
+ * `?app=<plugin>&appAction=<id>` / `&appView=<id>` — an app plugin asked for
+ * one of ITS OWN screens to be opened on the file the link points at
+ * (`notify_send target.action|view`, docs/APP-PLUGINS-API.md → v2).
+ *
+ * ⚠⚠ This is the whole point of an addressed notification. "Please sign
+ * this" that lands somebody in a FOLDER has made them find the signing screen
+ * themselves, which for an outside signer is where the flow stops — and the
+ * one thing they have in front of them (the row) does not say which app wants
+ * what. The reveal puts the file on screen; this puts the screen on the file.
+ */
+const appFromQuery = computed(() => {
+  const one = (v: unknown) => (Array.isArray(v) ? v[0] : v);
+  const plugin = one(route.query.app);
+  if (typeof plugin !== 'string' || !plugin) return null;
+  const action = one(route.query.appAction);
+  const view = one(route.query.appView);
+  if (typeof action === 'string' && action) return { plugin, action };
+  if (typeof view === 'string' && view) return { plugin, view };
+  return null;
+});
+
 /** Poll for the row the listing has not drawn yet. Bounded — a target that
  *  never appears (deleted meanwhile, filtered out) must not spin forever. */
 const SELECT_TIMEOUT_MS = 8000;
@@ -350,6 +468,62 @@ let selectToken = 0;
 /** Toggle a row's selection the one way a click selects: its checkbox. */
 function tick(row: HTMLElement) {
   row.querySelector<HTMLElement>('.fe-list__check')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
+
+/**
+ * The explorer instance, for the one thing a prop cannot do: run an app's
+ * screen on a file AFTER the page is already mounted.
+ *
+ * ⚠ A bell click does not remount anything — the route changes, the listing
+ * reloads. A config prop would fire once, at mount, and every click after the
+ * first would land on the file and stop there.
+ */
+const explorerRef = ref<{ openAppTarget?: (p: Record<string, unknown>) => Promise<boolean> } | null>(null);
+
+/**
+ * What the app screen runs ON: the row the link points at, or — when there is
+ * no row — the folder it opened.
+ *
+ * ⚠⚠ A `dir`-kind target may carry `open` too (a notice about a folder, or a
+ * `file` target the backend downgraded because its path was only the storage
+ * root). The deep link used to be gated on `?select=` alone, so those links
+ * opened the folder and dropped the app's instruction on the floor: a link
+ * that looks actionable and does nothing.
+ *
+ * ⚠ The hash is converted by `qualifiedFromHash`, never by slicing here —
+ * `#<storage>/<folder>` and `<storage>://<path>` are the two shapes this
+ * codebase keeps confusing, and their conversion lives with its inverse in
+ * lib/notificationTarget.
+ */
+const appPathFromQuery = computed(() => selectFromQuery.value || qualifiedFromHash(route.hash));
+
+/** Reveal the row (if there is one), then open whatever the app asked for. */
+async function revealAndOpen(): Promise<void> {
+  const qualified = selectFromQuery.value;
+  if (qualified) {
+    // ⚠ Opened even when the reveal timed out: the row may be off-screen, in a
+    // filtered view or on a slow listing, and the action runs on a PATH, not on
+    // a rendered row. The server re-checks `applies` and the ACL, so the worst
+    // case is an honest refusal rather than a wrong screen.
+    void (await revealSelection(qualified));
+  }
+  const app = appFromQuery.value;
+  if (!app) return;
+  const path = appPathFromQuery.value;
+  if (!path) return;
+  const explorer = explorerRef.value;
+  if (!explorer?.openAppTarget) {
+    // ⚠ SAID, not swallowed by an optional chain. This is reached when the
+    // explorer is not mounted — no storage is visible to this account, or the
+    // discovery pass is still running — and the person has just clicked "sign
+    // this" and watched nothing happen.
+    onExplorerError({
+      message: 'notification deep link: no explorer to open the app screen on',
+      context: { app, path },
+    });
+    return;
+  }
+  await explorer.openAppTarget({ ...app, path });
 }
 
 async function revealSelection(qualified: string): Promise<boolean> {
@@ -367,8 +541,11 @@ async function revealSelection(qualified: string): Promise<boolean> {
   let stable = 0;
   while (Date.now() < deadline) {
     if (mine !== selectToken) return false; // a newer click superseded this one
-    const row = Array.from(document.querySelectorAll<HTMLElement>('[data-fe-path]')).find(
-      (el) => el.getAttribute('data-fe-path') === qualified,
+    // sameRowPath, not `===`: the Trash view's rows spell the path with the
+    // stored leading slash (`docs:///Documents/a.txt`), and a notification
+    // about a deleted file selects its row there.
+    const row = Array.from(document.querySelectorAll<HTMLElement>('[data-fe-path]')).find((el) =>
+      sameRowPath(el.getAttribute('data-fe-path'), qualified),
     );
     if (row && row.getAttribute('aria-selected') === 'true') {
       if (++stable >= 3) return true;
@@ -391,9 +568,11 @@ async function revealSelection(qualified: string): Promise<boolean> {
 // remounting anything, so the reveal has to be driven by the route as well as
 // by mount.
 watch(
-  () => [route.hash, selectFromQuery.value] as const,
+  () => [route.hash, selectFromQuery.value, JSON.stringify(appFromQuery.value)] as const,
   () => {
-    if (selectFromQuery.value) void revealSelection(selectFromQuery.value);
+    // ⚠ `?app=` alone is enough. It used to need `?select=` as well, which
+    // silently discarded every deep link whose target was a FOLDER.
+    if (selectFromQuery.value || appFromQuery.value) void revealAndOpen();
   },
 );
 
@@ -440,16 +619,31 @@ const initialPathFromQuery = computed(() => {
  */
 const opensOnHome = computed(() => route.name === 'home');
 
+/**
+ * baglan:b1 — how this page reaches the server, and nothing else.
+ *
+ * ⚠ It exists because `explorerConfig` below returns NULL on the one screen
+ * that now has to mount a package component of its own: with no storages there
+ * is no explorer and therefore no config, and the connections overlay would
+ * otherwise need a hand-written second object holding the same six lines. Two
+ * config objects on one page is how one of them keeps the old endpoint after
+ * the other is moved — so the explorer's config is this one plus its own keys.
+ */
+const panelConfig = computed<ExplorerConfig>(() => ({
+  apiBase: '',
+  endpoint: '/api/files/manager',
+  capabilities: '/api/files/capabilities',
+  auth: explorerAuth(),
+  theme: currentTheme.value,
+  // ⚠ The ACTIVE language, whatever it is — a language pack's included. This
+  // was `en ? en : tr`, which handed the explorer Turkish under Spanish.
+  locale: locale.value,
+}));
+
 const explorerConfig = computed<ExplorerConfig | null>(() => {
   if (!roots.value.length) return null;
-  const authConf: ExplorerConfig['auth'] = explorerAuth();
   return {
-    apiBase: '',
-    endpoint: '/api/files/manager',
-    capabilities: '/api/files/capabilities',
-    auth: authConf,
-    theme: currentTheme.value,
-    locale: locale.value === 'en' ? 'en' : 'tr',
+    ...panelConfig.value,
     // Mouse open gesture — a per-viewer setting (Settings → Files). Default
     // double-click opens; touch always taps to open. e2e/cypress pin 'single'.
     openTrigger: openTriggerPref(),
@@ -458,6 +652,17 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     // folder for hash-less visits. Priority: hash → ?storage= → remembered.
     pathPersist: 'hash+localStorage',
     trashVisible: true,
+    // paylas:m1 — YES to the navigation panel's "My shares" row, and this
+    // line is what makes drawing it legal. The row only announces
+    // `open-my-shares`; the screen behind it belongs to this page
+    // (`@open-my-shares` below pushes the `my-shares` route), so this is
+    // precisely the host that may ask for it. The flag defaults OFF so an
+    // embed that has no such route is not handed a row that leads nowhere.
+    mySharesVisible: true,
+    // An app's home view ("Apps" → Signatures) is a page of this SPA, in the
+    // same tab (`app-home`): the owner asked for "its own page", with a menu
+    // of its sections and a working Back. `@open-app-home` below pushes it.
+    appHomePage: true,
     showInfoPanel: true,
     multiStorageRoot: true,
     // ⚠ Explicit, and NOT the simple profile's default. In this deployment a
@@ -474,8 +679,19 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     // The route reads `?path=&type=&mode=` and mounts the right viewer
     // (OnlyOffice for office, Monaco for code, drawio iframe for
     // .drawio, image/PDF/3D viewers otherwise) with save-on-change.
-    openPageBase: '/files/edit',
-    viewerBaseUrl: '/files/edit',
+    // ⚠ Under the prefix that served THIS document — `/drive/files/edit`
+    // for a non-admin. The bare `/files/edit` was rewritten to
+    // `/admin/files/edit` when the router hydrated (the router's own note on
+    // `mountBase`), so a person who is not an administrator landed on an
+    // /admin address the moment they opened a document (QA, 2026-09-21).
+    openPageBase: `${currentMountBase()}files/edit`,
+    viewerBaseUrl: `${currentMountBase()}files/edit`,
+    // An app plugin's `page` view opens at `{base}apps/{plugin}/{view}`.
+    // ⚠ The base is whichever prefix served THIS document (`/admin/` or
+    // `/drive/`): the tab is opened by the browser, not pushed by the router,
+    // and only those prefixes fall back to index.html on the server — a bare
+    // `/apps/…` is a 404 (routes.go → wireStatic).
+    pluginPageBase: currentMountBase(),
     saveText: '/api/files/save-text',
     onlyOfficeConfig: '/api/files/onlyoffice/config',
   };
@@ -486,6 +702,11 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
 // buttons, one destination, both admin-only. The cluster's `admin` row is the
 // survivor.
 
+/** An "Apps" row: the app's home view as a page of this SPA, same tab. */
+function openAppHome(a: { plugin: string; view: string }): void {
+  void router.push({ name: 'app-home', params: { plugin: a.plugin, view: a.view } });
+}
+
 function onExplorerError(err: { message: string; context?: unknown }) {
   // eslint-disable-next-line no-console
   console.warn('[explore] FileExplorer error:', err);
@@ -494,14 +715,15 @@ function onExplorerError(err: { message: string; context?: unknown }) {
 onMounted(async () => {
   try {
     await auth.fetchMe();
-    // Admin store fetch is best-effort (403s for non-admins) — roots then fall
-    // back to manager-root discovery inside fetchVisibleStorages().
-    await storages.fetch().catch(() => {});
-    roots.value = await fetchVisibleStorages(storages.items);
+    // The admin store for an administrator; everybody else is answered by the
+    // manager root inside fetchVisibleStorages() — no `/api/admin/*` call that
+    // can only 403 for them (QA, 2026-09-21: one on every page load).
+    if (auth.isAdmin) await storages.fetch().catch(() => {});
+    roots.value = await fetchVisibleStorages(auth.isAdmin ? storages.items : []);
   } finally {
     loading.value = false;
   }
-  if (selectFromQuery.value) void revealSelection(selectFromQuery.value);
+  if (selectFromQuery.value || appFromQuery.value) void revealAndOpen();
 });
 </script>
 
@@ -557,14 +779,23 @@ onMounted(async () => {
              With no storage there is no explorer, and with no explorer there is
              no header — a user whose access was revoked would be looking at one
              sentence with no way to sign out or open their settings. Same rows,
-             same handler, one definition. -->
+             same handler, one definition.
+
+             ⚠ `emptyStateActions`, not `headerActions`: the same rows plus
+             "Paylaştıklarım" and "Bağlantılar". The navigation panel carries
+             both doors for everybody who has an explorer, and there is no
+             navigation panel here — so this is the ONE screen where the
+             account menu has to carry them, or an account with no drive has no
+             way left to reach the links it already handed out (paylas:m1), and
+             no way at all to read how to connect or to mint the API token the
+             guide tells it to use (baglan:b1). -->
         <div class="fe fx-explore-actions" data-testid="explore-empty-actions">
           <!-- The bell too: an account whose access was revoked is exactly
                the account that will next be told it was granted some. -->
           <NotificationBell v-if="auth.isAuthenticated" />
           <AccountMenu
-            :actions="headerActions"
-            :locale="locale === 'tr' ? 'tr' : 'en'"
+            :actions="emptyStateActions"
+            :locale="locale"
             :fallback-label="t('explore.account')"
             @select="runAccountAction"
           />
@@ -573,10 +804,13 @@ onMounted(async () => {
 
       <div v-else-if="explorerConfig" class="flex-1 min-h-0 explore-host">
         <FileExplorer
+          ref="explorerRef"
           :key="`fx-multi-${remountKey}`"
           :config="explorerConfig"
           @error="onExplorerError"
           @refresh="rediscoverStorages /* gorunum:v2-topbar — the other half of Refresh */"
+          @open-my-shares="router.push({ name: 'my-shares' }) /* paylas:m1 — the nav's own door */"
+          @open-app-home="openAppHome"
         >
           <!-- gorunum:v3-shell — the top bar's far-left corner. The explorer
                draws the collapse control there itself; this fills the rest of
@@ -616,7 +850,7 @@ onMounted(async () => {
             <NotificationBell v-if="auth.isAuthenticated" />
             <AccountMenu
               :actions="headerActions"
-              :locale="locale === 'tr' ? 'tr' : 'en'"
+              :locale="locale"
               :fallback-label="t('explore.account')"
               @select="runAccountAction"
             />
@@ -626,6 +860,39 @@ onMounted(async () => {
     </main>
 
     <UserSettingsModal v-if="showSettings" v-model="showSettings" />
+
+    <!-- baglan:b1 — the connections guide for the screen that has no panel to
+         open it. Reached ONLY from `emptyStateActions`'s `connections` row;
+         when the explorer is mounted it carries `sidenav-connect` and this
+         never opens, so the two are never on screen together.
+
+         ⚠ The package's own overlay classes and the package's own panel, with
+         the same `closable` FileExplorer passes — anything wrong in here is
+         wrong in one place for every surface. What
+         was deleted in gorunum:v2-topbar was this page's *second copy of the
+         screen*; a host mounting the shared component is what Connections.vue
+         and FileExplorer.vue both already do.
+
+         ⚠ NOT wrapped in `.fe`. The `--fe-*` tokens live on `:root` (and the
+         dark set on `<html>.dark`), so the overlay is themed without it —
+         while `.fe` would also hand this fixed, full-viewport backdrop a 1px
+         border and a radius, which is what a wrapper here looks like when it
+         is wrong. -->
+    <div
+      v-if="showConnections"
+      class="fe-overlay"
+      data-testid="explore-connections-overlay"
+      @click.self="showConnections = false"
+    >
+      <div class="fe-overlay__card" @click.stop>
+        <ConnectionsPanel
+          :config="panelConfig"
+          closable
+          @close="showConnections = false"
+          @error="onExplorerError"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -688,7 +955,7 @@ onMounted(async () => {
    * screen, so that is where they sit when there is no top bar. */
   position: fixed;
   top: 12px;
-  right: 16px;
+  inset-inline-end: 16px;
 }
 .fx-explore-spinner {
   width: 34px;

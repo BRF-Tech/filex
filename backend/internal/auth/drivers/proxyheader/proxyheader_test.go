@@ -11,14 +11,14 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
-	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/dbtest"
 )
 
 // initDriver builds a Driver bound to an in-memory store with the supplied
 // config overlaid on top of the minimum-required trusted_proxies.
 func initDriver(t *testing.T, cfg map[string]any) *Driver {
 	t.Helper()
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	d := New(store)
 	if cfg == nil {
 		cfg = map[string]any{}
@@ -32,7 +32,7 @@ func initDriver(t *testing.T, cfg map[string]any) *Driver {
 
 // TestInit_RequiresTrustedProxies — empty trusted_proxies is a hard error.
 func TestInit_RequiresTrustedProxies(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	d := New(store)
 	err := d.Init(context.Background(), map[string]any{})
 	require.Error(t, err)
@@ -51,7 +51,7 @@ func TestInit_NilStore(t *testing.T) {
 // TestInit_BareIPAccepted ensures plain "127.0.0.1" entries are accepted
 // (auto-suffixed to /32).
 func TestInit_BareIPAccepted(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	d := New(store)
 	err := d.Init(context.Background(), map[string]any{
 		"trusted_proxies": []string{"127.0.0.1", "10.0.0.0/8"},
@@ -62,7 +62,7 @@ func TestInit_BareIPAccepted(t *testing.T) {
 
 // TestInit_InvalidCIDR fails fast.
 func TestInit_InvalidCIDR(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	d := New(store)
 	err := d.Init(context.Background(), map[string]any{
 		"trusted_proxies": []string{"not-an-ip"},
@@ -72,7 +72,7 @@ func TestInit_InvalidCIDR(t *testing.T) {
 
 // TestInit_AnyInterfaceList — yaml may decode lists as []any.
 func TestInit_AnyInterfaceList(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	d := New(store)
 	err := d.Init(context.Background(), map[string]any{
 		"trusted_proxies": []any{"127.0.0.1/32", "10.0.0.0/8"},
@@ -208,7 +208,7 @@ func TestAuthenticate_FallbackEmailSynthesized(t *testing.T) {
 // TestAuthenticate_ExistingUserReused looks up by email and does NOT
 // create a duplicate row.
 func TestAuthenticate_ExistingUserReused(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	d := New(store)
 	require.NoError(t, d.Init(context.Background(), map[string]any{
 		"trusted_proxies": []string{"127.0.0.1/32"},

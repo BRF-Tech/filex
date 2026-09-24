@@ -1,0 +1,315 @@
+{
+  "manifest_version": 1,
+  "name": "echo",
+  "version": "0.0.1",
+  "label": {
+    "en": "Echo Fixture",
+    "tr": "Yankı"
+  },
+  "permissions": [
+    "files:read",
+    "files:write",
+    "files:lock",
+    "state",
+    "engines:ffmpeg",
+    "users:lookup",
+    "notify:send",
+    "mail:send",
+    "http:example.test",
+    "public_pages",
+    "sign"
+  ],
+  "actions": [
+    {
+      "id": "upper",
+      "label": {
+        "en": "Upper-case",
+        "tr": "Büyük harf"
+      },
+      "applies": {
+        "kind": "file",
+        "ext": [
+          "txt"
+        ]
+      },
+      "output": {
+        "mode": "sibling",
+        "name": "{stem}-upper{ext}"
+      }
+    },
+    {
+      "id": "engine",
+      "label": {
+        "en": "Engine probe",
+        "tr": "Engine probe"
+      },
+      "applies": {
+        "kind": "any"
+      },
+      "output": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "escape",
+      "label": {
+        "en": "Engine escape probe",
+        "tr": "Engine escape probe"
+      },
+      "applies": {
+        "kind": "any"
+      },
+      "output": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "outbound",
+      "label": {
+        "en": "Outbound probe",
+        "tr": "Outbound probe"
+      },
+      "applies": {
+        "kind": "any"
+      },
+      "output": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "invite",
+      "label": {
+        "en": "Invite an outside signer",
+        "tr": "Invite an outside signer"
+      },
+      "applies": {
+        "kind": "file",
+        "ext": [
+          "txt"
+        ]
+      },
+      "output": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "sign",
+      "label": {
+        "en": "Sign probe",
+        "tr": "Sign probe"
+      },
+      "applies": {
+        "kind": "file",
+        "ext": [
+          "txt"
+        ]
+      },
+      "output": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "deliver",
+      "label": {
+        "en": "Deliver the signed file",
+        "tr": "İmzalı dosyayı ilet"
+      },
+      "applies": {
+        "kind": "file",
+        "ext": [
+          "txt"
+        ]
+      },
+      "output": {
+        "mode": "sibling",
+        "name": "{stem}-signed{ext}"
+      }
+    },
+    {
+      "id": "owned",
+      "label": {
+        "en": "Owner-only probe",
+        "tr": "Yalnız sahip denemesi"
+      },
+      "applies": {
+        "kind": "any"
+      },
+      "min_role": "owner",
+      "output": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "listing",
+      "label": {
+        "en": "State listing probe",
+        "tr": "Durum listesi denemesi"
+      },
+      "applies": {
+        "kind": "any"
+      },
+      "output": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "asset",
+      "label": {
+        "en": "Asset probe",
+        "tr": "Varlık denemesi"
+      },
+      "applies": {
+        "kind": "any"
+      },
+      "output": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "facts",
+      "label": {
+        "en": "File facts probe",
+        "tr": "Dosya bilgisi denemesi"
+      },
+      "applies": {
+        "kind": "any"
+      },
+      "output": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "lock",
+      "label": {
+        "en": "Lock probe",
+        "tr": "Lock probe"
+      },
+      "applies": {
+        "kind": "any"
+      },
+      "output": {
+        "mode": "none"
+      },
+      "view": "wizard"
+    },
+    {
+      "id": "unlock",
+      "label": {
+        "en": "Unlock probe",
+        "tr": "Unlock probe"
+      },
+      "applies": {
+        "kind": "any"
+      },
+      "output": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "again",
+      "label": {
+        "en": "Again (needs state)",
+        "tr": "Again (needs state)"
+      },
+      "applies": {
+        "kind": "file",
+        "ext": [
+          "txt"
+        ],
+        "state": [
+          "runs"
+        ]
+      },
+      "output": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "fresh",
+      "label": {
+        "en": "Fresh (no state)",
+        "tr": "Fresh (no state)"
+      },
+      "applies": {
+        "kind": "file",
+        "ext": [
+          "txt"
+        ],
+        "no_state": [
+          "runs"
+        ]
+      },
+      "output": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "expire",
+      "label": {
+        "en": "Expire (scheduled)",
+        "tr": "Süresi doldu (zamanlanmış)"
+      },
+      "applies": {
+        "kind": "any"
+      },
+      "output": {
+        "mode": "none"
+      },
+      "hidden": true
+    },
+    {
+      "id": "applied",
+      "label": {
+        "en": "Hidden apply",
+        "tr": "Hidden apply"
+      },
+      "applies": {
+        "kind": "any"
+      },
+      "output": {
+        "mode": "none"
+      },
+      "hidden": true
+    }
+  ],
+  "views": [
+    {
+      "id": "hello",
+      "placement": "modal",
+      "label": {
+        "en": "Hello",
+        "tr": "Hello"
+      }
+    },
+    {
+      "id": "wizard",
+      "placement": "page",
+      "label": {
+        "en": "Wizard",
+        "tr": "Wizard"
+      }
+    }
+  ],
+  "public_pages": [
+    {
+      "id": "signer",
+      "label": {
+        "en": "Sign the document",
+        "tr": "Belgeyi imzala"
+      },
+      "pin": "optional",
+      "default_ttl_days": 7,
+      "max_ttl_days": 30
+    }
+  ],
+  "languages": [
+    "en",
+    "tr"
+  ],
+  "messages": {
+    "held": {
+      "en": "held for {who}",
+      "tr": "{who} için tutuluyor"
+    }
+  }
+}

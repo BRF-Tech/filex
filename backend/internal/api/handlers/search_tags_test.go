@@ -65,9 +65,9 @@ func seedTaggedSearch(t *testing.T) (base string, client *http.Client, store db.
 	readme := mk("readme.txt", "/readme.txt")
 	mk("notes.md", "/Documents/notes.md")
 
-	require.NoError(t, store.SetNodeTags(ctx, mainGo.ID, []string{"source", "draft"}))
-	require.NoError(t, store.SetNodeTags(ctx, readme.ID, []string{"source"}))
-	require.NoError(t, store.SetNodeTags(ctx, invoice.ID, []string{"invoice"}))
+	testutil.TagNode(t, store, mainGo.ID, 0, "source", "draft")
+	testutil.TagNode(t, store, readme.ID, 0, "source")
+	testutil.TagNode(t, store, invoice.ID, 0, "invoice")
 
 	return srv.URL, client, store, st.ID
 }
@@ -157,10 +157,20 @@ func TestSearchEndpoint_TagFilterSurvivesTagChange(t *testing.T) {
 
 	assert.Empty(t, namesOf(doSearch(t, base, client, "tag:fresh", "name")))
 
-	nodes, err := store.ListNodesByTag(ctx, "invoice", 10)
+	vocab, err := store.ListTags(ctx, model.TagQuery{Team: true})
+	require.NoError(t, err)
+	var invoiceTag int64
+	for _, tg := range vocab {
+		if tg.Name == "invoice" {
+			invoiceTag = tg.ID
+		}
+	}
+	nodes, err := store.ListNodesByTagIDs(ctx, []int64{invoiceTag}, 10)
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
-	require.NoError(t, store.SetNodeTags(ctx, nodes[0].ID, []string{"fresh"}))
+	// Re-tag: "fresh" on, "invoice" off — what the picker's POST does.
+	testutil.TagNode(t, store, nodes[0].ID, 0, "fresh")
+	require.NoError(t, store.LinkNodeTags(ctx, nodes[0].ID, nil, []int64{invoiceTag}))
 
 	assert.Equal(t, []string{"invoice_2026.pdf"}, namesOf(doSearch(t, base, client, "tag:fresh", "name")))
 	// …and the tag it no longer carries stops matching, same instant.

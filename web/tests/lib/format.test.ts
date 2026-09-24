@@ -7,8 +7,11 @@ import {
   formatDate,
   formatRelative,
   formatDuration,
+  formatPercent,
   truncate,
 } from '@/lib/format';
+import { formatWhen } from '@brftech/filex-core';
+import { useLocale } from '@brftech/filex-core/src/composables/useLocale';
 
 describe('formatBytes', () => {
   it('returns 0 B for zero', () => {
@@ -33,6 +36,20 @@ describe('formatBytes', () => {
   it('returns em-dash for negative or NaN', () => {
     expect(formatBytes(-1)).toBe('—');
     expect(formatBytes(Number.NaN)).toBe('—');
+  });
+
+  // ⚠ The unit is the language's own word (`unit.*` of the core catalogue,
+  // a language pack's too): the admin panel printed "GB" where the explorer
+  // beside it printed the French "Go" (translator report, 2026-09-22).
+  it('names the unit in the language the number is in', async () => {
+    const { registerLocale, resetLocales } = await import('@brftech/filex-core');
+    registerLocale({ code: 'fr', label: 'Français', source: 'plugin', plugin: 'lang-fr', strings: { 'unit.gb': 'Go' } });
+    try {
+      expect(formatBytes(1_500_000_000, 'fr')).toBe('1,5 Go');
+      expect(formatBytes(1_500_000_000, 'tr')).toBe('1,5 GB');
+    } finally {
+      resetLocales();
+    }
   });
 
   it('uses the supplied locale for thousands separator', () => {
@@ -94,26 +111,61 @@ describe('formatRelative', () => {
   });
 });
 
+// ⚠ The units are the LANGUAGE's (Intl), not English letters: the Sync page's
+// Duration column read "0s" in the Turkish panel (release-candidate sweep,
+// 2026-09-21). Intl's short forms, because the narrow Turkish ones are
+// ambiguous ("3d" is 3 minutes — dakika — and "3s" 3 hours — saat).
 describe('formatDuration', () => {
-  it('renders seconds for short', () => {
-    expect(formatDuration(45)).toBe('45s');
-  });
-
-  it('renders minutes', () => {
-    expect(formatDuration(120)).toBe('2m');
-  });
-
-  it('renders hours', () => {
-    expect(formatDuration(7200)).toBe('2h');
-  });
-
-  it('renders days', () => {
-    expect(formatDuration(86400 * 3)).toBe('3d');
+  // ⚠ It printed "45s" / "2m" / "2h" / "3d" — English letters under every
+  // language (wave-2 wording sweep). Intl's unit names now, per language.
+  it("renders seconds, minutes, hours and days in the viewer's language", () => {
+    expect(formatDuration(45, 'en')).toBe('45 sec');
+    expect(formatDuration(120, 'en')).toBe('2 min');
+    expect(formatDuration(7200, 'en')).toBe('2 hr');
+    expect(formatDuration(86400 * 3, 'en')).toBe('3 days');
+    expect(formatDuration(45, 'tr')).toBe('45 sn.');
+    expect(formatDuration(120, 'tr')).not.toMatch(/\dm$/);
   });
 
   it('returns em-dash for negative', () => {
     expect(formatDuration(-1)).toBe('—');
     expect(formatDuration(Number.NaN)).toBe('—');
+  });
+});
+
+/* ── one format with the explorer ─────────────────────────────────────────
+ * ⚠ QA, 2026-09-21: the explorer printed "21 Eyl 2026, 14:50", the admin
+ * tables "21 Eyl 2026 15:02"; English "2:50 PM" beside "02:51 PM"; sizes
+ * "1,96 KB" beside "1.9 KB". The admin helpers are the explorer's now. */
+describe('the admin panel prints what the explorer prints', () => {
+  const at = '2026-09-21T11:50:00Z';
+
+  it("a date is the listing's own string, in both languages", () => {
+    for (const code of ['en', 'tr']) {
+      const explorer = useLocale(() => code).formatDate(Date.parse(at), { time: true });
+      expect(formatDate(at, code)).toBe(explorer);
+      expect(formatWhen(at, code, { time: true })).toBe(explorer);
+    }
+  });
+
+  it('English hours carry no leading zero, and the date and clock are joined by a comma', () => {
+    const out = formatDate('2026-09-12T08:05:00Z', 'en');
+    expect(out).not.toMatch(/\b0\d:\d\d/);
+    expect(out).toMatch(/2026, \d{1,2}:\d\d/);
+    expect(formatDate('2026-09-12T08:05:00Z', 'tr')).toMatch(/2026, \d{2}:\d\d/);
+  });
+
+  it("a size is written the way the language writes numbers, with the catalogue's units", () => {
+    expect(formatBytes(1_960, 'tr')).toBe('1,96 KB');
+    expect(formatBytes(1_960, 'en')).toBe('1.96 KB');
+    expect(formatBytes(1_200_000, 'tr')).toBe(useLocale(() => 'tr').formatSize(1_200_000));
+  });
+
+  it('a percentage too', () => {
+    expect(formatPercent(12.5, 'en')).toBe('13%');
+    expect(formatPercent(7.25, 'en')).toBe('7.3%');
+    expect(formatPercent(7.25, 'tr')).toBe('%7,3');
+    expect(formatPercent(Number.NaN, 'en')).toBe('—');
   });
 });
 

@@ -20,6 +20,7 @@ import type { LocaleCode } from '../types/ExplorerConfig';
 import type { StorageField, StorageFieldOption } from '../types/Connections';
 import { useLocale } from '../composables/useLocale';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
+import ChoiceButtons, { type ChoiceOption } from './ChoiceButtons.vue';
 
 const props = defineProps<{
   fields: StorageField[];
@@ -27,6 +28,12 @@ const props = defineProps<{
   locale: LocaleCode;
   /** Keys to mark as failing validation (missing required). */
   invalid?: string[];
+  /**
+   * Field-level messages, keyed by field key — what a server (an app
+   * plugin's `surface.errors`, a driver's 400) said about the value. A key
+   * here is invalid too, and its own words replace the generic "required".
+   */
+  errors?: Record<string, string>;
   disabled?: boolean;
 }>();
 
@@ -98,7 +105,53 @@ function bool(f: StorageField): boolean {
 }
 
 function isInvalid(f: StorageField): boolean {
-  return (props.invalid ?? []).includes(f.key);
+  return (props.invalid ?? []).includes(f.key) || !!props.errors?.[f.key];
+}
+
+function errorText(f: StorageField): string {
+  return props.errors?.[f.key] || (isInvalid(f) ? t('conn.form.required') : '');
+}
+
+/**
+ * The options a `choice` field draws as buttons.
+ *
+ * A `bool` has two by definition and the catalogue names them, unless the
+ * declaration named them itself — "Keep the original / Replace it" reads
+ * better than "Yes / No" and is the plugin author's call, not ours.
+ */
+function choiceOptions(f: StorageField): ChoiceOption[] {
+  if (f.type === 'bool') {
+    const given = (f.options ?? []).filter((o) => o.value === 'true' || o.value === 'false');
+    const yes = given.find((o) => o.value === 'true');
+    const no = given.find((o) => o.value === 'false');
+    return [
+      { value: 'true', label: yes ? optionLabel(yes) : t('conn.form.yes') },
+      { value: 'false', label: no ? optionLabel(no) : t('conn.form.no') },
+    ];
+  }
+  return (f.options ?? []).map((o) => ({ value: o.value, label: optionLabel(o) }));
+}
+
+/** What a `choice` field holds right now, in the shape ChoiceButtons reads. */
+function choiceValue(f: StorageField): string | string[] {
+  const v = raw(f);
+  if (f.type === 'bool') return v === true || v === 'true' ? 'true' : v === false || v === 'false' ? 'false' : '';
+  if (f.multi) return Array.isArray(v) ? v.map((x) => String(x)) : v === undefined || v === null || v === '' ? [] : [String(v)];
+  return v === undefined || v === null ? '' : String(v);
+}
+
+/** …and back: a bool becomes a boolean again, everything else stays as declared. */
+function setChoice(f: StorageField, v: string | string[]): void {
+  if (f.type === 'bool') {
+    set(f.key, v === 'true');
+    return;
+  }
+  set(f.key, v);
+}
+
+/** A field drawn as buttons — never as a dropdown, never as a lone checkbox. */
+function isChoice(f: StorageField): boolean {
+  return f.choice === true && (f.type === 'select' || f.type === 'bool');
 }
 
 function inputType(f: StorageField): string {
@@ -118,8 +171,10 @@ function toggleReveal(key: string) {
 
     <template v-for="f in basic" :key="f.key">
       <div class="fe-cfield__row" :class="{ 'is-invalid': isInvalid(f) }">
-        <!-- bool: the label belongs next to the box, not above it -->
-        <label v-if="f.type === 'bool'" class="fe-cfield__check">
+        <!-- bool: the label belongs next to the box, not above it — unless
+             the field is a DECISION, which is drawn as two buttons under a
+             label of its own (v3 §2.2). -->
+        <label v-if="f.type === 'bool' && !isChoice(f)" class="fe-cfield__check">
           <input
             type="checkbox"
             :checked="bool(f)"
@@ -132,8 +187,20 @@ function toggleReveal(key: string) {
           {{ label(f) }}<span v-if="f.required" class="fe-cfield__req" aria-hidden="true">*</span>
         </label>
 
+        <ChoiceButtons
+          v-if="isChoice(f)"
+          :options="choiceOptions(f)"
+          :model-value="choiceValue(f)"
+          :multi="f.multi === true"
+          :disabled="disabled"
+          :invalid="isInvalid(f)"
+          :aria-label="label(f)"
+          :testid-prefix="`fe-choice-${f.key}`"
+          @update:model-value="(v: string | string[]) => setChoice(f, v)"
+        />
+
         <select
-          v-if="f.type === 'select'"
+          v-else-if="f.type === 'select'"
           :id="`fe-cf-${f.key}`"
           class="fe-cfield__input"
           :value="str(f)"
@@ -213,7 +280,7 @@ function toggleReveal(key: string) {
         />
 
         <p v-if="help(f)" class="fe-cfield__help">{{ help(f) }}</p>
-        <p v-if="isInvalid(f)" class="fe-cfield__error">{{ t('conn.form.required') }}</p>
+        <p v-if="errorText(f)" class="fe-cfield__error">{{ errorText(f) }}</p>
       </div>
     </template>
 
@@ -255,6 +322,7 @@ function toggleReveal(key: string) {
             />
           </template>
           <p v-if="help(f)" class="fe-cfield__help">{{ help(f) }}</p>
+          <p v-if="errorText(f)" class="fe-cfield__error">{{ errorText(f) }}</p>
         </div>
       </div>
     </div>
@@ -284,7 +352,7 @@ function toggleReveal(key: string) {
 }
 .fe-cfield__req {
   color: var(--fe-danger);
-  margin-left: 3px;
+  margin-inline-start: 3px;
 }
 .fe-cfield__input {
   font: inherit;

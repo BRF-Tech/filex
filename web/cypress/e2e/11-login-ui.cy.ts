@@ -25,10 +25,7 @@ describe('login UI', () => {
       .first()
       .clear()
       .type('definitely-wrong-password');
-    cy.contains('button', /sign in|giriş|giris|login/i)
-      .filter(':visible')
-      .first()
-      .click();
+    cy.submitLogin();
     // Still on /login (no redirect to dashboard).
     cy.url({ timeout: 5000 }).should('include', '/login');
   });

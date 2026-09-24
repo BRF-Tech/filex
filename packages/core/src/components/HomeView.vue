@@ -30,6 +30,7 @@
  * hash does not match in the web-component build, so the rules would silently
  * stop applying in every embed.
  */
+import StorageTags from './StorageTags.vue';
 import { computed, ref } from 'vue';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
@@ -144,12 +145,9 @@ const storageTile = fileIconTile({ type: 'dir', mime_type: 'inode/storage' });
  * with the wrong size line says something false.
  */
 function storageCaption(s: HomeStorage): string {
-  const base =
-    typeof s.usedBytes === 'number' && s.usedBytes >= 0
-      ? t('drive.storage.used_unlimited', { used: formatSize(s.usedBytes) })
-      : t('conn.guide.storage');
-  // A read-only mount says so on its card too (issue #30).
-  return s.readOnly ? `${base} · ${t('sidenav.storage.readOnly')}` : base;
+  return typeof s.usedBytes === 'number' && s.usedBytes >= 0
+    ? t('drive.storage.used_unlimited', { used: formatSize(s.usedBytes) })
+    : t('conn.guide.storage');
 }
 
 /**
@@ -202,6 +200,20 @@ function openNode(n: FileNode) {
           <span class="fe-home__storage-main">
             <span class="fe-home__storage-label">{{ s.label || s.name }}</span>
             <span class="fe-home__storage-meta">{{ storageCaption(s) }}</span>
+            <!-- A read-only mount says so on its card too (issue #30) — on a
+                 line of its own, the panel's own mark (StorageTags, the one
+                 read-only tag of every surface). ⚠ It used to be glued to
+                 the size ("81 GB belegt · Nur lesen") inside a fixed 124 px
+                 caption, and in German the words that mattered were the ones
+                 the ellipsis ate (translator measurement, v0.43.0). A tag of
+                 its own fits any language that fits the panel's. -->
+            <StorageTags
+              v-if="s.readOnly"
+              read-only
+              :locale="locale"
+              class="fe-home__storage-ro"
+              data-testid="home-storage-readonly"
+            />
           </span>
         </button>
       </div>

@@ -1,68 +1,114 @@
 /**
- * gorunum:v1 — the operator's own stylesheet.
+ * tema:v1 — the operator's own stylesheet, and the two ways it is kept away
+ * from the controls that turn it off.
  *
- * Besides the shipped theme gallery an operator can paste CSS on the admin
- * Settings page (`ui.custom_css`). It arrives on the `/api/branding` boot
- * payload and lands here as the text of ONE `<style data-filex-custom>`
- * element in `<head>`: replaced when the setting changes, removed when it is
- * cleared, never a second element.
+ * The sheet arrives from `GET /api/me/custom-css` — authenticated, so an
+ * anonymous visitor and the login page never receive it at all — already
+ * sanitised and already wrapped in its `@scope (:root) to (.fe-css-immune)`
+ * rule by the server. This module only puts it in the document.
  *
  * ⚠ It is CSS, not markup. The value is assigned to `textContent`, which an
  * HTML parser never re-reads, so nothing in it can become an element. It never
- * goes near `v-html` or `innerHTML`, and the server refuses the one string
- * (`</style`) that would matter if it ever reached a server-rendered page.
+ * goes near `v-html` or `innerHTML`.
  *
- * ⚠ The element must be the LAST stylesheet in `<head>`. A theme override is
+ * ⚠ The element must be the LAST stylesheet in `<head>`. A token override is
  * the same specificity as the declaration it overrides — `.fe { --fe-primary }`
  * against `.fe--theme-dark { --fe-primary }` on the same element — so ties are
  * broken by source order and "last" is the whole mechanism. Appending once at
  * boot is not enough: both Vite dev and the production build inject a lazily
- * loaded route's CSS into `<head>` when that route is first opened, which is
- * long after boot (the explorer's own `style.css` is exactly such a chunk). So
- * we watch `<head>` and move back to the end whenever a stylesheet is added
- * after us.
+ * loaded route's CSS into `<head>` when that route is first opened, long after
+ * boot (the explorer's own `style.css` is exactly such a chunk). So we watch
+ * `<head>` and move back to the end whenever a stylesheet is added after us.
+ *
+ * ⚠⚠ SUSPENSION — THE GUARANTEE THAT NOBODY CAN LOCK THEMSELVES OUT.
+ * `suspendCustomCss()` takes the element OUT of the document; the admin
+ * Appearance route calls it on enter and `resumeCustomCss()` on leave. The
+ * `@scope` wrapper already stops an operator selector MATCHING inside the
+ * immune panel, but scoping cannot un-apply an inherited property or an
+ * ancestor-level one: a sheet that writes `:root { display: none }` or
+ * `:root { opacity: 0 }` blanks everything below it, immune subtree included,
+ * because those are not questions about which elements a rule matches. Nothing
+ * a stylesheet can express survives the stylesheet not being in the document —
+ * so the screen that edits and removes the sheet is the screen where the sheet
+ * is not loaded. The two guards cover different failures and both are needed.
  */
-import { BrandingApi } from '@/api/branding';
+import { AppearanceApi } from '@/api/appearance';
 
 const MARKER = 'data-filex-custom';
 
 let el: HTMLStyleElement | null = null;
 let observer: MutationObserver | null = null;
+/** The text we would be serving if we were not suspended. */
+let current = '';
+let suspended = false;
 
 /** Put (or replace) the operator stylesheet. An empty value removes it. */
 export function applyCustomCss(css: string | null | undefined): void {
-  const text = (css ?? '').trim();
-  if (!text) {
-    removeCustomCss();
+  current = (css ?? '').trim();
+  render();
+}
+
+/** Drop the operator stylesheet (the setting was cleared, or switched off). */
+export function removeCustomCss(): void {
+  current = '';
+  render();
+}
+
+/**
+ * Take the sheet out of the document until `resumeCustomCss` is called.
+ *
+ * Idempotent, and it does NOT forget the sheet: leaving the Appearance screen
+ * has to put back exactly what was there, without another round trip.
+ */
+export function suspendCustomCss(): void {
+  suspended = true;
+  render();
+}
+
+/** Put the sheet back after a suspension. */
+export function resumeCustomCss(): void {
+  suspended = false;
+  render();
+}
+
+/** Whether the sheet is currently held out of the document. */
+export function isCustomCssSuspended(): boolean {
+  return suspended;
+}
+
+/**
+ * Fetch the sheet and wear it. Best-effort, and only worth calling once a
+ * session exists — the endpoint is authenticated.
+ */
+export async function loadCustomCss(): Promise<void> {
+  try {
+    const payload = await AppearanceApi.customCss();
+    applyCustomCss(payload?.css);
+  } catch {
+    /* The endpoint needs a session and the sheet is optional — an unstyled
+       panel is the right failure, and it is the same one an installation with
+       no custom CSS already sees. */
+  }
+}
+
+/* ------------------------------------------------------------------ */
+
+function render(): void {
+  const wanted = suspended ? '' : current;
+  if (!wanted) {
+    observer?.disconnect();
+    observer = null;
+    el?.remove();
+    el = null;
     return;
   }
   if (!el) {
     el = document.createElement('style');
     el.setAttribute(MARKER, '');
   }
-  el.textContent = text;
+  el.textContent = wanted;
   moveToEnd();
   watchHead();
-}
-
-/** Drop the operator stylesheet (the setting was cleared). */
-export function removeCustomCss(): void {
-  observer?.disconnect();
-  observer = null;
-  el?.remove();
-  el = null;
-}
-
-/** Fetch the boot payload and wear whatever it carries. Best-effort. */
-export async function loadCustomCss(): Promise<void> {
-  try {
-    const branding = await BrandingApi.boot();
-    applyCustomCss(branding?.custom_css);
-  } catch {
-    /* The endpoint is public but optional — an unstyled panel is the right
-       failure, and it is the same one an installation with no custom CSS
-       already sees. */
-  }
 }
 
 function moveToEnd(): void {

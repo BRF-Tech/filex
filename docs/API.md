@@ -79,7 +79,7 @@ property.
 |----------------|--------|------------|-------|
 | `api-base`     | string | `apiBase`  | base URL of the filex backend; required unless `endpoint` is set |
 | `endpoint`     | string | `endpoint` | legacy explicit manager URL, for hosts with their own routes |
-| `locale`       | string | `locale`   | `tr \| en`. Unset ⇒ the browser's language, falling back to `en` |
+| `locale`       | string | `locale`   | `tr`, `en`, or any language an installed **language pack** adds (`GET /api/public/branding` → `ui_locales` lists them). Unset ⇒ the browser's language, falling back to `en`. An embed takes its **text direction** from this value, not from the host page — see [RTL](RTL.md) |
 | `theme`        | string | `theme`    | `light \| dark \| auto` (default `auto`) — the **host's** mode, used while the viewer has not pinned one of their own |
 | `trash-visible`| bool   | `trashVisible` | show the Trash entry |
 | `sidenav`      | bool   | `sideNav`  | the navigation panel. Absent leaves the core default (on) alone |
@@ -141,16 +141,22 @@ Our own desktop app is in this position too — it mounts the web component.
 
 ### `<filex-connections>`
 
-The storage-connection surface as an element, so a host with no bundler mounts
+The "how to connect" surface as an element, so a host with no bundler mounts
 the same component the admin SPA imports as an SFC.
 
 | Property / attribute | Notes |
 |---|---|
 | `config` | same `ExplorerConfig`; **configure through this**, not the attributes |
-| `initial-tab` | `storages \| connect` — which half to open on |
 | `closable` | render the close affordance |
 
-Events: `changed`, `close`, `error`.
+Events: `close`, `error`.
+
+⚠ `initial-tab` and the `changed` event were **removed in v0.43.0** with the
+Storages tab they belonged to. The element no longer creates, edits or deletes
+a storage, so there is no second half to open on and nothing that could make a
+host's own storage list stale. Storages are managed in the admin panel
+(Storages), and the storages a caller may browse are listed by the explorer's
+navigation panel.
 
 ⚠ Set `el.config = { ...el.config, locale: 'tr' }`. Setting `el.locale = 'tr'`
 changes a property nothing renders from — the merge is `{...attributes,
@@ -207,6 +213,7 @@ function onError(e: { message: string; context?: unknown }) {
 | `selection-change` | `Array<{ path: string; basename: string; type: 'file' \| 'dir' }>` |
 | `navigate`         | `{ path: string }` — the viewed folder changed |
 | `refresh`          | *(none)* — the viewer asked for a refresh |
+| `open-my-shares`   | *(none)* — the navigation panel's **My shares** row was pressed. The row is drawn only with `config.mySharesVisible: true` (default off); the page it leads to is the host's, so set the flag only if you handle this. Not forwarded by `<filex-explorer>` or `<FileManager>` |
 
 `refresh` is a **notification, not a request**: the explorer reloads the listing
 itself and does not wait for the host. It exists for the half it cannot know
@@ -304,7 +311,7 @@ embed one product.
 | `DestinationPickerModal` + `destinationTree` helpers | the **one** folder chooser, spanning every storage. "Move to" and "Copy to" both mount it; its rules (`destinationRows`, `blockedReason`, `permAllowsWrite`, `isAtOrInside`, …) are pure functions so a host can reuse the decisions without the dialog |
 | `downloadArchive`, `requestArchive`, `triggerFileNavigation`, `absoluteTicketUrl`, `archiveTicketUrl` | "download the selection as one archive" — the real two-step flow, for a host that draws its own selection bar |
 | `ConnectionsPanel`, `StorageFields`, `TokensPanel`, `S3KeysPanel`, `SSHKeysPanel`, `NFSExportsPanel` | the connection surfaces, and the guide builders behind them |
-| `ThemeGallery`, `ThemePalette`, `THEMES`, `setTheme`, `setThemeMode` | the palette gallery and the light/dark mode, for hosts whose appearance settings live in their own pane |
+| `ThemeGallery`, `ThemePalette`, `THEMES`, `setTheme`, `setThemeMode`, `setCustomThemes` | the palette gallery and the light/dark mode, for hosts whose appearance settings live in their own pane; `setCustomThemes` adds an operator's own themes (the `themes` of `GET /api/appearance`) beside the built-in ones |
 | `viewPrefs` (`attachViewPrefsStore`, `folderMemoryEnabled`, `setFolderMemoryEnabled`, `COLUMNS`, `tableLayout`, …) | per-folder view memory and the table configuration. The host owns the settings control and the transport; the rest is the explorer's |
 | `dateGroups` (`groupByDate`, `dateBucketFor`, `groupingActive`) | the Today / Yesterday / This week ladder every listing view draws its headings from |
 | `timezone` (`activeTimeZone`, `setTimeZone`, `supportedTimeZones`, …) | the viewer's clock, so dates outside the explorer are formatted against the same value |
@@ -398,7 +405,7 @@ export type AuthConfig =
   | { kind: 'none' };                     // development / public sandbox
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
-export type LocaleCode = 'tr' | 'en';
+export type LocaleCode = 'tr' | 'en' | (string & {});  // + any language a pack adds
 export type UiProfile  = 'standard' | 'simple';
 export type ViewMode   = 'list' | 'grid' | 'gallery';
 
@@ -519,7 +526,8 @@ them restricts and changes nothing.
 
 ```ts
 export interface FileNode {
-  /** DB node id — needed by the per-user meta routes (starred, tags, recent).
+  /** DB node id — needed by the node meta routes (starred, recent, and the
+   *  personal + team tags — SEARCH.md#tags--personal-and-team).
    *  Only client-synthesized rows (virtual storage folders) lack one. */
   id?: number;
   /** Adapter-qualified path: `local://receipts/2024/invoice.pdf` */
@@ -546,6 +554,13 @@ export interface FileNode {
   perm?: 'none' | 'viewer' | 'editor' | 'owner';
   /** Directory rows: the folder is E2E-encrypted. */
   e2e?: boolean;
+  /** A symlink the server will NOT follow — it cannot be opened. A link inside
+   *  a `local` storage's folder is followed and arrives as its target, so this
+   *  never means merely "is a link". `type` stays `'file' | 'dir'`. */
+  symlink?: boolean;
+  /** Why: `outside_root` | `broken` | `unresolved`; often absent (read it
+   *  through `linkStateOf`). See docs/STORAGE.md → Symlinks. */
+  link_state?: string;
   [k: string]: unknown;
 }
 
@@ -650,9 +665,11 @@ allow-list, and because two of them are not shaped like the rest.
 | `GET \| PUT /api/files/manager/view-prefs` | one opaque JSON document per user: view mode, sort, column widths/order/visibility. On the user row rather than in the browser, because `localStorage` is per-BROWSER and a shared machine would hand the next account the previous one's arrangements. Capped at 128 KB, server-side |
 | `GET /api/files/quota/storages` | per-storage usage, RBAC-filtered — "how full is this drive" for somebody who is not an administrator. `{ storages: [{ name, used_bytes, file_count }] }`. It is the right source for `config.storages[].usedBytes` in an embed; `/api/admin/storages` is the operator's |
 | `POST /api/files/manager?action=newfile` | create a document: `{ path, name, type }`, where `type` is an `ext` from `newdoc_types`. Answers `{ path, name, ext, size, mime }` — deliberately **not** the re-rendered listing, because a create is followed by "open the thing I just made" and the one fact the client cannot reconstruct is the final path (the name may have gained an extension). `409` on a collision: creation is the one verb where replacing is never the intent |
+| `GET /api/files/manager?action=changes&path=<storage>://<folder>&since=<cursor>` | `{ cursor, changed }`: has anything under this folder changed since the cursor this caller got last time? No `since` (or a cursor from before a server restart) is always `changed`. One request instead of re-listing a tree; the sync client and the desktop app ask it every round. Same visibility rules as `index`, and a change counts only if the caller can see what it touched. Servers before it answer `501` — walk instead |
+| `POST /api/files/manager?action=rename` | rename one item in place: `{ path, item, name }`. `409 { code: "NAME_TAKEN", name }` when anything already has the name — a rename never replaces it, and is not given a `-copy` name either, because the client's undo assumes the item landed exactly where it was asked to. `503 { code: "EXISTS_CHECK_FAILED" }` when the backend cannot tell. A case-only rename is allowed |
 | `GET /api/files/capabilities` → `newdoc_types` | the document types **this build** can create, from a template registry compiled into the binary. Each row is `{ ext, group, mime, requires }`. Published to anonymous callers too: it is a static property of the build and names no host |
 | `GET /api/branding` → `sso_label` | the operator's text for the sign-in page's SSO button (settings key `branding.sso_label`, tenant-overlaid like the rest of branding). Empty means the translated default |
-| `GET /api/branding` → `custom_css` | the operator stylesheet (settings key `ui.custom_css`). It rides this payload because `/api/branding` is the appearance fetch the SPA already makes at boot, before a session exists, so the login screen is styled too |
+| `GET /api/me/custom-css` | the operator stylesheet (settings key `ui.custom_css`), **behind authentication** and `no-store`: `{ css, enabled }`, already sanitised and already wrapped in its `@scope` guard. ⚠ It used to ride `GET /api/branding`, which is public — so it reached anonymous visitors and the sign-in form. The `custom_css` field is **removed** from that payload rather than emptied, so a client still reading it fails loudly instead of quietly rendering nothing. Off by default (`ui.custom_css_enabled`); see [INTEGRATION.md](INTEGRATION.md#operator-custom-css) |
 
 ### Downloading a selection is two requests
 

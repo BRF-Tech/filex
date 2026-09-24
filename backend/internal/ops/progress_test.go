@@ -56,6 +56,10 @@ func TestMeasureSources_SumsTreesAndSkipsBookkeeping(t *testing.T) {
 	write("klasor/a.bin", 100)
 	write("klasor/alt/b.bin", 250)
 	write("klasor/.thumbs/t.jpg", 9999)
+	// Every filex directory is storage-local bookkeeping (syspath), not only
+	// the two the transfer's own list used to name.
+	write("klasor/.versions/7/1", 7777)
+	write("klasor/.filex-open/0123456789ab-Plan.docx", 5555)
 	write("tek.bin", 30)
 
 	drv := &local.Driver{}
@@ -63,5 +67,5 @@ func TestMeasureSources_SumsTreesAndSkipsBookkeeping(t *testing.T) {
 
 	total, ok := measureSources(context.Background(), drv, []string{"klasor", "tek.bin"})
 	require.True(t, ok)
-	require.EqualValues(t, 380, total, ".thumbs is not transferred, so it is not counted")
+	require.EqualValues(t, 380, total, "filex's own directories are not transferred, so they are not counted")
 }

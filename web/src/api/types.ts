@@ -78,6 +78,13 @@ export interface StorageDriverDescriptor {
   i18n_key: string;
   fields: StorageField[];
   capabilities: StorageDriverCapabilities;
+  /**
+   * Settings a STORAGE on this driver has for the scan that catalogues it
+   * (issue #44 — `scan_exclude`), kept in the same `config` map. Drawn where a
+   * storage is created or edited, never in the replication-target dialog: a
+   * target is not scanned. Absent from a server older than v0.43.0.
+   */
+  scan_fields?: StorageField[];
 }
 
 export interface StorageRef {
@@ -119,9 +126,10 @@ export interface StorageRef {
   };
   last_sync_at?: string | null;
   /** Raw `sync_runs.status` of the last run: the backend writes 'ok',
-   *  'running' or 'failed'. ('error' is the sync-runs list's translated
-   *  spelling — accepted here too so both round-trip.) */
-  last_sync_state?: 'ok' | 'failed' | 'error' | 'running' | 'pending';
+   *  'running', 'failed' or 'aborted' (a run the server stopped in the middle
+   *  of, closed when it next started). ('error' is the sync-runs list's
+   *  translated spelling — accepted here too so both round-trip.) */
+  last_sync_state?: 'ok' | 'failed' | 'error' | 'running' | 'aborted' | 'pending';
   last_sync_error?: string | null;
   /** Replica fields. v0.1.18+: the canonical link is
    *  `replica_target_id` — a foreign key into the new
@@ -256,6 +264,18 @@ export interface Capabilities {
    *  mailed link then carries the built-in guess (http://localhost:5212). The
    *  admin layout puts up a sign for exactly this (#32). */
   public_url_configured?: boolean;
+  /** Whether the host can run app plugins at all (WASM runtime present and
+   *  not switched off). The same block the explorer reads off
+   *  `/api/files/capabilities`; absent on a server too old to say, which
+   *  reads as off — and off means the panel makes no plugin call at all. */
+  app_plugins?: { enabled: boolean };
+  /** Async upload scanning is configured (ClamAV). Configured, not probed. */
+  antivirus?: boolean;
+  /** Whether this installation holds an escrow key for encrypted folders. */
+  e2e_escrow?: { enabled: boolean };
+  /** The caller could configure the instance (the server's answer — the
+   *  same checks the admin routes apply, supertenant included). */
+  caller_admin?: boolean;
 }
 
 export interface SettingsMap {
@@ -287,7 +307,8 @@ export interface ExternalAdvisory {
 }
 
 export interface ExternalService {
-  id: 'onlyoffice' | 'drawio';
+  /** `convert` is the legacy iframe converter (internal/external.Convert). */
+  id: 'onlyoffice' | 'drawio' | 'convert';
   url: string | null;
   jwt_secret_set: boolean;
   enabled: boolean;
@@ -315,12 +336,62 @@ export interface ExternalService {
 }
 
 export interface AuthProvider {
-  id: 'local' | 'oidc' | 'ldap' | 'proxy-header';
+  id: 'local' | 'oidc' | 'ldap' | 'proxy-header' | 'api-token';
   enabled: boolean;
   config: Record<string, unknown>;
   config_redacted?: Record<string, unknown>;
   status: 'ok' | 'misconfigured' | 'disabled';
   last_error?: string | null;
+  /** "Test now" can check this provider for real (the driver is an auth.Prober). */
+  testable?: boolean;
+  /** The page may change it (not defined by the environment). */
+  managed?: boolean;
+  /** Where it is configured: the environment, this page, or built in. */
+  origin?: 'environment' | 'page' | 'builtin';
+  /** Where an environment provider is defined (FILEX_AUTH_DRIVERS, a config file…). */
+  from?: string;
+  state?: 'running' | 'failed' | 'off';
+  /** Saved on this page before v0.43.0, never applied; imported switched off. */
+  legacy?: boolean;
+  /** The page holds a configuration under this name, but the environment's is used. */
+  shadowed?: boolean;
+  /** Secret fields holding a value — never the value itself. */
+  secrets_set?: Record<string, boolean>;
+  /** The fields the page may set (server-side schema). */
+  fields?: AuthProviderField[];
+}
+
+/** One field of a provider the page manages (authsetup.Field). */
+export interface AuthProviderField {
+  key: string;
+  kind: 'text' | 'secret' | 'bool';
+  required?: boolean;
+  default?: string;
+}
+
+/** `GET /api/admin/auth-providers`, read whole. */
+export interface AuthProvidersOverview {
+  providers: AuthProvider[];
+  /** The password form answers (password sign-in or the recovery sign-in). */
+  passwordSignIn: boolean;
+  /** The installation administrator's recovery sign-in is on. */
+  recoveryLogin: boolean;
+  /** FILEX_SECRET_KEY is set, so secrets can be stored (sealed). */
+  secretKey: boolean;
+}
+
+/** One step of a provider test (auth.ProbeCheck). */
+export interface AuthProviderCheck {
+  id: string;
+  status: 'ok' | 'fail' | 'unchecked';
+  params?: Record<string, string>;
+}
+
+/** `POST /api/admin/auth-providers/{name}/test`. */
+export interface AuthProviderTestResult {
+  testable: boolean;
+  ok: boolean;
+  checks: AuthProviderCheck[];
 }
 
 export interface AuditEntry {
@@ -328,6 +399,8 @@ export interface AuditEntry {
   at: string;
   user_id: number | null;
   user_email: string | null;
+  /** The person as every screen names them (server model.PersonLabel). */
+  user_name?: string | null;
   action: string; // e.g. "user.create", "storage.delete", "share.access"
   target_type: string | null;
   target_id: string | null;
@@ -336,6 +409,9 @@ export interface AuditEntry {
   details: Record<string, unknown> | null;
   /** Backend metadata_json — token-authenticated writes carry token_id + token_username. */
   metadata?: Record<string, unknown> | null;
+  /** WHICH thing the row is about, in words — a user's e-mail, a storage's
+   *  name, a file's path (backend handlers/audit_targets.go). */
+  target_name?: string | null;
 }
 
 export interface Share {
@@ -351,6 +427,18 @@ export interface Share {
   pin_set?: boolean;
   /** Current backend field. */
   has_pin?: boolean;
+  /**
+   * Can this link's PIN still be SHOWN to its owner or to an admin?
+   *
+   * Since migration 00049 the PIN is also sealed (internal/secretbox, under
+   * FILEX_SECRET_KEY) so those two principals can be told it again. False for
+   * a link with no PIN, for one minted before that migration, and on an
+   * instance with no secret key — the three cases a row must say plainly
+   * rather than offer a copy button with nothing behind it. The PIN itself is
+   * never in a listing; it comes from GET /api/shares/{id}/pin, one row at a
+   * time and audited.
+   */
+  pin_recoverable?: boolean;
   expires_at?: string | null;
   max_downloads?: number | null;
   download_count?: number;
@@ -412,6 +500,9 @@ export interface QueueOp {
   started_at?: string | null;
   finished_at?: string | null;
   not_before?: string | null;
+  /** What the job is about, in words — a file's path with its storage, or a
+   *  storage's name (handlers/queue.go subjectOf). */
+  subject?: string;
 }
 
 export interface QueueStats {
@@ -444,7 +535,8 @@ export type WebhookStatus = 'pending' | 'sent' | 'failed' | 'skipped';
  * whole point of the field is that one rule decides where every surface lands.
  */
 export interface NotificationTargetRef {
-  kind: 'file' | 'dir' | 'share' | 'none';
+  /** `trash` — the Trash view, the item deleted from `path` selected. */
+  kind: 'file' | 'dir' | 'share' | 'trash' | 'none';
   /** Storage NAME, not id — the explorer addresses storages by name. */
   storage?: string;
   /** Path inside that storage, relative, no `<storage>://` prefix. */
@@ -462,6 +554,17 @@ export interface NotificationItem {
   meta: Record<string, unknown>;
   target?: NotificationTargetRef;
   user_id?: number | null;
+  /** Display name of the row's person — admin list only (server fills it). */
+  user_name?: string;
+  /** A broadcast only administrators' bells show — admin list only. */
+  admins_only?: boolean;
+  /**
+   * Who a BROADCAST reaches — admin list only, the bells' own rule
+   * (notify.BroadcastAudience): everybody, administrators and the members who
+   * can see the file it names, administrators only, or no bell at all (routine
+   * file activity recorded without the person who did it).
+   */
+  audience?: 'everyone' | 'viewers' | 'admins' | 'nobody';
   read_at?: string | null;
   webhook_status: WebhookStatus;
   webhook_error?: string;

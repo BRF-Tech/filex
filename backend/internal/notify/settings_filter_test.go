@@ -23,7 +23,14 @@ import (
 )
 
 // bellFixture seeds one user and sends three events at them: two
-// replica_fail and one file.infected.
+// share.created and one file.infected.
+//
+// ⚠ The muted event used to be replica_fail. Since the 0.43 release-candidate
+// sweep (2026-09-21) operator alarms (notify.operatorEvents) never reach a
+// non-administrator's bell, muted or not, so a plain user's baseline dropped
+// from 3 rows to 1 and these tests went red for a reason that has nothing to
+// do with preferences. The fixture keeps a plain user — most bells belong to
+// one — and mutes an event such a user actually receives.
 func bellFixture(t *testing.T) (db.Store, notify.Service, int64) {
 	t.Helper()
 	_, store := dbtest.NewTestDB(t)
@@ -33,7 +40,7 @@ func bellFixture(t *testing.T) (db.Store, notify.Service, int64) {
 	t.Cleanup(svc.Stop)
 
 	for _, ev := range []notify.EventType{
-		notify.EventReplicaFail, notify.EventReplicaFail, notify.EventFileInfected,
+		notify.EventShareCreated, notify.EventShareCreated, notify.EventFileInfected,
 	} {
 		_, err := svc.Send(context.Background(), notify.Event{
 			Event:    ev,
@@ -61,23 +68,23 @@ func TestBell_MutedEventIsHidden(t *testing.T) {
 	_, svc, uid := bellFixture(t)
 	ctx := context.Background()
 
-	items, total, err := svc.List(ctx, &uid, false, 50, 0)
+	items, total, err := svc.List(ctx, &uid, notify.AdminBell, false, 50, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 3, "baseline: nothing muted yet")
 	require.EqualValues(t, 3, total)
 
-	setBellPrefs(t, svc, uid, true, `["replica_fail"]`)
+	setBellPrefs(t, svc, uid, true, `["share.created"]`)
 
-	items, total, err = svc.List(ctx, &uid, false, 50, 0)
+	items, total, err = svc.List(ctx, &uid, notify.AdminBell, false, 50, 0)
 	require.NoError(t, err)
-	require.Len(t, items, 1, "the two replica_fail rows are muted")
+	require.Len(t, items, 1, "the two share.created rows are muted")
 	require.Equal(t, string(notify.EventFileInfected), items[0].Event)
 
 	// ⚠ The total must shrink with the page. A total that still says 3 makes
 	// the UI render pagination for rows it will never show.
 	require.EqualValues(t, 1, total)
 
-	n, err := svc.UnreadCount(ctx, &uid)
+	n, err := svc.UnreadCount(ctx, &uid, notify.AdminBell)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n, "the badge must agree with the list")
 }
@@ -88,14 +95,14 @@ func TestBell_MutedRowsAreStillRecorded(t *testing.T) {
 	_, svc, uid := bellFixture(t)
 	ctx := context.Background()
 
-	setBellPrefs(t, svc, uid, false, `["replica_fail","file.infected"]`)
+	setBellPrefs(t, svc, uid, false, `["share.created","file.infected"]`)
 
-	items, total, err := svc.List(ctx, nil, false, 50, 0)
+	items, total, err := svc.List(ctx, nil, notify.AdminBell, false, 50, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 3, "admin/global view is never filtered by one user's prefs")
 	require.EqualValues(t, 3, total)
 
-	n, err := svc.UnreadCount(ctx, nil)
+	n, err := svc.UnreadCount(ctx, nil, notify.AdminBell)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, n)
 }
@@ -107,18 +114,18 @@ func TestBell_InAppDisabledSilencesTheBell(t *testing.T) {
 
 	setBellPrefs(t, svc, uid, false, `[]`)
 
-	items, total, err := svc.List(ctx, &uid, false, 50, 0)
+	items, total, err := svc.List(ctx, &uid, notify.AdminBell, false, 50, 0)
 	require.NoError(t, err)
 	require.Empty(t, items)
 	require.EqualValues(t, 0, total)
 
-	n, err := svc.UnreadCount(ctx, &uid)
+	n, err := svc.UnreadCount(ctx, &uid, notify.AdminBell)
 	require.NoError(t, err)
 	require.EqualValues(t, 0, n)
 
 	// Turning it back on restores the history — nothing was destroyed.
 	setBellPrefs(t, svc, uid, true, `[]`)
-	items, total, err = svc.List(ctx, &uid, false, 50, 0)
+	items, total, err = svc.List(ctx, &uid, notify.AdminBell, false, 50, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 3)
 	require.EqualValues(t, 3, total)
@@ -134,7 +141,7 @@ func TestBell_MutedPageIsNotShort(t *testing.T) {
 	// Two more of the muted event, so a post-filter would eat a whole page.
 	for i := 0; i < 2; i++ {
 		_, err := svc.Send(ctx, notify.Event{
-			Event: notify.EventReplicaFail, Severity: notify.SeverityWarning,
+			Event: notify.EventShareCreated, Severity: notify.SeverityWarning,
 			Title: "noise", UserID: &uid,
 		})
 		require.NoError(t, err)
@@ -146,9 +153,9 @@ func TestBell_MutedPageIsNotShort(t *testing.T) {
 		})
 		require.NoError(t, err)
 	}
-	setBellPrefs(t, svc, uid, true, `["replica_fail"]`)
+	setBellPrefs(t, svc, uid, true, `["share.created"]`)
 
-	items, total, err := svc.List(ctx, &uid, false, 2, 0)
+	items, total, err := svc.List(ctx, &uid, notify.AdminBell, false, 2, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 2, "a filtered page must be full, not short")
 	require.EqualValues(t, 3, total, "3 file.infected rows survive the mute")
@@ -165,7 +172,7 @@ func TestBell_UnreadableSettingsFailOpen(t *testing.T) {
 
 	setBellPrefs(t, svc, uid, true, `not json at all`)
 
-	items, total, err := svc.List(ctx, &uid, false, 50, 0)
+	items, total, err := svc.List(ctx, &uid, notify.AdminBell, false, 50, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 3)
 	require.EqualValues(t, 3, total)
@@ -196,4 +203,27 @@ func TestMutedList(t *testing.T) {
 	s := &model.NotificationSettings{MutedEventsRaw: []byte(`["a"]`)}
 	require.True(t, s.IsMuted("a"))
 	require.False(t, s.IsMuted("b"))
+}
+
+// The admin list marks the broadcasts only administrators' bells show, so its
+// Scope column can say "Administrators" instead of "Everyone" beside an
+// upgrade notice no plain user ever sees.
+func TestAdminList_MarksOperatorBroadcastsAsAdminsOnly(t *testing.T) {
+	_, svc, _ := bellFixture(t)
+	for _, ev := range []notify.EventType{notify.EventUpdateAvailable, notify.EventType("admin_test")} {
+		_, err := svc.Send(context.Background(), notify.Event{Event: ev, Severity: notify.SeverityInfo, Title: string(ev)})
+		require.NoError(t, err)
+	}
+	rows, _, err := svc.List(context.Background(), nil, notify.AdminBell, false, 50, 0)
+	require.NoError(t, err)
+	seen := map[string]bool{}
+	for _, n := range rows {
+		if n.UserID == nil {
+			seen[n.Event] = n.AdminsOnly
+		} else {
+			require.False(t, n.AdminsOnly, "a person's own row is theirs, not the administrators'")
+		}
+	}
+	require.True(t, seen[string(notify.EventUpdateAvailable)], "update_available is for administrators")
+	require.False(t, seen["admin_test"], "a test broadcast reaches everybody")
 }

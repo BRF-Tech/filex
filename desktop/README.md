@@ -13,12 +13,27 @@ app adds the five things a browser tab cannot do:
    browser (PKCE, `src/browser-auth.ts`), and the resulting token is stored
    through the OS keychain (`safeStorage`). If the keychain is unavailable the
    app **refuses to store the token** rather than writing it to disk.
-3. **Folder sync in the background.** `filex sync run --watch` runs per account,
-   supervised by the app and shipped inside it (`build/bin/filex`), so the app
-   and a terminal act on one implementation and one pairing file.
+3. **Folder sync in the background, live.** `filex sync run --watch` runs per
+   account, supervised by the app and shipped inside it (`build/bin/filex`), so
+   the app and a terminal act on one implementation and one pairing file. The
+   engine follows the server's change stream and the local file system, so an
+   edit on either side arrives in about a second; its `live:` lines become the
+   *Live / Polling / Offline* word under each synced folder
+   (`src/syncstatus.ts`, which also keeps each folder's own error and clears
+   it on that folder's next clean pass). ⚠ The live path lives in the ENGINE: an installed app
+   gets it only with a build that bundles the new CLI.
+   Also on this release: **Pause sync** in the tray menu and Settings,
+   remembered across restarts, reboots and the hidden start at sign-in; a
+   **bandwidth limit** and a **sync window** as Settings presets
+   (`--limit-down` / `--limit-up` / `--window`); a first run that **holds back**
+   a large re-upload and offers *Upload them* or *Move to local trash* with a
+   count; transfer progress in bytes with an estimate on each folder's line;
+   and the computer **kept awake while sync moves files** (the screen still
+   locks). The unread notification count shows on the dock icon where the
+   system has one.
 4. **It keeps itself up to date, quietly.** See *Updates* below.
 5. **It can be the app that opens a document.** Double-click a `.docx` on the
-   disk and it opens in the server's OnlyOffice editor, with the edits written
+   disk and it opens in the server's ONLYOFFICE editor, with the edits written
    back over the local file — see *Open with filex* below. A browser tab cannot
    be a file handler at all.
 
@@ -168,7 +183,7 @@ separate component with its own catalogue). Covered by `scripts/lang-e2e.mjs`.
 
 ## Open with filex
 
-Double-clicking a `.docx` opens it in the server's OnlyOffice editor. The user
+Double-clicking a `.docx` opens it in the server's ONLYOFFICE editor. The user
 story and the OS-by-OS limits are in
 [docs/DESKTOP.md](../docs/DESKTOP.md#opening-documents-from-your-computer); what
 matters when working on this code:
@@ -186,7 +201,7 @@ matters when working on this code:
   across drives (EXDEV), never resurrecting a document the user deleted while it
   was open, and a failure that is shown rather than logged. `keptAt` on the
   error is where the edit went instead.
-- **The grace period after the window closes is not optional.** OnlyOffice posts
+- **The grace period after the window closes is not optional.** ONLYOFFICE posts
   its save callback ~10 s *after* the last editor disconnects, so deleting the
   scratch copy on close would discard the last edit of every session.
   `FILEX_OPENWITH_POLL_MS` / `_GRACE_MS` / `_QUIET_MS` shorten it for tests.
@@ -272,6 +287,7 @@ a server and credentials (`FILEX_SERVER`, `FILEX_EMAIL`, `FILEX_PASSWORD`), and
 | Script | What it proves |
 |---|---|
 | `ui-login-e2e.mjs` | Browser sign-in end to end, including the manual-code fallback |
+| `signin-retry-e2e.mjs` | A sign-in that fails — a stale link, a refused code, a reload of the window — stays on the waiting screen of the same attempt; *Start again* begins a new one; *Cancel* is the only way back to the server address (issue #36) |
 | `chrome-e2e.mjs` | The app's own chrome: rail, tabs, theme, scrollbars |
 | `files-e2e.mjs` · `share-e2e.mjs` | Listing, upload, preview; share links |
 | `share-limit-e2e.mjs` | A capped link hands out exactly that many downloads |
@@ -301,7 +317,7 @@ Two more, which need neither a server nor Electron:
 | `pnpm test` | The parts of "Open with filex" that can lose a document, measured directly (`test/openwith.test.ts`, Node's own runner via type stripping); the notification and portable-data decisions; and `test/chrome-tokens.test.ts` — the shell's chrome states no colour of its own, sizes its controls from `--fe-h-*`, and never becomes a SECOND writer of a preference the file list already owns |
 | `pnpm test:red` | ⚠ The same cases against a deliberately naive implementation (`test/openwith-naive.ts`), and **fails if any of them passes there**. A case the first draft already satisfies measures nothing while looking like it does — this repo has shipped exactly that kind of test before |
 
-⚠ `openwith-e2e.mjs` performs the editor's save the way OnlyOffice's callback
+⚠ `openwith-e2e.mjs` performs the editor's save the way ONLYOFFICE's callback
 does — by writing new bytes over the scratch copy through the API. The document
 server itself is a separate ~2 GB service that has to reach the filex instance
 over the network, and a local run has none; everything on this side of that one

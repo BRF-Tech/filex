@@ -25,6 +25,21 @@ hero:
       link: https://github.com/BRF-Tech/filex
 
 features:
+  - icon: ✍️
+    title: Apps — things to do with a file
+    details: A second kind of plugin — a sandboxed WebAssembly app that adds actions to the file menu, screens filex draws for it, and public pages for people with no account — installed from a GitHub address through a review of every permission it asks for, and able to do exactly that and nothing else. Two ship alongside filex as public repositories — e-Signature, which sends a document round for signature and seals the finished file with the installation's own seal, and Convert. Write your own in stock Go, against a test kit.
+    link: /APP-PLUGINS
+    linkText: Apps docs
+  - icon: 🌍
+    title: Your language, right to left included
+    details: English and Turkish are built in; any other language is a language pack — a manifest of strings, no code and no release — which joins every picker and translates the explorer, the admin panel, the public pages and the text the server writes, with its coverage of this version shown beside it. Plural forms follow CLDR. Arabic, Hebrew, Persian and Urdu lay the whole interface out right to left, and stop where mirroring would be wrong.
+    link: /RTL
+    linkText: Right-to-left docs
+  - icon: 🎨
+    title: Wear your own colours
+    details: Compose named themes on the admin Appearance screen — twelve colours for light and for dark, a corner radius, a font stack, previewed as you type — and make one the instance default. It reaches the sign-in page and every public link too, because branding that stops at the login is not branding.
+    link: /INTEGRATION#themes
+    linkText: Themes & appearance
   - icon: 🌐
     title: A browser client for your users
     details: Give someone a user or viewer account and the address …/drive, and they land on their own Home — their storages, what they opened last, what they starred — one click from the file manager itself, with its uploads, sharing, search and editor, and with no admin panel around it and no separate frontend to deploy. …/admin is the operator's door to the same application, and it opens on the same Home.
@@ -42,7 +57,7 @@ features:
     linkText: How dragging out works
   - icon: 🔁
     title: Folder sync
-    details: A folder on your PC kept in step with a folder on the server, both ways — from the desktop menu or the CLI. The first sync deletes nothing and a delete never beats an edit.
+    details: A folder on your PC kept in step with a folder on the server, both ways, live — an edit on either side arrives in about a second instead of on the next 30-second lap — from the desktop menu or the CLI, with a bandwidth limit and a sync window when you want them. The first sync deletes nothing, holds back a big re-upload and asks first, and a delete never beats an edit.
     link: /SYNC
     linkText: Sync docs
   - icon: 🔍

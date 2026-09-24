@@ -221,11 +221,17 @@ async function main() {
     // COUNT badge, so the old probe answered "(no bell button)" on a page
     // with a bell on it. Read straight out of the DOM so a miss reports what
     // IS there rather than an empty locator.
+    //
+    // ⚠ And by the testid of the ONE badge since v0.43.0: the count is
+    // `UnreadBadge.vue` (`unread-badge`), drawn on every surface that shows an
+    // unread count, and the bell's own `notification-bell-count` span is gone.
+    // The probe that still asked for it failed this check on a bell that was
+    // plainly showing "1".
     const dotState = () =>
       page.evaluate(() => {
         const btn = document.querySelector('[data-testid="notification-bell"]');
         if (!btn) return { found: false, html: '(no bell button)' };
-        const badge = btn.querySelector('[data-testid="notification-bell-count"]');
+        const badge = btn.querySelector('[data-testid="unread-badge"]');
         return {
           found: !!badge && /\d/.test(badge.textContent || ''),
           html: btn.outerHTML.replace(/\s+/g, ' ').slice(0, 200),
@@ -397,15 +403,27 @@ async function main() {
     await spage.fill('#password', ADMIN.password);
     await spage.click('button[type="submit"]');
     await spage.waitForURL(/\/admin\/(home|dashboard|explore)/, { timeout: 25_000 });
+    // ⚠ A person's own preferences live in ONE place — the user settings
+    // dialog. The admin Notifications page points at it
+    // (`notif-open-own-prefs`, which opens the dialog already on its
+    // notifications section) and no longer carries the button itself. This
+    // script waited for the page's old `notif-browser-ask` until v0.43.0 and
+    // died here, taking every scene after it down with it;
+    // `web/tests/deploy/shotsFixtures.test.ts` now fails when a test id a shot
+    // script waits for is emitted nowhere in the interface.
     await spage.goto(`${URL}/admin/notifications`);
-    await spage.waitForSelector('[data-testid="notif-browser-ask"]', { timeout: 20_000 });
+    await spage.waitForSelector('[data-testid="notif-open-own-prefs"]', { timeout: 20_000 });
+    const askedOnLoad = await spage.evaluate(() => window.__askedAt.length);
+    check('6a. permission was NOT asked on page load', askedOnLoad === 0, `calls=${askedOnLoad}`);
+    await spage.click('[data-testid="notif-open-own-prefs"]');
+    await spage.waitForSelector('[data-testid="user-settings-browser-ask"]', { timeout: 20_000 });
     const askedBefore = await spage.evaluate(() => window.__askedAt.length);
-    check('6a. permission was NOT asked on page load', askedBefore === 0, `calls=${askedBefore}`);
-    await spage.click('[data-testid="notif-browser-ask"]');
+    check('6a2. …nor by opening the dialog that offers it', askedBefore === 0, `calls=${askedBefore}`);
+    await spage.click('[data-testid="user-settings-browser-ask"]');
     await spage.waitForTimeout(600);
     const askedAfter = await spage.evaluate(() => window.__askedAt.length);
     check('6b. …and IS asked from the button', askedAfter === 1, `calls=${askedAfter}`);
-    const gone = await spage.locator('[data-testid="notif-browser-ask"]').count();
+    const gone = await spage.locator('[data-testid="user-settings-browser-ask"]').count();
     check('6c. …after which the screen says it is allowed', gone === 0, `button still present: ${gone}`);
     await sctx.close();
 

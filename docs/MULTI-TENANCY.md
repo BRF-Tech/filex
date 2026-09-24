@@ -13,7 +13,7 @@
 > finished.
 >
 > Longer-standing gaps: no admin SPA page for tenant lifecycle (the API is the
-> surface), **one e-mail address still cannot exist in two tenants** (§4), no
+> surface), **one email address still cannot exist in two tenants** (§4), no
 > per-tenant SMTP identity, and no live multi-realm OIDC end-to-end run. (The
 > postgres/mysql CI job landed in v0.38.0 — `test:go:engines` — so the
 > migrations, the schema comparison and the write paths now run on all three
@@ -210,7 +210,7 @@ context through workers.
   hop tenants).
 - Uniqueness is **`(provider_id, oidc_subject)`** — the JIT lookup is
   provider-scoped, so a subject from tenant A cannot resolve tenant B's user.
-  ⚠ E-mail is the exception: `users.email` is **still globally unique** (§4), so
+  ⚠ Email is the exception: `users.email` is **still globally unique** (§4), so
   two tenants may NOT both have `admin@` yet. The scoped lookup is in place and
   the schema change is not.
 - Role/scope: reuse the existing OIDC claim→role logic (roles read from *both*
@@ -228,7 +228,7 @@ rather than on `PublicURL`:
 |---|---|
 | Share / file-request links | `/s/{token}`, `/d/{token}` |
 | Realtime | the `wss://…/api/ws` endpoint advertised with a ticket |
-| E-mail | drop-received notice, item-grant notice, **account-created (temp password + login link)**, invite share link |
+| Email | drop-received notice, item-grant notice, **account-created (temp password + login link)**, invite share link |
 | Integrations | the `/s/{token}` and `/u/{ticket}` URLs returned to AI / MCP / ShareX |
 
 Two ways in, because not every URL is minted while a browser waits:
@@ -236,7 +236,7 @@ Two ways in, because not every URL is minted while a browser waits:
 - **From the request** — the host it asked for, and only when that host
   resolves to an **enabled provider row** (same trusted-host model as tenant
   resolution, §13). Anything else falls back to `PublicURL`, so a forged
-  `Host:` header can never appear in a minted link or an e-mail. The origin is
+  `Host:` header can never appear in a minted link or an email. The origin is
   assembled from the provider row's own `host` column, not from the request
   string.
 - **From the data** — where there is no `*http.Request` (an MCP tool call, an
@@ -306,6 +306,14 @@ are unchanged.
       cross-storage path) now shares that rule. The tag listings
       (`/manager/tagged`, `/manager/tags*`) were a third door into the same
       catalogue and are filtered too.
+- [x] **Tags themselves** (v0.43.0) — until then a tag was one label per file
+      with no owner and no tenant, so `tags/all` told every tenant the tag
+      NAMES every other tenant used (measured: bravo's panel listed alpha's
+      "müşteri teklifi"). Tags are now personal (one user) or team (one
+      tenant: `tags.tenant_id`), a team tag is never shown to another tenant —
+      not even on a storage both tenants are linked to — and tenant 0 means
+      "the instance" (a single-tenant install, or a storage linked to no
+      tenant). See [Tags — personal and team](SEARCH.md#tags--personal-and-team).
 - [x] **All pickers server-filtered** — user directory, storage-picker,
       share-picker, grant-picker (RBAC), audit, notifications, search. The
       picker that was NOT filtered was
@@ -399,6 +407,8 @@ is the honest form of that proof.
 | `/api/admin/update` | Replace the binary every tenant is served by. |
 | `/api/admin/providers` | Tenant lifecycle. |
 | `/api/admin/plugins` | Install a process filex runs. The tenancy check runs **before** the `plugins_disabled` 503, so the refusal does not disclose whether plugins are switched on. |
+| `/api/admin/app-plugins` | Apps are instance-wide (the table has no tenant column): install one into every tenant's file menu, change its grants and settings, or force-lift the file locks it holds. |
+| `/api/admin/themes` | Themes are instance-wide too: a theme one tenant's admin wrote would paint every other tenant's users. The instance default is the `ui.default_theme` setting, which the per-key classification below already refuses to a tenant admin. |
 | `/api/admin/webhooks`, `/api/admin/notifications/webhook-config` | One target list receives **every tenant's** event stream, so a tenant admin adding a target subscribes to other customers' file paths. Per-tenant targets are a feature — the rows must carry a provider and the emitter must filter by it — not something a gate approximates. Same 503-ordering note as plugins. |
 | `/api/admin/replication-targets`, `/api/admin/replica/*` | Fan every tenant's writes at a backup sink of the caller's choosing. |
 | `/api/admin/search/stats`, `/api/admin/search/rebuild` | One instance-wide index: `stats` discloses other customers' document counts, `rebuild` re-enqueues extraction for every node of every tenant. The rebuild ITSELF must stay unscoped — it runs on a background context, and a scoped rebuild would silently evict every other tenant from the index. |
@@ -413,7 +423,7 @@ unfiltered. Gating these would have taken a real capability away:
 | `/api/admin/duplicates` | Walked every storage and returned path, name, size **and etag** — a content fingerprint, so it confirmed that a file you already hold exists in another tenant | Own storages only |
 | `/api/admin/sync-runs` (list) | A timeline of every tenant's sync activity | Own storages only |
 | `/api/admin/dashboard` | Storage rows were confined, but `total_users`, `active_sessions` and `recent_activity` were instance-wide aggregates | Own users. `active_sessions` is **zeroed** for a tenant rather than reported wrong: there is no count-by-provider query, and a zero is honest where the platform total is not |
-| `POST /api/admin/trash/empty` | Permanent, irreversible destruction of **every** tenant's trashed files, by an admin of any one of them, answering 200. The most damaging single request in the admin surface | Own storages only. Scoped inside the service sweep, because the handler has no list to filter; the nightly retention worker carries no scope and so still sweeps everything |
+| `POST /api/admin/trash/empty` | Permanent, irreversible destruction of **every** tenant's trashed files, by an admin of any one of them, answering 200. The most damaging single request in the admin surface | Own storages only. Scoped inside the service sweep, because the handler has no list to filter; the nightly retention worker carries no scope and so still sweeps everything. The run is an ops job stored with the scope it was asked with, and it is its tenant's: another tenant neither lists, reads, follows nor cancels it |
 
 **Classified per key** — `/api/admin/settings` (`PATCH`, `PUT /{key}`):
 
@@ -748,7 +758,7 @@ means the phase's core landed and a named piece did not.
       ⚠ live multi-realm Keycloak E2E still to be exercised on a real deploy.)*
       ⚠ The `(provider_id,email)` unique swap was described here as "a
       review-gated migration (00015)". It is not: **no such migration exists**,
-      and `00015` went to `provider_cookie_domain`. E-mail is still globally
+      and `00015` went to `provider_cookie_domain`. Email is still globally
       unique (§4). Not required for isolation — only for the same address in two
       tenants — but a reader should not be told a file is waiting when none is.
 - [x] **Phase 5 — supertenant + admin scoping.** Confine-exempt platform scope;

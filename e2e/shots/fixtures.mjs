@@ -87,7 +87,7 @@ This folder is the demo fixture the project's screenshots are taken from — the
 ## Try these
 
 - **Click a file** to preview it: images, video, audio, PDF, Office documents, source code, notebooks, 3D models and diagrams each open in their own viewer.
-- **Right-click → Share / Permissions** to mint a public link, with an optional PIN, an expiry and a download limit.
+- **Right-click → Share** to mint a public link, with an optional PIN, an expiry and a download limit.
 - **Drag & drop** to upload, and convert between formats.
 - **Search** runs across the whole tree, contents included.
 

@@ -146,6 +146,24 @@ const LEGITIMATE_TWINS: Twin[] = [
   },
   {
     files: [
+      'backend/internal/db/drivers/postgres/customthemes.go',
+      'backend/internal/db/drivers/sqlite/customthemes.go',
+    ],
+    reason:
+      'tema:v1 — the same argument as the two driver files above, but only ' +
+      'after the shareable half was actually shared. This gate first caught ' +
+      'these two files carrying ~400 tokens of clone: the row scanning, the ' +
+      'select list and the token-JSON marshalling had no dialect in them, and ' +
+      'they moved to internal/db/customtheme_scan.go, which both drivers ' +
+      'already import. What is left is four statements that differ in exactly ' +
+      'the two ways the dialects differ (`?` vs `$1`, CURRENT_TIMESTAMP vs ' +
+      'NOW()) plus the error handling around each. Parameterising those means ' +
+      'a placeholder-rewriting query builder for four statements, and a builder ' +
+      'that emits the wrong dialect fails at run time on the one engine nobody ' +
+      'tested.',
+  },
+  {
+    files: [
       'backend/internal/queue/drivers/postgres/postgres.go',
       'backend/internal/queue/drivers/sqlite/sqlite.go',
     ],
@@ -285,13 +303,6 @@ const KNOWN_DUPLICATION: Debt[] = [
       'sources, the DestStorageID fallback — is written out at two query sites. ' +
       'Add a column to operations and one of them is silently wrong.',
     maxTokens: 150,
-  },
-  {
-    files: ['backend/internal/filesync/engine.go'],
-    reason:
-      'The post-pass settle block (re-walk the remote, save the next baseline, prune ' +
-      'expired trash, record the duration) runs in two places in the engine.',
-    maxTokens: 160,
   },
   {
     files: ['backend/internal/trash/service.go', 'backend/internal/versioning/cleanup.go'],
@@ -438,9 +449,15 @@ const CONCEPT_EXEMPTIONS: ConceptExemption[] = [
     concept: 'brand-mark',
     file: 'backend/internal/api/handlers/share.go',
     reason:
-      'DEBT, and it is WRONG RIGHT NOW: publicBrandMark still fills #6366f1, the ' +
-      'pre-rebrand indigo. Every public share page shows the old logo. This is ' +
-      'the "half a rebrand shipped" case, live.',
+      'DEBT. publicBrandMark is the mark hand-typed as a Go string for the ' +
+      'no-JavaScript fallback pages, which have no bundler and cannot import ' +
+      'the component. It is the RIGHT colour today (#2f6ceb, checked ' +
+      '2026-09-23) — the reason here used to say it still filled the ' +
+      'pre-rebrand indigo, which was true when it was written and is the case ' +
+      'this register exists for: a second copy goes out of step silently. It ' +
+      'is also a fixed hex where the SPA shell now follows --fe-primary, so a ' +
+      'branded instance gets its accent on the JS page and product blue on ' +
+      'the fallback.',
   },
   {
     concept: 'brand-mark',

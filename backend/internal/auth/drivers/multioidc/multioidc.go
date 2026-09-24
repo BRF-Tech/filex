@@ -66,6 +66,22 @@ func (m *Dispatcher) HandleCallback(w http.ResponseWriter, r *http.Request) (*mo
 	return drv.HandleCallback(w, r)
 }
 
+// EndSessionURL implements auth.OIDCLogoutDriver on the tenant's own driver —
+// the host resolves exactly as it did for sign-in. "" (sign-out stays local)
+// when the host has no IdP, the IdP cannot be reached for discovery, or the
+// driver does not do RP-initiated logout.
+func (m *Dispatcher) EndSessionURL(r *http.Request, idToken, postLogoutRedirect string) string {
+	drv, err := m.resolve(r)
+	if err != nil {
+		return ""
+	}
+	lo, ok := drv.(auth.OIDCLogoutDriver)
+	if !ok {
+		return ""
+	}
+	return lo.EndSessionURL(r, idToken, postLogoutRedirect)
+}
+
 // resolve maps the request host to a tenant OIDC driver, or the fallback.
 func (m *Dispatcher) resolve(r *http.Request) (auth.OIDCDriver, error) {
 	p, _ := m.store.GetProviderByHost(r.Context(), RequestHost(r))

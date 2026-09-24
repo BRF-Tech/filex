@@ -1,20 +1,47 @@
 <script setup lang="ts">
 /**
  * Modal — tiny headless wrapper. Backdrop + centered card + ESC + autofocus.
+ *
+ * ⚠⚠ Every dialog the explorer draws is this one — rename, new folder, the
+ * delete confirmation, and the frame EVERY app plugin's screen opens in
+ * (PluginViewModal). What it does on Escape, on a click outside the card
+ * and with the focus is therefore what all of them do, and until v0.43.0
+ * it did none of the three for a dialog MOUNTED open:
+ *
+ *   • the keys and the focus were wired in a `watch` on `open` without
+ *     `immediate`, so a dialog created with `open` already true (the plugin
+ *     frame is `v-if` + `:open="true"`) never heard Escape and never took
+ *     the focus — the converter's dialog stayed up on Escape while the share
+ *     dialog next to it closed (release-candidate sweep, 2026-09-21);
+ *   • `closeOnBackdrop` was read as `!== false`, but Vue casts an absent
+ *     boolean prop to `false`, so NO dialog closed on an outside click.
  */
 import { watch, onBeforeUnmount, ref } from 'vue';
+import { isTopModal, popModal, pushModal } from '../lib/modalStack';
+import { useLocale } from '../composables/useLocale';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
+  /** The explorer's language, for the close button's name. Absent = English. */
+  locale?: string;
   open: boolean;
   title?: string;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  /** A click outside the card closes the dialog (the default, as the share
+   *  dialog and the admin panel's dialogs do). `false` for a dialog that
+   *  must be answered — the recovery key a person has to write down. */
   closeOnBackdrop?: boolean;
   /** When true, drop the dialog chrome (backdrop tint, header, footer,
    *  centered card with border-radius) and render the slot full-bleed.
    *  Used by the standalone /files/edit route where the browser tab IS
    *  the container — a modal frame on top of it just steals real estate
-   *  from the editor. ESC + emit('close') still wire through so the
-   *  parent route can window.close() the tab. */
+   *  from the editor.
+   *
+   *  ⚠ Escape does NOT close a chromeless dialog. There it would close the
+   *  TAB (the route answers `close` with window.close()), and Escape is a
+   *  key editors use for themselves — dismissing a suggestion list in the
+   *  text editor must not throw the document away. It never did in
+   *  practice (the route mounts the dialog open, see above); now it is a
+   *  rule rather than an accident. */
   chromeless?: boolean;
   /**
    * gorunum:v1 — full-bleed overlay. Like `chromeless` it drops the dialog
@@ -35,7 +62,10 @@ const props = defineProps<{
    *  rather than a child of the parent component, so plain DOM
    *  inheritance isn't always enough). */
   theme?: 'light' | 'dark' | 'auto';
-}>();
+}>(), {
+  closeOnBackdrop: true,
+});
+const { t } = useLocale(() => props.locale ?? 'en');
 
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -54,29 +84,74 @@ const FOCUSABLE =
   'input:not([disabled]),select:not([disabled]),textarea:not([disabled]),' +
   'button:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])';
 
+/** This dialog's place in lib/modalStack: only the top one answers keys. */
+const me = Symbol('fe-modal');
+let wired = false;
+let focusTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * The first thing to focus: something in the BODY when there is one, so a
+ * form's first box — or a plugin screen's first choice — has the cursor,
+ * not the header's ×; then the footer; then anything in the card (the ×).
+ */
+function focusFirst() {
+  const card = cardEl.value;
+  if (!card) return;
+  const within = (sel: string) => card.querySelector(sel)?.querySelector<HTMLElement>(FOCUSABLE) ?? null;
+  const target = within('.fe-modal__body') ?? within('.fe-modal__actions') ?? card.querySelector<HTMLElement>(FOCUSABLE);
+  target?.focus();
+}
+
+function wire() {
+  if (wired) return;
+  wired = true;
+  prevFocus = (document.activeElement as HTMLElement | null) ?? null; /* wiring:c4 */
+  pushModal(me);
+  document.addEventListener('keydown', onKey);
+  // ⚠ The handle is kept and cleared on unwire: a dialog closed (or torn
+  // down, as a test environment is) inside these 30 ms must not reach for a
+  // document that is gone — vitest reported exactly that as an unhandled
+  // "document is not defined" once dialogs created open were wired.
+  focusTimer = setTimeout(() => {
+    focusTimer = undefined;
+    if (typeof document === 'undefined') return;
+    // Only if the focus is not already inside (a component that focuses its
+    // own field on mount keeps it).
+    if (wired && !cardEl.value?.contains(document.activeElement)) focusFirst();
+  }, 30);
+}
+
+function unwire() {
+  if (!wired) return;
+  wired = false;
+  if (focusTimer !== undefined) {
+    clearTimeout(focusTimer);
+    focusTimer = undefined;
+  }
+  document.removeEventListener('keydown', onKey);
+  popModal(me);
+  /* wiring:c4 — return focus to the opener. */
+  prevFocus?.focus?.();
+  prevFocus = null;
+}
+
+// ⚠ `immediate`: a dialog created open (v-if + :open="true", which is how
+// the explorer mounts every plugin screen) must be wired exactly like one
+// that opens later. See the header for what happened without it.
 watch(
   () => props.open,
-  (v) => {
-    if (v) {
-      prevFocus = (document.activeElement as HTMLElement | null) ?? null; /* wiring:c4 */
-      document.addEventListener('keydown', onKey);
-      setTimeout(() => {
-        const focusable = cardEl.value?.querySelector<HTMLElement>(FOCUSABLE);
-        focusable?.focus();
-      }, 30);
-    } else {
-      document.removeEventListener('keydown', onKey);
-      /* wiring:c4 — return focus to the opener. */
-      prevFocus?.focus?.();
-      prevFocus = null;
-    }
-  },
+  (v) => (v ? wire() : unwire()),
+  { immediate: true },
 );
 
-onBeforeUnmount(() => document.removeEventListener('keydown', onKey));
+// Removed while still open (the parent's v-if went false first): the keys
+// come off and the focus goes home, as if it had closed.
+onBeforeUnmount(unwire);
 
 function onKey(e: KeyboardEvent) {
+  if (!isTopModal(me)) return;
   if (e.key === 'Escape') {
+    if (props.chromeless) return;
     emit('close');
     return;
   }
@@ -100,8 +175,22 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
-function onBackdrop() {
-  if (props.closeOnBackdrop !== false) emit('close');
+/**
+ * A click outside the card closes the dialog — but only a click that also
+ * STARTED outside it. A drag that selects text in a field and is released
+ * over the backdrop fires `click` on the backdrop (the common ancestor), and
+ * closing then would throw away what was being typed.
+ */
+let downOnBackdrop = false;
+function onBackdropDown(e: PointerEvent) {
+  downOnBackdrop = e.target === e.currentTarget;
+}
+function onBackdrop(e: MouseEvent) {
+  const started = downOnBackdrop;
+  downOnBackdrop = false;
+  if (!props.closeOnBackdrop || props.chromeless) return;
+  if (e.target !== e.currentTarget || !started) return;
+  emit('close');
 }
 </script>
 
@@ -117,6 +206,7 @@ function onBackdrop() {
         theme === 'dark' ? 'fe--theme-dark' : '',
       ]"
       role="presentation"
+      @pointerdown="onBackdropDown"
       @click="onBackdrop"
     >
       <div
@@ -138,7 +228,7 @@ function onBackdrop() {
           <button
             type="button"
             class="fe-modal__close"
-            aria-label="Close"
+            :aria-label="t('modal.close')"
             @click="emit('close')"
           >×</button>
         </header>

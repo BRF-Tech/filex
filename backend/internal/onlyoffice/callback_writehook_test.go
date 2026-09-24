@@ -185,7 +185,11 @@ func (h *harness) save(t *testing.T, status int, body string) map[string]any {
 	}))
 	t.Cleanup(ds.Close)
 
-	payload := fmt.Sprintf(`{"key":"k","status":%d,"url":%q}`, status, ds.URL+"/saved.docx")
+	// Signed the way a document server with JWT on signs it — an unsigned
+	// callback is refused (TestCallback_UnsignedIsRefused).
+	tok, err := signHS256(map[string]any{"key": "k", "status": status, "url": ds.URL + "/saved.docx"}, "shh")
+	require.NoError(t, err)
+	payload := fmt.Sprintf(`{"key":"k","status":%d,"url":%q,"token":%q}`, status, ds.URL+"/saved.docx", tok)
 	req := httptest.NewRequest(http.MethodPost, "/api/files/onlyoffice/callback?node=1",
 		strings.NewReader(payload))
 	resp, err := h.svc.HandleCallback(req, h.node.ID)
@@ -282,6 +286,10 @@ func TestCallback_UnwiredSyncStillWrites(t *testing.T) {
 
 	resp := h.save(t, StatusReadyForSaving, "STILL SAVED")
 	assert.Equal(t, 0, resp["error"])
+	// The fallback gate still announces the save, on a goroutine. Wait for it:
+	// the harness's cleanup resets the process-wide sink, and a test that ends
+	// first races that emit (seen under -race).
+	h.sink.wait(t)
 
 	onDisk, err := os.ReadFile(filepath.Join(h.root, "budget.docx"))
 	require.NoError(t, err)

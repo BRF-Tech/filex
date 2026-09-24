@@ -27,6 +27,10 @@ var internalKeys = []string{
 	".versions/42/1",
 	".thumbs/abc.jpg",
 	".filex-trash/deleted.txt",
+	// The desktop app's open-with working area. Every protocol server carried
+	// its own copy of the list above and none of them knew this name (they
+	// now share syspath), so an S3 client listed the working copies.
+	".filex-open/0123456789ab-Plan.docx",
 }
 
 // They must not appear in a listing...

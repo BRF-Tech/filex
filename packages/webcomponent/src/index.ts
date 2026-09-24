@@ -316,11 +316,15 @@ const FilexConnectionsWrapper = defineCustomElement(
       endpoint: { type: String, default: '' },
       locale: { type: String, default: '' },
       theme: { type: String, default: '' },
-      /** 'storages' | 'connect' — which half to open on. */
-      initialTab: { type: String, default: '' },
       closable: { type: [Boolean, String], default: undefined },
     },
-    emits: ['changed', 'close', 'error'],
+    /* ⚠ No `initial-tab`, and no `changed`. Both belonged to the storage half
+       the panel lost in v0.43.0: the attribute chose between "storages" and
+       "connect" when there were two halves, and the event fired when a storage
+       was added or removed here. An attribute that can only take one value and
+       an event that can never fire are worse than absent — a host wires them
+       and believes them. Storages are managed in the admin panel. */
+    emits: ['close', 'error'],
     setup(props, { emit }) {
       injectStylesOnce();
 
@@ -352,12 +356,10 @@ const FilexConnectionsWrapper = defineCustomElement(
           ? null
           : h(ConnectionsPanel as never, {
               config: merged.value,
-              initialTab: props.initialTab === 'connect' ? 'connect' : 'storages',
               closable:
                 props.closable === true ||
                 props.closable === 'true' ||
                 props.closable === '',
-              onChanged: () => emit('changed'),
               onClose: () => emit('close'),
               onError: (e: unknown) => emit('error', e),
             });

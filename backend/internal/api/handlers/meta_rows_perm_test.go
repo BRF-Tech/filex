@@ -66,7 +66,7 @@ func TestMetaLists_RowsCarryPermAndReadOnly(t *testing.T) {
 	for _, n := range []*model.Node{rwNode, roNode} {
 		require.NoError(t, store.SetUserNodeMeta(ctx, admin.ID, n.ID, "starred", "1"))
 		require.NoError(t, store.SetUserNodeMeta(ctx, admin.ID, n.ID, "last_opened", "1758240000"))
-		require.NoError(t, store.SetNodeTags(ctx, n.ID, []string{"menu-everywhere"}))
+		testutil.TagNode(t, store, n.ID, 0, "menu-everywhere")
 	}
 
 	type row struct {

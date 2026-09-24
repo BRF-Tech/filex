@@ -6,7 +6,13 @@
 // order is what breaks the tie.
 import { describe, it, expect, beforeEach } from 'vitest';
 
-import { applyCustomCss, removeCustomCss } from '@/lib/customCss';
+import {
+  applyCustomCss,
+  removeCustomCss,
+  suspendCustomCss,
+  resumeCustomCss,
+  isCustomCssSuspended,
+} from '@/lib/customCss';
 
 const marker = 'style[data-filex-custom]';
 
@@ -16,6 +22,7 @@ function sheets(): Element[] {
 
 describe('custom CSS injection', () => {
   beforeEach(() => {
+    resumeCustomCss();
     removeCustomCss();
     document.head.innerHTML = '';
   });
@@ -66,5 +73,62 @@ describe('custom CSS injection', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(document.head.lastElementChild).toBe(sheets()[0]);
     expect(sheets()).toHaveLength(1);
+  });
+});
+
+// tema:v1 — suspension.
+//
+// ⚠⚠ THE GUARANTEE THAT NOBODY CAN LOCK THEMSELVES OUT. The `@scope` wrapper
+// the server puts around the sheet stops an operator selector MATCHING inside
+// the admin Appearance panel, but scoping cannot un-apply an inherited or
+// ancestor-level property: `:root { display: none }` and `:root { opacity: 0 }`
+// blank everything below them, immune subtree included, because neither is a
+// question about which elements a rule matches. Nothing a stylesheet can
+// express survives the stylesheet not being in the document — so the screen
+// that edits and removes the sheet takes it out while it is open.
+describe('suspending the operator stylesheet', () => {
+  beforeEach(() => {
+    resumeCustomCss();
+    removeCustomCss();
+    document.head.innerHTML = '';
+  });
+
+  it('takes the element out of the document and puts the same one back', () => {
+    applyCustomCss('.fe { --fe-primary: #ff0000; }');
+    expect(sheets()).toHaveLength(1);
+
+    suspendCustomCss();
+    expect(isCustomCssSuspended()).toBe(true);
+    expect(sheets(), 'a suspended sheet must not merely be emptied').toHaveLength(0);
+
+    resumeCustomCss();
+    expect(isCustomCssSuspended()).toBe(false);
+    expect(sheets()).toHaveLength(1);
+    expect(sheets()[0].textContent).toBe('.fe { --fe-primary: #ff0000; }');
+  });
+
+  it('does not re-inject while suspended, however the sheet changes', () => {
+    applyCustomCss('.fe { --fe-primary: #ff0000; }');
+    suspendCustomCss();
+
+    // The Appearance screen is editing it; nothing it does may put it back.
+    applyCustomCss('.fe { --fe-primary: #00ff00; }');
+    expect(sheets()).toHaveLength(0);
+
+    resumeCustomCss();
+    expect(sheets()[0].textContent).toBe('.fe { --fe-primary: #00ff00; }');
+  });
+
+  it('is idempotent, and resuming a cleared sheet injects nothing', () => {
+    applyCustomCss('.fe { --fe-primary: #ff0000; }');
+    suspendCustomCss();
+    suspendCustomCss();
+    resumeCustomCss();
+    expect(sheets()).toHaveLength(1);
+
+    suspendCustomCss();
+    removeCustomCss();
+    resumeCustomCss();
+    expect(sheets(), 'a sheet removed while suspended must stay gone').toHaveLength(0);
   });
 });

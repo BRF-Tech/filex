@@ -1,0 +1,118 @@
+/**
+ * sign-fonts.css — the five faces a signature may be written in.
+ *
+ * Three handwriting (Caveat, Dancing Script, Homemade Apple) and two formal
+ * (the interface face, Source Serif 4): the closed set `pdf-fields` and
+ * `signature-pad` offer, mirrored by `lib/signFonts.ts` (which is what the
+ * components and the wire value read — keep the two in step).
+ *
+ * ⚠⚠ Self-hosted on purpose. A CDN `@font-face` on a signing screen tells a
+ * third party that somebody, at this address, is signing a document right
+ * now — and on an air-gapped install it silently draws the signature in the
+ * wrong face. The `.woff2` files live in `../assets/fonts/`; the bundler
+ * emits them beside `style.css`, so every host of the package gets them
+ * without wiring anything. See that folder's README for licences.
+ *
+ * ⚠ These rules cost nothing until they are used: a browser fetches a
+ * `@font-face` file only when text is actually laid out in that family, and
+ * `unicode-range` narrows it further to the subset the text needs.
+ *
+ * ⚠ `unicode-range` is copied from the upstream stylesheet. Without it the
+ * browser would download the latin-ext file for a plain ASCII name, and —
+ * worse — would NOT fall back to the interface face for a glyph the subset
+ * does not carry (Homemade Apple has no latin-ext at all: `ş ğ İ` come from
+ * the fallback, which is exactly the intended behaviour).
+ */
+
+/* ── Caveat (OFL 1.1) ─────────────────────────────────────────────────── */
+@font-face {
+  font-family: 'Caveat';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('../assets/fonts/caveat-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Caveat';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('../assets/fonts/caveat-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ── Dancing Script (OFL 1.1) ─────────────────────────────────────────── */
+@font-face {
+  font-family: 'Dancing Script';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('../assets/fonts/dancing-script-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Dancing Script';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('../assets/fonts/dancing-script-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ── Homemade Apple (Apache 2.0) — latin only, see the folder README ──── */
+@font-face {
+  font-family: 'Homemade Apple';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/homemade-apple-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ── Source Serif 4 (OFL 1.1) ─────────────────────────────────────────── */
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url('../assets/fonts/source-serif-4-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url('../assets/fonts/source-serif-4-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* The CSS stack each key resolves to. One definition, read by the pad, by
+   the pdf-fields overlay and by anything that later renders a stored value:
+   a second copy is how a signature drawn in Caveat comes back in Inter. */
+.fe-signfont--caveat {
+  font-family: 'Caveat', cursive;
+}
+.fe-signfont--dancing-script {
+  font-family: 'Dancing Script', cursive;
+}
+.fe-signfont--homemade-apple {
+  font-family: 'Homemade Apple', cursive;
+}
+.fe-signfont--inter {
+  font-family: var(--fe-font);
+}
+.fe-signfont--source-serif {
+  font-family: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+}

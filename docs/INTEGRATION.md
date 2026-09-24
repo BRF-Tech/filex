@@ -40,7 +40,7 @@ const config = {
   //   or { kind: 'csrf', csrf: '<token>' }  for cookie-session hosts
   //   or { kind: 'none' }                    for an open/dev backend
 
-  locale: 'tr',            // 'tr' | 'en'
+  locale: 'tr',            // 'tr' | 'en' | any language a pack adds; sets this
   theme: 'auto',           // 'light' | 'dark' | 'auto'
   // ⚠ Show a "drives" root listing every storage — and PAIR IT WITH `storages`.
   // The explorer MIRRORS the list you hand it; it does not go and discover the
@@ -77,7 +77,8 @@ const config = {
   // Home · Shared with me · Recent · Starred · Trash (plus "My files" when the
   // caller reaches at most one storage — with several there is a drives root
   // to go back to instead), the tags in use, the storages this caller can
-  // reach, then "How to connect" + "API keys".
+  // reach, an "Apps" section when an installed app has a home screen
+  // (docs/APP-PLUGINS.md), then "How to connect" + "API keys".
   // ON by default on every surface. The viewer collapses it to a 56px
   // icon rail from the control at the FAR LEFT OF THE TOP BAR — above the
   // panel, not inside it, so it is still there when the panel is a rail — and
@@ -92,7 +93,9 @@ const config = {
   // token three of those protocols sign in with). Default on, except under
   // `uiProfile: 'simple'` where it is off.
   // ⚠ Never gated on role: the backend already decides what a caller sees, and
-  // /api/tokens caps every scope against the caller's own role and grants.
+  // /api/tokens caps every scope against the caller's own role and grants — and,
+  // since v0.43.0, against the CALLING CREDENTIAL too: a token cannot mint one
+  // wider than itself (`403 token_ceiling`). A browser session has no ceiling.
   connections: true,
 
   // Is a PERSON behind this explorer, or an integration?
@@ -188,10 +191,22 @@ once the file is starred, so the Starred view's contents are visible without
 hovering every tile. All of it is the one `StarButton` component over the one
 `POST /api/files/manager/star` call — there is no second starring path to drift.
 
-The panel's **Tags** section lists every tag in use (`GET
+The panel's **Tags** section lists every tag the person can see (`GET
 /api/files/manager/tags/all`) and opens one as a listing of the files carrying
-it (`GET /api/files/manager/tagged`). Notes for embedders:
+it (`GET /api/files/manager/tagged`). Since v0.43.0 tags are **personal** (the
+person's own, like a star) or **team** (everyone in the tenant who can see the
+file) — see [Tags — personal and team](SEARCH.md#tags--personal-and-team).
+Notes for embedders:
 
+- The section is two groups, **Personal** then **Team**, each under its kind's
+  name and glyph (`TagKindIcon`, exported), and every tag chip on a file, every
+  pick in the advanced search and the tag view's crumb carry the same glyph and
+  the kind in words. A tag on screen always says who can see it.
+- `TagPicker` asks who sees a new tag (personal by default) and offers "team"
+  only where the server says the person may change team tags
+  (`can_edit_team`); for a viewer it stays visible, disabled, with the reason.
+  Its `change` event still sends the names first, then the `{name, kind}`
+  items; `open` sends the name, then the kind.
 - The list is fetched **after** the first folder listing, not during mount, and
   is cached module-wide for a minute with in-flight de-duplication: several
   explorers on one page cost one query, and navigation costs none. Editing a
@@ -199,11 +214,13 @@ it (`GET /api/files/manager/tagged`). Notes for embedders:
 - The first eight tags are shown with a "Show N more"; on the 56px icon rail the
   section collapses to a single **Tags** button that opens the panel, because a
   rail of identical tag glyphs names nothing.
-- A tag view is a virtual listing like Starred: it parks the sentinel
-  `.tag~<name>` in the path, so it is deep-linkable (`#.tag~invoices`) and every
-  surface that renders a path segment — tab strip, breadcrumb, details panel —
-  shows `#invoices`. A hash naming a tag that no longer exists opens that tag's
-  empty state, never an error.
+- A tag view is a virtual listing like Starred: it parks a sentinel in the
+  path, so it is deep-linkable, and every surface that renders a path segment —
+  tab strip, breadcrumb, details panel — shows `#invoices`. The sentinel names
+  the kind: `.mytag~invoices` (personal, crumb `#invoices · Personal`),
+  `.teamtag~invoices` (team), and the pre-v0.43 `.tag~invoices`, which keeps
+  working and lists **both** kinds. A hash naming a tag that no longer exists
+  opens that tag's empty state, never an error.
 - ⚠ Reloading on any virtual view's hash (`#.trash`, `#.starred`, `#.recent`,
   `#.shared`, `#.tag~…`) opens the **view**. Those hashes used to be handed to
   the ordinary folder load, which answered "folder not found" for a trash that
@@ -243,25 +260,54 @@ eventMatchesShortcut(ev, 'palette'); // true when THIS event fires that action
 
 A theme is a map of `--fe-*` custom properties in a light and a dark variant,
 not a second stylesheet — picking one is independent of light/dark mode, which
-keeps deciding which variant is active. Eight ship (Default, Night Blue,
-Forest, Amber, Lilac, High Contrast, Soft Gray and Terminal Green), and a host
+keeps deciding which variant is active. Eight ship (Default, Night blue,
+Forest, Amber, Lilac, High contrast, Soft gray and Terminal green), and a host
 that wants its own look sets the same tokens on any scope above the explorer.
 Every shipped palette clears WCAG 2.1 contrast in both variants, which is a
 check in the test suite rather than a claim.
 
+An operator can add **their own** beside those eight on the admin panel's
+**Appearance** screen (`/admin/appearance`): named themes with twelve colours
+per variant, a corner radius and a font stack, one of which may be made the
+instance default. The filex web app reads them from the public
+`GET /api/appearance` at boot, so they reach the sign-in page and anonymous
+share visitors too — and a signed-out window wears the instance default, never
+the palette of whoever last signed in on that browser. A signed-in person's
+pick is kept on their **account** (`GET|PUT /api/me/prefs`), not in the
+browser. An embed does neither by itself: it offers the built-in eight unless
+the host fetches `/api/appearance` and hands the list to `setCustomThemes`, and
+a pick made inside it is remembered in that browser.
+
 #### Operator custom CSS
 
 An operator who wants a look no shipped theme gives can paste a stylesheet in
-the admin panel: **Settings -> Custom CSS**, stored as the setting
-`ui.custom_css` and capped at 64 KB (the page counts the same UTF-8 bytes the
-server enforces). It is delivered on the public `GET /api/branding` payload,
-which the SPA already fetches on every page load before a session exists, and
-injected as the text of a single `<style data-filex-custom>` element appended
-last in `<head>`. Last is deliberate: a token override ties on specificity with
-the declaration it overrides, so source order is what decides, and the element
-moves back to the end whenever a lazily loaded route injects its own CSS.
+the admin panel: **Appearance -> Custom CSS** (`/admin/appearance`), stored as
+the setting `ui.custom_css` and capped at 64 KB (the page counts the same UTF-8
+bytes the server enforces).
 
-Three things worth knowing before you write one:
+> ⚠ **It is off until you switch it on, and that includes an installation that
+> already had a sheet.** A second setting, `ui.custom_css_enabled`, gates it;
+> absent, or anything other than a true-ish value, means off. There is
+> deliberately no grandfathering — the rules below changed underneath existing
+> sheets, so continuing to apply one silently would be applying something the
+> operator never approved. **Upgrading with a custom stylesheet in use means
+> re-enabling it.** The editor moved with it: it used to live under *Settings*.
+
+It is served from `GET /api/me/custom-css`, **behind authentication**, with
+`Cache-Control: no-store`, and injected as the text of a single
+`<style data-filex-custom>` element appended last in `<head>`. Last is
+deliberate: a token override ties on specificity with the declaration it
+overrides, so source order is what decides, and the element moves back to the
+end whenever a lazily loaded route injects its own CSS.
+
+> ⚠⚠ **It is not on the public `GET /api/branding` payload, and the field is
+> gone rather than blanked.** It used to ride that payload, which is the
+> pre-session appearance fetch — so the sheet reached anonymous visitors and
+> the sign-in form itself. A client still reading `branding.custom_css` now
+> finds no such key, on purpose: an old client should fail loudly rather than
+> quietly render an unstyled page while somebody believes the feature works.
+
+Things worth knowing before you write one:
 
 - **The `--fe-*` custom properties are the supported surface.** They are listed
   above and in `packages/core/src/styles/variables.css`, and setting them on any
@@ -273,16 +319,41 @@ Three things worth knowing before you write one:
   upgrade. That includes the admin panel's own chrome, which is built from
   utility classes rather than `--fe-*` tokens: a token-only sheet restyles the
   file surfaces and leaves the panel's sidebar and buttons alone.
-- **A change reaches other browsers within about a minute.** The payload is
-  sent with `Cache-Control: public, max-age=60`, so a visitor already on the
-  site keeps the previous sheet until their next load past that window. The
-  admin who saves sees it immediately — the Settings page applies its own save
-  without waiting for a reload.
-- **It applies to everyone using the installation, on every page**, including
-  the login screen — it is one instance-wide row, not a per-user preference and
-  not a per-tenant one. In multi-tenant mode only the supertenant may write it;
-  a tenant admin's write is refused, the way every other instance-wide setting
-  is. Clearing the box removes the element entirely.
+- **No anonymous surface wears it.** The sign-in page, share pages, the PIN
+  gate and an app's public pages are served to people with no session, and the
+  endpoint carrying the sheet refuses them — they cannot download it, let alone
+  apply it. Those surfaces follow the instance **theme** instead, which is a
+  token set and so cannot hide a control or repaint a sign-in form.
+- **It cannot reach the screen that turns it off.** Everything served is
+  wrapped in `@scope (:root) to (.fe-css-immune)`, so an operator selector
+  cannot match inside a subtree carrying that class — the Appearance panel and
+  destructive confirmation dialogs do. On top of that, the Appearance route
+  takes the `<style>` element out of the document while it is open, which is
+  the guard that survives `:root { display: none }`: scoping decides what a
+  rule *matches* and cannot un-apply an inherited or ancestor-level property.
+  An engine with no `@scope` support drops the block outright, so the sheet
+  simply does nothing — a plain-looking panel rather than an unguarded one.
+- **It cannot phone home.** `@import` is stripped outright, and every `url()`
+  and `image-set()` that is not a `data:` URI or a same-document `#fragment` is
+  rewritten to an inert `url("data:,")`. That closes the CSS exfiltration
+  classic — an attribute selector plus a background image reporting which page
+  or which filename a viewer is on — because after the pass the sheet has no
+  way left to originate a request. Top-level `@font-face` and `@keyframes` are
+  hoisted outside the scope wrapper, since both define a *name* rather than
+  matching elements; that is safe only because the `url()` pass has already
+  run. The Appearance screen names whatever it removed, instead of silently
+  serving something other than what you typed.
+- **A change reaches other browsers on their next load.** The response is
+  `no-store`, so there is no cache window to wait out: this is the setting an
+  operator turns off in a hurry, and a sheet still sitting in a shared cache
+  after the switch was flipped is the exact failure the switch exists to end.
+  The admin who saves sees it immediately — the Appearance page applies its own
+  save without waiting for a reload.
+- **It applies to everyone signed in to the installation** — it is one
+  instance-wide row, not a per-user preference and not a per-tenant one. In
+  multi-tenant mode only the supertenant may write it; a tenant admin's write
+  is refused, the way every other instance-wide setting is. Clearing the box
+  removes the element entirely.
 
 The value is CSS and is only ever assigned as a style element's text, so it
 cannot introduce markup; the server additionally refuses a sheet containing

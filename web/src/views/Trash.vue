@@ -4,19 +4,27 @@
  * Actions: restore (clears deleted_at), purge (hard-delete one), empty
  * (purge all in a storage, optionally limited by age).
  */
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useToastStore } from '@/stores/toast';
 import { useStoragesStore } from '@/stores/storages';
-import { trashApi, type TrashEntry } from '@/api/trash';
+import { trashApi, type TrashEntry, type TrashEmptyStatus } from '@/api/trash';
 import Button from '@/components/ui/Button.vue';
-import EmptyState from '@/components/ui/EmptyState.vue';
 import Modal from '@/components/ui/Modal.vue';
-import TableScroll from '@/components/ui/TableScroll.vue';
+import Select from '@/components/ui/Select.vue';
+import { DataTable, translate, trashTimeLeft, type ContextAction, type DataColumn } from '@brftech/filex-core';
 import { Trash2, RotateCcw, AlertTriangle } from 'lucide-vue-next';
-import { formatBytes, formatDate } from '@/lib/format';
+import { formatBytes, formatDate, formatNumber } from '@/lib/format';
 
 const { t, locale } = useI18n();
+
+/** The item's time left — the explorer's own sentence for it (core
+ *  `trashTimeLeft`, the `trash.days_remaining*` keys of its table), so the two
+ *  Trash screens never word one fact two ways ("0 days" here, "Due for
+ *  deletion" there, as they did). */
+function timeLeft(ttl: number | null | undefined): string {
+  return trashTimeLeft(ttl, (key, vars) => translate(locale.value, key, vars));
+}
 const toast = useToastStore();
 const storages = useStoragesStore();
 
@@ -28,7 +36,8 @@ const limit = ref(50);
 const offset = ref(0);
 
 const showEmptyDialog = ref(false);
-const olderThanDays = ref<number | undefined>(undefined);
+/** The days box: a number, or '' once it has been typed in and cleared. */
+const olderThanDays = ref<number | string | undefined>(undefined);
 
 async function load() {
   loading.value = true;
@@ -75,21 +84,149 @@ async function purge(entry: TrashEntry) {
   }
 }
 
+/* ── Empty trash ─────────────────────────────────────────────────────────
+ *
+ * ⚠⚠ This used to close the dialog, send one request and wait on it — and a
+ * large trash is not emptied inside any request. 61,844 files took the server
+ * the better part of an hour; this page's HTTP client gave up at thirty
+ * seconds, nginx at sixty, and the admin saw no change, no progress and at
+ * best an English timeout toast, so they pressed the button again. The server
+ * now answers within seconds — the final count if the purge is done, its
+ * progress if it is still going (`running: true`) — and the page follows a
+ * running purge until it ends, on GET /admin/trash/empty. */
+const emptyRun = ref<TrashEmptyStatus | null>(null);
+const emptyStarting = ref(false);
+const emptying = computed(() => emptyRun.value?.running === true);
+const EMPTY_POLL_MS = 1500;
+let emptyPoll: ReturnType<typeof setTimeout> | undefined;
+let alive = true;
+
+/** The days box as the server reads it: undefined is "any age", null is a
+ *  value that cannot be sent.
+ *
+ *  ⚠ `v-model.number` hands back '' once the box has been typed in and
+ *  cleared, and '' went out as `"older_than_days": ""` — a value the server
+ *  could not read, and then did not read the storage_id beside it either:
+ *  "empty this storage's trash" emptied every storage's. Cleared means any
+ *  age, so it is sent as nothing. A number that is not a whole count of days
+ *  is not quietly dropped, because dropped also means any age — the widest
+ *  purge there is, in answer to somebody asking for a narrower one. */
+const emptyDays = computed<number | undefined | null>(() => {
+  const v = olderThanDays.value;
+  if (v === undefined || v === null || v === '') return undefined;
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null;
+});
+const emptyDaysInvalid = computed(() => emptyDays.value === null);
+
 async function emptyTrash() {
-  showEmptyDialog.value = false;
+  if (emptyStarting.value || emptying.value || emptyDaysInvalid.value) return;
+  emptyStarting.value = true;
   try {
     const res = await trashApi.empty({
       storage_id: selectedStorage.value,
-      older_than_days: olderThanDays.value,
+      older_than_days: emptyDays.value ?? undefined,
     });
-    toast.success(t('trash.empty_done', { count: res.purged ?? '?' }, res.purged ?? 2));
-    await load();
+    showEmptyDialog.value = false;
+    await followEmpty(res);
   } catch (err: any) {
-    toast.error(err?.response?.data?.error ?? String(err));
+    showEmptyDialog.value = false;
+    const data = err?.response?.data;
+    // Another tab, or another admin of this tenant, already started one.
+    if (err?.response?.status === 409 && data?.code === 'BUSY') {
+      toast.error(t('trash.empty_busy'));
+      if (data.job?.running) await followEmpty(data.job);
+      return;
+    }
+    toast.error(data?.error ?? String(err));
+  } finally {
+    emptyStarting.value = false;
   }
 }
 
-const fmt = new Intl.NumberFormat();
+/** Takes a run's status — from the POST, the 409, or a poll — and either keeps
+ *  following it or says how it ended. */
+async function followEmpty(st: TrashEmptyStatus) {
+  if (st.running) {
+    emptyRun.value = st;
+    scheduleEmptyPoll();
+    return;
+  }
+  emptyRun.value = null;
+  // `{running: false}` with no start is a run the server no longer knows — it
+  // restarted under it. The reloaded list says what is left; nothing is
+  // claimed about the rest.
+  if (!st.started_at) {
+    await load();
+    return;
+  }
+  if (st.error) {
+    toast.error(t('trash.empty_stopped', { error: st.error }));
+  } else if (st.cancelled) {
+    const n = st.purged ?? 0;
+    toast.warn(t('trash.stopped_after', { count: formatNumber(n, locale.value) }, n));
+  } else {
+    const n = st.purged ?? 0;
+    toast.success(t('trash.empty_done', { count: formatNumber(n, locale.value) }, n));
+  }
+  if (st.failed) {
+    toast.warn(t('trash.empty_failed', { count: formatNumber(st.failed, locale.value) }, st.failed));
+  }
+  await load();
+}
+
+function scheduleEmptyPoll() {
+  stopEmptyPoll();
+  if (alive) emptyPoll = setTimeout(pollEmpty, EMPTY_POLL_MS);
+}
+
+function stopEmptyPoll() {
+  if (emptyPoll !== undefined) clearTimeout(emptyPoll);
+  emptyPoll = undefined;
+}
+
+async function pollEmpty() {
+  emptyPoll = undefined;
+  try {
+    await followEmpty(await trashApi.emptyStatus());
+  } catch {
+    // One look that failed is not the end of the run: look again.
+    scheduleEmptyPoll();
+  }
+}
+
+/** On arrival, pick up a run that is still going — started in another tab, or
+ *  before the admin left and came back. One that has ended was reported to
+ *  whoever was watching it, and is not announced again. */
+async function resumeEmpty() {
+  try {
+    const st = await trashApi.emptyStatus();
+    if (st.running) await followEmpty(st);
+  } catch {
+    // The page works without it.
+  }
+}
+
+/** Stop the run — the ops queue's cancel. The poll then sees it end and says
+ *  how far it got. */
+const emptyStopping = ref(false);
+async function stopEmpty() {
+  const id = emptyRun.value?.op_id;
+  if (!id || emptyStopping.value) return;
+  emptyStopping.value = true;
+  try {
+    await trashApi.cancelEmpty(id);
+  } catch (err: any) {
+    toast.error(err?.response?.data?.error ?? String(err));
+  } finally {
+    emptyStopping.value = false;
+  }
+}
+
+const emptyDone = computed(() => emptyRun.value?.scanned ?? 0);
+const emptyTotal = computed(() => emptyRun.value?.total ?? 0);
+const emptyPct = computed(() =>
+  emptyTotal.value > 0 ? Math.min(100, Math.floor((emptyDone.value / emptyTotal.value) * 100)) : 0,
+);
 
 /* The size column goes through the app's one byte formatter, imported from
  * the same module as fmtDate below. There was a private copy here — a
@@ -108,10 +245,87 @@ function fmtDate(s: string) {
 
 const hasItems = computed(() => entries.value.length > 0);
 
+/* The explorer's table (DataTable): every column resizes, hides, moves and
+ * sorts, remembered on the account under `admin.trash`.
+ *
+ * ⚠ The endpoint answers the first `limit` entries and a TOTAL, and this page
+ * draws no pager — so `total` is handed to the table. While more entries exist
+ * than are on screen the table closes its headers and says why: sorting 50 of
+ * 900 by size would put the 50th-largest file on top and call it the largest. */
+const columns = computed<DataColumn<TrashEntry>[]>(() => [
+  { id: 'name', label: t('trash.col_name'), sortable: true, width: 260 },
+  {
+    id: 'storage',
+    label: t('trash.col_storage'),
+    sortable: true,
+    width: 140,
+    sortValue: (e) => e.storage_name ?? `#${e.storage_id}`,
+  },
+  {
+    id: 'size',
+    label: t('trash.col_size'),
+    align: 'right',
+    sortable: true,
+    width: 100,
+    sortValue: (e) => (typeof e.size === 'number' ? e.size : null),
+  },
+  {
+    id: 'deleted_at',
+    label: t('trash.col_deleted_at'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 170,
+    sortValue: (e) => (e.deleted_at ? Date.parse(e.deleted_at) : null),
+  },
+  {
+    id: 'ttl_days',
+    label: t('trash.col_ttl'),
+    sortable: true,
+    width: 130,
+    sortValue: (e) => (typeof e.ttl_days === 'number' ? e.ttl_days : null),
+  },
+]);
+
+/* The storage filter, as options rather than a bare <select>: the panel has
+   one control for this and it is `ui/Select`. An `undefined` value cannot
+   round-trip through a <select>'s string value, so "all storages" is the
+   empty string on the way in and back to `undefined` on the way out. */
+const storageOptions = computed(() => [
+  { value: '', label: t('trash.all_storages') },
+  ...storages.items.map((s) => ({ value: String(s.id), label: s.name })),
+]);
+
+function pickStorage(v: string | number | null) {
+  const id = v == null || v === '' ? undefined : Number(v);
+  selectedStorage.value = id;
+  offset.value = 0;
+  load();
+}
+
 onMounted(async () => {
   await storages.fetch();
-  await load();
+  await Promise.all([load(), resumeEmpty()]);
 });
+
+onBeforeUnmount(() => {
+  // Leaving the page stops the watching, never the purge.
+  alive = false;
+  stopEmptyPoll();
+});
+
+/** The row's verbs, behind its one pinned `Actions` control. Purge keeps
+ *  whatever confirmation `purge()` already puts in front of it. */
+function rowActions(_row: TrashEntry): ContextAction[] {
+  return [
+    { key: 'restore', label: t('trash.restore'), icon: 'restore' },
+    { key: 'purge', label: t('trash.purge'), icon: 'delete', danger: true },
+  ];
+}
+
+function onRowAction(key: string, row: TrashEntry) {
+  if (key === 'restore') restore(row);
+  else if (key === 'purge') purge(row);
+}
 </script>
 
 <template>
@@ -122,78 +336,116 @@ onMounted(async () => {
         <p class="text-sm text-zinc-500">{{ t('trash.subtitle') }}</p>
       </div>
       <div class="flex items-center gap-2">
-        <select
-          v-model.number="selectedStorage"
-          class="rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-sm"
-          @change="load"
-        >
-          <option :value="undefined">{{ t('trash.all_storages') }}</option>
-          <option v-for="s in storages.items" :key="s.id" :value="s.id">{{ s.name }}</option>
-        </select>
         <Button variant="ghost" @click="load" :disabled="loading">↻</Button>
-        <Button variant="danger" :disabled="!hasItems" @click="showEmptyDialog = true">
+        <Button
+          data-testid="trash-empty-open"
+          variant="danger"
+          :disabled="!hasItems || emptying"
+          @click="showEmptyDialog = true"
+        >
           <Trash2 :size="14" /> {{ t('trash.empty') }}
         </Button>
       </div>
     </header>
 
-    <EmptyState
-      v-if="!loading && !hasItems"
-      :title="t('trash.empty_title')"
-      :description="t('trash.empty_description')"
-    />
-
-    <div v-else class="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
-      <TableScroll>
-        <table class="w-full text-sm">
-          <thead class="bg-zinc-50 dark:bg-zinc-900 text-left">
-            <tr>
-              <th class="px-3 py-2">{{ t('trash.col_name') }}</th>
-              <th class="px-3 py-2">{{ t('trash.col_storage') }}</th>
-              <th class="px-3 py-2">{{ t('trash.col_size') }}</th>
-              <th class="px-3 py-2">{{ t('trash.col_deleted_at') }}</th>
-              <th class="px-3 py-2">{{ t('trash.col_ttl') }}</th>
-              <th class="px-3 py-2 text-right tbl-actions">{{ t('common.actions') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="e in entries"
-              :key="e.id"
-              class="border-t border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-900"
-            >
-              <td class="px-3 py-2 font-medium">
-                <div>{{ e.name }}</div>
-                <div class="text-xs text-zinc-500">{{ e.path }}</div>
-              </td>
-              <td class="px-3 py-2 text-zinc-600 dark:text-zinc-400">{{ e.storage_name ?? `#${e.storage_id}` }}</td>
-              <td class="px-3 py-2 tabular-nums">{{ fmtBytes(e.size) }}</td>
-              <td class="px-3 py-2 text-zinc-500">{{ fmtDate(e.deleted_at) }}</td>
-              <td class="px-3 py-2 text-zinc-500">
-                <span v-if="e.ttl_days !== undefined && e.ttl_days <= 3" class="inline-flex items-center gap-1 text-rose-600">
-                  <AlertTriangle :size="12" /> {{ e.ttl_days }} {{ t('trash.days_left') }}
-                </span>
-                <span v-else>{{ e.ttl_days ?? '—' }} {{ t('trash.days_left') }}</span>
-              </td>
-              <td class="px-3 py-2 text-right tbl-actions">
-                <div class="inline-flex gap-2">
-                  <Button size="sm" variant="ghost" @click="restore(e)">
-                    <RotateCcw :size="12" /> {{ t('trash.restore') }}
-                  </Button>
-                  <Button size="sm" variant="danger" @click="purge(e)">
-                    <Trash2 :size="12" /> {{ t('trash.purge') }}
-                  </Button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </TableScroll>
-      <footer class="px-3 py-2 text-xs text-zinc-500 flex justify-between">
-        <span>{{ t('trash.total_count', { n: fmt.format(total) }) }}</span>
-        <span v-if="loading">{{ t('common.loading') }}</span>
-      </footer>
+    <!-- The run's own strip, in the panel's palette (--fe-* tokens): it is the
+         ops row the tray also shows, so it can be stopped from here too. -->
+    <div
+      v-if="emptyRun?.running"
+      data-testid="trash-emptying"
+      role="status"
+      aria-live="polite"
+      class="card card-body space-y-2"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-3 text-sm">
+        <span class="font-medium">{{ emptyRun.queued ? t('trash.emptying_queued') : t('trash.empty_running') }}</span>
+        <div class="flex items-center gap-3">
+          <span class="tabular-nums fx-trash-run__muted">
+            {{ t('trash.emptying_progress', { done: formatNumber(emptyDone, locale), total: formatNumber(emptyTotal, locale) }) }}
+          </span>
+          <Button
+            v-if="emptyRun.op_id"
+            data-testid="trash-empty-stop"
+            variant="ghost"
+            size="sm"
+            :loading="emptyStopping"
+            @click="stopEmpty"
+          >
+            {{ t('trash.empty_stop') }}
+          </Button>
+        </div>
+      </div>
+      <div
+        class="fx-trash-run__track"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        :aria-valuenow="emptyPct"
+        :aria-label="t('trash.empty_running')"
+      >
+        <div class="fx-trash-run__fill" :style="{ width: `${emptyPct}%` }" />
+      </div>
+      <p class="text-xs fx-trash-run__muted">
+        {{ t('trash.emptying_freed', { size: fmtBytes(emptyRun.bytes ?? 0) }) }} · {{ t('trash.emptying_note') }}
+      </p>
     </div>
+
+    <DataTable
+      table-id="admin.trash"
+      :columns="columns"
+      :rows="entries"
+      :loading="loading"
+      row-key="id"
+      :total="total"
+      :foot-note="t('trash.total_count', { n: formatNumber(total, locale) })"
+      :row-actions="(row: TrashEntry) => rowActions(row)"
+      :row-actions-test-id="(row: TrashEntry) => `trash-actions-${row.id}`"
+      @row-action="(key: string, row: TrashEntry) => onRowAction(key, row)"
+    >
+      <template #toolbar>
+        <Select
+          :model-value="selectedStorage == null ? '' : String(selectedStorage)"
+          :options="storageOptions"
+          size="sm"
+          class="w-56"
+          @update:model-value="pickStorage"
+        />
+      </template>
+
+      <template #empty>
+        <p class="font-medium">{{ t('trash.empty_title') }}</p>
+        <p class="tbl-sub">{{ t('trash.empty_description') }}</p>
+      </template>
+
+      <!-- ⚠ One wrapper: a DataTable cell is a flex row, and the name and
+           its path would otherwise sit side by side instead of stacked. -->
+      <template #cell-name="{ row }">
+        <div>
+          <span class="font-medium">{{ row.name }}</span>
+          <span class="tbl-sub tbl-clamp" :title="row.path">{{ row.path }}</span>
+        </div>
+      </template>
+      <template #cell-storage="{ row }">{{ row.storage_name ?? `#${row.storage_id}` }}</template>
+      <template #cell-size="{ row }">
+        <span class="tabular-nums">{{ fmtBytes(row.size) }}</span>
+      </template>
+      <template #cell-deleted_at="{ row }">
+        <span class="whitespace-nowrap">{{ fmtDate(row.deleted_at) }}</span>
+      </template>
+      <template #cell-ttl_days="{ row }">
+        <span
+          v-if="row.ttl_days !== undefined && row.ttl_days <= 3"
+          class="inline-flex items-center gap-1 whitespace-nowrap text-rose-600 dark:text-rose-400"
+        >
+          <AlertTriangle :size="12" /> {{ timeLeft(row.ttl_days) }}
+        </span>
+        <!-- ⚠ The count is IN the message ("{n} days"), with its plural forms:
+             a number followed by a separately translated "days" read "1 days"
+             and could not agree in any language that inflects. No number, no
+             message: a bare dash, not "— days". -->
+        <span v-else class="whitespace-nowrap">{{ timeLeft(row.ttl_days) }}</span>
+      </template>
+    </DataTable>
 
     <Modal v-model="showEmptyDialog" :title="t('trash.empty_modal_title')">
       <p class="text-sm text-zinc-600 dark:text-zinc-400">{{ t('trash.empty_modal_body') }}</p>
@@ -201,16 +453,52 @@ onMounted(async () => {
         {{ t('trash.older_than_days') }}
         <input
           v-model.number="olderThanDays"
+          data-testid="trash-empty-days"
           type="number"
           min="0"
-          class="mt-1 w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1"
+          step="1"
+          class="input-base mt-1 px-2 py-1"
+          :class="{ 'border-rose-500': emptyDaysInvalid }"
+          :aria-invalid="emptyDaysInvalid"
           :placeholder="t('trash.all_ages')"
         />
       </label>
+      <p v-if="emptyDaysInvalid" class="error-text">{{ t('trash.older_than_days_invalid') }}</p>
       <template #footer>
         <Button variant="ghost" @click="showEmptyDialog = false">{{ t('common.cancel') }}</Button>
-        <Button variant="danger" @click="emptyTrash">{{ t('trash.empty') }}</Button>
+        <Button
+          data-testid="trash-empty-confirm"
+          variant="danger"
+          :loading="emptyStarting"
+          :disabled="emptyDaysInvalid || emptyStarting"
+          @click="emptyTrash"
+        >
+          {{ t('trash.empty') }}
+        </Button>
       </template>
     </Modal>
   </section>
 </template>
+
+<style scoped>
+.fx-trash-run__muted {
+  color: var(--fe-text-muted);
+}
+.fx-trash-run__track {
+  height: 0.375rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--fe-border-soft);
+}
+.fx-trash-run__fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--fe-danger);
+  transition: width 500ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-trash-run__fill {
+    transition: none;
+  }
+}
+</style>

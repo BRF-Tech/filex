@@ -135,21 +135,21 @@ test.describe('User settings — language + password + TOTP enroll', () => {
     await openSettings(page, 'security');
 
     // The labels are `common.currentPassword` ("Current password" / "Mevcut
-    // şifre") and `common.newPassword`; the submit is a plain "Save".
+    // parola") and `common.newPassword`; the submit is a plain "Save".
     const pane = page.getByTestId('user-settings-security');
-    const oldPw = pane.getByLabel(/current password|mevcut şifre|old password|eski şifre/i);
+    const oldPw = pane.getByLabel(/current password|mevcut parola|old password|eski parola/i);
     await expect(oldPw, 'the password-change form must exist').toHaveCount(1);
     // ⚠ `has` takes a locator RELATIVE to the form. `oldPw` starts from the
     // pane's testid, which is not inside the form, so filtering on it matched
     // no form at all.
     const securityForm = pane
       .locator('form')
-      .filter({ has: page.getByLabel(/current password|mevcut şifre|old password|eski şifre/i) });
+      .filter({ has: page.getByLabel(/current password|mevcut parola|old password|eski parola/i) });
 
     await oldPw.fill('definitely-wrong');
     // "New password" also matches the confirm box — fill both, since the form
     // refuses to submit unless they agree.
-    const newPw = securityForm.getByLabel(/new password|yeni şifre|confirm|onayla/i);
+    const newPw = securityForm.getByLabel(/new password|yeni parola|confirm|onayla/i);
     await newPw.nth(0).fill('something-else-1234');
     await newPw.nth(1).fill('something-else-1234');
     await securityForm.getByRole('button', { name: /save|kaydet/i }).click();

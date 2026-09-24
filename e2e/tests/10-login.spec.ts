@@ -5,7 +5,7 @@ test.describe('Login flow', () => {
   test('rejects invalid credentials', async ({ page }) => {
     await page.goto('/admin/login');
     await page.getByLabel(/e-?mail|kullanıcı adı/i).fill('admin@local');
-    await page.getByLabel(/password|şifre/i).fill('definitely-wrong-password');
+    await page.getByLabel(/password|parola/i).fill('definitely-wrong-password');
     // Exact name disambiguates the local form submit from the OIDC
     // 'Sign in with SSO' button.
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();

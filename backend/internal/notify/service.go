@@ -35,11 +35,30 @@ type Service interface {
 
 	// List + Mark + Settings just delegate to the store; they're on
 	// the Service interface so handlers don't have to know about the
-	// store. Pass userID nil for admin-global views.
-	List(ctx context.Context, userID *int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error)
-	UnreadCount(ctx context.Context, userID *int64) (int64, error)
+	// store. Pass userID nil for admin-global views; bell (which
+	// broadcasts a per-user read takes) is ignored there.
+	List(ctx context.Context, userID *int64, bell Bell, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error)
+	UnreadCount(ctx context.Context, userID *int64, bell Bell) (int64, error)
+	// ListVisible is a per-user read whose BROADCASTS the caller judges one by
+	// one after the store (keep — a member's grants, a tenant): the reader's
+	// own rows are counted in SQL and only the broadcasts their bell admits are
+	// walked, so the total is exact and a page is cut where the reader sees
+	// it. keep nil is List. keepOwn, when set, judges the reader's own rows too
+	// (a folder-confined token reads only its folder's), walked the same way.
+	ListVisible(ctx context.Context, userID int64, bell Bell, onlyUnread bool, limit, offset int, keep, keepOwn func(*model.Notification) bool) ([]*model.Notification, int64, error)
+	// History is the admin-global list with each broadcast's read state as
+	// readerID has it (0: the rows' own column).
+	History(ctx context.Context, readerID int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error)
+	// MarkRead and MarkAllRead stamp rows ADDRESSED to userID only. A
+	// broadcast is read per reader: MarkBroadcastsRead marks single ones,
+	// after the caller has checked the reader may see them, and
+	// MarkAllBroadcastsRead reads every broadcast up to now for the reader —
+	// ones their bell does not show included, which only ever changes what
+	// that reader sees.
 	MarkRead(ctx context.Context, id int64, userID *int64) error
 	MarkAllRead(ctx context.Context, userID *int64) error
+	MarkBroadcastsRead(ctx context.Context, readerID int64, ids []int64) error
+	MarkAllBroadcastsRead(ctx context.Context, readerID int64) error
 	GetSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error)
 	UpsertSettings(ctx context.Context, s *model.NotificationSettings) error
 
@@ -165,6 +184,15 @@ func (s *service) Send(ctx context.Context, e Event) (int64, error) {
 	if e.At.IsZero() {
 		e.At = e.TS
 	}
+	// What the event means to a person — or that it means nothing and is not
+	// announced at all (personview.go). Before anything is stored or sent, so
+	// the bell row and every webhook body carry the same meaning.
+	var announce bool
+	if e, announce = personView(e); !announce {
+		slog.Debug("notify: not announcing a write inside filex's own directories",
+			slog.String("event", string(e.Event)))
+		return 0, nil
+	}
 	if e.Title == "" {
 		e.Title = string(e.Event)
 	}
@@ -259,11 +287,20 @@ func (s *service) resolveTarget(ctx context.Context, e Event) *Target {
 			return &Target{Kind: TargetNone}
 		}
 		return &Target{Kind: TargetShare, ID: t.ID}
-	case TargetFile, TargetDir:
+	case TargetApp:
+		// An app's home page: no storage to resolve, and nothing else to
+		// carry. Half of one (no plugin, no view) is no address at all.
+		if t.Open == nil || strings.TrimSpace(t.Open.Plugin) == "" || strings.TrimSpace(t.Open.View) == "" {
+			return &Target{Kind: TargetNone}
+		}
+		o := *t.Open
+		o.Action = ""
+		return &Target{Kind: TargetApp, Open: &o}
+	case TargetFile, TargetDir, TargetTrash:
 	default:
 		return &Target{Kind: TargetNone}
 	}
-	out := &Target{Kind: t.Kind, Storage: strings.TrimSpace(t.Storage), Path: t.Path, ID: t.ID}
+	out := &Target{Kind: t.Kind, Storage: strings.TrimSpace(t.Storage), Path: t.Path, ID: t.ID, Open: t.Open}
 	if out.Storage == "" && e.Node != nil && e.Node.StorageID != 0 && s.store != nil {
 		if st, err := s.store.GetStorage(ctx, e.Node.StorageID); err == nil && st != nil {
 			out.Storage = st.Name
@@ -272,6 +309,15 @@ func (s *service) resolveTarget(ctx context.Context, e Event) *Target {
 				slog.Int64("storage_id", e.Node.StorageID),
 				slog.String("err", err.Error()))
 		}
+	}
+	if out.Kind == TargetTrash {
+		// The Trash view spans every storage, so it is a destination on its
+		// own; the storage and path only say which row to SELECT there. Half
+		// of that is no selection at all, never a wrong one.
+		if out.Storage == "" || out.Path == "" {
+			return &Target{Kind: TargetTrash}
+		}
+		return &Target{Kind: TargetTrash, Storage: out.Storage, Path: out.Path}
 	}
 	if out.Storage == "" {
 		// A file target with no storage is not a location. Say "nothing to
@@ -478,6 +524,16 @@ func (s *service) TestTarget(ctx context.Context, target *model.WebhookTarget) T
 			Name:      "hello.txt",
 			Size:      11,
 		},
+		// ⚠⚠ `none`, SAID rather than left to happen. The sample carries a
+		// `node` so a receiver can see the payload shape it will get, and an
+		// event with a node and no target is exactly the silent shape rule 1
+		// warns about (docs/NOTIFICATIONS.md → "The bell, and who can reach
+		// it"). It did resolve to `none` — but only because storage id 0
+		// happens to be unresolvable, which is an accident standing in for a
+		// decision. There is no file called `/example/hello.txt`, so a click
+		// must open nothing, and saying so keeps that true whatever the
+		// resolver later does with id 0.
+		Target: &Target{Kind: TargetNone},
 	}
 	body, err := json.Marshal(sample)
 	if err != nil {
@@ -518,20 +574,25 @@ func (s *service) TargetStatuses() map[int64]TargetDeliveryStatus {
 // hiccup — resolves to "show everything", because the alternative is an
 // unreadable preference silently emptying a bell and hiding a real event (an
 // antivirus hit, a failed replica) behind a transient error.
-func (s *service) bellPrefs(ctx context.Context, userID *int64) (muted []string, silenced bool) {
+//
+// muted starts with what the reader's Bell leaves out at every address (the
+// operator alarms, for a non-administrator — Bell.never), which rides the same
+// SQL filter so the badge and the list agree.
+func (s *service) bellPrefs(ctx context.Context, userID *int64, bell Bell) (muted []string, silenced bool) {
 	if userID == nil {
 		return nil, false
 	}
+	muted = eventIDs(bell.never())
 	st, err := s.store.GetNotificationSettings(ctx, *userID)
 	if err != nil {
 		slog.Warn("notify: read notification settings",
 			slog.Int64("user_id", *userID), slog.String("err", err.Error()))
-		return nil, false
+		return muted, false
 	}
 	if st == nil {
-		return nil, false
+		return muted, false
 	}
-	return st.MutedList(), !st.InAppEnabled
+	return append(muted, st.MutedList()...), !st.InAppEnabled
 }
 
 // List returns the user's bell history with their preferences applied.
@@ -539,28 +600,238 @@ func (s *service) bellPrefs(ctx context.Context, userID *int64) (muted []string,
 // ⚠⚠ The preferences gate the READ, not the write. Send still records every
 // event, so muting one neither erases it from the audit nor touches webhook
 // delivery — that is global and configured in Admin → Webhooks. Muting
-// changes what a user sees, not what the system keeps.
-func (s *service) List(ctx context.Context, userID *int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error) {
-	muted, silenced := s.bellPrefs(ctx, userID)
+// changes what a user sees, not what the system keeps. The same holds for
+// bell: a broadcast a bell does not take stays in the table and in the
+// admin-global list.
+//
+// userID nil is the admin-global list, read with the row's own read state
+// (History reads it with a reader's).
+func (s *service) List(ctx context.Context, userID *int64, bell Bell, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error) {
+	if userID == nil {
+		return s.History(ctx, 0, onlyUnread, limit, offset)
+	}
+	muted, silenced := s.bellPrefs(ctx, userID, bell)
 	if silenced {
 		return nil, 0, nil
 	}
-	rows, total, err := s.store.ListNotifications(ctx, userID, onlyUnread, muted, limit, offset)
-	// One hydrate for every reader: the user bell and the admin-global list
-	// both come through here, so `target` cannot be present on one surface
-	// and missing on the other.
-	for _, n := range rows {
-		n.HydrateTarget()
-	}
-	return rows, total, err
+	return s.read(ctx, userID, onlyUnread, muted, bellFilter(userID, bell), limit, offset)
 }
 
-func (s *service) UnreadCount(ctx context.Context, userID *int64) (int64, error) {
-	muted, silenced := s.bellPrefs(ctx, userID)
+// History reads the admin-global list: every row, a broadcast carrying
+// readerID's read state (0: the rows' own column), each broadcast labelled
+// with who it reaches (model.Notification.Audience).
+//
+// ⚠ Through the same read as a bell (read below). PR #43 gave the history a
+// store call of its own, which skipped v0.43.0's person view: rows about
+// filex's own directories and `meta.trash_path` came back on the admin page,
+// and so did `user #2` where a name belongs.
+func (s *service) History(ctx context.Context, readerID int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error) {
+	return s.read(ctx, nil, onlyUnread, nil, model.BroadcastFilter{ReaderID: readerID}, limit, offset)
+}
+
+// visibleScanMax bounds the broadcasts ListVisible walks per read. A bell's
+// broadcasts are the few kinds it admits at all (Bell), so the walk is short;
+// past this, the rest are neither shown nor counted rather than paid for on
+// every poll.
+const visibleScanMax = 5000
+
+// storePageMax is the store's own per-read ceiling (ListNotifications clamps
+// limit to 500 and turns anything above into 50).
+const storePageMax = 500
+
+func (s *service) ListVisible(ctx context.Context, userID int64, bell Bell, onlyUnread bool, limit, offset int, keep, keepOwn func(*model.Notification) bool) ([]*model.Notification, int64, error) {
+	uid := userID
+	if keep == nil {
+		return s.List(ctx, &uid, bell, onlyUnread, limit, offset)
+	}
+	if limit <= 0 || limit > storePageMax {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	muted, silenced := s.bellPrefs(ctx, &uid, bell)
+	if silenced {
+		return nil, 0, nil
+	}
+	f := bellFilter(&uid, bell)
+
+	// The broadcasts, walked and judged.
+	bf := f
+	bf.BroadcastsOnly = true
+	shown, err := s.walk(ctx, uid, onlyUnread, muted, bf, keep)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	of := f
+	of.OwnOnly = true
+	if keepOwn != nil {
+		// The reader's own rows judged as well: walked, not counted.
+		own, err := s.walk(ctx, uid, onlyUnread, muted, of, keepOwn)
+		if err != nil {
+			return nil, 0, err
+		}
+		merged := mergeNewestFirst(own, shown)
+		total := int64(len(merged))
+		if offset >= len(merged) {
+			return []*model.Notification{}, total, nil
+		}
+		return merged[offset:min(offset+limit, len(merged))], total, nil
+	}
+
+	// The reader's own rows, counted in SQL; only as many read as the page
+	// can need (a page at `offset` holds at most offset+limit of them).
+	var (
+		own      []*model.Notification
+		ownTotal int64
+	)
+	need := offset + limit
+	for off := 0; ; off += storePageMax {
+		n := min(storePageMax, need-off)
+		rows, total, err := s.read(ctx, &uid, onlyUnread, muted, of, max(n, 1), off)
+		if err != nil {
+			return nil, 0, err
+		}
+		if off == 0 {
+			ownTotal = total
+		}
+		own = append(own, rows...)
+		if len(own) >= need || len(rows) < n || int64(off+storePageMax) >= total {
+			break
+		}
+	}
+
+	merged := mergeNewestFirst(own, shown)
+	if offset >= len(merged) {
+		return []*model.Notification{}, ownTotal + int64(len(shown)), nil
+	}
+	return merged[offset:min(offset+limit, len(merged))], ownTotal + int64(len(shown)), nil
+}
+
+// walk reads one half of a per-user read in store pages, up to visibleScanMax
+// rows, and keeps what keep admits.
+func (s *service) walk(ctx context.Context, uid int64, onlyUnread bool, muted []string, f model.BroadcastFilter, keep func(*model.Notification) bool) ([]*model.Notification, error) {
+	var out []*model.Notification
+	for off := 0; off < visibleScanMax; off += storePageMax {
+		rows, total, err := s.read(ctx, &uid, onlyUnread, muted, f, storePageMax, off)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range rows {
+			if keep(n) {
+				out = append(out, n)
+			}
+		}
+		if len(rows) < storePageMax && int64(off+storePageMax) >= total {
+			break
+		}
+	}
+	return out, nil
+}
+
+// mergeNewestFirst merges two lists already in the store's order (created_at,
+// then id, newest first).
+func mergeNewestFirst(a, b []*model.Notification) []*model.Notification {
+	out := make([]*model.Notification, 0, len(a)+len(b))
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		if newerThan(a[i], b[j]) {
+			out = append(out, a[i])
+			i++
+		} else {
+			out = append(out, b[j])
+			j++
+		}
+	}
+	out = append(out, a[i:]...)
+	return append(out, b[j:]...)
+}
+
+func newerThan(x, y *model.Notification) bool {
+	if !x.CreatedAt.Equal(y.CreatedAt) {
+		return x.CreatedAt.After(y.CreatedAt)
+	}
+	return x.ID > y.ID
+}
+
+// read is the one path every list takes out of the store.
+func (s *service) read(ctx context.Context, userID *int64, onlyUnread bool, muted []string, f model.BroadcastFilter, limit, offset int) ([]*model.Notification, int64, error) {
+	rows, total, err := s.store.ListNotifications(ctx, userID, onlyUnread, muted, hiddenBodies(), f, limit, offset)
+	// One sanitise + hydrate for every reader: the user bell and the
+	// admin-global list both come through here, so `target` cannot be present
+	// on one surface and missing on the other — and neither can show a row
+	// about filex's own directories, whenever it was recorded (personview.go).
+	kept := rows[:0]
+	for _, n := range rows {
+		if !sanitizeRow(n) {
+			// Only a row the SQL filter could not recognise by its body gets
+			// here; it leaves this page one short rather than showing it.
+			total--
+			continue
+		}
+		n.HydrateTarget()
+		kept = append(kept, n)
+	}
+	if userID == nil {
+		s.nameOwners(ctx, kept)
+		markAudience(kept)
+	}
+	return kept, total, err
+}
+
+// markAudience says, on the admin list, who each broadcast reaches — by the
+// same rule the bells apply (BroadcastAudience). ⚠ The Scope column said
+// "Everyone" beside "filex v0.42.2 available" — a row no plain user's bell
+// shows since the release-candidate sweep (2026-09-21); since PR #42 it would
+// have said it beside a drop notice only administrators get, too.
+func markAudience(rows []*model.Notification) {
+	for _, n := range rows {
+		n.Audience = BroadcastAudience(n)
+		n.AdminsOnly = n.Audience == AudienceAdmins
+	}
+}
+
+// nameOwners fills UserName on the admin list's user-scoped rows: one query
+// for the page (GetUserDisplayNames, names only). Best-effort — a lookup that
+// fails leaves the id, which the page still shows.
+func (s *service) nameOwners(ctx context.Context, rows []*model.Notification) {
+	ids := make([]int64, 0, len(rows))
+	seen := map[int64]bool{}
+	for _, n := range rows {
+		if n.UserID != nil && !seen[*n.UserID] {
+			seen[*n.UserID] = true
+			ids = append(ids, *n.UserID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	names, err := s.store.GetUserDisplayNames(ctx, ids)
+	if err != nil {
+		return
+	}
+	for _, n := range rows {
+		if n.UserID != nil {
+			n.UserName = names[*n.UserID]
+		}
+	}
+}
+
+func (s *service) MarkBroadcastsRead(ctx context.Context, readerID int64, ids []int64) error {
+	return s.store.MarkBroadcastsRead(ctx, readerID, ids)
+}
+
+func (s *service) MarkAllBroadcastsRead(ctx context.Context, readerID int64) error {
+	return s.store.MarkAllBroadcastsRead(ctx, readerID)
+}
+
+func (s *service) UnreadCount(ctx context.Context, userID *int64, bell Bell) (int64, error) {
+	muted, silenced := s.bellPrefs(ctx, userID, bell)
 	if silenced {
 		return 0, nil
 	}
-	return s.store.UnreadNotificationCount(ctx, userID, muted)
+	return s.store.UnreadNotificationCount(ctx, userID, muted, hiddenBodies(), bellFilter(userID, bell))
 }
 
 func (s *service) MarkRead(ctx context.Context, id int64, userID *int64) error {

@@ -5,6 +5,7 @@
  */
 import { ref, onMounted, watch } from 'vue';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
+import { localeTag, useLocale } from '../composables/useLocale';
 
 interface RecentNode {
   id: number;
@@ -30,7 +31,15 @@ const props = defineProps<{
   limit?: number;
   /** Optional refresh trigger — incrementing this re-fetches. */
   refreshKey?: number | string;
+  /**
+   * The explorer's language. ⚠ This tray printed English whatever the
+   * explorer spoke ("Recently opened", "5m ago") — strings no language pack
+   * could reach. Absent = English.
+   */
+  locale?: string;
 }>();
+
+const { t } = useLocale(() => props.locale ?? 'en');
 
 const emit = defineEmits<{
   (e: 'open', node: RecentNode): void;
@@ -76,13 +85,20 @@ async function load() {
 
 function fmtTime(s?: string): string {
   if (!s) return '';
-  const t = new Date(s).getTime();
-  if (Number.isNaN(t)) return '';
-  const diff = Date.now() - t;
-  if (diff < 60_000) return 'just now';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
+  const ms = new Date(s).getTime();
+  if (Number.isNaN(ms)) return '';
+  const diff = Date.now() - ms;
+  // `Intl` says "5 minutes ago" in the viewer's language — every language,
+  // a pack's included — with no string in any catalogue.
+  try {
+    const rtf = new Intl.RelativeTimeFormat(localeTag(props.locale), { numeric: 'auto', style: 'short' });
+    if (diff < 60_000) return rtf.format(0, 'second');
+    if (diff < 3_600_000) return rtf.format(-Math.floor(diff / 60_000), 'minute');
+    if (diff < 86_400_000) return rtf.format(-Math.floor(diff / 3_600_000), 'hour');
+    return rtf.format(-Math.floor(diff / 86_400_000), 'day');
+  } catch {
+    return new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
+  }
 }
 
 onMounted(load);
@@ -92,12 +108,12 @@ watch(() => props.refreshKey, load);
 <template>
   <div class="filex-recent">
     <header>
-      <h3>Recently opened</h3>
+      <h3>{{ t('recents.title') }}</h3>
       <button
         class="filex-recent-refresh"
         type="button"
-        title="Refresh"
-        aria-label="Refresh"
+        :title="t('recents.refresh')"
+        :aria-label="t('recents.refresh')"
         @click="load"
         :disabled="loading"
       >
@@ -117,13 +133,13 @@ watch(() => props.refreshKey, load);
           @click="emit('open', n)"
           @contextmenu.prevent="emit('context', n, $event)"
         >
-          <span class="filex-recent-name">{{ n.name }}</span>
+          <span class="filex-recent-name"><bdi>{{ n.name }}</bdi></span>
           <span class="filex-recent-meta">{{ fmtTime(n.last_opened) }}</span>
         </button>
       </li>
     </ul>
-    <p v-else-if="!loading" class="filex-recent-empty">Nothing here yet.</p>
-    <p v-else class="filex-recent-empty">Loading…</p>
+    <p v-else-if="!loading" class="filex-recent-empty">{{ t('recents.empty') }}</p>
+    <p v-else class="filex-recent-empty">{{ t('recents.loading') }}</p>
   </div>
 </template>
 
@@ -181,7 +197,7 @@ watch(() => props.refreshKey, load);
   padding: 6px 8px;
   cursor: pointer;
   border-radius: 4px;
-  text-align: left;
+  text-align: start;
 }
 .filex-recent-item:hover {
   background: var(--fe-bg-hover, var(--filex-bg-soft, #f3f4f6));
@@ -195,7 +211,7 @@ watch(() => props.refreshKey, load);
 .filex-recent-meta {
   color: var(--fe-text-muted, var(--filex-text-muted, #9ca3af));
   font-size: 11px;
-  margin-left: 8px;
+  margin-inline-start: 8px;
   flex-shrink: 0;
 }
 .filex-recent-empty {

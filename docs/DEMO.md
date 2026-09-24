@@ -20,9 +20,10 @@ The reference deployment is <https://demo.filex.sh>.
 | Login page | sign-in form | feature tour + "Open the demo" CTA with the credentials |
 | `/api/capabilities` | — | additionally carries `demo_mode`, `demo_user`, `demo_pass` |
 | Storage plugins | on unless disabled | **off** unless the operator says otherwise in so many words |
+| Apps (app plugins) | on unless disabled | **off** unless the operator says otherwise in so many words (`FILEX_APP_PLUGINS_DISABLED`); install, upgrade and uninstall answer `demo_refused`, and the hourly wake-up never arms |
 | Adding a storage | any driver | refused: `local` reaches the server's own filesystem, the remote drivers make the server connect where a visitor points it |
 | Admin writes | allowed | **refused, 403** (below) |
-| Own account's password / e-mail / TOTP | allowed | **refused, 403** — the account is shared |
+| Own account's password / email / TOTP | allowed | **refused, 403** — the account is shared |
 | Audit log, dashboard activity | shows client IPs | IPs replaced with `hidden on the demo` |
 | Auth-provider config read-back | full | values that carry a credential are masked |
 
@@ -43,7 +44,7 @@ makes that safe.
 | `/api/admin/…` | the operator surface: settings, users, storages, webhooks, external services, auth providers, self-update, quotas, trash purge |
 | `/api/ai/admin/…` | **the same surface behind an admin-scoped API token.** Guard one and the other is the bypass |
 | `/api/auth/password` | changes the *published* password — one visitor locks out every other reader |
-| `/api/auth/profile` | changes the e-mail those credentials sign in with |
+| `/api/auth/profile` | changes the email those credentials sign in with |
 | `/api/auth/totp/…` | puts a second factor on the shared account |
 | `/metrics` | the Prometheus exposition, mounted inside the admin group with `r.Handle`, so chi registers it for **every** method. The exposition is read-only and answers the same bytes to any verb, so nothing here was ever exploitable — it is guarded so that "a demo refuses every state-changing method on every operator surface" holds with no exceptions. `GET`/`HEAD`/`OPTIONS` still pass: scrape jobs are untouched (`METRICS.md`) |
 

@@ -36,6 +36,12 @@
 
 import type { ExplorerConfig } from '../types/ExplorerConfig';
 import type { FileApi } from './useFileApi';
+import { networkFailure, requestFailure, wordsIn } from '../lib/errorWords';
+// ⚠ An upload is an ACTION: it is never folded into the shared "no
+// connection" notice, because the person is waiting to be told whether their
+// file went (lib/connection).
+import { noteRequestFailed, noteRequestSucceeded } from '../lib/connection';
+import { resolveLocale } from '../locales/resolve';
 import {
   clearResume,
   defaultResumeStorage,
@@ -367,7 +373,12 @@ export function useUploadChunked(
         }
         if (next === -2) continue; // offset moved under us; re-slice
         if (next < 0) throw lastErr ?? new Error('chunk upload failed');
-        if (next <= acked) throw new Error(`upload stalled at byte ${acked}`);
+        // Said, not "upload stalled at byte 8388608": the row is read by a
+        // person, and the byte count is only for whoever is debugging.
+        if (next <= acked) {
+          console.warn('[filex] upload stalled at byte', acked);
+          throw new Error(wordsIn(resolveLocale(config.locale))('err.upload_stalled'));
+        }
         acked = next;
         report();
         saveResume(storage, key, {
@@ -455,6 +466,7 @@ export function useUploadChunked(
         };
         xhr.onload = () => {
           inFlight = null;
+          noteRequestSucceeded();
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
               const body = JSON.parse(xhr.responseText) as StatusResponse;
@@ -466,16 +478,14 @@ export function useUploadChunked(
             }
             return;
           }
-          const err = new Error(
-            `chunk ${start}-${end - 1} → ${xhr.status}`,
-          ) as Error & { status?: number; detail?: string };
-          err.status = xhr.status;
-          err.detail = xhr.responseText.slice(0, 200);
-          reject(err);
+          // Said (lib/errorWords): the upload row used to read
+          // "chunk 0-8388607 → 500". Status and body still ride along.
+          reject(requestFailure(xhr.status, xhr.responseText || '', resolveLocale(config.locale)));
         };
         xhr.onerror = () => {
           inFlight = null;
-          reject(new Error(`chunk ${start}-${end - 1}: network error`));
+          noteRequestFailed('action');
+          reject(networkFailure(resolveLocale(config.locale)));
         };
         xhr.onabort = () => {
           inFlight = null;

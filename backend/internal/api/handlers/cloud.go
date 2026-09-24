@@ -79,6 +79,9 @@ func (h *Cloud) Signup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
+	// The verification mail speaks the visitor's language: the body's
+	// `locale`, else the browser's Accept-Language (there is no account yet).
+	req.Locale = requestLang(r, req.Locale)
 	res, err := h.Svc.Signup(r.Context(), req)
 	if err != nil {
 		writeJSON(w, cloudErrStatus(err), map[string]string{"error": err.Error()})

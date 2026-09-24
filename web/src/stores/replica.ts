@@ -9,6 +9,7 @@ import type {
   ReplicaStatusReport,
 } from '@/api/types';
 import { extractError } from '@/api/client';
+import { t } from '@/i18n';
 
 export const useReplicaStore = defineStore('replica', () => {
   // Rules
@@ -36,7 +37,7 @@ export const useReplicaStore = defineStore('replica', () => {
     try {
       rules.value = await ReplicaApi.listRules();
     } catch (e: unknown) {
-      error.value = extractError(e, 'Failed to load rules');
+      error.value = extractError(e, t('errors.loadFailed'));
     } finally {
       loading.value = false;
     }
@@ -66,7 +67,7 @@ export const useReplicaStore = defineStore('replica', () => {
       failures.value = r.items ?? [];
       failuresTotal.value = r.total;
     } catch (e: unknown) {
-      error.value = extractError(e, 'Failed to load failures');
+      error.value = extractError(e, t('errors.loadFailed'));
     } finally {
       loading.value = false;
     }
@@ -93,7 +94,7 @@ export const useReplicaStore = defineStore('replica', () => {
     try {
       report.value = await ReplicaApi.getReport();
     } catch (e: unknown) {
-      error.value = extractError(e, 'Failed to load report');
+      error.value = extractError(e, t('errors.loadFailed'));
     }
   }
   async function runReportNow(): Promise<void> {
@@ -106,7 +107,7 @@ export const useReplicaStore = defineStore('replica', () => {
     try {
       settings.value = await ReplicaApi.getSettings();
     } catch (e: unknown) {
-      error.value = extractError(e, 'Failed to load settings');
+      error.value = extractError(e, t('errors.loadFailed'));
     }
   }
   async function updateSettings(payload: ReplicaSettings): Promise<void> {

@@ -28,13 +28,18 @@ describe('connections + API keys from the navigation panel', () => {
     cy.get('[data-testid="sidenav-apikeys"]').should('be.visible');
   });
 
-  it('"How to connect" opens the shared connections panel on the connect tab', () => {
+  it('"How to connect" opens the shared connections panel — and nothing else', () => {
     cy.get('[data-testid="sidenav-connect"]').click();
     cy.get('[data-testid="explorer-overlay"]').should('be.visible');
     cy.get('[data-testid="connections-panel"]').should('be.visible');
-    // `initial-tab="connect"` — a person who came here from the panel wants the
-    // mount instructions, not the storage form.
-    cy.get('[data-testid="tab-connect"]').should('exist');
+    // ⚠⚠ NO tab strip. v0.43.0 removed the Storages half — the owner, testing
+    // the release: "bu depolar sekmesine hiç ihtiyaç yok". A person who opens
+    // this wants the mount instructions, and there is no longer a second,
+    // poorer copy of Admin → Storages in front of them.
+    cy.get('[data-testid="tab-storages"]').should('not.exist');
+    cy.get('[data-testid="tab-connect"]').should('not.exist');
+    cy.get('[data-testid="storage-form"]').should('not.exist');
+    cy.get('[data-testid="storage-add"]').should('not.exist');
     // The protocol picker is the guide: without it the panel is a header.
     cy.get('[data-testid="guide-protocol"]').should('be.visible');
   });
@@ -55,9 +60,9 @@ describe('connections + API keys from the navigation panel', () => {
     // the way it is actually experienced: open one, close it, open the other.
     //
     // ⚠ `api-tokens` is NOT the discriminator: ConnectionsPanel embeds the same
-    // TokensPanel on its own tab, on purpose (one credential screen, not two).
-    // The connections CHROME is what must not be there when the caller asked
-    // for keys — otherwise "API keys" would drop them into the storage form.
+    // TokensPanel beside the guides that need it, on purpose (one credential
+    // screen, not two). The connections CHROME is what must not be there when
+    // the caller asked for keys.
     cy.get('[data-testid="sidenav-connect"]').click();
     cy.get('[data-testid="connections-panel"]').should('be.visible');
     cy.get('[data-testid="connections-close"]').click();
@@ -68,7 +73,6 @@ describe('connections + API keys from the navigation panel', () => {
     cy.get('[data-testid="sidenav-apikeys"]').click();
     cy.get('[data-testid="api-tokens"]').should('be.visible');
     cy.get('[data-testid="connections-panel"]').should('not.exist');
-    cy.get('[data-testid="tab-storages"]').should('not.exist');
   });
 
   it('mints a token and reveals the secret exactly once', () => {

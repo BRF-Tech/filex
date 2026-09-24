@@ -71,7 +71,7 @@ function label(u: PresenceUser): string {
         :title="label(u)"
       >
         <PresenceAvatar :user="u" />
-        <span class="fx-presence-chip-name">{{ u.name }}</span>
+        <span class="fx-presence-chip-name"><bdi>{{ u.name }}</bdi></span>
         <span v-if="u.file" class="fx-presence-chip-file">· {{ u.file }}</span>
       </span>
     </div>
@@ -131,7 +131,7 @@ function label(u: PresenceUser): string {
   justify-content: center;
   width: 1.5rem;
   height: 1.5rem;
-  margin-left: -0.4rem;
+  margin-inline-start: -0.4rem;
   border-radius: 9999px;
   border: 2px solid var(--fx-presence-ring, #ffffff);
   color: #fff;
@@ -141,7 +141,7 @@ function label(u: PresenceUser): string {
   user-select: none;
 }
 .fx-presence-avatar:first-child {
-  margin-left: 0;
+  margin-inline-start: 0;
 }
 /* A photo fills the circle; the identity colour stays as the ring backdrop so
    a picture with transparency still reads as that person. */
@@ -157,7 +157,7 @@ function label(u: PresenceUser): string {
 }
 .fx-presence-dot {
   position: absolute;
-  right: -1px;
+  inset-inline-end: -1px;
   bottom: -1px;
   width: 0.5rem;
   height: 0.5rem;
@@ -166,7 +166,7 @@ function label(u: PresenceUser): string {
   border: 1.5px solid var(--fx-presence-ring, #ffffff);
 }
 .fx-presence-more {
-  margin-left: 0.15rem;
+  margin-inline-start: 0.15rem;
   font-size: 0.7rem;
   color: rgb(113 113 122); /* zinc-500 */
 }
@@ -188,7 +188,7 @@ function label(u: PresenceUser): string {
   align-items: center;
   gap: 0.35rem;
   flex: 0 0 auto;
-  padding: 0.15rem 0.5rem 0.15rem 0.2rem;
+  padding-block: 0.15rem; padding-inline: 0.2rem 0.5rem;
   border-radius: 9999px;
   background: rgb(244 244 245); /* zinc-100 */
   font-size: 0.75rem;
@@ -196,7 +196,7 @@ function label(u: PresenceUser): string {
   white-space: nowrap;
 }
 .fx-presence-chip .fx-presence-avatar {
-  margin-left: 0;
+  margin-inline-start: 0;
 }
 .fx-presence-chip-name {
   font-weight: 500;

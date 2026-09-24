@@ -61,11 +61,14 @@ const selected = await tickRow(win, NAME);
 check('the fixture is listed and selectable', selected, NAME);
 await sleep(500);
 
-let opened = await clickText(/Payla[sş] \/ [İI]zinler|Share \/ Permissions/);
+// "Share" since v0.43.0 ("Share / Permissions" before); the row carries its
+// shortcut hint after the words, so the words are matched as a prefix.
+const SHARE_VERB = /^(Payla[sş]|Share)(?:$|[^a-zA-Zçğıöşüİ])/;
+let opened = await clickText(SHARE_VERB);
 if (!opened) {
   await clickText(/^⋯$/);
   await sleep(500);
-  opened = await clickText(/Payla[sş] \/ [İI]zinler|Share \/ Permissions/);
+  opened = await clickText(SHARE_VERB);
 }
 await sleep(1500);
 check('the Share / Permissions panel opens', opened && (await win.locator('.fx-perm-modal').count()) > 0);

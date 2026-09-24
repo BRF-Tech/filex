@@ -57,6 +57,7 @@ async function toggle() {
       apiBase: props.apiBase,
       authHeaders: props.authHeaders,
       authCredentials: props.authCredentials,
+      locale: resolveLocale(props.locale),
     });
     emit('change', next);
   } catch (err) {

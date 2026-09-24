@@ -13,6 +13,8 @@ import { hasInternalDrag } from '../lib/dragOut';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { lockOf, lockWords } from '../lib/appLock';
+import { linkWordsFor } from '../lib/symlink'; /* issue #34 — a link that will not open */
 import { checkMod, clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
 import ItemCheck from './ItemCheck.vue';
 import { encryptedFolderTile, fileIconTile, isEncryptedFolder } from '../lib/fileIcons';
@@ -30,6 +32,7 @@ import {
   groupingActive,
 } from '../lib/dateGroups'; /* gruplama */
 import { useSortStore, type ListingOrder } from '../lib/sortOrder'; /* gruplama */
+import { contentDir } from '../lib/direction';
 
 const props = withDefaults(defineProps<{
   files: FileNode[];
@@ -97,6 +100,25 @@ const emit = defineEmits<{
 
 const { t, formatSize, nodeDisplayName, formatDate, formatMonthYear, zonedYearMonth, toDate } =
   useLocale(() => props.locale);
+
+/* App plugins — an app's hold on a row (docs/APP-PLUGINS-API.md → "File
+   locks"). The listing already caps `perm` at viewer, so the write verbs are
+   gone without this; the badge is what stops that reading as a bug. ⚠ One
+   source of words for every view and the details panel (lib/appLock). */
+function lockTitleOf(n: FileNode): string {
+  return lockWords(lockOf(n), { t, formatDate, locale: props.locale });
+}
+
+/* issue #34 — a symlink the server will not follow. Same shape as the lock
+   badge above and for the same reason: the words live in ONE module
+   (lib/symlink), so the row, the details panel and the toast that explains a
+   refused open cannot drift apart. `null` for every ordinary row — a link
+   whose target is inside the root was already followed and arrives as that
+   target, so it is not one of these. */
+function linkOf(n: FileNode) {
+  return linkWordsFor(n, { t });
+}
+
 
 /* gruplama — this pane's sort, by injection, so the gallery cannot disagree
  * with the list beside it about whether a date heading is honest right now. */
@@ -305,6 +327,7 @@ function metaFor(n: FileNode): string {
             v-for="p in previewFor(n)"
             :key="'fprev'"
             class="fe-fprev"
+            :dir="contentDir(p.kind)"
             :class="'fe-fprev--' + p.kind"
             :style="p.kind === 'table' ? { '--fprev-cols': String(p.cols) } : undefined"
             aria-hidden="true"
@@ -401,11 +424,36 @@ function metaFor(n: FileNode): string {
             v-if="showParentPath && parentDirOf(n.path)"
             class="fe-gal__meta-line fe-gal__meta-line--path"
             :title="parentDirOf(n.path)"
-          >{{ parentDirOf(n.path) }}</span>
+          ><bdi>{{ parentDirOf(n.path) }}</bdi></span>
         </div>
       </div>
       <div class="fe-gal__label" :title="n.basename">
-        {{ nodeDisplayName(n) }}
+        <bdi>{{ nodeDisplayName(n) }}</bdi>
+      </div>
+      <!-- issue #34 — a symlink the server will not follow. Its own line: a
+           gallery card has no caption row to hang it off, and a badge that
+           only appeared in two of the three views is how the same fix reaches
+           some people and not others. -->
+      <div v-if="linkOf(n)" class="fe-gal__meta-line">
+        <span
+        class="fe-symlink"
+        :class="'fe-symlink--' + linkOf(n)!.state"
+        role="img"
+        :title="linkOf(n)!.why"
+        :aria-label="linkOf(n)!.why"
+        data-testid="symlink-badge"
+        :data-link-state="linkOf(n)!.state"
+        ><span class="fe-symlink__glyph" aria-hidden="true">&#128279;</span>{{ linkOf(n)!.badge }}</span>
+      </div>
+      <div v-if="lockTitleOf(n)" class="fe-gal__meta-line">
+        <span
+        v-if="lockTitleOf(n)"
+        class="fe-applock"
+        role="img"
+        :title="lockTitleOf(n)"
+        :aria-label="lockTitleOf(n)"
+        data-testid="lock-badge"
+            ><span class="fe-applock__glyph" aria-hidden="true">&#128274;</span>{{ t('applock.badge') }}</span>
       </div>
     </div>
     </template>

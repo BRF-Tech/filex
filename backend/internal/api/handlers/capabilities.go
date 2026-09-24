@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -24,6 +25,12 @@ type Capabilities struct {
 	// (docs/MULTI-TENANCY.md §12 + isolation checklist).
 	Store       db.Store
 	MultiTenant bool
+	// Mail, when wired, answers whether outgoing mail can be sent right now
+	// (configured and verified). Published as `mail.ready`, a boolean with no
+	// host in it. Nil = the field is absent and clients keep offering mail.
+	Mail interface {
+		Ready(ctx context.Context) bool
+	}
 	/* kimlik:e3 cloud */
 	// CloudEnabled mirrors FILEX_CLOUD (set by BuildRouter only when the flag
 	// is on). While false — the default — the capabilities payload carries NO
@@ -161,6 +168,12 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 		callerKind = model.TokenKindApp
 	}
 	merged["caller_kind"] = callerKind
+	merged["caller_admin"] = h.callerCanConfigure(r)
+	// Can "Send by email" work at all? ⚠ A typed nil *mailer.Service inside
+	// the interface is not == nil, so Ready is nil-safe itself.
+	if h.Mail != nil {
+		merged["mail"] = map[string]any{"ready": h.Mail.Ready(r.Context())}
+	}
 
 	/* wiring:e2 — say plainly whether this installation holds a second key.
 	 * Fixed at install (FILEX_INSTALLATION_E2E_ESCROW_KEY) and immutable
@@ -231,6 +244,42 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 // whose owner the session drivers also resolved shows up as both. Neither
 // annotation ever rejects, so "anonymous" here means exactly "no usable
 // credential was presented", not "authentication failed".
+// callerCanConfigure reports whether this caller could SET UP a missing
+// optional service — i.e. reach /admin/external and the admin settings.
+//
+// ⚠⚠ Why the explorer needs to know, and why it asks here rather than reading
+// a role: the owner's rule for a service that is not configured (2026-09-21) is
+// "disabled with a reason for administrators, hidden for everybody else". For
+// a person who can fix it, a greyed "Open with ONLYOFFICE — set it up under
+// External services" is useful; for everybody else it is a button that can
+// never work and only invites a click. The explorer is embedded in hosts that
+// know nothing about filex roles, so the answer comes from the server that
+// enforces the admin routes, with the same three conditions they apply:
+//
+//   - an administrator account (`CallerMayAdminister`, which also refuses an
+//     API token without the admin scope — a shared embed token is not a
+//     person who can go and configure anything);
+//   - in multi-tenant mode, the SUPERTENANT: the external services and the
+//     instance settings are instance-wide and a tenant admin is refused them
+//     (`requireSupertenant`, `allowSettingWrite`), so telling a tenant admin
+//     to go and set up ONLYOFFICE would send them to a 403.
+//
+// It names nothing and grants nothing: it only decides which of two honest
+// sentences the menu shows.
+func (h *Capabilities) callerCanConfigure(r *http.Request) bool {
+	ctx := r.Context()
+	if !auth.CallerMayAdminister(ctx) {
+		return false
+	}
+	if h.MultiTenant && h.Store != nil {
+		s := auth.ScopeForUser(ctx, h.Store, auth.UserFrom(ctx))
+		if s == nil || !s.IsSupertenant {
+			return false
+		}
+	}
+	return true
+}
+
 func anonymousCaller(r *http.Request) bool {
 	return auth.UserFrom(r.Context()) == nil && auth.TokenFrom(r.Context()) == nil
 }

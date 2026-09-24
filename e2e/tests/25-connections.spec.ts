@@ -3,14 +3,20 @@
  *
  * What it proves, in the order the user meets it:
  *
- *   1. the storages the caller may see are listed;
- *   2. a storage can be CREATED from the shared component, with a field
- *      set the backend descriptor supplied (not one this test hardcodes),
- *      and the server really has it afterwards;
- *   3. the "how to connect" page names the deployment it is served from,
+ *   1. the surface is the guides and NOTHING else — no tab strip, no storage
+ *      list, no storage form (v0.43.0 removed that half; see below);
+ *   2. the "how to connect" page names the deployment it is served from,
  *      and its copy button really puts that on the clipboard;
- *   4. a NON-admin gets an honest "ask your administrator" state and the
- *      instructions anyway — not a form whose submit would 403.
+ *   3. a NON-admin gets the instructions and can mint the credential they
+ *      name — the half they actually need.
+ *
+ * ⚠⚠ This file used to open by CREATING a storage through the panel, and the
+ * tests below still need that storage to exist (see the non-admin test's
+ * header: the explorer only mounts for a caller who can see one). The panel
+ * cannot create it any more, so `makeTestStorage` does it through the API in
+ * `beforeAll`. Do not "restore" the UI version — the owner removed that half
+ * on purpose: "bu depolar sekmesine hiç ihtiyaç yok". Creating a storage
+ * through the UI is 20-storage.spec.ts's job, on Admin → Storages.
  *
  * ⚠ The desktop half of this feature is measured separately, by driving
  * the real Electron app: `node desktop/scripts/connections-e2e.mjs`. Both
@@ -19,6 +25,11 @@
  */
 import { test, expect } from '@playwright/test';
 import { loginAs, apiLogin, ADMIN_EMAIL, ADMIN_PASSWORD } from '../helpers/auth';
+// panel:tek-satir — the four panels below moved onto the shared admin table,
+// and a row's verbs moved with them: one pinned "Actions" control per row
+// holding what used to be loose `Revoke` / `Remove` buttons. The menu
+// teleports to <body>, so it cannot be reached through the row at all.
+import { confirmRowAction } from '../helpers/rowMenu';
 
 const STORAGE_NAME = 'conn-e2e';
 const USER_EMAIL = 'conn-viewer@local';
@@ -72,62 +83,92 @@ async function switchLanguage(page: import('@playwright/test').Page, code: 'en' 
   await expect(page.getByTestId('user-settings-dialog')).toBeHidden();
 }
 
+/**
+ * The storage the rest of this file borrows, made the only way that is left:
+ * the admin API. ⚠ Not a convenience — the explorer (and therefore
+ * `sidenav-connect`, the non-admin test's door) is only mounted for a caller
+ * who can see at least one storage.
+ */
+async function makeTestStorage(request: import('@playwright/test').APIRequestContext) {
+  await apiLogin(request);
+  // ⚠ `enabled` and `read_only` explicitly, the same body the panel's own form
+  // used to send. Leaving `enabled` off creates a storage nobody can see, and
+  // the failure lands two tests later as "sidenav not found" — the explorer
+  // does not mount for a caller with no visible storage.
+  const made = await request.post('/api/admin/storages', {
+    data: {
+      name: STORAGE_NAME,
+      driver: 'local',
+      config: { path: MOUNT },
+      read_only: false,
+      enabled: true,
+    },
+  });
+  expect(
+    made.ok(),
+    `could not create ${STORAGE_NAME}: ${made.status()} ${await made.text()}`,
+  ).toBeTruthy();
+}
+
 test.describe('storage connections', () => {
   test.beforeAll(async ({ request }) => {
     await dropTestStorage(request);
+    await makeTestStorage(request);
   });
 
   test.afterAll(async ({ request }) => {
     await dropTestStorage(request);
   });
 
-  test('lists storages and creates one from the shared component', async ({ page, request }) => {
+  /**
+   * ⚠⚠ The Storages half is GONE, on BOTH doors into this component.
+   *
+   * The owner, testing v0.43.0: "nasıl bağlanılır kısmında ve adminde
+   * bağlantılar sayfası (aynılar zaten biliyorum) ikisinde de depolar
+   * gözüküyor bu depolar sekmesine hiç ihtiyaç yok. kaldıralım." It was a
+   * poorer copy of Admin → Storages — no sync mode, no RBAC, no drift —
+   * standing in front of the screen that answers the other question.
+   *
+   * This asserts ABSENCE, which is the kind of test that rots quietly, so it
+   * asserts the survivor in the same breath: if the panel ever fails to render
+   * at all, the guide assertion fails rather than the whole test passing
+   * because nothing is on screen.
+   */
+  test('the panel is the guides only — no tab strip, no storage form', async ({ page }) => {
     await loginAs(page);
     await page.goto('/admin/connections');
     await dismissInstallBanner(page);
 
     const panel = page.getByTestId('connections-panel');
     await expect(panel).toBeVisible();
-    // The list is rendered for an admin (empty or not) and the add button
-    // is there — the two things a non-admin does NOT get.
-    await expect(page.getByTestId('storage-list')).toBeAttached();
-    await expect(page.getByTestId('storage-add')).toBeVisible();
+    // The survivor, on screen without anything being clicked.
+    await expect(page.getByTestId('guide-protocol')).toBeVisible();
 
-    await page.getByTestId('storage-add').click();
-    await expect(page.getByTestId('storage-form')).toBeVisible();
+    for (const gone of [
+      'tab-storages',
+      'tab-connect',
+      'storage-list',
+      'storage-add',
+      'storage-form',
+      'no-admin',
+    ]) {
+      await expect(
+        page.getByTestId(gone),
+        `${gone} is still on the connections page`,
+      ).toHaveCount(0);
+    }
+    // Not even an empty strip left behind. ⚠ `.fe-conn__tabs`, the panel's OWN
+    // strip — not `[role="tablist"]`, which also matches the guide's Windows /
+    // macOS / Linux tabs further down the page, and those are the feature.
+    await expect(panel.locator('.fe-conn__tabs')).toHaveCount(0);
 
-    await page.getByTestId('storage-name').fill(STORAGE_NAME);
-    await page.getByTestId('storage-driver').selectOption('local');
-
-    // ⚠ The path field is whatever the DRIVER declared, found by its
-    // descriptor-generated id — not a selector this test invented. If the
-    // descriptor stopped shipping the field, this fails, which is the
-    // point.
-    const pathField = page.locator('#fe-cf-path');
-    await expect(pathField).toBeVisible();
-    await pathField.fill(MOUNT);
-
-    await dismissInstallBanner(page);
-    await page.getByTestId('storage-test').click();
-    await expect(page.getByTestId('test-result')).toBeVisible({ timeout: 15_000 });
-
-    await page.getByTestId('storage-save').click();
-    await expect(page.getByTestId('storage-form')).toBeHidden({ timeout: 15_000 });
-    await expect(page.getByTestId('storage-list')).toBeVisible();
-    await expect(page.getByTestId(`storage-edit-${STORAGE_NAME}`)).toBeVisible();
-
-    // The server, not the screen, is the authority on whether it saved.
-    // ⚠ Its own session: the per-test `request` fixture is a fresh context,
-    // so the beforeAll login does not carry into it.
-    await apiLogin(request);
-    const list = await request.get('/api/admin/storages');
-    expect(list.ok()).toBeTruthy();
-    const items: Array<{ name: string; driver: string; config: Record<string, unknown> }> =
-      await list.json();
-    const made = items.find((s) => s.name === STORAGE_NAME);
-    expect(made).toBeTruthy();
-    expect(made?.driver).toBe('local');
-    expect(made?.config?.path).toBe(MOUNT);
+    // ⚠ And the door out is named: this page sends a reader who wanted the
+    // storage form to the pages that have it. Without this the removal is a
+    // dead end rather than a move.
+    const advanced = page.getByRole('button', { name: 'Manage storages' });
+    await expect(advanced).toBeVisible();
+    await advanced.click();
+    await expect(page).toHaveURL(/\/admin\/storages/);
   });
 
   test('the instruction page names this deployment, and the copy button works', async ({
@@ -138,7 +179,7 @@ test.describe('storage connections', () => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await loginAs(page);
     await page.goto('/admin/connections');
-    await page.getByTestId('tab-connect').click();
+    await expect(page.getByTestId('connections-panel')).toBeVisible();
 
     const facts = page.getByTestId('guide-facts');
     await expect(facts).toBeVisible();
@@ -205,19 +246,12 @@ test.describe('storage connections', () => {
 
     const panel = page.getByTestId('connections-panel');
     await expect(panel).toContainText('Depo bağlantıları');
-    await expect(page.getByTestId('tab-storages')).toHaveText('Depolar');
-    await expect(page.getByTestId('tab-connect')).toHaveText('Nasıl bağlanılır');
-
-    // The descriptor-driven labels come from the SAME i18n keys the backend
-    // names, so they must be Turkish too — the whole point of copying the
-    // catalogue rather than inventing a second one.
-    await page.getByTestId('storage-add').click();
-    await page.getByTestId('storage-driver').selectOption('s3');
-    await expect(page.getByTestId('storage-form')).toContainText('Önek (prefix)');
-    await expect(page.getByTestId('storage-form')).toContainText('Gelişmiş ayarlar');
+    // ⚠ The tab strip used to be measured here (Depolar / Nasıl bağlanılır).
+    // It went with the storage half; the protocol picker is what the panel
+    // opens on now, and its label is the one that has to be Turkish.
+    await expect(panel).toContainText('Protokol');
 
     // And the generated instructions.
-    await page.getByTestId('tab-connect').click();
     await expect(page.getByTestId('guide-facts')).toContainText('Kullanıcı adı');
     await expect(page.locator('.fe-guide__body')).toContainText('Dosya Gezgini');
 
@@ -243,7 +277,7 @@ test.describe('storage connections', () => {
     await loginAs(page);
     await page.goto('/admin/connections');
     await dismissInstallBanner(page);
-    await page.getByTestId('tab-connect').click();
+    await expect(page.getByTestId('connections-panel')).toBeVisible();
     await page.getByTestId('guide-protocol').selectOption('s3');
 
     const keys = page.getByTestId('s3-keys');
@@ -278,12 +312,14 @@ test.describe('storage connections', () => {
     await page.getByTestId('guide-tab-restic').click();
     await expect(body).toContainText(`RESTIC_REPOSITORY="s3:${endpoint}/`);
 
-    // The key is listed, and revoking it takes a confirmation.
-    const row = keys.locator('tbody tr', { hasText: akid });
+    // The key is listed, and revoking it takes a confirmation. ⚠ The verb is
+    // a named entry in the row's one Actions menu now, and the confirmation
+    // is a second trip through it — destroying a credential did not get any
+    // cheaper in the move, which is the part worth measuring.
+    const row = keys.locator('.fe-list__row', { hasText: akid });
     await expect(row).toBeVisible();
-    await row.getByRole('button', { name: 'Revoke' }).click();
-    await row.getByRole('button', { name: 'Sure?' }).click();
-    await expect(keys.locator('tbody tr', { hasText: akid })).toHaveCount(0);
+    await confirmRowAction(row, 'Revoke');
+    await expect(keys.locator('.fe-list__row', { hasText: akid })).toHaveCount(0);
   });
 
 
@@ -299,7 +335,7 @@ test.describe('storage connections', () => {
     await loginAs(page);
     await page.goto('/admin/connections');
     await dismissInstallBanner(page);
-    await page.getByTestId('tab-connect').click();
+    await expect(page.getByTestId('connections-panel')).toBeVisible();
     await page.getByTestId('guide-protocol').selectOption('sftp');
 
     const keys = page.getByTestId('ssh-keys');
@@ -317,7 +353,7 @@ test.describe('storage connections', () => {
     await page.getByTestId('ssh-key-name').fill('e2e laptop');
     await page.getByTestId('ssh-key-add').click();
 
-    const row = keys.locator('tbody tr', { hasText: 'e2e laptop' });
+    const row = keys.locator('.fe-list__row', { hasText: 'e2e laptop' });
     await expect(row).toBeVisible();
     await expect(row).toContainText('SHA256:');
 
@@ -334,9 +370,8 @@ test.describe('storage connections', () => {
     await expect(page.locator('.fe-guide__body')).toContainText('shell_type = none');
 
     // Remove it again, so the next run starts from the same place.
-    await row.getByRole('button', { name: 'Remove' }).click();
-    await row.getByRole('button', { name: 'Sure?' }).click();
-    await expect(keys.locator('tbody tr', { hasText: 'e2e laptop' })).toHaveCount(0);
+    await confirmRowAction(row, 'Remove');
+    await expect(keys.locator('.fe-list__row', { hasText: 'e2e laptop' })).toHaveCount(0);
   });
 
 
@@ -367,7 +402,7 @@ test.describe('storage connections', () => {
     await loginAs(page);
     await page.goto('/admin/connections');
     await dismissInstallBanner(page);
-    await page.getByTestId('tab-connect').click();
+    await expect(page.getByTestId('connections-panel')).toBeVisible();
     await page.getByTestId('guide-protocol').selectOption('ftps');
 
     const facts = page.getByTestId('guide-facts');
@@ -405,7 +440,7 @@ test.describe('storage connections', () => {
     await loginAs(page);
     await page.goto('/admin/connections');
     await dismissInstallBanner(page);
-    await page.getByTestId('tab-connect').click();
+    await expect(page.getByTestId('connections-panel')).toBeVisible();
     await page.getByTestId('guide-protocol').selectOption('nfs');
 
     const panel = page.getByTestId('nfs-exports');
@@ -436,15 +471,14 @@ test.describe('storage connections', () => {
     const path = line.match(/\/x\/[0-9a-f]{64}/)?.[0] ?? '';
     await expect(page.getByTestId('guide-facts')).toContainText(path);
 
-    const row = panel.locator('tbody tr', { hasText: 'e2e media player' });
+    const row = panel.locator('.fe-list__row', { hasText: 'e2e media player' });
     await expect(row).toBeVisible();
     await expect(row).toContainText('read-only');
-    await row.getByRole('button', { name: 'Revoke' }).click();
-    await row.getByRole('button', { name: 'Sure?' }).click();
-    await expect(panel.locator('tbody tr', { hasText: 'e2e media player' })).toHaveCount(0);
+    await confirmRowAction(row, 'Revoke');
+    await expect(panel.locator('.fe-list__row', { hasText: 'e2e media player' })).toHaveCount(0);
   });
 
-  test('a non-admin is told to ask an administrator, and still gets the guide', async ({
+  test('a non-admin gets the guide, and can mint the credential it names', async ({
     page,
     request,
   }) => {
@@ -453,6 +487,22 @@ test.describe('storage connections', () => {
     await request.post('/api/admin/users', {
       data: { email: USER_EMAIL, password: USER_PASSWORD, role: 'user' },
     });
+
+    // ⚠ THIS TEST BORROWS THE STORAGE THE FIRST ONE CREATES, and the borrow
+    // is what makes it lie when something else in this file breaks. The door
+    // below (`sidenav-connect`) lives inside the explorer, and the explorer is
+    // only mounted when the caller can see at least one storage — a non-admin
+    // with none gets the bare "nothing has been shared with you" screen and no
+    // navigation panel at all.
+    //
+    // Playwright restarts its worker after ANY failed test, and a new worker
+    // re-runs this describe's `beforeAll` — which is `dropTestStorage`. So an
+    // earlier failure in this file deletes `conn-e2e` out from under this test
+    // and it then fails with "sidenav not found", which reads like a second,
+    // separate regression and is not one. Measured 2026-09-20: three revoke
+    // buttons moved into a row menu, and this test went red with them.
+    // If it fails alone, the finding is real; if it fails behind others in
+    // this file, fix those first and look again.
 
     // gorunum:v2-topbar — the onboarding tour has to be off for this test now,
     // and this is not belt-and-braces: it was MEASURED.
@@ -469,7 +519,7 @@ test.describe('storage connections', () => {
 
     await page.goto('/admin/login');
     await page.getByLabel(/e-?mail|kullanıcı adı/i).fill(USER_EMAIL);
-    await page.getByLabel(/password|şifre/i).fill(USER_PASSWORD);
+    await page.getByLabel(/password|parola/i).fill(USER_PASSWORD);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     // Non-admins land in the explorer — on Home since 0.41.0.
     await page.waitForURL(/\/(home|explore)([?#]|$)/, { timeout: 15_000 });
@@ -492,13 +542,16 @@ test.describe('storage connections', () => {
     const panel = page.getByTestId('connections-panel');
     await expect(panel).toBeVisible();
 
-    // It opens on the half they can use…
+    // It opens on what they came for…
     await expect(page.getByTestId('guide-facts')).toBeVisible();
     await expect(page.getByTestId('guide-facts')).toContainText(USER_EMAIL);
 
-    // …and the other half says why, instead of showing a dead form.
-    await page.getByTestId('tab-storages').click();
-    await expect(page.getByTestId('no-admin')).toBeVisible();
+    // …and there is no longer another half to be turned away from. Before
+    // v0.43.0 this clicked a "Storages" tab to read "ask an administrator";
+    // the honest version of that card is not showing a non-admin a console
+    // they may not use at all.
+    await expect(page.getByTestId('tab-storages')).toHaveCount(0);
+    await expect(page.getByTestId('no-admin')).toHaveCount(0);
     await expect(page.getByTestId('storage-form')).toHaveCount(0);
     await expect(page.getByTestId('storage-add')).toHaveCount(0);
 
@@ -507,7 +560,7 @@ test.describe('storage connections', () => {
     // API token, and until 2026-08-17 the only screen that could make one was
     // the admin panel — so this user read "use an API token as the password"
     // and had nowhere to go. Being an admin hid the gap completely.
-    await page.getByTestId('tab-connect').click();
+    await expect(page.getByTestId('connections-panel')).toBeVisible();
     await page.getByTestId('guide-protocol').selectOption('ftps');
     await expect(page.getByTestId('api-tokens')).toBeVisible();
 
@@ -522,6 +575,63 @@ test.describe('storage connections', () => {
     });
     expect(who.status(), 'a non-admin minted a token the API refused').toBeLessThan(400);
     expect(JSON.stringify(await who.json())).toContain(USER_EMAIL);
+
+    // ── baglan:b1 — and now the same person with NOTHING ────────────────
+    //
+    // ⚠⚠ Everything above went through `sidenav-connect`, which is inside the
+    // explorer — and the explorer is only mounted when the caller can see at
+    // least one storage. That is the borrow this test's header warns about,
+    // and it was also hiding the other half of the gap the ⚠⚠ block above says
+    // was closed on 2026-08-17: a brand-new account, and this same account the
+    // moment its grant is revoked, gets the bare "nothing has been shared with
+    // you" screen with no navigation panel at all — so it is told to ask an
+    // administrator AND cannot read how to connect or mint the token the guide
+    // tells it to use. Being handed a storage hid the zero-storage case
+    // exactly the way being an admin hid the first one.
+    //
+    // So: take the storage away from under a live session and reload. The door
+    // that has to be there is a row in the empty screen's own account menu
+    // (Explore.vue → `emptyStateActions`), the same mechanism
+    // "Paylaştıklarım" uses, opening the SAME ConnectionsPanel.
+    //
+    // ⚠ The drop is safe for what follows: nothing later in this file uses
+    // `conn-e2e`, and `afterAll` drops it anyway. It is done HERE rather than
+    // in a test of its own because this is the one session in the file signed
+    // in as a non-admin — a separate test would have to log in again, and a
+    // worker restart would re-run `beforeAll` and drop the storage under it.
+    await dropTestStorage(request);
+    await page.reload();
+    await dismissInstallBanner(page);
+
+    // No explorer, no navigation panel: the promise now rests entirely on the
+    // empty screen's own cluster.
+    const empty = page.getByTestId('explore-empty-actions');
+    await expect(empty).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId('sidenav')).toHaveCount(0);
+
+    await page.getByTestId('explore-account').click();
+    // ⚠ `explore-connections`, the testid AccountMenu derives from the row's
+    // KEY — not its label, which changes with the viewer's language.
+    const guideRow = page.getByTestId('explore-connections');
+    await expect(guideRow, 'no way to the connections guide with no storage').toBeVisible();
+    await guideRow.click();
+
+    // The package's own panel, opened on the half this person can use.
+    const emptyPanel = page.getByTestId('connections-panel');
+    await expect(emptyPanel).toBeVisible();
+    await expect(page.getByTestId('guide-facts')).toBeVisible();
+    await expect(page.getByTestId('guide-facts')).toContainText(USER_EMAIL);
+
+    // …and the credential the guide sends them for is mintable from here too,
+    // which is why the door matters rather than just the page.
+    await page.getByTestId('guide-protocol').selectOption('ftps');
+    await expect(page.getByTestId('api-tokens')).toBeVisible();
+
+    // It closes again and puts them back where they were, rather than trapping
+    // them on a surface the empty screen has no back button for.
+    await page.getByTestId('connections-close').click();
+    await expect(emptyPanel).toHaveCount(0);
+    await expect(empty).toBeVisible();
   });
 
   /**
@@ -538,7 +648,7 @@ test.describe('storage connections', () => {
     await loginAs(page);
     await page.goto('/admin/connections');
     await dismissInstallBanner(page);
-    await page.getByTestId('tab-connect').click();
+    await expect(page.getByTestId('connections-panel')).toBeVisible();
 
     // ⚠ The picker shows a NAME, not the id upper-cased — "MOUNT" would be a
     // label for a thing that is not a protocol, in a list where the rest are.
@@ -547,9 +657,9 @@ test.describe('storage connections', () => {
     await picker.selectOption('mount');
 
     const facts = page.getByTestId('guide-facts');
-    await expect(facts).toContainText(/API token/i);
+    await expect(facts).toContainText(/API key/i);
     // The token is never echoed: filex does not have its plaintext.
-    await expect(facts).toContainText(/create one under Tokens/i);
+    await expect(facts).toContainText(/create one under API keys/i);
 
     const body = page.locator('.fe-guide__body');
 
@@ -589,7 +699,7 @@ test.describe('storage connections', () => {
     await loginAs(page);
     await page.goto('/admin/connections');
     await dismissInstallBanner(page);
-    await page.getByTestId('tab-connect').click();
+    await expect(page.getByTestId('connections-panel')).toBeVisible();
 
     const picker = page.getByTestId('guide-protocol');
     const panel = page.getByTestId('api-tokens');
@@ -628,9 +738,13 @@ test.describe('storage connections', () => {
     });
     expect(probe.status(), 'the minted token was refused by the API').toBeLessThan(400);
 
-    // Revoking removes it from the list.
-    await page.getByTestId('api-tokens').getByRole('button', { name: /revoke/i }).first().click();
-    await page.getByTestId('api-tokens').getByRole('button', { name: /sure/i }).first().click();
+    // Revoking removes it from the list. ⚠ THIS row's own menu, found by the
+    // name that was typed — the old `.first()` reached for whichever revoke
+    // button happened to be first in the panel, which is not necessarily the
+    // token this test minted.
+    const tokenRow = page.getByTestId('api-tokens').locator('.fe-list__row', { hasText: label });
+    await expect(tokenRow).toBeVisible();
+    await confirmRowAction(tokenRow, 'Revoke');
     await expect(page.getByTestId('api-tokens')).not.toContainText(label);
 
     // ⚠ And the revoked token stops working — the panel promises exactly this

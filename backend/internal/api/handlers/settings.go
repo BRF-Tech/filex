@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 )
@@ -19,6 +18,13 @@ type Settings struct {
 	// Branding is invalidated on branding.* writes so public pages pick the
 	// new identity up immediately (wiring:e1). Nil-safe.
 	Branding *BrandingSource
+	// Appearance is invalidated on ui.default_theme writes, so an operator who
+	// sets the instance default sees it take effect on the next page load
+	// rather than up to fifteen seconds later (tema:v1). Nil-safe.
+	//
+	// ⚠ Two caches, not one: branding is keyed per HOST and overlaid per
+	// tenant, while the appearance payload is a single instance-wide answer.
+	Appearance *AppearanceSource
 }
 
 // NewSettings constructs a Settings handler.
@@ -29,6 +35,13 @@ func (h *Settings) AttachMailer(m *mailer.Service) { h.Mailer = m }
 
 // AttachBranding wires the shared branding source (wiring:e1).
 func (h *Settings) AttachBranding(b *BrandingSource) { h.Branding = b }
+
+// AttachAppearance wires the shared theme source (tema:v1).
+func (h *Settings) AttachAppearance(a *AppearanceSource) { h.Appearance = a }
+
+// appearanceSettingKey reports whether writing key changes what
+// /api/appearance answers.
+func appearanceSettingKey(key string) bool { return key == DefaultThemeSettingKey }
 
 // SMTPTest verifies the SMTP config (auth handshake) and, when a `to` address
 // is given, sends a real test message end-to-end.
@@ -44,18 +57,20 @@ func (h *Settings) SMTPTest(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if err := h.Mailer.Verify(r.Context()); err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "stage": "verify", "error": err.Error()})
+		// `reason` is what the screen says (mailer.Reason); `error` stays as
+		// the administrator's second line, not the sentence.
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "stage": "verify", "reason": mailer.Reason(err), "error": err.Error()})
 		return
 	}
 	to := strings.TrimSpace(req.To)
 	if to != "" {
-		locale := ""
-		if u := auth.UserFrom(r.Context()); u != nil {
-			locale = u.Locale
-		}
-		subject, body := smtpTestMailText(locale)
+		// The acting admin's language — a language pack's included — and the
+		// mail is tagged with it (Content-Language).
+		lang := requestLang(r)
+		r = r.WithContext(mailer.WithLanguage(r.Context(), lang))
+		subject, body := smtpTestMailText(lang)
 		if err := h.Mailer.Send(r.Context(), to, subject, body); err != nil {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "stage": "send", "error": err.Error()})
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "stage": "send", "reason": mailer.Reason(err), "error": err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": true})
@@ -104,14 +119,29 @@ func (h *Settings) Set(w http.ResponseWriter, r *http.Request) {
 		key = tenantBrandingKey(r.Context(), key)
 		defer h.Branding.Invalidate()
 	}
-	/* gorunum:v1 — operator stylesheet: cap it, and bust the branding cache
-	   it rides on so the next page load wears the new sheet. */
+	/* tema:v1 — operator stylesheet: run the guard pass, which both caps it
+	   and refuses a sheet that could escape its scope wrapper. There is no
+	   cache to bust: the sheet is served from /api/me/custom-css, which reads
+	   settings live and is `no-store`. */
 	if key == CustomCSSSettingKey {
 		if err := validateCustomCSS(req.Value); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		defer h.Branding.Invalidate()
+	}
+	/* tema:v1 — the instance default palette. */
+	if appearanceSettingKey(key) {
+		defer h.Appearance.Invalidate()
+	}
+	/* tablo:t3 — the instance default folder view: refused if it names a view,
+	   a sort or a column the explorer cannot draw, and stored normalised. */
+	if key == DefaultFolderViewSettingKey {
+		norm, err := normaliseFolderViewDefault(req.Value)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		req.Value = norm
 	}
 	if err := h.Store.UpsertSetting(r.Context(), key, req.Value); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -144,13 +174,22 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 		if !allowSettingWrite(w, r, k) {
 			return
 		}
-		/* gorunum:v1 — the operator stylesheet is capped HERE, in the
+		/* tema:v1 — the operator stylesheet is guarded HERE, in the
 		   classify-everything-first loop, for the same reason the tenancy
 		   check is: refusing it in the write loop below would leave the
 		   other keys of the batch already written. */
 		if k == CustomCSSSettingKey {
 			val, _ := stringifyValue(v)
 			if err := validateCustomCSS(val); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+		}
+		/* tablo:t3 — same reasoning: refuse before anything in the batch is
+		   written, not halfway through it. */
+		if k == DefaultFolderViewSettingKey {
+			val, _ := stringifyValue(v)
+			if _, err := normaliseFolderViewDefault(val); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
@@ -174,10 +213,13 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 			k = tenantBrandingKey(r.Context(), k)
 			defer h.Branding.Invalidate()
 		}
-		/* gorunum:v1 — already validated above; bust the branding cache the
-		   stylesheet rides on so the next page load wears the new sheet. */
-		if k == CustomCSSSettingKey {
-			defer h.Branding.Invalidate()
+		/* tema:v1 — the instance default palette changes what the public
+		   appearance endpoint answers, so drop its cache. */
+		if appearanceSettingKey(k) {
+			defer h.Appearance.Invalidate()
+		}
+		if k == DefaultFolderViewSettingKey {
+			val, _ = normaliseFolderViewDefault(val)
 		}
 		if err := h.Store.UpsertSetting(r.Context(), k, val); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

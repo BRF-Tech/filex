@@ -86,7 +86,7 @@ Set the **callback URL** for that. It is the address the Document Server uses,
 and nothing else reads it:
 
 ```bash
-FILEX_PUBLIC_URL=https://files.example.com      # people, share links, e-mails
+FILEX_PUBLIC_URL=https://files.example.com      # people, share links, emails
 FILEX_ONLYOFFICE_CALLBACK_URL=http://filex:5212 # the Document Server alone
 ```
 
@@ -212,6 +212,14 @@ services:
 ```
 
 Pick a long random `JWT_SECRET` and keep it — filex needs the **same** value.
+
+⚠⚠ **Always set one.** The save callback route is public, and filex can only
+tell a genuine save from a forged one by its signature. With a secret, an
+unsigned callback is refused (since v0.43.0). **Without** one there would be
+nothing to check a callback against, so filex does not run ONLYOFFICE at all:
+a URL with no secret leaves opening and saving off, and the admin Panel and
+*External services* show a red warning — it cannot be dismissed — until a
+secret is set.
 
 ### 2. Point filex at it
 
@@ -415,6 +423,12 @@ callback) with a token error. ⚠ Correct it on whichever side is wrong: an edit
 in *Settings → External services* takes effect on the next request with no
 filex restart, while `FILEX_ONLYOFFICE_JWT` is re-asserted onto the row at boot
 and therefore needs one. The Document Server needs a restart either way.
+
+A save callback that carries **no** token is refused as long as filex holds a
+secret: the callback route is public, and an unsigned one would let anybody
+who can reach it overwrite a file. If saves fail with `the callback is not
+signed`, the Document Server is running with `JWT_ENABLED` off — turn it on
+with the same secret.
 
 ### Failure: document won't load or save
 Almost always a **reachability / URL** problem — and which of the three

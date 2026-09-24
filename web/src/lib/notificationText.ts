@@ -121,7 +121,7 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
     en: {
       title: '{count} files received',
       body: '{uploader} → {folder}',
-      one: { title: '1 file received' },
+      one: { title: '{count} file received' },
     },
     tr: { title: '{count} dosya geldi', body: '{uploader} → {folder}' },
   },
@@ -141,6 +141,14 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
   'e2e.escrow_used': {
     en: { title: 'Encrypted folder opened with the escrow key', body: '{folder}' },
     tr: { title: 'Şifreli klasör emanet anahtarıyla açıldı', body: '{folder}' },
+  },
+  // An installed app speaking through notify_send. The plugin phrased the
+  // text itself, per language: meta.title_en/title_tr + body_en/body_tr
+  // (the row's own title is the English one). `{plugin}` is the app's LABEL
+  // in the reader's language (meta.plugin_label_en/_tr), not its install id.
+  'plugin.notice': {
+    en: { title: '{notice_title}', body: '{plugin}: {notice_body}' },
+    tr: { title: '{notice_title}', body: '{plugin}: {notice_body}' },
   },
 
   // ── Operational alarms ──────────────────────────────────────────────────
@@ -169,7 +177,7 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
     en: {
       title: '{count} replica retries queued',
       body: 'Progress is on the queue page.',
-      one: { title: '1 replica retry queued' },
+      one: { title: '{count} replica retry queued' },
     },
     tr: { title: '{count} kopya yeniden denemesi kuyruğa alındı', body: 'İlerleme kuyruk sayfasında.' },
   },
@@ -180,10 +188,18 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
   },
 };
 
-/** Words the templates need that are not in the row. */
-const WORDS: Record<NotifyLocale, { someone: string; unnamed: string }> = {
-  en: { someone: 'Someone', unnamed: 'a file' },
-  tr: { someone: 'Birisi', unnamed: 'bir dosya' },
+/**
+ * Words the templates need that are not in the row.
+ *
+ * `openWith` stands where a path would: a document edited through the desktop
+ * app's "open with filex" lives on the person's own computer, so the row
+ * (`meta.open_with`, the server's personview.go) carries its NAME and no path
+ * at all — no storage path names it. This says where it is instead, rather
+ * than leaving an empty line under the title.
+ */
+const WORDS: Record<NotifyLocale, { someone: string; unnamed: string; appNotice: string; openWith: string }> = {
+  en: { someone: 'Someone', unnamed: 'a file', appNotice: 'App notification', openWith: 'Opened with the filex desktop app' },
+  tr: { someone: 'Birisi', unnamed: 'bir dosya', appNotice: 'Uygulama bildirimi', openWith: 'filex masaüstü uygulamasıyla açıldı' },
 };
 
 /** The shape this module reads. Structural on purpose — the SPA passes a
@@ -224,14 +240,24 @@ function baseName(p: string): string {
 export function notificationVars(
   row: NotificationLike,
   locale: NotifyLocale,
+  strings?: Record<string, string>,
+  /** The reader's own language tag (`de`, `pt-br`) when it is neither of the
+   *  two built-in tables — what an app's notice is looked up in first. */
+  lang?: string,
 ): Record<string, string> {
   const meta = asRecord(row.meta);
   const node = asRecord(meta.node);
   const target = row.target ?? (asRecord(meta.target) as NotificationLike['target']);
-  const words = WORDS[locale];
+  const words = packWords(WORDS[locale], strings);
 
   // meta.path is the replica alarms' own field; they carry no node.
-  const path = str(node.path) || str(meta.path) || str(target?.path) || str(row.body);
+  // ⚠ An open-with row has no path by design (see WORDS.openWith). Checked
+  // FIRST so the fallbacks below never get to it: the body is the last of them,
+  // and a body is whatever the emitter happened to write there.
+  const path =
+    meta.open_with === true
+      ? words.openWith
+      : str(node.path) || str(meta.path) || str(target?.path) || str(row.body);
   const name = str(node.name) || baseName(path) || words.unnamed;
   const uploader = str(meta.uploader).trim() || words.someone;
   const num = (v: unknown) => (typeof v === 'number' ? String(v) : '');
@@ -258,7 +284,48 @@ export function notificationVars(
     error: str(meta.error) || str(meta.primary_error),
     failed: num(meta.failed_count),
     repaired: num(meta.repaired_count),
+    // plugin.notice: the app's own wording in the reader's language, falling
+    // back to the English the server stored in the row itself.
+    //
+    // ⚠ `plugin` is the app's LABEL in the reader's language, never
+    // `meta.plugin` — that is the install id, and it was printed: "sign:
+    // “sözleşme.pdf” imzanızı bekliyor…" in a bell whose side panel calls the
+    // app "İmzalar" (release-candidate sweep, 2026-09-21). A row from before
+    // the server sent labels has none, and then the prefix is left out
+    // (fillTemplate drops the dangling ':') rather than showing the id.
+    plugin: noticeText(meta, 'plugin_label_', lang, locale),
+    notice_title:
+      noticeText(meta, 'title_', lang, locale) ||
+      (str(row.title) !== row.event ? str(row.title) : '') || words.appNotice,
+    notice_body: noticeText(meta, 'body_', lang, locale) || str(row.body),
   };
+}
+
+/**
+ * One of an app notice's per-language texts (`<prefix><lang>`), in the
+ * reader's language: their own tag, its base language (`pt` for `pt-br`), the
+ * built-in table's language, then English.
+ *
+ * ⚠⚠ The reader's OWN language first, not `locale`. `locale` is which of the
+ * two built-in tables this renderer falls back on, so a German reader has
+ * `locale: 'en'` — and read the e-Signature app's English under "e-Signature:"
+ * while the app had written its notice in German too (2026-09-22). The server
+ * keeps a text per language the app wrote (wasmplugin `noticeMeta`).
+ */
+function noticeText(meta: Record<string, unknown>, prefix: string, lang: string | undefined, locale: NotifyLocale): string {
+  const tags: string[] = [];
+  const own = (lang ?? '').trim().toLowerCase();
+  if (own) {
+    tags.push(own);
+    const dash = own.indexOf('-');
+    if (dash > 0) tags.push(own.slice(0, dash));
+  }
+  tags.push(locale, 'en');
+  for (const tag of tags) {
+    const v = str(meta[prefix + tag]);
+    if (v) return v;
+  }
+  return '';
 }
 
 /**
@@ -290,6 +357,80 @@ export interface RenderOptions {
    * Go list has no phrase, so this path is a seatbelt, not a route.
    */
   fallbackLabel?: string;
+  /**
+   * A language pack's strings for the reader's language — the `server.
+   * notify.*` keys are read (`<event>.title` / `.body`, a plural form as
+   * `.title_<category>`, `word.<name>`); anything else is ignored.
+   *
+   * ⚠⚠ Why this exists. `locale` above is the BUILT-IN table to fall back
+   * on, and there are two; a Spanish reader got the English one, so the bell
+   * of a Spanish screen spoke English (measured 2026-09-22). The phrases here
+   * are the English and Turkish of the server catalogue's `server.notify.*`
+   * keys (scripts/lib/i18n-catalogue.mjs reads them out of this file), a
+   * pack translates them like any key, and a key the pack lacks falls back
+   * to this table — per key.
+   */
+  strings?: Record<string, string>;
+  /** The reader's language tag, for the pack's plural forms (Intl.PluralRules). */
+  lang?: string;
+  /**
+   * ⚠⚠ Machine runs inside the finished sentence, isolated for the reader's
+   * direction — core `foreignText` / `useLocale().t.foreign`.
+   *
+   * A notification is composed HERE, out of a phrase table and a row's own
+   * fields: it never passes through `useLocale().t` or the admin panel's
+   * post-translation hook, so nothing isolated it. Nearly every body IS
+   * machine text — a path, a reason, an error, an app's own words — and in an
+   * Arabic bell a path's trailing characters take the paragraph's direction
+   * and jump to the far side of the line.
+   *
+   * A hook rather than an import: this module is plain TypeScript with no
+   * dependencies because the DESKTOP shell's main process renders from it too
+   * (it has no catalogue and no packages/core), and its toasts are laid out
+   * by the OS. A caller that passes nothing gets exactly what it got before.
+   */
+  foreign?: (text: string) => string;
+}
+
+const NOTIFY_KEY = 'server.notify.';
+
+/** A pack's value for key, or undefined when it has none. */
+function packValue(strings: Record<string, string> | undefined, key: string): string | undefined {
+  const v = strings?.[key];
+  return typeof v === 'string' && v.trim() ? v : undefined;
+}
+
+/** WORDS with the pack's `server.notify.word.*` laid over, per word. */
+function packWords<T extends Record<string, string>>(base: T, strings?: Record<string, string>): T {
+  if (!strings) return base;
+  const out = { ...base };
+  for (const k of Object.keys(base) as Array<keyof T & string>) {
+    const v = packValue(strings, `${NOTIFY_KEY}word.${k}`);
+    if (v) out[k] = v as T[typeof k];
+  }
+  return out;
+}
+
+/**
+ * The CLDR plural category of count in lang — the rule the explorer, the admin
+ * panel and the server all pick forms by. ⚠ Guarded: an invalid tag, or a
+ * runtime without Intl.PluralRules, must not take the bell down.
+ */
+function pluralCategory(lang: string | undefined, count: string): string {
+  if (count === '') return 'other';
+  try {
+    return new Intl.PluralRules(lang || 'en').select(Number(count));
+  } catch {
+    return count === '1' ? 'one' : 'other';
+  }
+}
+
+/** The pack's form of one phrase field: `<field>_<category>`, then `<field>`. */
+function packField(opts: RenderOptions, event: string, field: 'title' | 'body', count: string): string | undefined {
+  if (!opts.strings) return undefined;
+  const base = `${NOTIFY_KEY}${event}.${field}`;
+  const cat = pluralCategory(opts.lang, count);
+  return (cat !== 'other' && packValue(opts.strings, `${base}_${cat}`)) || packValue(opts.strings, base);
 }
 
 /**
@@ -313,26 +454,32 @@ export function renderNotification(
   locale: NotifyLocale,
   opts: RenderOptions = {},
 ): NotificationText {
-  const vars = notificationVars(row, locale);
+  const vars = notificationVars(row, locale, opts.strings, opts.lang);
   const phrase = NOTIFICATION_PHRASES[row.event]?.[locale];
+  const packTitle = packField(opts, row.event, 'title', vars.count);
+  const packBody = packField(opts, row.event, 'body', vars.count);
+  /** The reader's direction, applied once to whatever this ends up saying. */
+  const say = (text: string): NotificationText['title'] =>
+    typeof opts.foreign === 'function' ? opts.foreign(text) : text;
+  const said = (title: string, body: string): NotificationText => ({ title: say(title), body: say(body) });
 
-  if (phrase) {
-    const singular = vars.count === '1' ? phrase.one : undefined;
-    const title = fillTemplate(singular?.title ?? phrase.title, vars);
-    const body = fillTemplate(singular?.body ?? phrase.body, vars);
-    if (title) return { title, body };
+  if (phrase || packTitle) {
+    const singular = vars.count === '1' ? phrase?.one : undefined;
+    const title = fillTemplate(packTitle ?? singular?.title ?? phrase?.title ?? '', vars);
+    const body = fillTemplate(packBody ?? singular?.body ?? phrase?.body ?? '', vars);
+    if (title) return said(title, body);
   }
 
   const serverTitle = str(row.title).trim();
   const fallbackBody = vars.path || str(row.body);
 
   if (opts.fallbackLabel && opts.fallbackLabel.trim()) {
-    return { title: opts.fallbackLabel.trim(), body: fallbackBody };
+    return said(opts.fallbackLabel.trim(), fallbackBody);
   }
   if (serverTitle && serverTitle !== row.event) {
-    return { title: serverTitle, body: str(row.body) || fallbackBody };
+    return said(serverTitle, str(row.body) || fallbackBody);
   }
-  return { title: row.event, body: fallbackBody };
+  return said(row.event, fallbackBody);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────

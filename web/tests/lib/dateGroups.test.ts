@@ -78,12 +78,12 @@ describe('the ladder', () => {
   it('names today, yesterday, the six days before that, and this month', () => {
     expect(dateBucketFor(at(0), LABELS).label).toBe('Today');
     expect(dateBucketFor(at(1), LABELS).label).toBe('Yesterday');
-    expect(dateBucketFor(at(2), LABELS).label).toBe('This Week');
+    expect(dateBucketFor(at(2), LABELS).label).toBe('This week');
     // ⚠ The far edge of "This Week". Six days before yesterday, not seven, and
     // NOT a calendar week: on a Monday a calendar rule would file Sunday —
     // eighteen hours ago — under a month heading.
-    expect(dateBucketFor(at(6), LABELS).label).toBe('This Week');
-    expect(dateBucketFor(at(7), LABELS).label).toBe('This Month');
+    expect(dateBucketFor(at(6), LABELS).label).toBe('This week');
+    expect(dateBucketFor(at(7), LABELS).label).toBe('This month');
   });
 
   it('falls back to a named month once the current one is behind us', () => {
@@ -190,7 +190,7 @@ function headings(html: string, cls: string): string[] {
 }
 
 describe('all three views draw the same headings', () => {
-  const expected = ['Today', 'Yesterday', 'This Week', 'This Month', 'August 2026'];
+  const expected = ['Today', 'Yesterday', 'This week', 'This month', 'August 2026'];
 
   it('the list', () => {
     const w = mount(ListView, { props: { ...base, files: ROWS } });

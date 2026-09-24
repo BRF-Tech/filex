@@ -28,6 +28,7 @@ import (
 	"context"
 	"crypto/md5"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -53,10 +54,12 @@ import (
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/quota"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/throughput"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -157,6 +160,9 @@ func (h *StagedUpload) Begin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	fullRel := path.Join(destRel, name)
+	if gate(w, r, h.ACL, st.ID, writegate.Writes(fullRel)) {
+		return
+	}
 
 	chunk, err := h.effectiveChunk(req.ChunkSize, req.Size)
 	if err != nil {
@@ -471,6 +477,14 @@ func (h *StagedUpload) Commit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, mapDriverErr(err), map[string]string{"error": err.Error()})
 		return
 	}
+	// The same overwrite precondition as the multipart path (upload_expect.go),
+	// taken at COMMIT: that is the moment the file is replaced, and on a large
+	// upload it can be minutes after the client last looked. A failed row stays
+	// committable, so a refusal here costs no bytes.
+	if !uploadExpectHolds(r.Context(), h.Store, row.StorageID, row.StorageKey, r.URL.Query().Get("expect")) {
+		writePreconditionFailed(w)
+		return
+	}
 
 	// The last moment at which the bytes we are about to replace still exist,
 	// and the ONLY place on this path that gets to say so.
@@ -721,6 +735,25 @@ func (h *StagedUpload) transfer(ctx context.Context, row *model.StagedUpload) er
 	throughput.Observe(row.StorageID, throughput.Write, row.TotalSize, time.Since(started))
 	metrics.StagedBytes.Sub(float64(row.TotalSize))
 
+	// ⚠⚠ From here on the bytes ARE on the storage, and two catalogue writes
+	// stand between them and a readable file: the backend's metadata and
+	// transfer_state "stored". Both used to be fire-and-forget — the metadata
+	// error discarded, the flip's only logged — and staging and the session
+	// were deleted right after, whatever had happened. One failed write (a
+	// database busy under a large scan) left a row that said "staged" with
+	// nothing staged: listed, every read 503 STAGING_GONE, every overwrite
+	// refused, never scanned, and the op had told the client "ok".
+	//
+	// So: the bookkeeping runs detached from the op's context (a shutdown
+	// landing between the driver write and the flip must not cut it in half),
+	// each write is retried through a transient failure, and staging and the
+	// session are released only once the row says "stored". If the flip still
+	// cannot be written, the transfer FAILS: the session and its staging stay,
+	// reads keep coming out of staging, and the commit can be retried without
+	// re-sending a byte. Once the session is gone for good, the storage sync
+	// and the boot pass (RecoverUnstored) settle the row from the evidence.
+	bctx := context.WithoutCancel(ctx)
+
 	// Post-write, in the same order and through the same helpers as vfUpload:
 	// node meta → search index → thumbnail → writehook (antivirus + webhook +
 	// notify) → realtime. A commit path that skips one of these is a silent
@@ -728,48 +761,95 @@ func (h *StagedUpload) transfer(ctx context.Context, row *model.StagedUpload) er
 	size := row.TotalSize
 	etag := ""
 	mtime := time.Now()
-	if obj, serr := drv.Stat(ctx, row.StorageKey); serr == nil {
+	statCtx, cancelStat := context.WithTimeout(bctx, 30*time.Second)
+	if obj, serr := drv.Stat(statCtx, row.StorageKey); serr == nil {
 		size = obj.Size
 		etag = obj.Etag
 		if !obj.Mtime.IsZero() {
 			mtime = obj.Mtime
 		}
 	}
+	cancelStat()
 	var node *model.Node
 	if row.NodeID != nil {
+		nodeID := *row.NodeID
 		// Keep the mime the commit step resolved. It came from sniffing the
 		// staged bytes (what vfUpload does); row.Mime is only what the client
 		// claimed, and writing that back here would quietly undo the sniff.
 		mime := row.Mime
-		if existing, _ := h.Store.GetNode(ctx, *row.NodeID); existing != nil && existing.Mime != "" {
+		if existing, _ := h.Store.GetNode(bctx, nodeID); existing != nil && existing.Mime != "" {
 			mime = existing.Mime
 		}
-		_ = h.Store.UpdateNodeMeta(ctx, *row.NodeID, size, mime, etag, mtime)
-		if err := h.Store.SetNodeTransferState(ctx, *row.NodeID, model.TransferStateStored); err != nil {
-			slog.Warn("staged upload: transfer_state", slog.Int64("node", *row.NodeID), slog.String("err", err.Error()))
+		if err := retryBookkeeping(bctx, func(c context.Context) error {
+			return h.Store.UpdateNodeMeta(c, nodeID, size, mime, etag, mtime)
+		}); err != nil {
+			return fmt.Errorf("the bytes are on the storage, but the file's row could not be updated (the upload stays retryable): %w", err)
 		}
-		node, _ = h.Store.GetNode(ctx, *row.NodeID)
+		if err := retryBookkeeping(bctx, func(c context.Context) error {
+			return h.Store.SetNodeTransferState(c, nodeID, model.TransferStateStored)
+		}); err != nil {
+			return fmt.Errorf("the bytes are on the storage, but the file's row could not be marked stored (the upload stays retryable): %w", err)
+		}
+		node, _ = h.Store.GetNode(bctx, nodeID)
 	}
 	if node != nil {
-		h.Manager.indexNode(ctx, node)
+		h.Manager.indexNode(bctx, node)
 		h.Manager.dispatchThumb(node)
 		/* bag:b3 event + koru:k2 av — single post-write gate */
-		writehook.OnFileWritten(ctx, row.StorageID, node, writehook.OriginManager, writeKind,
+		writehook.OnFileWritten(bctx, row.StorageID, node, writehook.OriginManager, writeKind,
 			map[string]any{"staged": true})
 		emitFolderChange(row.StorageID, storageRelDir(node.Path), realtime.ChangeEvent{Action: "upload"})
 	}
 
+	// Only now, with the row saying "stored", may the session and the staging
+	// go. The row first: a session row left behind with its staging gone is a
+	// `committing` row the sweeper never touches (and a quota reservation that
+	// never ends); a staging directory left behind is swept as an orphan.
+	if err := retryBookkeeping(bctx, func(c context.Context) error {
+		return h.Store.DeleteStagedUpload(c, row.ID)
+	}); err != nil {
+		slog.Warn("staged upload: row cleanup", slog.String("id", row.ID), slog.String("err", err.Error()))
+		// ⚠ A row the delete could not remove must not stay `committing`:
+		// the sweeper skips that state on purpose (its bytes are being read
+		// right now) and SumOpenStagedUploadBytes counts it, so the user
+		// would carry the reservation of a finished upload for ever. The
+		// file is stored; it is the SESSION that failed to close, which is
+		// what the message says.
+		if err := retryBookkeeping(bctx, func(c context.Context) error {
+			return h.Store.UpdateStagedUploadState(c, row.ID, model.StagedUploadFailed,
+				"the file was stored; only this upload session could not be closed")
+		}); err != nil {
+			slog.Warn("staged upload: row demote", slog.String("id", row.ID), slog.String("err", err.Error()))
+		}
+	}
 	if err := h.Area.Remove(row.ID); err != nil {
 		slog.Warn("staged upload: staging cleanup", slog.String("id", row.ID), slog.String("err", err.Error()))
-	}
-	if err := h.Store.DeleteStagedUpload(ctx, row.ID); err != nil {
-		slog.Warn("staged upload: row cleanup", slog.String("id", row.ID), slog.String("err", err.Error()))
 	}
 	slog.Info("staged upload stored",
 		slog.String("id", row.ID),
 		slog.String("path", row.StorageKey),
 		slog.Int64("size", size))
 	return nil
+}
+
+// bookkeepingRetry is the pause before each retry of a catalogue write that
+// follows a successful driver write.
+var bookkeepingRetry = []time.Duration{100 * time.Millisecond, 500 * time.Millisecond, 2 * time.Second}
+
+// retryBookkeeping runs one catalogue write, retrying it through a transient
+// failure such as a busy database. The bytes are already on the storage when
+// this runs, so giving up on the first error is what turned a hiccup into a
+// file nobody could read.
+func retryBookkeeping(ctx context.Context, write func(context.Context) error) error {
+	err := write(ctx)
+	for _, pause := range bookkeepingRetry {
+		if err == nil {
+			return nil
+		}
+		time.Sleep(pause)
+		err = write(ctx)
+	}
+	return err
 }
 
 // streamMultipart pushes an assembled staging reader into a driver multipart
@@ -1034,6 +1114,125 @@ func (h *StagedUpload) Sweep(ctx context.Context) (int, int) {
 	return removed, len(orphans)
 }
 
+// RecoverUnstored settles the rows a staged upload left "staged" or "failed"
+// although their bytes are on the storage, and reports how many it settled.
+//
+// transfer() now makes the "stored" flip a condition of releasing staging, but
+// a process that died between the driver write and the flip, or ran a version
+// that released staging regardless, can leave such a row with no session
+// behind it: listed, and unreadable. Nothing else settles it on a storage
+// nobody scans (sync_mode `ondemand`), so this runs once at boot, from
+// RunSweeper, after the first sweep.
+//
+// A row is settled only on the evidence the storage sync uses: no session
+// references it (a session owns its bytes — in flight, or retryable), and the
+// object at its key has the committed size and is not older than the commit
+// (model.TransferLanded). Anything short of that is left exactly as it is and
+// logged: an error a person can read beats a wrong file served as the right
+// one.
+func (h *StagedUpload) RecoverUnstored(ctx context.Context) int {
+	if h == nil || h.Store == nil || h.Manager == nil || h.Manager.StorageResolver == nil {
+		return 0
+	}
+	const page = 200
+	settled, left := 0, 0
+	var after int64
+	for {
+		rows, err := h.Store.ListUnstoredNodes(ctx, after, page)
+		if err != nil {
+			slog.Warn("staged upload recovery: list", slog.String("err", err.Error()))
+			break
+		}
+		for _, n := range rows {
+			after = n.ID
+			if h.settleUnstored(ctx, n) {
+				settled++
+			} else {
+				left++
+			}
+		}
+		if len(rows) < page {
+			break
+		}
+	}
+	if settled > 0 || left > 0 {
+		slog.Info("staged upload recovery",
+			slog.Int("settled", settled),
+			slog.Int("left_unstored", left))
+	}
+	return settled
+}
+
+// settleUnstored is RecoverUnstored for one row.
+func (h *StagedUpload) settleUnstored(ctx context.Context, n *model.Node) bool {
+	if n.Type != model.NodeTypeFile {
+		return false
+	}
+	sess, err := h.Store.GetStagedUploadByNode(ctx, n.ID)
+	switch {
+	case err == nil && sess != nil:
+		return false // its session owns the bytes: the commit or the sweeper settles it
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return false // could not check: never guess
+	}
+	drv, err := h.Manager.StorageResolver(n.StorageID)
+	if err != nil {
+		return false
+	}
+	key := n.StorageKey
+	if key == "" {
+		key = n.Path
+	}
+	statCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	obj, err := drv.Stat(statCtx, key)
+	cancel()
+	if err != nil || obj.Kind == storage.KindDirectory || !model.TransferLanded(n, obj.Size, obj.Mtime) {
+		reason := "the object at its key is not the committed upload"
+		if err != nil {
+			reason = err.Error()
+		}
+		slog.Warn("staged upload recovery: left unstored — its bytes are not provably on the storage",
+			slog.Int64("node", n.ID),
+			slog.String("path", n.Path),
+			slog.String("transfer_state", n.TransferState),
+			slog.String("reason", reason))
+		return false
+	}
+	// The write the transfer never made, under the identity it would have
+	// carried, so the uploader keeps ownership and last-actor attribution.
+	actx := ctx
+	if n.OwnerID != nil {
+		actx = quotastore.WithOwner(actx, *n.OwnerID)
+	}
+	if n.LastActorID != nil {
+		actx = quotastore.WithActor(actx, *n.LastActorID)
+	}
+	mime := n.Mime
+	if mime == "" {
+		mime = obj.Mime
+	}
+	if err := h.Store.UpdateNodeMeta(actx, n.ID, obj.Size, mime, obj.Etag, obj.Mtime); err != nil {
+		slog.Warn("staged upload recovery: node meta", slog.Int64("node", n.ID), slog.String("err", err.Error()))
+		return false
+	}
+	if err := h.Store.SetNodeTransferState(actx, n.ID, model.TransferStateStored); err != nil {
+		slog.Warn("staged upload recovery: transfer_state", slog.Int64("node", n.ID), slog.String("err", err.Error()))
+		return false
+	}
+	if fresh, _ := h.Store.GetNode(ctx, n.ID); fresh != nil {
+		// The hooks the transfer would have run. The upload event is not
+		// re-sent: whoever uploaded was already answered.
+		h.Manager.indexNode(ctx, fresh)
+		h.Manager.dispatchThumb(fresh)
+		enqueueAntivirusScan(ctx, fresh)
+	}
+	slog.Info("staged upload recovery: the bytes were already on the storage; the row now says stored",
+		slog.Int64("node", n.ID),
+		slog.String("path", n.Path),
+		slog.String("was", n.TransferState))
+	return true
+}
+
 // RunSweeper sweeps once at boot and then on every tick until ctx is done.
 func (h *StagedUpload) RunSweeper(ctx context.Context, interval time.Duration) {
 	if h == nil || h.Area == nil || !h.Area.Enabled() {
@@ -1043,6 +1242,10 @@ func (h *StagedUpload) RunSweeper(ctx context.Context, interval time.Duration) {
 		interval = time.Hour
 	}
 	h.Sweep(ctx)
+	// Once per process, after the first sweep: the sweep may just have removed
+	// the session that was the only thing standing between a row and the
+	// recovery.
+	h.RecoverUnstored(ctx)
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -1099,6 +1302,11 @@ func (h *StagedUpload) authorize(w http.ResponseWriter, r *http.Request) (*model
 	}
 	if row.UserID != currentUserID(r.Context()) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "upload not found"})
+		return nil, false
+	}
+	// Re-asked on every chunk and at commit: a freeze taken while the bytes
+	// were still arriving stops them landing.
+	if gate(w, r, h.ACL, row.StorageID, writegate.Writes(row.StorageKey)) {
 		return nil, false
 	}
 	if !aclAllowID(r.Context(), h.ACL, h.Store, row.StorageID, row.StorageKey, acl.LevelEditor) {

@@ -50,6 +50,7 @@ package pluginsdk
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -503,7 +504,10 @@ func (s *server) failErr(w http.ResponseWriter, err error) {
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Authorization") != "Bearer "+s.token {
+	// Constant-time: the token is the only thing between the socket and
+	// every storage credential filex sends, and a byte-by-byte comparison
+	// leaks how much of a guess was right.
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {
 		s.fail(w, http.StatusUnauthorized, "unauthorized", "bad or missing token")
 		return
 	}

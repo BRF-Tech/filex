@@ -49,9 +49,11 @@ export async function openNotificationTarget(
   if (router.resolve({ name: route.name }).meta.requiresAdmin && !useAuthStore().isAdmin) return;
 
   const hashBefore = window.location.hash;
-  await router.push({ name: route.name, query: route.query, hash: route.hash || undefined });
+  await router.push({ name: route.name, params: route.params, query: route.query, hash: route.hash || undefined });
 
-  if (dest.kind === 'folder' && window.location.hash !== hashBefore) {
+  // The Trash view is reached through the hash too (`#.trash`), so it takes the
+  // same nudge, for the same reason.
+  if ((dest.kind === 'folder' || dest.kind === 'trash') && window.location.hash !== hashBefore) {
     window.dispatchEvent(new HashChangeEvent('hashchange'));
   }
 }

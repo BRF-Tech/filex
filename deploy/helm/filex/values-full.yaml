@@ -1,5 +1,5 @@
-# Full install: bundled Postgres + Redis + MinIO, plus external OnlyOffice and
-# Drawio wired in. Every add-on is a toggle — flip `enabled` to add/remove it.
+# Full install: bundled Postgres + Redis + MinIO, plus external ONLYOFFICE and
+# draw.io wired in. Every add-on is a toggle — flip `enabled` to add/remove it.
 #
 # Usage:
 #   helm install filex ./deploy/helm/filex -f deploy/helm/filex/values-full.yaml \
@@ -47,7 +47,7 @@ storage:
 #   from: no-reply@example.com
 
 # ── External integrations (run separately; the chart wires filex) ───────
-# Flip enabled=false to remove one later (e.g. drop OnlyOffice tomorrow).
+# Flip enabled=false to remove one later (e.g. drop ONLYOFFICE tomorrow).
 onlyoffice:
   enabled: true
   url: https://office.example.com   # deploy a Document Server separately

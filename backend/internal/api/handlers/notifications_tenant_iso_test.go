@@ -117,9 +117,41 @@ func TestNotifications_SupertenantStillSeesEveryWorkerRow(t *testing.T) {
 	require.Contains(t, body, "2026-yevmiye.xlsx")
 }
 
+// TestNotifications_TenantAdminStaysInsideItsTenant — being an admin buys a
+// tenant admin every file of THEIR tenant (admins bypass RBAC), and nothing of
+// anybody else's. The admin bypass sits right beside the tenant check, so the
+// order of the two is load-bearing: the admin short-cut placed before the
+// tenant check, or an unconfined-admin test that forgets the tenant, hands
+// every tenant admin every other tenant's alerts.
+func TestNotifications_TenantAdminStaysInsideItsTenant(t *testing.T) {
+	f := newMTFix(t, true)
+	f.emitWorkerAV(t, f.StA.ID, "/alpha-gizli/virus.exe")
+	f.emitWorkerAV(t, f.StB.ID, "/bravo-gizli/virus.exe")
+	f.emitWorkerReplica(t, "/bravo/muhasebe/2026-yevmiye.xlsx")
+
+	status, body := mtGet(t, f.AdminA, f.URL+"/api/notifications")
+	require.Equal(t, http.StatusOK, status)
+	require.Contains(t, body, "/alpha-gizli/virus.exe", "%s", body)
+	require.NotContains(t, body, "/bravo-gizli/virus.exe", "%s", body)
+	require.NotContains(t, body, "2026-yevmiye.xlsx", "%s", body)
+
+	status, body = mtGet(t, f.AdminA, f.URL+"/api/notifications/unread-count")
+	require.Equal(t, http.StatusOK, status)
+	require.Contains(t, body, `"count":1`, "%s", body)
+}
+
 // TestNotifications_SingleTenantInstallUnaffected — mode off: the bell keeps
-// showing every worker broadcast, which on a single-tenant install is the
-// operator's own alert feed. Passes on `main`.
+// showing the worker broadcasts a person can act on, and the operator's alarms
+// stay the administrator's.
+//
+// ⚠ Until the 0.43 release-candidate sweep (2026-09-21) this test read the
+// replica alarm from a plain member's bell and called that "unaffected": every
+// broadcast went to every signed-in person, so Ayşe (role=user) read "filex
+// v0.42.2 yayınlandı — Bu sunucu 0.1.0-dev sürümünde çalışıyor" about a server
+// she cannot touch. Operator alarms (notify.operatorEvents) are now kept out
+// of a non-administrator's bell AND badge; the antivirus row is about a file a
+// member can see and still reaches them. The admin half proves the alarm was
+// only moved, not lost.
 func TestNotifications_SingleTenantInstallUnaffected(t *testing.T) {
 	f := newMTFix(t, false)
 	f.emitWorkerAV(t, f.StB.ID, "/bravo-gizli/virus.exe")
@@ -128,9 +160,21 @@ func TestNotifications_SingleTenantInstallUnaffected(t *testing.T) {
 	status, body := mtGet(t, f.A, f.URL+"/api/notifications")
 	require.Equal(t, http.StatusOK, status)
 	require.Contains(t, body, "/bravo-gizli/virus.exe", "%s", body)
-	require.Contains(t, body, "2026-yevmiye.xlsx")
+	require.NotContains(t, body, "2026-yevmiye.xlsx",
+		"a replica alarm is the operator's, not a member's: %s", body)
 
 	status, body = mtGet(t, f.A, f.URL+"/api/notifications/unread-count")
+	require.Equal(t, http.StatusOK, status)
+	require.Contains(t, body, `"count":1`,
+		"the badge must not count an alarm the bell does not show: %s", body)
+
+	status, body = mtGet(t, f.AdminA, f.URL+"/api/notifications")
+	require.Equal(t, http.StatusOK, status)
+	require.Contains(t, body, "/bravo-gizli/virus.exe", "%s", body)
+	require.Contains(t, body, "2026-yevmiye.xlsx",
+		"the administrator still gets the replica alarm: %s", body)
+
+	status, body = mtGet(t, f.AdminA, f.URL+"/api/notifications/unread-count")
 	require.Equal(t, http.StatusOK, status)
 	require.Contains(t, body, `"count":2`, "%s", body)
 }

@@ -25,8 +25,22 @@ export { default as PreviewModal } from './modals/PreviewModal.vue';
 
 // ——— Phase-2 standalone components (consumers can mount these
 //      independently of the FileExplorer host, e.g. a sidebar tray).
+/* The filex mark — ONE copy, here, because the public shell draws it and
+   `packages/core` cannot import out of `web/` (dup-scan: `brand-mark`). */
+export { default as LogoMark } from './components/LogoMark.vue';
 export { default as StarButton } from './components/StarButton.vue';
 export { default as TagPicker } from './components/TagPicker.vue';
+export { default as TagKindIcon } from './components/TagKindIcon.vue';
+export { tagItemsOf, tagKey, isTagKind, type TagItem, type TagKind } from './lib/tags';
+// tablo:t3 — the row's ONE action control ("Actions" / "Aksiyon"). DataTable
+// draws it for every table (`rowActions`); it stays exported for a host that
+// needs the same control outside a table. A second menu built beside
+// ContextMenu drifts from it the first time an action is added (lesson #67).
+// ⚠ `useTableScroll`, `PIN_LEAD_ROOM` and `useScrolledX` are gone: they were
+// the plumbing of the second table (ui/Table.vue) that imitated this one, and
+// DataTable owns the scroll and the frozen edges itself.
+export { default as RowActions } from './components/RowActions.vue';
+export type { ContextAction } from './components/ContextMenu.vue';
 export { default as RecentlyOpened } from './components/RecentlyOpened.vue';
 // belge:n1 — the "New document" picker. Exported because the entry belongs
 // on every surface, not just the admin app: a host that draws its own
@@ -54,6 +68,265 @@ export {
   splitWire,
 } from './lib/destinationTree';
 export type { DestinationRow } from './lib/destinationTree';
+
+/* App plugins (docs/APP-PLUGINS-API.md) — the menu rule, the label fallback
+ * and the shared actions cache, so a host that draws its own menu offers the
+ * same rows the explorer does. */
+export { usePluginActions, invalidatePluginActions, PLUGIN_ACTIONS_TTL_MS } from './composables/usePluginActions';
+export type { PluginActionsStore } from './composables/usePluginActions';
+export { appliesMatches, appliesToNodes, appliesItemOf } from './lib/pluginApplies';
+export { labelOf as pluginLabelOf, labelIn as pluginLabelIn, appTextOr as pluginTextOr } from './lib/pluginLabel';
+/* The public page's three card widths, and which kind gets which. */
+export { publicLayoutFor } from './lib/publicLayout';
+export type { PublicLayout } from './lib/publicLayout';
+export { pluginMenuRows, pluginActionsFor, pluginActionKey, isPluginActionKey } from './lib/pluginMenu';
+export { normalizeOp } from './composables/usePendingOps';
+export type { PendingOpType, PendingOpOutput } from './composables/usePendingOps';
+/* M2 — the surface conversation (modal + inspector share it) and the value seeding. */
+export { usePluginSurface, SURFACE_CHANGE_DEBOUNCE_MS } from './composables/usePluginSurface';
+export type { PluginSurfaceStore, PluginSurfaceHost, PluginSurfaceEvents } from './composables/usePluginSurface';
+export { initialValues as surfaceInitialValues, storageFieldOf, pinLength, looksLikeEmail } from './lib/surfaceValues';
+/* v3 §2 — the two rules the RENDERER keeps so no plugin can break them:
+ * a field that depends on another field, and a step with one way forward. */
+export {
+  conditionMet,
+  fieldRequired,
+  formFields,
+  hasAnswer,
+  hiddenKeys,
+  missingRequired as surfaceMissingRequired,
+  stripHiddenValues,
+  visibleFields,
+} from './lib/surfaceConditions';
+export { hasSteps, isBackAction, stepFooter } from './lib/surfaceSteps';
+/* v3 §3.0 — "go to this file, and start that screen on it". */
+export { isOpenRequest, openHashFor, openTargetFor } from './lib/surfaceOpen';
+export type { SurfaceOpenOptions, SurfaceOpenTarget } from './lib/surfaceOpen';
+export type { StepFooter } from './lib/surfaceSteps';
+/* v3 §2 — a choice you can read without clicking. The replacement for
+ * `<select>` in every surface, and available to a host that draws its own. */
+export { default as ChoiceButtons } from './components/ChoiceButtons.vue';
+export type { ChoiceOption } from './components/ChoiceButtons.vue';
+// M3 — public pages for outside participants + the sign track's components.
+export { usePublicPage, publicPageClient, publicPageUrl, PublicPageError } from './composables/usePublicPage';
+export type { PublicPageStore, PublicPageClient, PublicPageStatus, PinFailure } from './composables/usePublicPage';
+/* v3 §1 — ONE public shell for every link a stranger can follow: a share
+ * (`/s/`), a file request (`/d/`) and an app plugin's page (a share that
+ * carries one). A host binds the address and mounts `PublicLinkPage`; it does
+ * not own a public surface of its own. */
+export {
+  usePublicLink,
+  usePublicShare,
+  usePublicRequest,
+  publicLinkClient,
+  shareRoot,
+  requestRoot,
+  pageRoot,
+  shareDownloadUrl,
+  shareNoJsUrl,
+  PublicLinkError,
+} from './composables/usePublicLink';
+export type {
+  PublicLinkOptions,
+  PublicLinkStore,
+  PublicLinkClient,
+  PublicRoot,
+  PublicStatus,
+  PublicUpload,
+} from './composables/usePublicLink';
+export { usePublicBranding, normalizeAccent, shade, inkOn, accentStyleOf, DEFAULT_BRAND_NAME } from './composables/usePublicBranding';
+export { default as PublicLinkPage } from './components/public/PublicLinkPage.vue';
+export { default as PublicShell } from './components/public/PublicShell.vue';
+export { default as PublicLinkPreview } from './components/public/PublicLinkPreview.vue';
+export { default as PublicPinGate } from './components/public/PublicPinGate.vue';
+export { default as PublicShareBody } from './components/public/PublicShareBody.vue';
+export { default as PublicRequestBody } from './components/public/PublicRequestBody.vue';
+export { default as PublicLanguagePicker } from './components/public/PublicLanguagePicker.vue';
+export type {
+  PublicBranding,
+  PublicEntry,
+  PublicFailure,
+  PublicLinkBase,
+  PublicApp,
+  PublicDropLimits,
+  PublicLocaleOption,
+  PublicNode,
+  PublicRequestInfo,
+  PublicShareInfo,
+  PublicShareKind,
+} from './types/Public';
+/* v3 §5 — the language list is not a constant: an app plugin may add one. */
+export {
+  acceptableLocale,
+  availableLocales,
+  ensureLocaleStrings,
+  hasLocale,
+  isBuiltinLocale,
+  loadLocales,
+  localeLabel,
+  localeOwnTable,
+  localeStrings,
+  localeTable,
+  localesKnown,
+  localesVersion,
+  normalizeLocaleCode,
+  plausibleLocale,
+  registerLocale,
+  resetLocales,
+  setLocales,
+  setLocalesFromBranding,
+  unregisterPluginLocales,
+  BUILTIN_LOCALES,
+} from './lib/uiLocales';
+export type { OwnLocaleTable } from './lib/uiLocales';
+/* v0.43.0 — CLDR plural categories: a language pack writes as many forms as
+ * its language has (Arabic six, Russian four), in both catalogues. */
+export {
+  CLDR_ORDER,
+  pluralCategories,
+  pluralCategory,
+  pluralChoiceIndex,
+} from './lib/plural';
+export type { PluralCategory } from './lib/plural';
+/* v3 §4-of-the-brief — theme, palette, density and language live on the
+ * ACCOUNT, not in one browser's localStorage. */
+export {
+  configurePrefs,
+  currentPrefs,
+  flushPrefs,
+  hydratePrefs,
+  localPref,
+  localPrefs,
+  onPrefs,
+  onPrefsSettled,
+  prefsConfigured,
+  prefsHydrated,
+  prefsSettled,
+  resetPrefs,
+  savePref,
+  setLocalPref,
+  PREFS_PUT_DEBOUNCE_MS,
+  PREF_KEYS,
+  LOOK_KEYS,
+  PREF_LS_KEYS,
+  /* ⚠⚠ "Is anybody signed in?" — the synchronous, first-paint answer that
+   * decides whether a PERSON's palette and light/dark mode may be read at all.
+   * A host wires it in two places and no more: `sealSessionless()` on a public
+   * link before the first paint, `rememberSession()` the moment
+   * `/api/auth/me` answers. */
+  SESSION_LS_KEY,
+  hasSession,
+  rememberSession,
+  sealSessionless,
+  /* ⚠ The session ENDED: drop every per-person mirror this browser holds.
+   * An "and" beside `hasSession`, never an "instead of" — it covers only the
+   * sign-outs the app is told about. */
+  forgetPersonalPrefs,
+  registerPersonalMirror,
+} from './lib/prefs';
+export type { LookKey, PrefKey, PrefsConfig, UiPrefs } from './lib/prefs';
+/* The first-use tour is offered to a PERSON once — the account's answer or
+ * this browser's, never once per mount. */
+export { markTourSeen, offerTourOnce, resetTourState, tourSeen, TOUR_LS_KEY } from './lib/tour';
+export { default as SurfaceRenderer } from './components/plugin/SurfaceRenderer.vue';
+/* v2 — the surface BODY and the footer row, shared by every frame that draws
+ * one (the explorer's dialog, an inspector section, an app's full page, the
+ * public card). A host drawing its own frame takes these two rather than
+ * re-deriving what `submit` means. */
+export { default as SurfaceConversation } from './components/plugin/SurfaceConversation.vue';
+export { default as SurfaceFooterButtons } from './components/plugin/SurfaceFooterButtons.vue';
+export { default as PluginPageView } from './components/plugin/PluginPageView.vue';
+export { default as SurfaceSignaturePad } from './components/plugin/nodes/SurfaceSignaturePad.vue';
+export { default as SurfacePdfFields } from './components/plugin/nodes/SurfacePdfFields.vue';
+export { loadPdfjs, defaultPdfWorkerUrl } from './lib/pdfjsLoader';
+export { fracToPdf, pdfToFrac, fracToPixel, pixelToFrac, clampFrac, fitPageWidth, normRotation } from './lib/pdfFieldsGeom';
+export {
+  defineField,
+  fillValues,
+  isFieldOf,
+  isPlaced,
+  normalizeFields,
+  todayIso,
+  unplacedFields,
+  withFont,
+  PDF_FIELD_TYPES,
+} from './lib/pdfFields';
+export type { PdfField, PdfFieldType, PdfSigner, PdfFillEntry } from './lib/pdfFields';
+export { signatureModes, isSignatureValue, SIGNATURE_UPLOAD_MAX_BYTES } from './lib/signaturePad';
+export type { SignatureValue, SignatureMode } from './lib/signaturePad';
+/* v2 — the five faces a signature may be written in, and what a `text` field
+ * on a PDF accepts. Both travel back to the plugin with the value, so a host
+ * that renders a stored signature reads them from here too. */
+export { SIGN_FONTS, DEFAULT_SIGN_FONT, signFont, isSignFontKey } from './lib/signFonts';
+export type { SignFont, SignFontKey } from './lib/signFonts';
+/* ⚠ v3 §3.3 — `isRealDate` and `DATE_MASK` are gone with the `date` text
+ * rule. A date is asked for with the `date` FIELD TYPE; a host that was
+ * parsing `GG/AA/YYYY` out of a text field is reading a shape this product
+ * no longer produces. */
+export {
+  applyRule,
+  normalizeRule,
+  ruleError,
+  ruleInputMode,
+  ruleMaxLength,
+  PDF_RULE_KINDS,
+} from './lib/pdfFieldRules';
+export type { PdfFieldRule, PdfRuleKind, PdfRuleError } from './lib/pdfFieldRules';
+/* v2 — an app's hold on a file: the badge's words and the 423 refusal. */
+export { lockOf, anyLocked, lockedRefusal, lockWords, lockUntilText, lockReasonText } from './lib/appLock';
+/* How a failure is SAID — one table of words for every screen (lib/errorWords). */
+export {
+  jobFailure,
+  looksTechnical,
+  networkFailure,
+  refusalCode,
+  refusalWords,
+  requestFailure,
+  sayFailure,
+  serverWords,
+  statusIsTelling,
+  statusWords,
+} from './lib/errorWords';
+export type { JobErrorCode, RequestFailure, SaidFailure } from './lib/errorWords';
+export { legacyConvertGate, gateOnService } from './lib/serviceGate';
+export type { AppLock, LockedRefusal, LockWordsHost } from './lib/appLock';
+/* issue #34 — a symlink the server will NOT follow: what it is, why it will
+   not open, and the rule that every surface refuses it out loud. */
+export { linkStateOf, linkWords, linkWordsFor, isUnopenableLink } from './lib/symlink';
+export type { LinkState, LinkWords, LinkWordsHost } from './lib/symlink';
+/* v2 — where a `page` view lives and how a host opens it. */
+export { pluginPagePath, pluginPageUrl, isPagePlacement, PLUGIN_PAGE_SEGMENT } from './lib/pluginPage';
+export type { PluginPageTarget } from './lib/pluginPage';
+export type {
+  PluginText,
+  PluginApplies,
+  PluginActionRow,
+  PluginGatedRule,
+  PluginViewRow,
+  PluginActionsResponse,
+  PluginSurface,
+  SurfaceNode,
+  SurfaceAction,
+  PluginRunResult,
+  PluginViewEventBody,
+  PluginViewEventData,
+  SurfaceTone,
+  TextNodeProps,
+  PluginField,
+  FormNodeProps,
+  StepState,
+  StepsNodeProps,
+  ListRowAction,
+  ListNodeProps,
+  ProgressNodeProps,
+  PluginPerson,
+  PeoplePickerNodeProps,
+  PinInputNodeProps,
+  FileChooserNodeProps,
+  PreviewNodeProps,
+  PluginUsersResponse,
+} from './types/Plugins';
+export type { NavApp } from './components/SideNav.vue';
 
 /* issue #27 — the one "how far along is this queued op" rule, shared by the
  * explorer's operations center and a host's own tray (the admin app's). */
@@ -159,7 +432,52 @@ export type { ResumeRecord, ResumeStorage } from './lib/uploadResume';
 export { useSelection } from './composables/useSelection';
 export { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
 export type { ShortcutHandlers } from './composables/useKeyboardShortcuts';
-export { useLocale, localeTag, formatByteSize, formatInstant } from './composables/useLocale';
+export { useLocale, localeTag, formatByteSize, formatInstant, formatWhen, formatWhenFull, translate } from './composables/useLocale';
+export type { WhenInput } from './composables/useLocale';
+/* The Trash's "time left" sentence — the explorer's Trash view and the admin Trash page. */
+export { trashTimeLeft } from './lib/trashTimeLeft';
+/* A person, named one way on every surface (lib/personName; server twin model.PersonLabel). */
+export { personName, personInitial } from './lib/personName';
+export type { PersonLike } from './lib/personName';
+/* RTL — the direction of a language (the server's `rtl` flag, never a second
+ * list) and the page-level rule that derives `<html dir>` from `<html lang>`. */
+export {
+  clampAlongInline,
+  dirOfElement,
+  inlineEndX,
+  inlineKeyStep,
+  inlineSign,
+  inlineStartX,
+  foreignText,
+  isolateLtrRuns,
+  localeDir,
+  openAlongInline,
+  syncDocumentDir,
+} from './lib/direction';
+/* ONE notice for a connection that is down, however many requests fall over
+   while it is (lib/connection): a background call is folded into the shared
+   state, an action the person is waiting on still reports itself, and the
+   notice clears the moment anything gets an answer. */
+export {
+  connectionDown,
+  connectionDownSince,
+  connectionFolded,
+  kindOfMethod,
+  noteRequestFailed,
+  noteRequestSucceeded,
+  resetConnectionNotice,
+} from './lib/connection';
+export type { FailureVerdict, RequestKind } from './lib/connection';
+export { default as ConnectionNotice } from './components/ConnectionNotice.vue';
+/* `filex 0.43.0` — which filex this is, in ONE spelling for every place that
+   says it (the account menus, user settings, the sign-in page). No catalogue
+   key: a name and a number need no translation (lib/productVersion). */
+export { PRODUCT_NAME, productVersionLine } from './lib/productVersion';
+export { default as ProductVersion } from './components/ProductVersion.vue';
+/* The one splitter for list fields — "،" "，" "、" are commas too. */
+export { splitList, isListSeparatorKey } from './lib/listInput';
+export type { SplitListOptions } from './lib/listInput';
+export type { TextDirection } from './lib/direction';
 export type { ByteSizeOptions, ByteUnitKey } from './composables/useLocale';
 export { usePendingOps } from './composables/usePendingOps';
 export type { PendingOp, UsePendingOpsOptions } from './composables/usePendingOps';
@@ -182,7 +500,20 @@ export {
   DEFAULT_THEME_ID,
   themeById,
   useThemeState,
+  /* tema:v1 — operator-defined themes. The host fetches /api/appearance once
+   * at boot and publishes the result through `setCustomThemes`; everything
+   * else — the gallery, the palette cards, and the id resolution that makes a
+   * deleted theme fall back to stock — reads it from here. */
+  CUSTOM_THEME_PREFIX,
+  setCustomThemes,
+  useCustomThemes,
+  allThemes,
+  themeName,
   setTheme,
+  /* v3 — paint the palette the ACCOUNT holds without writing it back. */
+  applyStoredPalette,
+  /* tema:v1 — paint the INSTANCE's default without recording it as a choice. */
+  applyInstanceDefault,
   applyThemeToEl,
   syncThemeStyle,
   generateThemeCss,
@@ -194,6 +525,10 @@ export {
   THEME_MODE_LS_KEY,
   useThemeModeState,
   setThemeMode,
+  /* ⚠⚠ The session answer changed after the first paint (a public link, or
+   * an `/api/auth/me` that says nobody) — re-decide whose look this window
+   * wears. See `lib/prefs` → SESSION_LS_KEY. */
+  resolveSessionLook,
 } from './lib/themes';
 export type { ThemeDef, ThemeTokenMap, ThemeModePref } from './lib/themes';
 export { default as ThemeGallery } from './components/ThemeGallery.vue';
@@ -339,6 +674,7 @@ export { default as E2eRecoveryUnlockModal } from './components/E2eRecoveryUnloc
    component wrapper around this), the admin SPA mounts the SFC, embeds
    can do either — and none of them owns a copy of the form. */
 export { default as ConnectionsPanel } from './components/ConnectionsPanel.vue';
+export { default as StorageTags } from './components/StorageTags.vue';
 export { default as StorageFields } from './components/StorageFields.vue';
 export { default as ConnectionGuideView } from './components/ConnectionGuideView.vue';
 export { default as S3KeysPanel } from './components/S3KeysPanel.vue';
@@ -391,27 +727,43 @@ export type {
 } from './types/Connections';
 /* /connections */
 
-/* tablo:t1 — per-folder view memory + the table configuration.
+/* tablo:t1 — per-folder view memory, the defaults beneath it, and the
+ * explorer's table configuration.
  *
- * Exported because the HOST owns two things this module cannot reach: the
- * settings control that turns the memory on (`folderMemoryEnabled` /
- * `setFolderMemoryEnabled`), and the transport that reads and writes the
- * document (`attachViewPrefsStore` — the explorer wires its own, but a host
- * embedding the views directly has to). The rest is exported so the gates in
- * `web/tests/lib/viewPrefs.test.ts` drive the real module rather than a copy. */
+ * Exported because the HOST owns things this module cannot reach: the
+ * settings controls for the person's default folder view
+ * (`personFolderDefault` / `setPersonFolderDefault`) and the instance's
+ * (`readInstanceFolderDefault`, written by the admin settings page), and the
+ * transport that reads and writes the document (`attachViewPrefsHttp` — the
+ * explorer attaches it, and so does the admin app on sign-in, because its
+ * tables keep their columns in the same document). The rest is exported so
+ * the gates in `web/tests/lib/viewPrefs.test.ts` drive the real module rather
+ * than a copy.
+ *
+ * ⚠ v0.43: the "global default" (`globalViewPrefs` / `setGlobalViewPrefs`) is
+ * gone — it was written by every click and was the leak the owner reported
+ * ("tüm klasörlerde görünüm değişikliği geçerli oluyor"). A change belongs to
+ * the folder it was made in; the default is set on purpose. */
 export {
   COLUMNS,
+  EXPLORER_METRICS,
   FOLDER_CAP,
   NAME_AUTO,
   NAME_MIN,
+  ROOT_FOLDER_KEY,
   __flushViewPrefs,
   __resetViewPrefs,
+  applyToAllFolders,
   attachViewPrefsStore,
   canMoveColumn,
+  columnDropBand,
   columnHidden,
   columnOrder,
   columnWidth,
   columnsCustomised,
+  defaultFolderView,
+  detachViewPrefsStore,
+  folderColumnStore,
   folderIsRemembered,
   folderKey,
   folderMemoryEnabled,
@@ -419,16 +771,27 @@ export {
   forgetAllFolders,
   forgetFolder,
   freezeWidths,
+  instanceFolderDefault,
+  onViewPrefsApplied,
+  personFolderDefault,
+  readInstanceFolderDefault,
+  refreshViewPrefs,
   moveColumn,
   moveColumnBy,
   rememberFolder,
   rememberedCount,
+  reorderColumns,
   resetColumns,
+  resolveFolderView,
   setColumnHidden,
   setColumnWidth,
   setFolderMemoryEnabled,
+  setInstanceFolderDefault,
+  setPersonFolderDefault,
   tableLayout,
   touchFolder,
+  viewPrefsAttached,
+  viewPrefsReady,
   viewPrefsSlot,
   widthsAreAuto,
 } from './lib/viewPrefs';
@@ -436,10 +799,43 @@ export type {
   ColumnId,
   ColumnSpec,
   FolderPrefs,
+  FolderViewDefault,
+  InstanceFolderDefault,
   TableLayout,
   ViewPrefsSlot,
   ViewPrefsTransport,
 } from './lib/viewPrefs';
+export { attachViewPrefsHttp, viewPrefsHttpTransport } from './lib/viewPrefsHttp';
+export type { ViewPrefsHttpOptions } from './lib/viewPrefsHttp';
+
+/* ═══ THE ONE TABLE ═══════════════════════════════════════════════════════
+ * `DataTable` is the explorer's list view with the files taken out of it, and
+ * it is the ONLY table in the product: the admin panel, the connection
+ * panels, My shares, the notifications list and an app's `list` node all
+ * render through it. A raw `<table>` or a second table component fails
+ * `web/tests/ui/tablePinnedActions.test.ts`; `docs/CONTRIBUTING.md` → "UI
+ * rules" says why (owner, 2026-09-21: "bir yere tablo gerekiyorsa bu tabloyu
+ * koymak zorundayız"). */
+export { default as DataTable } from './components/DataTable.vue';
+export type { DataColumn } from './components/DataTable.vue';
+export {
+  columnDropBand as tableColumnDropBand,
+  createColumnStore,
+  emptyCols,
+  memoryBacking,
+  readCols,
+} from './lib/tableColumns';
+export type {
+  ColsState,
+  ColumnBacking,
+  ColumnStore,
+  LayoutMetrics,
+  TableColumnSpec,
+  TableLayout as GenericTableLayout,
+} from './lib/tableColumns';
+export { setTableSort, tableColumnBacking, tableSort } from './lib/tablePrefs';
+export { TABLE_ENV, provideTableEnv, useTableEnv } from './lib/tableEnv';
+export type { TableEnv } from './lib/tableEnv';
 
 /* gruplama — the date ladder every listing view draws its headings from.
  *

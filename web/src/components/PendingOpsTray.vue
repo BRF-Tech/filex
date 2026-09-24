@@ -39,7 +39,7 @@ const visibleItems = computed(() => store.items.slice().reverse());
 
 function iconFor(opType: string) {
   if (opType === 'move') return Move;
-  if (opType === 'delete') return Trash2;
+  if (opType === 'delete' || opType === 'trash-empty') return Trash2;
   return Copy;
 }
 
@@ -49,6 +49,8 @@ function verbFor(opType: string): string {
       return t('pendingOps.verb.move');
     case 'delete':
       return t('pendingOps.verb.delete');
+    case 'trash-empty':
+      return t('pendingOps.verb.trash');
     case 'copy':
     default:
       return t('pendingOps.verb.copy');
@@ -203,8 +205,9 @@ function isTerminal(status: string): boolean {
   animation: fx-tray-slide 1.2s ease-in-out infinite;
 }
 @keyframes fx-tray-slide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(300%); }
+  /* ⚠ RTL: the sweep runs the way the line reads (--filex-dir-x, core base.css). */
+  0% { transform: translateX(calc(-100% * var(--filex-dir-x, 1))); }
+  100% { transform: translateX(calc(300% * var(--filex-dir-x, 1))); }
 }
 @media (prefers-reduced-motion: reduce) {
   .fx-tray-indeterminate { animation: none; width: 100%; opacity: 0.45; }

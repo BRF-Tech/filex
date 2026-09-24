@@ -1,7 +1,5 @@
 import type { LocaleCode } from '../types/ExplorerConfig';
-
-/** The locales this component actually has a catalogue for. */
-const SUPPORTED: readonly LocaleCode[] = ['en', 'tr'];
+import { acceptableLocale, hasLocale, normalizeLocaleCode } from '../lib/uiLocales';
 
 /**
  * The language filex falls back to when the host does not say.
@@ -34,11 +32,19 @@ const FALLBACK: LocaleCode = 'en';
  * locale, because the component alone no longer determines it. Pass an
  * explicit `locale` anywhere the answer has to be stable.
  *
- * Matching is on the primary subtag, so `tr-TR` and `en-GB` resolve; anything
- * with no catalogue falls through rather than half-rendering.
+ * Matching is on the primary subtag, so `tr-TR` and `en-GB` resolve, and a
+ * language pack's own tag (`es`, `pt-br`) resolves while the pack is offered;
+ * anything nothing offers falls through rather than half-rendering.
  */
 export function resolveLocale(explicit?: LocaleCode | '' | null): LocaleCode {
-  if (explicit && SUPPORTED.includes(explicit)) return explicit;
+  // ⚠⚠ Not "en or tr". It was, and every explorer surface — the listing, the
+  // details panel, the dialogs, some twelve call sites — turned a language
+  // pack's `es` into the browser's guess: the admin panel around the explorer
+  // spoke Spanish and the explorer inside it did not (measured 2026-09-21).
+  // An offered language stands; while the server's list is still in flight a
+  // plausible one is HELD (`acceptableLocale`), so the explorer does not
+  // flash the browser's language on its way to the one the host asked for.
+  if (explicit && acceptableLocale(explicit)) return normalizeLocaleCode(explicit);
   return detectLocale();
 }
 
@@ -56,8 +62,11 @@ export function detectLocale(): LocaleCode {
     const wanted = nav.languages && nav.languages.length ? nav.languages : [nav.language];
     for (const tag of wanted) {
       if (!tag) continue;
-      const primary = String(tag).toLowerCase().split('-')[0] as LocaleCode;
-      if (SUPPORTED.includes(primary)) return primary;
+      // An offered language, built-in or added by a pack: a visitor whose
+      // browser asks for Spanish on an instance with a Spanish pack reads
+      // Spanish. (`hasLocale` is reactive, so a caller inside a computed
+      // re-decides when the pack list arrives.)
+      if (hasLocale(tag)) return normalizeLocaleCode(tag);
     }
   } catch {
     /* a hostile or exotic runtime is not a reason to fail to render */

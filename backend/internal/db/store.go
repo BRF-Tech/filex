@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -69,6 +70,13 @@ type Store interface {
 	// (`trash.Prefix`); implementations match the stored path with and
 	// without one, because drivers differ on that.
 	ListLiveNodesInTrash(ctx context.Context, storageID int64, trashPrefix string) ([]*model.Node, error)
+	// ListNodesUnder returns the row at dir and every row below it, in both
+	// path spellings drivers produce ("/a/b" and "a/b"); includeDeleted adds
+	// soft-deleted rows. The match is EXACT: names compare byte for byte, and
+	// the prefix bound is counted in characters, so a folder whose name is not
+	// ASCII matches as reliably as one that is. The storage root ("" or "/")
+	// is never a subtree and returns nothing.
+	ListNodesUnder(ctx context.Context, storageID int64, dir string, includeDeleted bool) ([]*model.Node, error)
 	ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error)
 	// AggNodes returns a lightweight {id, parent_id, is_dir, size} row for every
 	// live node of a storage — the input to folder-size aggregation.
@@ -91,6 +99,13 @@ type Store interface {
 	HardDeleteNode(ctx context.Context, id int64) error
 	MoveNode(ctx context.Context, id int64, parentID *int64, name, path, pathHash string) error
 	ListStaleNodes(ctx context.Context, storageID int64, before time.Time) ([]*model.Node, error)
+	// ListStaleNodesUnder is ListStaleNodes bounded to the rows strictly BELOW
+	// dir (the folder's own row excluded), matched exactly as ListNodesUnder
+	// matches — the tombstone candidates of a folder rescan.
+	ListStaleNodesUnder(ctx context.Context, storageID int64, dir string, before time.Time) ([]*model.Node, error)
+	// CountLiveNodesUnder counts the live rows strictly below dir — the
+	// baseline a folder rescan's 70% guard compares what it saw against.
+	CountLiveNodesUnder(ctx context.Context, storageID int64, dir string) (int64, error)
 	CountNodesByStorage(ctx context.Context, storageID int64) (int64, error)
 
 	// Replication targets — separate entity. Storages.replica_target_id
@@ -105,7 +120,29 @@ type Store interface {
 	// storages list page so each row can show "N files, 1.2 GB" without
 	// the SPA looping every node row.
 	StorageStats(ctx context.Context, storageID int64) (fileCount int64, totalBytes int64, err error)
-	SearchNodes(ctx context.Context, storageID int64, like string, limit int) ([]*model.Node, error)
+	// SearchNodes returns up to `limit` live nodes of a storage whose NAME
+	// answers m — every word in it, compared through internal/namefold (see
+	// model.NameMatch) — ranked by m.Prefer before the LIMIT. It is the
+	// search an install without the index runs, and every caller reaches it
+	// through search.Fallback.Candidates. No words, no rows.
+	//
+	// ⚠ EVERY word is a condition, never one of them: the fallback used to
+	// send only the longest word and check the rest in Go over the first rows
+	// by name, and a word most files shared pushed the file past the LIMIT
+	// (GitHub PR #46, measured on a 169k-file catalogue: the file at row
+	// 33 623 of a 1 000-row window).
+	//
+	// ⚠ Rank BEFORE the limit, never after: a LIMIT on `ORDER BY name` keeps
+	// the alphabetically first rows, and a search for `report` among a
+	// thousand `a-report-…` files lost `report.txt` itself.
+	//
+	// ⚠ The stored name goes through the same normaliser as the words, spelt
+	// in each dialect: fx_match/fx_rank (Go, registered on SQLite),
+	// normalize+lower on PostgreSQL, and on MySQL, which can compose nothing,
+	// its accent- and case-insensitive collation over both the composed and
+	// the decomposed form of each word. TestSearchNodesOnEveryEngine holds
+	// the three to one answer.
+	SearchNodes(ctx context.Context, storageID int64, m model.NameMatch, limit int) ([]*model.Node, error)
 
 	// Users
 	CreateUser(ctx context.Context, email, passwordHash, role, locale, tz string) (*model.User, error)
@@ -144,6 +181,12 @@ type Store interface {
 	CreateSession(ctx context.Context, userID int64, token string, expiresAt time.Time, ip, ua string) (*model.Session, error)
 	GetSessionByToken(ctx context.Context, token string) (*model.Session, error)
 	DeleteSession(ctx context.Context, token string) error
+	// SetSessionIDToken / GetSessionIDToken keep the IdP's id_token beside an
+	// OIDC session, so sign-out can end the IdP's session too (id_token_hint).
+	// Get returns "" — never an error — for a session that has none or does
+	// not exist: sign-out falls back to local-only and must not fail on it.
+	SetSessionIDToken(ctx context.Context, token, idToken string) error
+	GetSessionIDToken(ctx context.Context, token string) (string, error)
 	DeleteSessionsForUser(ctx context.Context, userID int64, exceptToken string) error
 	CountActiveSessions(ctx context.Context) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) error
@@ -214,6 +257,105 @@ type Store interface {
 	UpdatePlugin(ctx context.Context, p *model.Plugin) error
 	DeletePlugin(ctx context.Context, id int64) error
 
+	// App plugins (migration 00042) — in-process WebAssembly plugins; see
+	// internal/wasmplugin. The row is the admin's intent + the approved grant;
+	// runtime state is derived by loading the module.
+	CreateAppPlugin(ctx context.Context, p *model.AppPlugin) (*model.AppPlugin, error)
+	GetAppPlugin(ctx context.Context, id int64) (*model.AppPlugin, error)
+	GetAppPluginByName(ctx context.Context, name string) (*model.AppPlugin, error)
+	ListAppPlugins(ctx context.Context) ([]*model.AppPlugin, error)
+	UpdateAppPlugin(ctx context.Context, p *model.AppPlugin) error
+	// DeleteAppPlugin removes the row and everything keyed on it (settings,
+	// overrides, state, jobs).
+	DeleteAppPlugin(ctx context.Context, id int64) error
+	GetAppPluginSettings(ctx context.Context, pluginID int64) (map[string]string, error)
+	// PutAppPluginSettings replaces the whole set.
+	PutAppPluginSettings(ctx context.Context, pluginID int64, values map[string]string) error
+	ListAppPluginOverrides(ctx context.Context, pluginID int64) ([]*model.AppPluginOverride, error)
+	// PutAppPluginOverrides replaces the whole set.
+	PutAppPluginOverrides(ctx context.Context, pluginID int64, rows []*model.AppPluginOverride) error
+	GetAppPluginState(ctx context.Context, pluginID, storageID int64, pathHash, key string) (string, bool, error)
+	// SetAppPluginState records one key. rel is the file's storage-relative
+	// path, stored beside the hash so a listing can name the file.
+	SetAppPluginState(ctx context.Context, pluginID, storageID int64, pathHash, rel, key, value string) error
+	DeleteAppPluginState(ctx context.Context, pluginID, storageID int64, pathHash, key string) error
+	CreateAppPluginJob(ctx context.Context, j *model.AppPluginJob) error
+	GetAppPluginJob(ctx context.Context, id string) (*model.AppPluginJob, error)
+	// ListAppPluginJobsByOp returns the jobs behind the given ops rows, keyed
+	// by op id — what the ops tray uses to decorate plugin rows.
+	ListAppPluginJobsByOp(ctx context.Context, opIDs []int64) (map[int64]*model.AppPluginJob, error)
+	UpdateAppPluginJob(ctx context.Context, j *model.AppPluginJob) error
+	// SetAppPluginJobOp writes ONLY the ops-row id onto a job.
+	//
+	// The whole-row update cannot be used for this: submitting the job wakes
+	// the worker immediately, a short action can finish before the handler
+	// gets its answer back, and writing the handler's copy of the row then
+	// erases the status, the message and the outputs the worker just wrote.
+	// The symptom is silent and awful — the ops row says "ok" and the
+	// message the plugin produced (a public link and its PIN, say) is gone.
+	SetAppPluginJobOp(ctx context.Context, jobID string, opID int64) error
+	CreateAppPluginSigningKey(ctx context.Context, k *model.AppPluginSigningKey) error
+	GetAppPluginSigningKey(ctx context.Context, id string) (*model.AppPluginSigningKey, error)
+	// GetAppPluginSigningCA returns the tenant's live CA row, or nil.
+	GetAppPluginSigningCA(ctx context.Context, tenantID int64) (*model.AppPluginSigningKey, error)
+	// GetAppPluginSealKey returns the live platform seal of one app for one
+	// tenant (purpose "platform", not destroyed), or nil.
+	GetAppPluginSealKey(ctx context.Context, tenantID, pluginID int64) (*model.AppPluginSigningKey, error)
+	RetireAppPluginSigningCA(ctx context.Context, tenantID int64) error
+	// ListAppPluginSigningCAs returns every CA a tenant has ever signed
+	// with, retired ones included, newest first. Nothing deletes these: a
+	// signature made years ago is only verifiable while the certificate
+	// that issued it is still here.
+	ListAppPluginSigningCAs(ctx context.Context, tenantID int64) ([]*model.AppPluginSigningKey, error)
+	// DestroyAppPluginSigningKey empties the sealed key and stamps destroyed_at.
+	DestroyAppPluginSigningKey(ctx context.Context, id string) error
+	// ListAppPluginStateFiles returns the files this plugin keeps the given
+	// state key on — the key joined back to the node rows, so a file that
+	// was deleted is simply not in the answer. An empty key lists every key.
+	ListAppPluginStateFiles(ctx context.Context, pluginID int64, key string, limit int) ([]*model.AppPluginStateFile, error)
+	// ListAppPluginStateKeys returns, per path hash, the "<plugin name>:<key>"
+	// pairs kept on those files — what a listing shows so the menu can offer
+	// state-aware actions (applies.state). Values are never returned.
+	ListAppPluginStateKeys(ctx context.Context, storageID int64, pathHashes []string) (map[string][]string, error)
+	// PutAppPluginLock inserts or replaces the lock on (storage, path).
+	PutAppPluginLock(ctx context.Context, l *model.AppPluginLock) error
+	GetAppPluginLock(ctx context.Context, storageID int64, pathHash string) (*model.AppPluginLock, error)
+	// ListAppPluginLocks returns every lock on a storage (0 = all storages),
+	// expired ones included; callers filter with Live.
+	ListAppPluginLocks(ctx context.Context, storageID int64) ([]*model.AppPluginLock, error)
+	DeleteAppPluginLock(ctx context.Context, storageID int64, pathHash string) error
+	// DeleteExpiredAppPluginLocks drops locks whose until passed before now.
+	DeleteExpiredAppPluginLocks(ctx context.Context, now time.Time) (int64, error)
+
+	// App-plugin schedule (migration 00050) — the hourly wake-up of an app
+	// that holds the `schedule` permission, and the work that wake-up asked
+	// for. One row per (plugin, key); the empty key is the wake-up itself.
+	//
+	// PutAppPluginScheduleItem inserts the item or moves the existing one.
+	// A row another process is RUNNING is left alone and no error is
+	// returned: the running process owns it and will finish it.
+	PutAppPluginScheduleItem(ctx context.Context, it *model.AppPluginScheduleItem) error
+	// ClaimAppPluginScheduleItem takes the lease on a due row: one
+	// conditional UPDATE from due to running, true only for the process
+	// whose UPDATE matched. This is what stops two filex processes on one
+	// database from running the same item twice.
+	ClaimAppPluginScheduleItem(ctx context.Context, pluginID int64, key, owner string, now time.Time) (bool, error)
+	// FinishAppPluginScheduleItem ends a claimed row. A non-nil rearmAt puts
+	// it back to `due` at that time instead (the wake-up re-arming itself
+	// for the next hour); status is then ignored and errMsg becomes the
+	// note the row carries until the next wake-up.
+	FinishAppPluginScheduleItem(ctx context.Context, pluginID int64, key, status, jobID, errMsg string, rearmAt *time.Time) error
+	// DueAppPluginScheduleItems returns rows that are `due` at or before
+	// now, oldest first, capped at limit.
+	DueAppPluginScheduleItems(ctx context.Context, now time.Time, limit int) ([]*model.AppPluginScheduleItem, error)
+	// NextAppPluginScheduleDue is when the earliest `due` row comes due, so
+	// the scheduler can sleep exactly that long instead of polling.
+	NextAppPluginScheduleDue(ctx context.Context) (*time.Time, error)
+	// ListAppPluginScheduleItems returns every row of one app, soonest first.
+	ListAppPluginScheduleItems(ctx context.Context, pluginID int64) ([]*model.AppPluginScheduleItem, error)
+	// ReapAppPluginScheduleItems drops finished rows older than before.
+	ReapAppPluginScheduleItems(ctx context.Context, before time.Time) (int64, error)
+
 	// File grants — per-user/per-folder ACL (RBAC feature, migration 00012).
 	ListFileGrantsByStorageUser(ctx context.Context, storageID, userID int64) ([]*model.FileGrant, error)
 	ListFileGrantsByStorage(ctx context.Context, storageID int64) ([]*model.FileGrant, error)
@@ -231,6 +373,10 @@ type Store interface {
 	ListAllShares(ctx context.Context, creatorID *int64, activeOnly bool, limit, offset int) ([]*ShareWithMeta, int64, error)
 	RevokeShare(ctx context.Context, id int64) error
 	IncrementShareDownload(ctx context.Context, id int64) error
+	// IncrementShareVisit counts one opening of an app page (00052) — the
+	// counter an app page's visit ceiling is measured against. Page views
+	// are not downloads (the owner's ruling, 2026-09-21).
+	IncrementShareVisit(ctx context.Context, id int64) error
 	// ReserveShareDownload claims ONE download against the link's cap and
 	// reports whether it got one. This is the cap's only real enforcement
 	// point: a check that reads the counter and a serve that bumps it
@@ -245,6 +391,23 @@ type Store interface {
 	IncrementShareUpload(ctx context.Context, id int64, n int) error
 	DeleteShare(ctx context.Context, id int64) error
 	DeleteExpiredShares(ctx context.Context) error
+	// ── App-plugin page shares (00046) ──
+	//
+	// An app plugin's public page is a share carrying plugin_id/page_id plus
+	// its own two documents. These are the only writers of those columns after
+	// CreateShare, so the ordinary share paths never have to know about them.
+
+	// UpdateShareAppState replaces the plugin's durable record for one link
+	// (the share_state host function). Bounded by the caller at 64 KiB.
+	UpdateShareAppState(ctx context.Context, id int64, stateJSON string) error
+	// UpdateSharePinLock writes the PIN strike counter and the lock deadline.
+	// Separate from every other update so a failed guess cannot rewrite the
+	// link's expiry, caps or exposed files by riding along in a whole-row save.
+	UpdateSharePinLock(ctx context.Context, id int64, fails int, until *time.Time) error
+	// ListAppPluginShares returns the links an installed app opened, newest
+	// first. pluginID 0 means every app (never the ordinary shares);
+	// activeOnly drops the expired and revoked ones.
+	ListAppPluginShares(ctx context.Context, pluginID int64, activeOnly bool, limit, offset int) ([]*ShareWithMeta, int64, error)
 
 	// Chunked uploads
 	CreateChunkedUpload(ctx context.Context, u *model.ChunkedUpload) error
@@ -279,12 +442,27 @@ type Store interface {
 	// are in filex's staging area, "stored" once they are on the driver, and
 	// "failed" when the transfer to the driver did not succeed.
 	SetNodeTransferState(ctx context.Context, nodeID int64, state string) error
+	// ListUnstoredNodes pages through every LIVE row whose transfer_state is
+	// "staged" or "failed" — bytes a staged upload committed that were never
+	// confirmed on the storage — in id order, after afterID. The staged-upload
+	// boot pass settles the ones whose bytes did land.
+	ListUnstoredNodes(ctx context.Context, afterID int64, limit int) ([]*model.Node, error)
 
 	// Sync runs / conflicts
 	CreateSyncRun(ctx context.Context, storageID int64, cursorBefore string) (*model.SyncRun, error)
 	FinishSyncRun(ctx context.Context, id int64, cursorAfter string, seen, added, updated, deleted int, status, errMsg string) error
 	GetSyncRun(ctx context.Context, id int64) (*model.SyncRun, error)
 	GetLastSyncRun(ctx context.Context, storageID int64) (*model.SyncRun, error)
+	// GetLastSyncRunByStatus is the most recent FINISHED run of a storage with
+	// the given status (sql.ErrNoRows when there is none) — the tombstone
+	// guard's baseline is the last run that finished "ok", never one that
+	// was cut short with whatever it had counted by then.
+	GetLastSyncRunByStatus(ctx context.Context, storageID int64, status string) (*model.SyncRun, error)
+	// AbortUnfinishedSyncRuns closes every run with no finished_at as
+	// "aborted", with errMsg as its error, and reports how many it closed.
+	// Called once when the sync worker starts, before any run of its own: a
+	// row still open then belongs to a process that is gone.
+	AbortUnfinishedSyncRuns(ctx context.Context, errMsg string) (int64, error)
 	ListSyncRuns(ctx context.Context, storageID int64, limit int) ([]*model.SyncRun, error)
 	ListSyncRunsAcrossAll(ctx context.Context, storageID int64, status string, limit, offset int) ([]*model.SyncRun, int64, error)
 	CreateSyncConflict(ctx context.Context, c *model.SyncConflict) error
@@ -385,7 +563,30 @@ type Store interface {
 	GetUserDisplayNames(ctx context.Context, ids []int64) (map[int64]string, error)
 
 	// Trash retention
-	ListTrashedExpired(ctx context.Context, before time.Time, limit int) ([]*model.Node, error)
+	//
+	// ListTrashedExpired returns up to `limit` soft-deleted nodes whose
+	// deleted_at is older than `before`, in id order, strictly after `afterID`
+	// (0 starts at the first), narrowed to storageIDs: nil means every
+	// storage, and an EMPTY, non-nil slice matches nothing (a scope that
+	// reaches no storage must not read as "no restriction"). A sweep passes
+	// the last id it saw back in, so every row is met once per run whatever
+	// the caller did with it.
+	//
+	// ⚠ The narrowing is in the SQL on purpose. The purge used to read every
+	// storage's rows and skip the foreign ones in Go; a skipped row is never
+	// removed, so behind a full batch of somebody else's rows it re-read the
+	// same batch forever.
+	//
+	// ⚠ The cursor is the id, never deleted_at. SQLite keeps CURRENT_TIMESTAMP
+	// as `YYYY-MM-DD HH:MM:SS` and the driver writes a time.Time parameter in
+	// another spelling, so a timestamp cursor compared unequal to the rows that
+	// share its second — and a trash emptied in one burst shares very few
+	// seconds between tens of thousands of rows.
+	ListTrashedExpired(ctx context.Context, before time.Time, storageIDs []int64, afterID int64, limit int) ([]*model.Node, error)
+	// CountTrashedExpired tallies, per storage, the rows ListTrashedExpired
+	// walks for the same `before`: how many, and the bytes their files hold
+	// (a folder's size is a cached total of its files, so it is not added).
+	CountTrashedExpired(ctx context.Context, before time.Time) (map[int64]TrashTally, error)
 	// ListTrashed returns soft-deleted nodes (paginated). storage filter optional.
 	ListTrashed(ctx context.Context, storageID *int64, limit, offset int) ([]*model.Node, int, error)
 	RestoreNode(ctx context.Context, id int64) error
@@ -398,7 +599,8 @@ type Store interface {
 	// parent dir, or an error if the parent dir doesn't exist in the cache.
 	LookupParentByPath(ctx context.Context, storageID int64, fullPath string) (*int64, error)
 
-	// Per-user metadata (tags, starred, last_opened)
+	// Per-user metadata (starred, last_opened). Tags have their own tables
+	// since 00055 — see the Tags block below.
 	SetUserNodeMeta(ctx context.Context, userID, nodeID int64, key, value string) error
 	DeleteUserNodeMeta(ctx context.Context, userID, nodeID int64, key string) error
 	GetUserNodeMeta(ctx context.Context, userID, nodeID int64, key string) (string, error)
@@ -413,15 +615,59 @@ type Store interface {
 	GetUserViewPrefs(ctx context.Context, userID int64) (string, error)
 	SetUserViewPrefs(ctx context.Context, userID int64, doc string) error
 
-	// Tags use the shared node_meta table (key='tag:<name>', value='1').
-	SetNodeTags(ctx context.Context, nodeID int64, tags []string) error
-	GetNodeTags(ctx context.Context, nodeID int64) ([]string, error)
-	ListAllTagsForStorage(ctx context.Context, storageID int64) ([]string, error)
-	// ListAllTags returns every distinct tag across all storages (alphabetical).
-	ListAllTags(ctx context.Context) ([]string, error)
-	// ListNodesByTag returns non-deleted nodes carrying the given tag,
+	// ── Surface preferences (00047) ──
+	//
+	// What a person chose about the interface itself — theme, palette,
+	// density, language — one JSON document per person PER SURFACE ("web" or
+	// "desktop"). Distinct from the view prefs above, which are how each
+	// FOLDER was left. "" and "no row" are the same answer and neither is an
+	// error: nothing chosen yet is every account's first day.
+	GetUserPrefs(ctx context.Context, userID int64, surface string) (string, error)
+	SetUserPrefs(ctx context.Context, userID int64, surface, doc string) error
+	// Operator-defined themes (00051): a name plus two `--fe-*` token maps,
+	// served to every browser beside the built-in palettes. Instance-wide —
+	// the table has no tenant column, which is exactly why the admin routes
+	// that write them are behind requireSupertenant.
+	//
+	// ⚠ ListCustomThemes is on the PUBLIC appearance path (an anonymous
+	// visitor's share page resolves the instance default through it), so a row
+	// whose token JSON cannot be parsed is DROPPED from the list rather than
+	// failing the call: one bad row must not take the login page down with it.
+	ListCustomThemes(ctx context.Context) ([]*model.CustomTheme, error)
+	GetCustomTheme(ctx context.Context, key string) (*model.CustomTheme, error)
+	UpsertCustomTheme(ctx context.Context, t *model.CustomTheme) error
+	// DeleteCustomTheme reports whether a row was actually removed, so the
+	// handler can answer 404 instead of a cheerful 200 for a key that was
+	// never there.
+	DeleteCustomTheme(ctx context.Context, key string) (bool, error)
+
+	// ── Tags (00055): personal and team vocabularies + the files they are on ──
+	//
+	// ⚠ The store does not decide who may SEE a tag. Visibility needs the
+	// caller, the tenant scope, the token's `root:` confinement and the ACL,
+	// none of which a store knows — handlers/tags.go owns it, and every read
+	// below returns rows for that code to judge. What the store does own is
+	// the vocabulary boundary: TagQuery (rendered once, by TagQueryWhere) says
+	// WHOSE tags a query may even consider.
+	//
+	// ListTags returns the vocabulary rows a query selects, oldest first.
+	ListTags(ctx context.Context, q model.TagQuery) ([]*model.Tag, error)
+	// CreateTag inserts a vocabulary row. A UNIQUE violation (a concurrent
+	// create of the same name) is returned as an error; the caller re-reads.
+	CreateTag(ctx context.Context, t *model.Tag) (*model.Tag, error)
+	// ListNodeTags returns EVERY tag on a node, of every owner and tenant —
+	// the caller filters to what the person may see.
+	ListNodeTags(ctx context.Context, nodeID int64) ([]*model.Tag, error)
+	// LinkNodeTags adds and removes tag links on one node in one transaction,
+	// and deletes a removed tag that no file carries any more (a tag exists
+	// while it is on something, as it always has).
+	LinkNodeTags(ctx context.Context, nodeID int64, add, remove []int64) error
+	// ListNodesByTagIDs returns live nodes carrying ANY of the tags,
 	// newest-first (by node updated_at), capped at limit.
-	ListNodesByTag(ctx context.Context, tag string, limit int) ([]*model.Node, error)
+	ListNodesByTagIDs(ctx context.Context, tagIDs []int64, limit int) ([]*model.Node, error)
+	// ListTagPlacements returns every (tag, live file) pair for the tags a
+	// query selects — what the tag listings judge visibility on, file by file.
+	ListTagPlacements(ctx context.Context, q model.TagQuery) ([]model.TagPlacement, error)
 
 	// Notifications (in-app bell + webhook delivery audit)
 	InsertNotification(ctx context.Context, n *model.NotificationInput) (int64, error)
@@ -433,10 +679,35 @@ type Store interface {
 	// back short and its total still counts the rows the caller then hides.
 	// Nil/empty means "no mute filter", which is what the admin/global view
 	// (userID == nil) always passes.
-	ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, mutedEvents []string, limit, offset int) ([]*model.Notification, int64, error)
+	//
+	// hiddenBodies are LIKE patterns a row's `body` must NOT match — the
+	// notify service's read-time filter for rows recorded about filex's own
+	// directories before those stopped being announced (notify.hiddenBodies).
+	// SQL for the same reason as the mute list: the unread badge is a COUNT,
+	// and a row the list hides but the count still counts is a badge that says
+	// "3" over an empty bell. Nil/empty filters nothing. The rows are not
+	// changed or deleted — the filter is on the read, never on the history.
+	//
+	// broadcasts decides how the read treats rows with no user: which of them
+	// a bell takes at all (see notify.Bell), and whose read state they carry.
+	// It is in SQL for the same reason as the mute list.
+	ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, mutedEvents, hiddenBodies []string, broadcasts model.BroadcastFilter, limit, offset int) ([]*model.Notification, int64, error)
+	// MarkNotificationRead and MarkAllNotificationsRead stamp rows ADDRESSED
+	// to userID and nothing else: a broadcast is many readers' row, and is
+	// marked per reader through MarkBroadcastsRead. nil userID stamps the
+	// rows' own column regardless of owner (an instance-wide sweep).
 	MarkNotificationRead(ctx context.Context, id int64, userID *int64) error
 	MarkAllNotificationsRead(ctx context.Context, userID *int64) error
-	UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents []string) (int64, error)
+	// MarkBroadcastsRead records that readerID has read these broadcasts
+	// (migration 00056). Ids that are not broadcasts are ignored, and marking
+	// one twice is not an error. Whether the reader may see them is the
+	// caller's question — the store cannot answer it.
+	MarkBroadcastsRead(ctx context.Context, readerID int64, ids []int64) error
+	// MarkAllBroadcastsRead moves readerID's "mark all read" point to the
+	// newest notification: every broadcast up to it is read for that reader,
+	// and nobody else. One write however many broadcasts there are.
+	MarkAllBroadcastsRead(ctx context.Context, readerID int64) error
+	UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents, hiddenBodies []string, broadcasts model.BroadcastFilter) (int64, error)
 	UpdateWebhookStatus(ctx context.Context, id int64, status, errMsg string) error
 	GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error)
 	UpsertNotificationSettings(ctx context.Context, s *model.NotificationSettings) error
@@ -517,6 +788,12 @@ type Store interface {
 	GetProviderPlan(ctx context.Context, providerID int64) (plan, limitsJSON, billingRef string, err error)
 }
 
+// TrashTally is one storage's share of the trash a purge sweep will walk.
+type TrashTally struct {
+	Count int
+	Bytes int64
+}
+
 // ExternalService is the DB row representation. Lives in the db package so
 // model can stay pure-domain.
 type ExternalService struct {
@@ -535,13 +812,43 @@ type ExternalService struct {
 type ShareWithMeta struct {
 	Share        *model.Share `json:"share"`
 	CreatorEmail string       `json:"creator_email,omitempty"`
-	NodePath     string       `json:"node_path,omitempty"`
-	StorageName  string       `json:"storage_name,omitempty"`
+	// CreatorName is the creator as every screen names a person
+	// (model.PersonLabel), filled by the admin handler — never by the store.
+	CreatorName string `json:"creator_name,omitempty"`
+	NodePath    string `json:"node_path,omitempty"`
+	StorageName string `json:"storage_name,omitempty"`
+	// PluginName names the app that opened this link, when one did (00046).
+	// Empty for an ordinary share. It is joined in rather than derived by the
+	// caller so the admin Shares table can carry a "plugin / page" column
+	// without a lookup per row.
+	PluginName string `json:"plugin_name,omitempty"`
 	// URL is the canonical public link (`<origin>/s/<token>`), filled by the
 	// admin handler from the configured public origin — never by the store.
 	// The admin Shares page used to build it from the browser's address, so an
 	// operator signed in on localhost copied a localhost link (issue #32).
 	URL string `json:"url,omitempty"`
+	// App says what an app's link IS (its page's declared purpose), filled
+	// by the handlers from the app's manifest — never by the store. Nil for
+	// an ordinary share and for a page that declares no purpose.
+	App *AppLink `json:"app,omitempty"`
+}
+
+// AppLink is what a list of links needs to show an app's link for what it
+// is (wire.PagePurpose): the owner's decision of 2026-09-21 — a signing link
+// in My shares is marked as a signing request, opens the request's page in
+// the app, and its revoke says that it cancels the request.
+type AppLink struct {
+	Plugin string `json:"plugin"`
+	Page   string `json:"page"`
+	// Label names the kind of link ({lang: …}): "Signing request".
+	Label map[string]string `json:"label"`
+	// Revoke is what revoking it does ({lang: …}); empty when the page says
+	// nothing, and the list then asks its ordinary question.
+	Revoke map[string]string `json:"revoke,omitempty"`
+	// View / Section: where in the app the row opens (`/app/<plugin>/<view>
+	// ?section=`). Empty View when the app has no home page to open.
+	View    string `json:"view,omitempty"`
+	Section string `json:"section,omitempty"`
 }
 
 // AuditEntryWithUser is an audit row joined with the user.email column
@@ -549,6 +856,42 @@ type ShareWithMeta struct {
 type AuditEntryWithUser struct {
 	Entry     *model.AuditEntry `json:"entry"`
 	UserEmail string            `json:"user_email,omitempty"`
+	// TargetName is the thing the row is about, in words (a user's e-mail,
+	// a storage's name, a file's path) — filled by the audit handler, not
+	// by the query (handlers/audit_targets.go).
+	TargetName string `json:"target_name,omitempty"`
+	// UserName is who acted, as every screen names a person
+	// (model.PersonLabel), filled by the audit handler — never by the store.
+	UserName string `json:"user_name,omitempty"`
+}
+
+// AuditActionPrefixes reads ListAuditFiltered's action filter: a value ending
+// in "." ("user.") asks for every action of that resource, and a comma-
+// separated list of them ("app_plugin.,app-plugins.") for every action of
+// any of them — one resource can be written under two spellings (a handler's
+// own row and the admin route's generic one). The answer is one LIKE pattern
+// per prefix, with `\` as the escape character, so the underscore in
+// "auth_provider." is a literal underscore. ok=false means an exact action
+// (or no filter at all).
+//
+// ⚠ The Audit page's action filter was a free-text box matched EXACTLY against
+// wire names ("user.create"): a person typing what the page shows them
+// ("Kullanıcı") found nothing. The page now offers the resources by name and
+// sends their prefixes.
+func AuditActionPrefixes(action string) ([]string, bool) {
+	if len(action) < 2 || action[len(action)-1] != '.' {
+		return nil, false
+	}
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	var out []string
+	for _, p := range strings.Split(action, ",") {
+		p = strings.TrimSpace(p)
+		if len(p) < 2 || p[len(p)-1] != '.' {
+			return nil, false
+		}
+		out = append(out, r.Replace(p)+"%")
+	}
+	return out, true
 }
 
 // DuplicateNode is one row of the duplicate-file report query — a slim

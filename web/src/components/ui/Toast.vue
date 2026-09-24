@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { CheckCircle2, Info, AlertTriangle, XCircle, X } from 'lucide-vue-next';
 import type { Toast } from '@/stores/toast';
+import { t } from '@/i18n';
 
 interface Props {
   toast: Toast;
@@ -53,7 +54,7 @@ const cfg = computed(() => styleMap[props.toast.level]);
       <button
         type="button"
         class="rounded p-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-        aria-label="Dismiss"
+        :aria-label="t('common.close')"
         @click="emit('dismiss', toast.id)"
       >
         <X class="h-4 w-4" />

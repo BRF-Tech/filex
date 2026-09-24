@@ -73,6 +73,12 @@ const demoPass = computed(() => caps.data.demo_pass || 'demo');
 // password" link (?local=1) for break-glass/admin logins.
 const wantLocal = computed(() => route.query.local !== undefined);
 const oidcError = computed(() => route.query.error === 'oidc');
+// Straight after "Sign out" (lib/signOut, or the IdP sending the browser back
+// once it has ended its own session). The page says so and does NOT start SSO
+// by itself: wherever the IdP's session outlived the sign-out (an IdP without
+// RP-initiated logout, FILEX_OIDC_LOGOUT=local) that would sign the same
+// account straight back in — which is what "Sign out" used to do.
+const signedOut = computed(() => route.query.signed_out !== undefined);
 const autoRedirect = computed(
   () => caps.data.oidc_auto_redirect === true && oidcEnabled.value && !demoMode.value,
 );
@@ -138,12 +144,14 @@ onMounted(async () => {
   if (!caps.loaded) await caps.fetch();
   // Loop guards: never auto-redirect when the visitor explicitly asked for
   // the password form (?local=1), when the IdP round-trip just failed
-  // (?error=... — redirecting again would loop), or when the tenant is
-  // locked out (?maintenance=1). The OIDC callback itself is a backend
-  // route, so the SPA never mounts on it.
+  // (?error=... — redirecting again would loop), when the tenant is
+  // locked out (?maintenance=1), or right after signing out (?signed_out —
+  // see `signedOut`). The OIDC callback itself is a backend route, so the
+  // SPA never mounts on it.
   if (
     autoRedirect.value &&
     !wantLocal.value &&
+    !signedOut.value &&
     route.query.error === undefined &&
     route.query.maintenance === undefined
   ) {
@@ -208,10 +216,18 @@ function startOidc() {
            • language — `getStoredLocale()` honours a previously stored
              `filex.locale` and otherwise follows `navigator.language`, so a
              Turkish browser lands on a Turkish form;
-           • theme — `getStoredTheme()` returns 'auto' when nothing is stored
-             and `applyStoredTheme()` resolves that through
-             `prefers-color-scheme`, so an OS in dark mode gets a dark sign-in
-             page. A stored choice still outranks the OS, both ways round.
+           • theme — `getStoredTheme()` returns 'auto' and `applyStoredTheme()`
+             resolves that through `prefers-color-scheme`, so an OS in dark
+             mode gets a dark sign-in page.
+         ⚠⚠ The theme line USED to end "a stored choice still outranks the OS,
+         both ways round", and that was the bug rather than the feature
+         (owner, 2026-09-21): the stored choice belongs to whoever signed in at
+         this browser last, so a shared machine showed the next person the
+         previous one's mode — and, through `filex.palette`, their palette,
+         which also suppressed the operator's own house theme on the one page
+         every customer sees first. With no session the PERSON is not read at
+         all now (`lib/prefs` → SESSION_LS_KEY): the browser decides light or
+         dark, and the INSTANCE decides the palette.
          The only place either one is chosen is the user-settings panel. -->
     <!-- ─────────── Demo mode landing ─────────── -->
     <div v-if="demoMode" class="mx-auto max-w-5xl px-4 py-10 sm:py-16">
@@ -369,6 +385,14 @@ function startOidc() {
             <p v-if="oidcError" role="alert" class="lg-alert">
               {{ t('login.errOidc') }}
             </p>
+            <p
+              v-else-if="signedOut"
+              role="status"
+              class="lg-note"
+              data-testid="login-signed-out"
+            >
+              {{ t('login.signedOut') }}
+            </p>
 
             <!-- SSO is the primary path whenever OIDC is configured. -->
             <button
@@ -403,7 +427,6 @@ function startOidc() {
                   type="text"
                   autocomplete="username"
                   required
-                  placeholder="admin@local"
                   class="lg-field__input"
                 />
               </label>
@@ -424,7 +447,7 @@ function startOidc() {
                 </label>
                 <!-- ⚠ The accessible name deliberately avoids the word
                      "password": e2e/helpers/auth.ts fills the field with
-                     `getByLabel(/password|şifre/i)`, and a second control
+                     `getByLabel(/password|parola/i)`, and a second control
                      answering to that name turns every sign-in in the suite
                      into a strict-mode violation. -->
                 <button
@@ -507,12 +530,15 @@ function startOidc() {
             </div>
 
             <p v-if="!localEnabled && !oidcEnabled && !recoveryLogin" class="lg-alert lg-alert--form">
-              No auth providers enabled. Set <code>AUTH_DRIVERS</code> in your env.
+              <i18n-t keypath="login.noProviders" tag="span"><template #env><code>AUTH_DRIVERS</code></template></i18n-t>
             </p>
           </template>
         </div>
 
-        <p class="lg-version">
+        <!-- `data-install-keep`: the full install card must not stand on this
+             line either (InstallPrompt.vue → checkFit; measured under the card
+             at 1440×900, 2026-09-21). -->
+        <p class="lg-version" data-install-keep>
           <Box class="lg-i16" aria-hidden="true" /> filex {{ caps.data.version }}
         </p>
       </div>
@@ -564,13 +590,13 @@ function startOidc() {
 }
 .lg-deco__a {
   top: -96px;
-  left: -96px;
+  inset-inline-start: -96px;
   height: 288px;
   width: 288px;
   border-radius: 64px;
 }
 .lg-deco__b {
-  right: -96px;
+  inset-inline-end: -96px;
   bottom: -128px;
   height: 384px;
   width: 384px;
@@ -605,8 +631,8 @@ function startOidc() {
 }
 @media (min-width: 640px) {
   .lg-card {
-    padding-left: 88px;
-    padding-right: 88px;
+    padding-inline-start: 88px;
+    padding-inline-end: 88px;
   }
 }
 /* The short-viewport compaction lives in the unscoped block at the bottom of
@@ -666,10 +692,10 @@ function startOidc() {
   display: inline-block;
   height: 14px;
   width: 14px;
-  margin-right: 6px;
+  margin-inline-end: 6px;
   vertical-align: -2px;
   border: 2px solid currentColor;
-  border-right-color: transparent;
+  border-inline-end-color: transparent;
   border-radius: 999px;
   opacity: 0.6;
   animation: lg-spin 0.7s linear infinite;
@@ -727,7 +753,7 @@ function startOidc() {
   color: var(--fe-text-muted);
 }
 .lg-field__input {
-  margin-left: 16px;
+  margin-inline-start: 16px;
   min-width: 0;
   flex: 1;
   border: 0;
@@ -737,7 +763,7 @@ function startOidc() {
   color: var(--fe-text);
 }
 .lg-field__input--pw {
-  margin-right: 16px;
+  margin-inline-end: 16px;
 }
 .lg-field__input:focus {
   outline: none;
@@ -761,7 +787,7 @@ function startOidc() {
 
 .lg-2fa {
   margin-top: 12px;
-  text-align: right;
+  text-align: end;
 }
 .lg-link {
   padding: 0;
@@ -826,6 +852,16 @@ function startOidc() {
 }
 .lg-alert--form {
   margin: 24px 0 0;
+}
+/* Same box as .lg-alert, in the page's quiet voice: news, not an error. */
+.lg-note {
+  margin: 20px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-elev);
+  font-size: var(--fe-text-md);
+  color: var(--fe-text-muted);
 }
 .lg-alert code {
   font-family: var(--fe-font-mono);

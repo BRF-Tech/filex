@@ -1,0 +1,182 @@
+{
+  "granted": [
+    "files:read",
+    "files:write",
+    "public_pages",
+    "state"
+  ],
+  "manifest": {
+    "actions": [
+      {
+        "applies": {
+          "ext": [
+            "pdf"
+          ],
+          "kind": "file"
+        },
+        "confirm": {
+          "en": "Send it?",
+          "tr": "Gönderilsin mi?"
+        },
+        "id": "sign",
+        "label": {
+          "en": "Sign…",
+          "tr": "İmzala…"
+        },
+        "limits": {},
+        "output": {
+          "mode": "sibling",
+          "name": "{stem}-sign{ext}"
+        },
+        "view": "wizard"
+      }
+    ],
+    "description": {
+      "en": "Send a document out for signature.",
+      "tr": "Bir belgeyi imzaya gönderin."
+    },
+    "label": {
+      "en": "e-Signature",
+      "tr": "e-İmza"
+    },
+    "languages": [
+      "en",
+      "tr"
+    ],
+    "limits": {},
+    "manifest_version": 1,
+    "name": "sign",
+    "permission_reasons": {
+      "files:read": {
+        "en": "To read the document you sign or send.",
+        "tr": "İmzaladığınız ya da gönderdiğiniz belgeyi okumak için."
+      },
+      "files:write": {
+        "en": "To write the signed document beside the original.",
+        "tr": "İmzalı belgeyi özgün belgenin yanına yazmak için."
+      },
+      "public_pages": {
+        "en": "To let a signer without an account open their own link.",
+        "tr": "Hesabı olmayan bir imzacının kendi bağlantısını açabilmesi için."
+      }
+    },
+    "permissions": [
+      "files:read",
+      "files:write",
+      "public_pages",
+      "state"
+    ],
+    "public_pages": [
+      {
+        "id": "signer",
+        "label": {
+          "en": "Sign the document",
+          "tr": "Belgeyi imzala"
+        },
+        "pin": "optional"
+      }
+    ],
+    "settings": [
+      {
+        "key": "tsa_url",
+        "label": "Timestamp authority",
+        "type": "string"
+      }
+    ],
+    "version": "1.2.0",
+    "views": [
+      {
+        "applies": {
+          "kind": "file"
+        },
+        "id": "wizard",
+        "label": {
+          "en": "Signing",
+          "tr": "İmzalama"
+        },
+        "placement": "page"
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "admin_only": false,
+      "applies": null,
+      "enabled": true,
+      "id": "sign"
+    }
+  ],
+  "permissions": [
+    {
+      "id": "files:read",
+      "label": "Reads the contents of the files you pick",
+      "reason": {
+        "en": "To read the document you sign or send.",
+        "tr": "İmzaladığınız ya da gönderdiğiniz belgeyi okumak için."
+      }
+    },
+    {
+      "id": "files:write",
+      "label": "Writes files next to the one you pick, or as its new version",
+      "reason": {
+        "en": "To write the signed document beside the original.",
+        "tr": "İmzalı belgeyi özgün belgenin yanına yazmak için."
+      }
+    },
+    {
+      "id": "public_pages",
+      "label": "Creates time-limited, PIN-protected public pages for outside participants",
+      "reason": {
+        "en": "To let a signer without an account open their own link.",
+        "tr": "Hesabı olmayan bir imzacının kendi bağlantısını açabilmesi için."
+      }
+    },
+    {
+      "id": "state",
+      "label": "Keeps small per-file state records"
+    }
+  ],
+  "plugin": {
+    "actions": 1,
+    "created_at": "2026-09-20T10:00:00Z",
+    "description": {
+      "en": "Send a document out for signature.",
+      "tr": "Bir belgeyi imzaya gönderin."
+    },
+    "enabled": true,
+    "id": 7,
+    "kind": "app",
+    "label": {
+      "en": "e-Signature",
+      "tr": "e-İmza"
+    },
+    "name": "sign",
+    "permissions": [
+      "files:read",
+      "files:write",
+      "public_pages",
+      "state"
+    ],
+    "public_pages": 1,
+    "scheduled": false,
+    "sha256": "a9950e0d84a62a1b30c952736b097e5f3cde019564724dc3c0432a36f7c0d091",
+    "signed": true,
+    "source": "github",
+    "source_url": "https://github.com/BRF-Tech/filex-sign",
+    "state": "",
+    "updated_at": "2026-09-20T10:00:00Z",
+    "version": "1.2.0",
+    "views": 1
+  },
+  "schedule": null,
+  "setting_fields": [
+    {
+      "key": "tsa_url",
+      "label": "Timestamp authority",
+      "type": "string"
+    }
+  ],
+  "settings": {
+    "tsa_url": "https://freetsa.org/tsr"
+  }
+}

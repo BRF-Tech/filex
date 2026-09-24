@@ -30,7 +30,8 @@ import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { ApiToken } from '../types/Tokens';
 import { useLocale } from '../composables/useLocale';
 import { useTokens } from '../composables/useTokens';
-import { useScrolledX } from '../composables/useScrolledX';
+import DataTable, { type DataColumn } from './DataTable.vue';
+import type { ContextAction } from './ContextMenu.vue';
 import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
@@ -62,7 +63,6 @@ const emit = defineEmits<{
 
 const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
 const { t, formatDate } = useLocale(locale);
-const { scrolledX, onScroll } = useScrolledX();
 
 const { tokens, loading, error, canMint, revealed, load, create, remove, dismiss } = useTokens(
   props.config,
@@ -90,6 +90,14 @@ const scopeState = ref<Record<string, boolean>>({
 });
 const rootPath = ref('');
 const expiresInDays = ref<number | null>(null);
+
+/**
+ * ⚠⚠ Nothing ticked is not a request (owner's decision, v0.43.0): no door
+ * mints a token without an explicit list, and this form used to paper over
+ * an empty one with `|| 'read'` — a silent default, the very thing the rule
+ * removes. The button waits for a tick and says why.
+ */
+const noScope = computed(() => !FULL_SCOPES.some((s) => scopeState.value[s]));
 
 function buildScopes(): string {
   const parts = FULL_SCOPES.filter((s) => scopeState.value[s]) as string[];
@@ -133,9 +141,8 @@ async function mint(): Promise<void> {
   copied.value = false;
   try {
     if (props.full) {
-      // At least one verb, or the token can do nothing and the server's
-      // refusal would be about the wrong thing.
-      const scopes = buildScopes() || 'read';
+      if (noScope.value) return;
+      const scopes = buildScopes();
       await create({
         label: label.value.trim() || defaultLabel(),
         scopes,
@@ -160,6 +167,50 @@ async function mint(): Promise<void> {
   } finally {
     busy.value = false;
   }
+}
+
+/** The list's columns — the product's one table (DataTable). */
+const columns = computed<DataColumn<ApiToken>[]>(() => [
+  {
+    id: 'label',
+    label: t('conn.tokens.col.label'),
+    sortable: true,
+    width: 200,
+    format: (row) => row.label || '—',
+  },
+  { id: 'scopes', label: t('conn.tokens.col.scopes'), sortable: true, width: 200 },
+  {
+    id: 'used',
+    label: t('conn.tokens.col.used'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 140,
+    format: usedLabel,
+    sortValue: (row) => (row.last_used_at ? new Date(row.last_used_at).getTime() : null),
+  },
+]);
+
+/** The row's one verb, behind its one `Actions` control. ⚠ It keeps the
+ *  two-step confirmation it had as a loose button: the first pick arms it and
+ *  the label becomes "Confirm", the second pick revokes the token — which
+ *  also ends any session already open on it. */
+function rowActions(row: ApiToken): ContextAction[] {
+  return [
+    {
+      key: 'revoke',
+      label: confirming.value === row.id ? t('conn.tokens.confirm') : t('conn.tokens.revoke'),
+      icon: 'delete',
+      danger: true,
+      /* The whole control used to be `:disabled="busy"`; the table draws the
+         control, so the verb carries it — RowActions greys a button with
+         nothing usable behind it. */
+      disabled: busy.value,
+    },
+  ];
+}
+
+function onRowAction(key: string, row: ApiToken) {
+  if (key === 'revoke') void revoke(row);
 }
 
 async function revoke(row: ApiToken): Promise<void> {
@@ -241,6 +292,9 @@ function usedLabel(row: ApiToken): string {
           <input v-model="scopeState[s]" type="checkbox" :data-testid="`token-scope-${s}`" />
           <span>{{ s }}</span>
         </label>
+        <p v-if="noScope" class="fe-s3keys__hint fe-tokform__required" role="alert" data-testid="token-scopes-required">
+          {{ t('conn.tokens.scopesRequired') }}
+        </p>
       </fieldset>
 
       <label class="fe-tokform__field">
@@ -265,7 +319,7 @@ function usedLabel(row: ApiToken): string {
             data-testid="token-expiry"
           />
         </label>
-        <button class="fe-s3keys__btn" :disabled="busy" data-testid="token-mint" @click="mint">
+        <button class="fe-s3keys__btn" :disabled="busy || noScope" data-testid="token-mint" @click="mint">
           {{ t('conn.tokens.mint') }}
         </button>
       </div>
@@ -289,32 +343,29 @@ function usedLabel(row: ApiToken): string {
       </button>
     </div>
 
+    <!-- ⚠ THE table (DataTable — the explorer's own), not a table of its own.
+         This panel is reachable from the admin panel's Connections menu and
+         from the explorer, so its list resizes, sorts, hides and moves columns
+         and remembers that on the account (`conn.tokens`), like every other
+         table. The raised ground is the panel's own (`.fe-s3keys` sets
+         `--tbl-bg` once). -->
     <p v-if="loading" class="fe-s3keys__muted">…</p>
-    <div v-else-if="tokens.length" class="fe-s3keys__scroll" :class="{ 'is-scrolled-x': scrolledX }" @scroll.passive="onScroll">
-      <table class="fe-s3keys__table">
-        <thead>
-          <tr>
-            <th>{{ t('conn.tokens.col.label') }}</th>
-            <th>{{ t('conn.tokens.col.scopes') }}</th>
-            <th>{{ t('conn.tokens.col.used') }}</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in tokens" :key="row.id">
-            <td>{{ row.label || '—' }}</td>
-            <td><code>{{ row.scopes }}</code></td>
-            <td>{{ usedLabel(row) }}</td>
-            <td class="fe-s3keys__actions">
-              <button class="fe-s3keys__link is-danger" :disabled="busy" @click="revoke(row)">
-                {{ confirming === row.id ? t('conn.tokens.confirm') : t('conn.tokens.revoke') }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <p v-else-if="canMint" class="fe-s3keys__muted">{{ t('conn.tokens.empty') }}</p>
+    <DataTable
+      v-else
+      table-id="conn.tokens"
+      :columns="columns"
+      :rows="tokens"
+      row-key="id"
+      :locale="locale"
+      :empty="t('conn.tokens.empty')"
+      :row-actions="rowActions"
+      :row-actions-test-id="(row: ApiToken) => `api-token-actions-${row.id}`"
+      @row-action="(key: string, row: ApiToken) => onRowAction(key, row)"
+    >
+      <template #cell-scopes="{ row }">
+        <code class="tbl-mono">{{ row.scopes }}</code>
+      </template>
+    </DataTable>
 
     <!-- ⚠ Said next to the button rather than in a document nobody opens: a
          revoked token stops a session that is already open, not only the next

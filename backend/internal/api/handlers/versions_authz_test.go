@@ -276,3 +276,19 @@ func TestVersions_RestoreSnapshotsTheBytesItReplaces(t *testing.T) {
 	require.Equal(t, before+2, f.versionCount(t),
 		"snapshot_current with the guard installed must not record the same bytes twice")
 }
+
+// The history names WHICH file it is of. The admin "File history" page headed
+// the list "Node #31" — a number the operator had to have typed in themselves
+// (release-candidate sweep, 2026-09-21); the page now picks a file by search
+// and reads its name, path and storage from here.
+func TestVersions_ListNamesTheFile(t *testing.T) {
+	f := newVZFixture(t)
+	user := f.asRole(t, model.RoleUser, "reader@test.local")
+	status, body := doJSON(t, user, http.MethodGet,
+		f.srv.URL+"/api/files/versions?node_id="+xtItoa(f.node.ID), nil)
+	require.Equal(t, http.StatusOK, status, "%v", body)
+	node, _ := body["node"].(map[string]any)
+	require.Equal(t, f.node.Name, node["name"], "%v", body)
+	require.Equal(t, f.node.Path, node["path"], "%v", body)
+	require.Equal(t, f.storage.Name, node["storage_name"], "%v", body)
+}

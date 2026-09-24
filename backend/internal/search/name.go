@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"github.com/brf-tech/filex/backend/internal/namefold"
 )
 
 // indexSchemaVersion is the document schema this build writes. It is
@@ -32,7 +34,13 @@ import (
 // separator-blind half of a query cannot match them.
 //
 // v1 -> v2 (issue #15): added name_norm + path_norm.
-const indexSchemaVersion = "2"
+// v2 -> v3 (GitHub PR #46, v0.43.0): names are indexed composed and their
+// normalised copies folded by internal/namefold (the four i's one letter),
+// and a combining mark no longer splits a word. A v2 document holds a
+// decomposed name's words in pieces — `Gürel` as `gu rel` — which no query
+// word can match, and `IŞIK` as `işik` where the query `ışık` asks for
+// `ışık`.
+const indexSchemaVersion = "3"
 
 // indexVersionKey is the Bleve internal-KV key holding the above.
 const indexVersionKey = "filex:index_schema"
@@ -54,18 +62,29 @@ const indexVersionKey = "filex:index_schema"
 //
 // Letters and digits are kept by Unicode class, not by ASCII range, so
 // `rapor-şubat.txt` normalises to `rapor şubat txt` instead of losing its
-// Turkish characters.
+// Turkish characters. They are folded by internal/namefold — the one rule for
+// when two spellings are the same text, shared with the fallback's database
+// query, the scorer and tags — so `IŞIK`, `Işık` and `ışık` are one word
+// (`işik`), which strings.ToLower would have made two.
+//
+// The input is composed first (namefold.Canonical), and a combining mark is
+// kept as part of its word. Before, a decomposed `Gürel` — `Gu`, U+0308,
+// `rel` — normalised to the two words `gu rel`, because a mark is neither a
+// letter nor a digit. Composition removes most marks; the ones that survive
+// it have no precomposed form (every Devanagari vowel sign is one) and
+// belong to the letter before them just the same.
 func Normalize(s string) string {
+	s = namefold.Canonical(s)
 	var b strings.Builder
 	b.Grow(len(s))
 	pendingSpace := false
 	wrote := false
 	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r) {
 			if pendingSpace && wrote {
 				b.WriteByte(' ')
 			}
-			b.WriteRune(unicode.ToLower(r))
+			b.WriteRune(namefold.Rune(r))
 			pendingSpace = false
 			wrote = true
 			continue

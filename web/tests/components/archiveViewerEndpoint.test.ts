@@ -47,3 +47,22 @@ describe('ArchiveViewer', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/files/archive/list');
   });
 });
+
+/* ⚠ QA, 2026-09-21: the zip preview's size column read "1.9 KB" — base 1024,
+   a dot, English units — beside the explorer's "1,96 KB" for the same
+   bytes. It is the product's one byte formatter now. */
+describe('ArchiveViewer sizes', () => {
+  it('are written the way the interface language writes a size', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({ entries: [{ name: 'a.txt', size: 1960 }] }),
+    });
+    const w = mount(ArchiveViewer, {
+      props: { url: '/preview', filePath: 's3://docs/sample.zip', ext: 'zip', locale: 'tr', t: (k: string) => k },
+    });
+    await vi.waitFor(() => expect(w.text()).toContain('1,96'));
+    expect(w.text()).not.toContain('1.9 KB');
+  });
+});

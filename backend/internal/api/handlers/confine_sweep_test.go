@@ -247,7 +247,7 @@ func TestConfinement_NodeDataSurfaces(t *testing.T) {
 		require.NoError(t, f.store.SetUserNodeMeta(ctx, f.uid, f.outID, "starred", "1"))
 		require.NoError(t, f.store.SetUserNodeMeta(ctx, f.uid, f.outID, "opened",
 			strconv.FormatInt(time.Now().Unix(), 10)))
-		require.NoError(t, f.store.SetNodeTags(ctx, f.outID, []string{"secret"}))
+		testutil.TagNode(t, f.store, f.outID, 0, "secret")
 
 		_, body := f.get(t, "/api/files/manager/star/list")
 		assert.NotContains(t, body, "outside.txt", "starred listing leaked an out-of-root node")

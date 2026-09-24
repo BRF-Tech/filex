@@ -85,8 +85,17 @@ export async function exchangeCode(
     body: JSON.stringify({ state, code, verifier: pending.verifier }),
   });
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`exchange failed (${res.status})${body ? `: ${body.slice(0, 200)}` : ''}`);
+    const body = (await res.text().catch(() => '')).trim();
+    // The server answers `{"error": "…"}`; the person reads the sentence, not
+    // the JSON around it (it is shown on the sign-in window, issue #36).
+    let reason = body;
+    try {
+      const parsed = JSON.parse(body) as { error?: unknown };
+      if (typeof parsed?.error === 'string' && parsed.error) reason = parsed.error;
+    } catch {
+      /* not JSON — keep the text */
+    }
+    throw new Error(`exchange failed (${res.status})${reason ? `: ${reason.slice(0, 200)}` : ''}`);
   }
   return (await res.json()) as ExchangeResult;
 }

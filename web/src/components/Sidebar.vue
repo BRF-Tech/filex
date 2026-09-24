@@ -9,6 +9,7 @@ import {
   Database,
   Users,
   Settings,
+  Brush,
   PlugZap,
   ShieldCheck,
   ScrollText,
@@ -35,6 +36,8 @@ import {
 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import LogoMark from './LogoMark.vue';
+import { useAuthStore } from '@/stores/auth';
+import { usePluginHomeApps } from '@/composables/usePluginHomeApps';
 
 interface Props {
   open: boolean;
@@ -60,11 +63,44 @@ async function refreshTrash(): Promise<void> {
 onMounted(refreshTrash);
 watch(() => route.name, refreshTrash);
 
+/**
+ * The installed apps that have a screen of their own — the sidebar's "Apps"
+ * section. Only an administrator sees it (the panel is admin-only anyway, but
+ * the section says so itself rather than relying on the layout above it), and
+ * it is absent entirely when no running plugin ships a `home` view: a heading
+ * over nothing is a promise the deployment cannot keep.
+ *
+ * ⚠ Nothing here names a plugin. The signing app's request table reaches the
+ * panel because it is a `home` view, exactly like the next plugin's will.
+ */
+const auth = useAuthStore();
+const { apps: homeApps } = usePluginHomeApps();
+const appItems = computed<NavItem[]>(() =>
+  auth.isAdmin
+    ? homeApps.value.map((a) => ({
+        to: { name: 'admin-app', params: { plugin: a.plugin, view: a.view } },
+        label: a.label,
+        svg: a.svg,
+        group: 'apps' as const,
+        id: `app-${a.key}`,
+      }))
+    : [],
+);
+
 interface NavItem {
-  to: { name: string };
+  to: { name: string; params?: Record<string, string> };
   label: string;
-  icon: Component;
-  group: 'main' | 'access' | 'ops' | 'meta';
+  /** A panel page's icon: a Lucide component. */
+  icon?: Component;
+  /**
+   * An app row's icon instead: inline SVG from the core icon library, chosen
+   * by the manifest's icon NAME. ⚠ Static markup this repository wrote —
+   * never markup a plugin supplied — which is what makes `v-html` safe here.
+   */
+  svg?: string;
+  group: 'main' | 'apps' | 'access' | 'ops' | 'meta';
+  /** A stable key + test hook; defaults to the route name for a fixed page. */
+  id?: string;
 }
 
 const items = computed<NavItem[]>(() => [
@@ -80,6 +116,11 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'duplicates' }, label: t('nav.duplicates'), icon: CopyIcon, group: 'main' } /* bul:s3 */,
   { to: { name: 'tagged' }, label: t('nav.tagged'), icon: Tag, group: 'main' },
 
+  // An app is a PLACE you go, like a drive — not a setting. The explorer's
+  // own navigation panel puts its "Apps" rows in the same spot, right after
+  // the places, and the two sidebars should not disagree about that.
+  ...appItems.value,
+
   { to: { name: 'users' }, label: t('nav.users'), icon: Users, group: 'access' },
   { to: { name: 'grants' }, label: t('nav.grants'), icon: ShieldCheck, group: 'access' },
   {
@@ -92,6 +133,7 @@ const items = computed<NavItem[]>(() => [
 
   { to: { name: 'settings' }, label: t('nav.settings'), icon: Settings, group: 'ops' },
   { to: { name: 'branding' }, label: t('nav.branding'), icon: Palette, group: 'ops' } /* wiring:e1 */,
+  { to: { name: 'appearance' }, label: t('nav.appearance'), icon: Brush, group: 'ops' } /* tema:v1 */,
   { to: { name: 'protection' }, label: t('nav.protection'), icon: Shield, group: 'ops' } /* koru:k3 */,
   { to: { name: 'external' }, label: t('nav.external'), icon: PlugZap, group: 'ops' },
   { to: { name: 'replica' }, label: t('nav.replica'), icon: GitBranch, group: 'ops' },
@@ -106,16 +148,41 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'about' }, label: t('nav.about'), icon: Info, group: 'meta' },
 ]);
 
+/**
+ * ⚠ Built from the ORDER in `items`, not from a fixed list of group names:
+ * an empty group renders nothing at all (`v-for` over no entries and a
+ * heading that is only drawn when the group has rows), which is what keeps
+ * the Apps section from appearing as an empty heading on an installation
+ * with no plugins.
+ */
 const groups = computed(() => {
-  const map: Record<NavItem['group'], NavItem[]> = { main: [], access: [], ops: [], meta: [] };
+  const map: Record<NavItem['group'], NavItem[]> = {
+    main: [],
+    apps: [],
+    access: [],
+    ops: [],
+    meta: [],
+  };
   for (const it of items.value) map[it.group].push(it);
   return map;
 });
 
-function isActive(name: string): boolean {
+/** A group's heading, or '' for the ones that have never had one. */
+function groupLabel(group: string): string {
+  return group === 'apps' ? t('nav.apps') : '';
+}
+
+function isActive(item: NavItem): boolean {
   // Match self + child routes that declare `meta.parent`.
-  if (route.name === name) return true;
-  if (route.meta?.parent && route.meta.parent === name) return true;
+  if (route.name === item.to.name) {
+    // ⚠ Several app rows share ONE route name and differ only in their
+    // params; comparing the name alone would light up every app in the list
+    // whenever any one of them is open.
+    const params = item.to.params;
+    if (!params) return true;
+    return Object.entries(params).every(([k, v]) => String(route.params[k] ?? '') === v);
+  }
+  if (route.meta?.parent && route.meta.parent === item.to.name) return true;
   return false;
 }
 </script>
@@ -123,8 +190,9 @@ function isActive(name: string): boolean {
 <template>
   <aside
     :class="[
-      'fixed inset-y-0 left-0 z-40 w-64 transform bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 transition-transform lg:translate-x-0',
-      open ? 'translate-x-0' : '-translate-x-full',
+      'fixed inset-y-0 start-0 z-40 w-64 transform bg-white dark:bg-zinc-900 border-e border-zinc-200 dark:border-zinc-800 transition-transform lg:translate-x-0',
+      // ⚠ RTL: closed = pushed off the START edge, which is the right one there.
+      open ? 'translate-x-0' : '-translate-x-full rtl:translate-x-full',
     ]"
   >
     <div class="flex h-full flex-col">
@@ -151,24 +219,52 @@ function isActive(name: string): boolean {
       </div>
 
       <nav class="flex-1 overflow-y-auto px-2 py-3 space-y-4">
-        <div v-for="(list, group) in groups" :key="group">
-          <ul class="space-y-0.5">
-            <li v-for="item in list" :key="item.to.name">
-              <RouterLink
-                :to="item.to"
-                :class="['nav-link', isActive(item.to.name) && 'nav-link-active']"
-                @click="emit('close')"
-              >
-                <component :is="item.icon" class="h-4 w-4" />
-                <span class="truncate">{{ item.label }}</span>
-              </RouterLink>
-            </li>
-          </ul>
+        <!-- ⚠ The `v-if` sits on the INNER div, not beside the `v-for`: in
+             Vue 3 `v-if` wins that race and `list` would not exist yet. An
+             empty group must vanish completely — a heading over nothing is a
+             promise the deployment cannot keep. -->
+        <template
+          v-for="(list, group) in groups"
+          :key="group"
+        >
           <div
-            v-if="group !== 'meta'"
-            class="my-3 border-t border-zinc-200/70 dark:border-zinc-800/70"
-          />
-        </div>
+            v-if="list.length"
+            :data-testid="`nav-group-${group}`"
+          >
+            <p
+              v-if="groupLabel(group)"
+              class="nav-heading"
+            >
+              {{ groupLabel(group) }}
+            </p>
+            <ul class="space-y-0.5">
+              <li
+                v-for="item in list"
+                :key="item.id ?? item.to.name"
+              >
+                <RouterLink
+                  :to="item.to"
+                  :class="['nav-link', isActive(item) && 'nav-link-active']"
+                  :data-testid="`nav-${item.id ?? item.to.name}`"
+                  @click="emit('close')"
+                >
+                  <!-- eslint-disable-next-line vue/no-v-html, vue/max-attributes-per-line -- static markup from lib/actionIcons -->
+                  <span v-if="item.svg" class="nav-appicon" aria-hidden="true" v-html="item.svg"></span>
+                  <component
+                    :is="item.icon"
+                    v-else
+                    class="h-4 w-4"
+                  />
+                  <span class="truncate">{{ item.label }}</span>
+                </RouterLink>
+              </li>
+            </ul>
+            <div
+              v-if="group !== 'meta'"
+              class="my-3 border-t border-zinc-200/70 dark:border-zinc-800/70"
+            />
+          </div>
+        </template>
       </nav>
     </div>
   </aside>

@@ -34,8 +34,10 @@ describe('markdown list markers', () => {
     it(`${surface} ol draws a number`, () => {
       expect(declarationsFor(`${surface} ol`)).toMatch(/list-style(-type)?:\s*decimal/);
     });
+    // ⚠ On the START side — `padding-inline-start`: the marker hangs at the
+    // left of an English list and at the RIGHT of an Arabic one (RTL, v0.43.0).
     it(`${surface} lists are indented enough for the marker to show`, () => {
-      expect(declarationsFor(`${surface} ul`) + declarationsFor(`${surface} ol`)).toMatch(/padding-left:\s*2em/);
+      expect(declarationsFor(`${surface} ul`) + declarationsFor(`${surface} ol`)).toMatch(/padding-inline-start:\s*2em/);
     });
   }
 });

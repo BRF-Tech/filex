@@ -29,6 +29,9 @@ const props = defineProps<{
   t?: (key: string) => string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
+  /** Could this person set up draw.io (`capabilities.caller_admin`)? Picks
+   *  which sentence the "not configured" pane says — see `bootIfReady`. */
+  canConfigure?: boolean;
 }>();
 
 const iframeRef = ref<HTMLIFrameElement | null>(null);
@@ -76,7 +79,11 @@ async function loadXml(): Promise<void> {
       credentials: props.authCredentials,
     });
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'fetch failed';
+    /* ⚠ A sentence, never `${status} ${statusText} — <body>` (which is what
+       fetchViewerText's error carries). The detail goes to the console. */
+    console.warn('[filex] diagram could not be read', err);
+    error.value = tt('viewer.drawio.load_failed', 'This diagram could not be read. Download it to open it elsewhere.');
+    disabledPane = false;
     status.value = 'error';
   }
 }
@@ -100,14 +107,19 @@ async function persist(xml: string): Promise<void> {
       body: JSON.stringify({ path: props.filePath, content: xml }),
     });
     if (!res.ok) {
-      throw new Error(`${res.status} ${res.statusText}`);
+      /* ⚠ Never the HTTP layer on screen ("503 Service Unavailable" is what
+         this used to say when a save could not take its version snapshot). */
+      console.warn('[filex] diagram save failed', res.status, res.statusText);
+      throw new Error('save');
     }
     status.value = 'saved';
     setTimeout(() => {
       if (status.value === 'saved') status.value = 'ready';
     }, 2500);
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'save failed';
+    console.warn('[filex] diagram save failed', err);
+    error.value = tt('viewer.drawio.save_failed', 'The diagram could not be saved. Your changes are still in the editor — try again.');
+    disabledPane = false;
     status.value = 'error';
   }
 }
@@ -152,15 +164,29 @@ function onMessage(ev: MessageEvent): void {
   }
 }
 
+/** Is the pane on screen the "not configured" one (so a later answer that
+ *  draw.io IS there can clear it)? A flag, not a comparison with the text:
+ *  the text now depends on who is looking. */
+let disabledPane = false;
+
 function bootIfReady(): void {
   if (!drawioBase.value) {
-    error.value = tt('viewer.drawio.disabled', 'diagrams.net is not configured for this filex instance.');
+    /* The owner's rule for a missing service (2026-09-21): whoever can fix
+       it is told where; everybody else is told what they can do instead.
+       ⚠ The old sentence named an ENVIRONMENT VARIABLE to every reader —
+       "operator must wire FILEX_DRAWIO_URL" — which is a riddle to a person
+       who only wanted to look at a diagram. */
+    error.value = props.canConfigure
+      ? tt('viewer.drawio.disabled_admin', 'draw.io is not set up on this server. Set it up in the admin panel under External services.')
+      : tt('viewer.drawio.disabled', 'Diagrams cannot be opened here: this server has no draw.io. Download the file to open it elsewhere.');
+    disabledPane = true;
     status.value = 'error';
     return;
   }
-  // Clear a previous "disabled" error in case the prop just became
-  // available (capability probe finished after mount).
-  if (error.value === tt('viewer.drawio.disabled', 'diagrams.net is not configured for this filex instance.')) {
+  // Clear a previous "disabled" pane in case the prop just became available
+  // (capability probe finished after mount).
+  if (disabledPane) {
+    disabledPane = false;
     error.value = null;
     status.value = 'loading';
   }
@@ -204,7 +230,7 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
       ref="iframeRef"
       :src="iframeSrc"
       class="filex-viewer-drawio__frame"
-      title="diagrams.net editor"
+      title="draw.io"
     />
   </div>
 </template>
@@ -240,7 +266,7 @@ const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ex
 .filex-viewer-drawio__status[data-state="saved"] { color: #059669; }
 .filex-viewer-drawio__readonly {
   font-style: italic;
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 .filex-viewer-drawio__frame {
   flex: 1;

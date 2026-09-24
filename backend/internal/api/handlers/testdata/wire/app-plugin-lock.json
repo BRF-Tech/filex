@@ -1,0 +1,16 @@
+{
+  "labelled": {
+    "plugin": "sign",
+    "plugin_label": {
+      "en": "e-Signature",
+      "tr": "e-İmza"
+    },
+    "reason": "signatures are being collected",
+    "until": "2026-09-30T15:08:00Z"
+  },
+  "unlabelled": {
+    "plugin": "ghost",
+    "reason": "signatures are being collected",
+    "until": "2026-09-30T15:08:00Z"
+  }
+}

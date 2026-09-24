@@ -232,4 +232,25 @@ describe('webhook event catalogue', () => {
       expect(problems, problems.join('\n')).toEqual([]);
     });
   }
+
+  // ── the fourth: what KIND of event a row is, on the admin list ─────────
+  //
+  // ⚠ The admin notifications page printed the raw id in its Event column —
+  // `share.created`, `update_available` — beside a Turkish sentence
+  // (release-candidate sweep, 2026-09-21). Every id the backend declares,
+  // dotted or not, plus the two test ids the admin screens fire, needs a short
+  // name in both languages, or the column is back to wire format for that one.
+  const allFromGo = [...source.matchAll(/^\s*Event\w*\s+EventType\s*=\s*"([^"]+)"/gm)].map((m) => m[1]);
+  for (const [name, bundle] of locales) {
+    it(`names every event kind for the admin list in ${name}`, () => {
+      const missing: string[] = [];
+      for (const ev of [...allFromGo, 'admin_test', 'webhook_test']) {
+        const key = `notifications.kinds.${ev.replace(/\./g, '_')}`;
+        const label = lookup(bundle, key);
+        if (!label || !label.trim() || label.trim() === ev) missing.push(`${ev} (${key})`);
+      }
+      expect(allFromGo.length, 'parsed no EventType constants at all').toBeGreaterThan(15);
+      expect(missing, missing.join('\n')).toEqual([]);
+    });
+  }
 });

@@ -28,12 +28,14 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
+	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/identitystore"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
+	"github.com/brf-tech/filex/backend/internal/secretbox"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
@@ -202,6 +204,16 @@ func NewTestServerWith(t *testing.T, cfgMutate func(*config.Config), depsMutate 
 		cfgMutate(&cfg)
 	}
 
+	// ⚠ The SAME line internal/server.New runs (server.go → AttachSecret). The
+	// instance secret signs the PIN unlock cookie and, since migration 00049,
+	// seals a share's PIN so its owner and an admin can be shown it again.
+	// Without this the harness measured an instance that has NO
+	// FILEX_SECRET_KEY on every test — a harness that quietly differs from
+	// production is how a suite goes green over a broken feature. Inert when
+	// the config carries no key, which is the default.
+	shareSvc := share.NewService(store)
+	shareSvc.AttachSecret(cfg.SecretKey)
+
 	deps := &api.Deps{
 		Cfg:   cfg,
 		Store: store,
@@ -212,11 +224,35 @@ func NewTestServerWith(t *testing.T, cfgMutate func(*config.Config), depsMutate 
 		Quota:           accounting.Quota(),
 		Worker:          worker,
 		Caps:            caps,
-		Share:           share.NewService(store),
+		Share:           shareSvc,
 		StorageResolver: resolver,
 		Embed:           embed.FS{},
-		LocalAuth:       localDrv,
 	}
+	// Sign-in as the server wires it (internal/server → authsetup): `local`
+	// as the environment's provider, the Identity providers page's on top,
+	// and the handlers holding the running set's proxies — so a provider
+	// switched on through the page in a test is reachable the way it is in
+	// production.
+	box, err := secretbox.New(cfg.SecretKey)
+	if err != nil {
+		t.Fatalf("testutil: secret box: %v", err)
+	}
+	live, err := authsetup.New(context.Background(), authsetup.Options{
+		Store: store, Box: box, MultiTenant: cfg.MultiTenant,
+		RecoveryLogin: cfg.Auth.RecoveryLogin, PublicURL: cfg.PublicURL,
+	}, []authsetup.Entry{authsetup.NewEnvEntry("local", "the test harness", nil, localDrv, nil, false)})
+	if err != nil {
+		t.Fatalf("testutil: auth: %v", err)
+	}
+	live.Start(context.Background())
+	live.OnSwap(func(set *authsetup.Set) {
+		caps.SetAuthDrivers(set.Names())
+		caps.SetRecoveryLogin(set.Recovery())
+	})
+	deps.AuthLive = live
+	deps.LocalAuth = live.Login()
+	deps.OIDCAuth = live.OIDC()
+	deps.Directory = live.Dir()
 	if depsMutate != nil {
 		depsMutate(deps)
 	}

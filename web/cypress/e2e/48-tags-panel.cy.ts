@@ -21,9 +21,10 @@
 
 const STORAGE = () => (Cypress.env('SEEDED_STORAGE') as string) || '';
 
-/** Lower case on purpose: `Meta.SetTags` lower-cases every tag it stores, so a
- *  fixture with a capital would be asserting against a name the server never
- *  keeps. */
+/** Since v0.43 a tag keeps its capitals (the server lower-cased them before);
+ *  lower case here only keeps the test id plain. It is written as a TEAM tag —
+ *  the kind a tag had to be to show in everybody's panel, and the kind whose
+ *  view address is `.teamtag~` (a personal one would be `.mytag~`). */
 const TAG = 'cypressinvoices';
 const FIXTURE = 'cypress-tagged-fixture.txt';
 
@@ -59,7 +60,7 @@ describe('tags in the navigation panel', () => {
           method: 'POST',
           url: '/api/files/manager/tags',
           headers: h,
-          body: { node_id: row.id, tags: [TAG] },
+          body: { node_id: row.id, items: [{ name: TAG, kind: 'team' }] },
         })
           .its('status')
           .should('eq', 200);
@@ -109,10 +110,10 @@ describe('tags in the navigation panel', () => {
     );
     // The address bar carries the sentinel — that is what makes the view a
     // shareable deep link (`pathPersist: 'hash+localStorage'`).
-    cy.hash().should('include', `.tag~${TAG}`);
+    cy.hash().should('include', `.teamtag~${TAG}`);
     // …and nothing on screen prints it.
     cy.get('.fe').should(($fe) => {
-      expect($fe.text(), 'no raw tag sentinel on screen').to.not.include('.tag~');
+      expect($fe.text(), 'no raw tag sentinel on screen').to.not.include('tag~');
     });
     cy.get('.fe-breadcrumb').should('contain.text', `#${TAG}`);
   });

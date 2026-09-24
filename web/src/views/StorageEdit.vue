@@ -13,6 +13,7 @@ import {
 
 import { StoragesApi } from '@/api/storages';
 import { useStoragesStore } from '@/stores/storages';
+import { useStorageDriversStore } from '@/stores/storageDrivers';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { DriftReport, StorageRef, SyncRun } from '@/api/types';
@@ -25,18 +26,22 @@ import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Spinner from '@/components/ui/Spinner.vue';
-import Table from '@/components/ui/Table.vue';
+import { DataTable, StorageTags, type DataColumn } from '@brftech/filex-core';
+import { syncStateLabel, syncTone } from '@/lib/syncTone';
 import StorageDriverFields from '@/components/StorageDriverFields.vue';
 
 const { t, locale } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const storages = useStoragesStore();
+const drivers = useStorageDriversStore();
 const toast = useToastStore();
 
 const id = computed(() => Number(route.params.id));
 const item = ref<StorageRef | null>(null);
 const loading = ref(true);
+/** How many files this storage counts — the number "{n} files" agrees with. */
+const fileCount = computed(() => item.value?.stats?.file_count ?? item.value?.file_count ?? 0);
 
 const name = ref('');
 const enabled = ref(true);
@@ -45,6 +50,8 @@ const rbacEnabled = ref(false);
 /** Poll cadence in minutes; '' = the server default. Seconds on the wire. */
 const syncIntervalMin = ref<number | ''>('');
 const config = ref<Record<string, unknown>>({});
+/** The storage's scan settings (issue #44), kept in the same config map. */
+const scanFields = computed(() => drivers.scanFields(item.value?.driver));
 
 // Renaming is not cosmetic: the name is the first path segment on every file
 // protocol, so a mount or bookmark that used the old one stops resolving. The
@@ -180,25 +187,10 @@ async function test() {
   }
 }
 
-const stateTone = (s: string) => {
-  switch (s) {
-    case 'ok':
-      return 'emerald';
-    case 'error':
-      return 'rose';
-    case 'running':
-      return 'sky';
-    case 'aborted':
-      return 'amber';
-    default:
-      return 'zinc';
-  }
-};
-
 function rowDuration(r: SyncRun): string {
   if (!r.finished_at) return '—';
   const ms = new Date(r.finished_at).getTime() - new Date(r.started_at).getTime();
-  return formatDuration(ms / 1000);
+  return formatDuration(ms / 1000, locale.value);
 }
 
 // Defensive zero-fill so rows with missing fields render "0"
@@ -207,13 +199,62 @@ function num(n: number | null | undefined): string {
   return typeof n === 'number' && Number.isFinite(n) ? String(n) : '0';
 }
 
-const runColumns = computed(() => [
-  { key: 'started_at', label: t('sync.fields.started'), format: (r: SyncRun) => r.started_at ? formatDate(r.started_at, locale.value) : '—' },
-  { key: 'duration', label: t('sync.fields.duration'), format: rowDuration },
-  { key: 'state', label: t('sync.fields.state'), cell: 'slot' as const },
-  { key: 'added', label: '+', align: 'right' as const, format: (r: SyncRun) => num(r.added) },
-  { key: 'updated', label: '~', align: 'right' as const, format: (r: SyncRun) => num(r.updated) },
-  { key: 'deleted', label: '-', align: 'right' as const, format: (r: SyncRun) => num(r.deleted) },
+/** How long a run took, in ms — what the Duration column SORTS by, so "2m"
+ *  lands after "45s" rather than before it. Unfinished runs sort last. */
+function runMs(r: SyncRun): number | null {
+  if (!r.finished_at) return null;
+  return new Date(r.finished_at).getTime() - new Date(r.started_at).getTime();
+}
+
+/* The explorer's table (DataTable), remembered on the account under
+ * `admin.storage.runs`. The last ten runs are all on screen, so sorting them
+ * is honest. */
+const runColumns = computed<DataColumn<SyncRun>[]>(() => [
+  {
+    id: 'started_at',
+    label: t('sync.fields.started'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 170,
+    format: (r: SyncRun) => (r.started_at ? formatDate(r.started_at, locale.value) : '—'),
+    sortValue: (r: SyncRun) => (r.started_at ? Date.parse(r.started_at) : null),
+  },
+  {
+    id: 'duration',
+    label: t('sync.fields.duration'),
+    sortable: true,
+    width: 110,
+    format: rowDuration,
+    sortValue: runMs,
+  },
+  { id: 'state', label: t('sync.fields.state'), sortable: true, width: 110, sortValue: (r) => syncStateLabel(r.state, t) },
+  {
+    id: 'added',
+    label: '+',
+    align: 'right',
+    sortable: true,
+    width: 70,
+    format: (r: SyncRun) => num(r.added),
+    sortValue: (r: SyncRun) => r.added ?? 0,
+  },
+  {
+    id: 'updated',
+    label: '~',
+    align: 'right',
+    sortable: true,
+    width: 70,
+    format: (r: SyncRun) => num(r.updated),
+    sortValue: (r: SyncRun) => r.updated ?? 0,
+  },
+  {
+    id: 'deleted',
+    label: '-',
+    align: 'right',
+    sortable: true,
+    width: 70,
+    format: (r: SyncRun) => num(r.deleted),
+    sortValue: (r: SyncRun) => r.deleted ?? 0,
+  },
 ]);
 
 onMounted(load);
@@ -234,14 +275,13 @@ onMounted(load);
       <div class="min-w-0">
         <h1 class="text-xl font-semibold flex items-center gap-2">
           {{ item.name }}
-          <Badge size="xs">
-            {{ item.driver }}
-          </Badge>
+          <StorageTags :driver="item.driver" :read-only="item.read_only" :enabled="item.enabled" :locale="locale" />
         </h1>
         <p class="text-sm text-zinc-500 dark:text-zinc-400">
           {{ formatBytes(item.stats?.total_size_bytes ?? item.total_bytes ?? 0, locale) }} ·
-          {{ formatNumber(item.stats?.file_count ?? item.file_count ?? 0, locale) }}
-          {{ t('storages.filesUnit') }}
+          <!-- ⚠ The count is IN the message ("{n} files"), with its plural
+               forms — see Storages.vue, which draws the same line. -->
+          {{ t('storages.fileCount', { n: formatNumber(fileCount, locale) }, fileCount) }}
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -292,7 +332,7 @@ onMounted(load);
         </p>
         <button
           type="button"
-          class="font-mono break-all text-left w-full rounded bg-zinc-100 dark:bg-zinc-800 px-2 py-1 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+          class="font-mono break-all text-start w-full rounded bg-zinc-100 dark:bg-zinc-800 px-2 py-1 hover:bg-zinc-200 dark:hover:bg-zinc-700"
           :title="t('common.copy')"
           @click="copyUID"
         >
@@ -334,6 +374,14 @@ onMounted(load);
         v-model="config"
         :driver="item.driver"
       />
+      <template v-if="scanFields.length">
+        <hr class="divider" />
+        <StorageDriverFields
+          v-model="config"
+          :fields="scanFields"
+          data-testid="storage-scan-fields"
+        />
+      </template>
 
       <div
         v-if="testResult"
@@ -395,21 +443,20 @@ onMounted(load);
           <RefreshCcw class="h-3.5 w-3.5" />
         </Button>
       </header>
-      <Table
+      <DataTable
+        table-id="admin.storage.runs"
         :columns="runColumns"
         :rows="runs"
+        row-key="id"
         :loading="runsLoading"
         :empty="t('sync.noResults')"
       >
         <template #cell-state="{ row }">
-          <Badge
-            :tone="stateTone((row as SyncRun).state)"
-            size="xs"
-          >
-            {{ (row as SyncRun).state }}
+          <Badge :tone="syncTone((row as SyncRun).state)" size="xs" data-testid="storage-run-state">
+            {{ syncStateLabel((row as SyncRun).state, t) }}
           </Badge>
         </template>
-      </Table>
+      </DataTable>
     </section>
 
     <section class="card">
@@ -445,7 +492,7 @@ onMounted(load);
         >
           <div>
             <p class="text-xs text-zinc-500">
-              Missing in DB
+              {{ t('storages.drift.missingInDb') }}
             </p>
             <p class="font-semibold">
               {{ drift.missing_in_db }}
@@ -453,7 +500,7 @@ onMounted(load);
           </div>
           <div>
             <p class="text-xs text-zinc-500">
-              Missing in storage
+              {{ t('storages.drift.missingInStorage') }}
             </p>
             <p class="font-semibold">
               {{ drift.missing_in_storage }}
@@ -461,7 +508,7 @@ onMounted(load);
           </div>
           <div>
             <p class="text-xs text-zinc-500">
-              Size mismatch
+              {{ t('storages.drift.sizeMismatch') }}
             </p>
             <p class="font-semibold">
               {{ drift.size_mismatch }}
@@ -469,7 +516,7 @@ onMounted(load);
           </div>
           <div>
             <p class="text-xs text-zinc-500">
-              Hash mismatch
+              {{ t('storages.drift.hashMismatch') }}
             </p>
             <p class="font-semibold">
               {{ drift.hash_mismatch }}

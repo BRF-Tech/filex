@@ -9,6 +9,7 @@ import {
 } from '@/api/external';
 import type { ExternalService } from '@/api/types';
 import { extractError } from '@/api/client';
+import { t } from '@/i18n';
 
 /**
  * Three machines must reach three addresses before the Office editor works:
@@ -56,7 +57,7 @@ export const useExternalServicesStore = defineStore('external-services', () => {
       items.value = await ExternalApi.list();
       publicUrl.value = externalPublicURL();
     } catch (e: unknown) {
-      error.value = extractError(e, 'Failed to load external services');
+      error.value = extractError(e, t('errors.loadFailed'));
     } finally {
       loading.value = false;
     }

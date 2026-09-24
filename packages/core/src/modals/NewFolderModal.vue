@@ -3,6 +3,7 @@ import { ref, watch } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
+import { isInternalName } from '../lib/internalPaths';
 import Modal from './Modal.vue';
 
 const props = defineProps<{
@@ -40,6 +41,13 @@ function submit() {
   }
   if (/[\\/]/.test(clean) || clean === '.' || clean === '..') {
     err.value = t('modal.newfolder.invalid');
+    return;
+  }
+  // The server refuses these (403 RESERVED_NAME, handlers/reserved_guard.go)
+  // in English; saying it here, in the reader's language, is the courtesy —
+  // the server is still the check.
+  if (isInternalName(clean)) {
+    err.value = t('names.reserved', { name: clean });
     return;
   }
   emit('submit', clean);

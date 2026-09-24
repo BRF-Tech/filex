@@ -1,204 +1,625 @@
 /**
- * Every admin table pins its actions column to the right edge, the way the
- * explorer's list view pins its ⋮ column.
+ * ONE TABLE IN THE PRODUCT, and it is the explorer's.
  *
- * The owner asked for it verbatim (2026-09-19): "admin panelinde bütün
- * tablolarımızda işlemler bölgesi sağda sabit kalsın, file explorer içindeki
- * tablolarımız gibi". Until then a table wider than its card scrolled the
- * buttons out of view first — at 700px the Users list needed a sideways
- * scroll to reach Edit/Delete at all.
+ * The owner, 2026-09-21, verbatim:
  *
- * Three things have to stay true, and each has a test below:
- *   1. ui/Table.vue marks the `actions` column pinned by default (header,
- *      filter row and body cells alike), lets a column opt in with
- *      `pinned: 'right'` and lets `actions` opt out with `pinned: null`.
- *   2. Its wrapper is the shared TableScroll, which flips `is-scrolled-x` on
- *      real sideways scroll — the only time the pinned cell draws its edge.
- *   3. The hand-rolled admin tables ride the same two classes, so the shared
- *      table and a `<table>` written by hand cannot drift apart. That half is
- *      a source scan: a view with an actions column and no `tbl-actions` is a
- *      regression, whatever it looks like.
+ *   "Artık explore tablomuz bizim her yerde kullanacağımız tablo yapısıdır;
+ *    bir yere tablo gerekiyorsa bu tabloyu koymak zorundayız. Bunu kural
+ *    olarak yazalım, çok önemli bir kural."
+ *   "Admin tabloları hâlâ explore tablolarıyla AYNI KODDA DEĞİL. LÜTFEN AYNI
+ *    KODA ALALIM. Örnek veriyorum: tablo sütunları düzenlenebilir değil,
+ *    büyütme küçültme yok, sıralama yok."
  *
- * The geometry itself (sticky cell inside the viewport at 700px, still
- * clickable) is measured in a real browser: cypress/e2e/41-users-crud.cy.ts.
+ * The history this file carries, because it is the reason for every check:
+ *
+ *   2026-09-19 — "admin panelinde bütün tablolarımızda işlemler bölgesi sağda
+ *   sabit kalsın" was answered by teaching each hand-rolled `<table>` two
+ *   classes, and a scan kept them in step.
+ *   2026-09-20 — "biri anya biri konya" was answered by `ui/Table.vue`: ONE
+ *   admin table… that IMITATED the explorer's list (the same frozen edges,
+ *   the same Actions menu) and got only the parts somebody copied. Resizing,
+ *   sorting, the column menu and remembering all lived in the explorer's code
+ *   and never reached it. This file then asserted `ui/Table.vue`'s classes —
+ *   i.e. it GUARDED THE IMITATION.
+ *   2026-09-21 — the table is `packages/core/src/components/DataTable.vue`:
+ *   the explorer's list view with the files taken out of it. The explorer's
+ *   own listing renders through it, and so does every other table. The
+ *   imitation is deleted.
+ *
+ * What is measured here, in order:
+ *   1. DataTable's own contract — the capabilities every table gets: the lead
+ *      frozen left and ONE Actions control right, sorting (and the honest
+ *      refusal to sort one page of a paged list), resizing, the column menu,
+ *      and remembering the arrangement per table.
+ *   2. The explorer's listing IS DataTable — no second copy beside it.
+ *   3. THE SOURCE SCAN over BOTH trees (web/src AND packages/core/src — the
+ *      blind spot of 2026-09-20 was scanning only one): no `<table>`, no
+ *      table markup or table roles outside DataTable, no imitation left
+ *      behind, and every DataTable carries a table id of its own.
+ *   4. The stylesheet: the `fe-list` rules are the table's, the `.tbl` table
+ *      rules are gone, and nothing carries a colour a palette cannot move.
+ *
+ * The geometry (a sticky cell inside the viewport at 700px, still clickable)
+ * is measured in a real browser: web/cypress/e2e/41-users-crud.cy.ts.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { nextTick } from 'vue';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-import Table, { type Column } from '@/components/ui/Table.vue';
-import TableScroll from '@/components/ui/TableScroll.vue';
+import DataTable from '@brftech/filex-core/src/components/DataTable.vue';
+import ListView from '@brftech/filex-core/src/components/ListView.vue';
+import {
+  __flushViewPrefs,
+  __resetViewPrefs,
+  attachViewPrefsStore,
+} from '@brftech/filex-core/src/lib/viewPrefs';
 
-type Row = { id: number; name: string; actions?: unknown };
+type Row = { id: number; name: string; size: number };
 
-const rows: Row[] = [
-  { id: 1, name: 'alpha' },
-  { id: 2, name: 'beta' },
+const ROWS: Row[] = [
+  { id: 1, name: 'beta', size: 20 },
+  { id: 2, name: 'Alpha', size: 300 },
+  { id: 3, name: 'gamma', size: 1 },
 ];
 
-function mountTable(columns: Column<Row>[], extra: Record<string, unknown> = {}) {
-  return mount(Table, {
-    props: { columns, rows, rowKey: 'id', ...extra },
-    slots: {
-      'cell-actions': '<button type="button" class="row-action">edit</button>',
-      'filter-name': '<input class="name-filter" />',
-      'filter-actions': '<span class="actions-filter" />',
-      filters: '<span />',
-    },
+const COLUMNS = [
+  { id: 'name', label: 'Name', sortable: true, width: 200 },
+  { id: 'size', label: 'Size', sortable: true, width: 100, align: 'right' as const },
+];
+
+const settle = () => new Promise<void>((r) => setTimeout(r, 0));
+
+const mounted: { unmount(): void }[] = [];
+function draw(extra: Record<string, unknown> = {}) {
+  const w = mount(DataTable, {
+    props: { columns: COLUMNS, rows: ROWS, rowKey: 'id', tableId: 'test.table', ...extra },
   });
+  mounted.push(w);
+  return w;
 }
 
-describe('ui/Table.vue — pinned actions column', () => {
-  it('pins the `actions` column by default: header, filter row and every body cell', () => {
-    const w = mountTable([
-      { key: 'name', label: 'Name' },
-      { key: 'actions', label: 'Actions', cell: 'slot', align: 'right', width: '180px' },
-    ]);
+/** A row's (or the header's) own cells, in order — `:scope` is not reliable
+ *  in the test DOM, so the children are read directly. */
+function cellsOf(el: Element): Element[] {
+  return Array.from(el.children).filter((c) => c.classList.contains('fe-list__col'));
+}
 
-    const ths = w.findAll('thead tr:first-child th');
-    expect(ths).toHaveLength(2);
-    expect(ths[0].classes()).not.toContain('tbl-actions');
-    expect(ths[1].classes()).toContain('tbl-actions');
-    // The header keeps its alignment and width — pinning changes neither.
-    expect(ths[1].classes()).toContain('text-right');
-    expect(ths[1].attributes('style')).toContain('180px');
+function names(w: ReturnType<typeof draw>): string[] {
+  return w.findAll('.fe-list__row').map((r) => r.find('.fe-list__col--lead').text());
+}
 
-    const filterThs = w.findAll('thead tr:nth-child(2) th');
-    expect(filterThs).toHaveLength(2);
-    expect(filterThs[1].classes()).toContain('tbl-actions');
-    expect(filterThs[0].classes()).not.toContain('tbl-actions');
+beforeEach(() => {
+  __resetViewPrefs();
+});
+afterEach(() => {
+  // Unmount, never wipe <body>: a wiped body under a live component makes
+  // its next update throw, and the column menu is teleported there.
+  while (mounted.length) mounted.pop()!.unmount();
+});
 
-    const bodyRows = w.findAll('tbody tr');
-    expect(bodyRows).toHaveLength(rows.length);
-    for (const tr of bodyRows) {
-      const tds = tr.findAll('td');
-      expect(tds[0].classes()).not.toContain('tbl-actions');
-      expect(tds[1].classes()).toContain('tbl-actions');
-      expect(tds[1].find('button.row-action').exists()).toBe(true);
-      // The pinned cell paints with the row's own ground, so the row has to
-      // have one — and an opaque one (a translucent hover lets the columns
-      // sliding underneath show through).
-      expect(tr.classes()).toContain('bg-white');
-      expect(tr.classes()).toContain('dark:bg-zinc-900');
-      expect(tr.classes().join(' ')).not.toMatch(/\/\d+\b/);
+describe('DataTable — the frozen edges', () => {
+  it('draws the lead first and marks it the lead, in the header and in every row', () => {
+    const w = draw();
+    const head = cellsOf(w.find('.fe-list__head').element);
+    expect(head[0].classList.contains('fe-list__col--lead')).toBe(true);
+    expect(head[0].getAttribute('data-col')).toBe('name');
+    for (const r of w.findAll('.fe-list__row')) {
+      expect(cellsOf(r.element)[0].classList.contains('fe-list__col--lead')).toBe(true);
     }
   });
 
-  it('`pinned: "right"` pins any column; `pinned: null` unpins `actions`', () => {
-    const w = mountTable([
-      { key: 'name', label: 'Name', pinned: 'right' },
-      { key: 'actions', label: 'Actions', cell: 'slot', pinned: null },
-    ]);
-    const ths = w.findAll('thead tr:first-child th');
-    expect(ths[0].classes()).toContain('tbl-actions');
-    expect(ths[1].classes()).not.toContain('tbl-actions');
-    const tds = w.findAll('tbody tr:first-child td');
-    expect(tds[0].classes()).toContain('tbl-actions');
-    expect(tds[1].classes()).not.toContain('tbl-actions');
+  it('a `lead: true` column is drawn first wherever it was declared', () => {
+    const w = draw({ columns: [COLUMNS[1], { ...COLUMNS[0], lead: true }] });
+    expect(cellsOf(w.find('.fe-list__head').element)[0].getAttribute('data-col')).toBe('name');
   });
 
-  it('wraps the table in the shared TableScroll and lets it grow past the card', () => {
-    const w = mountTable([
-      { key: 'name', label: 'Name' },
-      { key: 'actions', label: 'Actions', cell: 'slot' },
-    ]);
-    const scroll = w.findComponent(TableScroll);
-    expect(scroll.exists()).toBe(true);
-    expect(scroll.classes()).toContain('tbl-scroll');
-    expect(scroll.classes()).not.toContain('is-scrolled-x');
-    // The table is a direct child of the scroll container: the stylesheet's
-    // `.tbl-scroll > table { min-width: max-content }` is what lets it be
-    // wider than the card instead of squeezing its columns.
-    expect(Array.from(scroll.element.children).some((c) => c.tagName === 'TABLE')).toBe(true);
-  });
-
-  it('empty and loading rows span every column and are never pinned', () => {
-    const cols: Column<Row>[] = [
-      { key: 'name', label: 'Name' },
-      { key: 'actions', label: 'Actions', cell: 'slot' },
-    ];
-    const empty = mount(Table, { props: { columns: cols, rows: [], empty: 'nothing' } });
-    const td = empty.find('tbody td');
-    expect(td.attributes('colspan')).toBe('2');
-    expect(td.classes()).not.toContain('tbl-actions');
-    expect(td.text()).toBe('nothing');
-
-    const loading = mount(Table, { props: { columns: cols, rows: [], loading: true } });
-    expect(loading.find('tbody td').classes()).not.toContain('tbl-actions');
+  it('ends every row in the trailing column — ONE Actions control when the row has verbs', () => {
+    const w = draw({
+      rowActions: (r: Row) => (r.id === 3 ? [] : [{ key: 'edit', label: 'Edit' }]),
+    });
+    const rows = w.findAll('.fe-list__row');
+    for (const r of rows) {
+      const cells = cellsOf(r.element);
+      expect(cells[cells.length - 1].classList.contains('fe-list__col--menu')).toBe(true);
+    }
+    // A row with verbs: exactly one control. A row with NONE: no control —
+    // a disabled "Actions" over nothing is a promise the row cannot keep.
+    const byName = (n: string) => rows.find((r) => r.find('.fe-list__col--lead').text() === n)!;
+    expect(byName('beta').findAll('.tbl-rowactions__btn')).toHaveLength(1);
+    expect(byName('gamma').findAll('.tbl-rowactions__btn')).toHaveLength(0);
+    // The header's trailing cell is the column menu, the same ⋮ the explorer has.
+    const head = cellsOf(w.find('.fe-list__head').element);
+    expect(head[head.length - 1].querySelector('.fe-list__colmenu-btn')).not.toBeNull();
   });
 });
 
-describe('ui/TableScroll.vue — the divider only while scrolled sideways', () => {
-  it('flips `is-scrolled-x` with scrollLeft', async () => {
-    const w = mount(TableScroll, { slots: { default: '<table><tbody><tr><td>x</td></tr></tbody></table>' } });
-    const el = w.element as HTMLElement;
-    expect(w.classes()).toContain('tbl-scroll');
-    expect(w.classes()).not.toContain('is-scrolled-x');
+describe('DataTable — sorting, honestly', () => {
+  it('a header click sorts the rows, a second click reverses them, and aria-sort says so', async () => {
+    const w = draw();
+    expect(names(w)).toEqual(['beta', 'Alpha', 'gamma']);
+    const btn = w.find('.fe-list__head [data-col="name"] button.fe-list__sort');
+    await btn.trigger('click');
+    // The viewer's collation, case-insensitive.
+    expect(names(w)).toEqual(['Alpha', 'beta', 'gamma']);
+    expect(w.find('.fe-list__head [data-col="name"]').attributes('aria-sort')).toBe('ascending');
+    await btn.trigger('click');
+    expect(names(w)).toEqual(['gamma', 'beta', 'Alpha']);
+    expect(w.find('.fe-list__head [data-col="name"]').attributes('aria-sort')).toBe('descending');
+  });
 
-    // happy-dom has no layout, so scrollLeft is set by hand; the component
-    // reads it off the event target, which is all a real scroll does too.
-    Object.defineProperty(el, 'scrollLeft', { value: 40, configurable: true, writable: true });
-    el.dispatchEvent(new Event('scroll'));
-    await nextTick();
-    expect(w.classes()).toContain('is-scrolled-x');
+  it('numbers sort as numbers', async () => {
+    const w = draw();
+    await w.find('.fe-list__head [data-col="size"] button.fe-list__sort').trigger('click');
+    expect(names(w)).toEqual(['gamma', 'beta', 'Alpha']);
+  });
 
-    Object.defineProperty(el, 'scrollLeft', { value: 0, configurable: true, writable: true });
-    el.dispatchEvent(new Event('scroll'));
-    await nextTick();
-    expect(w.classes()).not.toContain('is-scrolled-x');
+  it('CLOSES its headers over one page of a paged list, and says why', async () => {
+    // ⚠⚠ Sorting 25 rows of 300 and calling it sorted is the lie this refuses
+    // (Shares used to do exactly that; Users drew an arrow and moved nothing).
+    const w = draw({ page: 1, pageSize: 3, total: 9 });
+    const btn = w.find('.fe-list__head [data-col="name"] button.fe-list__sort');
+    expect(btn.attributes('disabled')).toBeDefined();
+    expect(btn.attributes('title')).toMatch(/pages/i);
+    // A scripted click must not get through the affordance either.
+    (btn.element as HTMLButtonElement).disabled = false;
+    await btn.trigger('click');
+    expect(names(w)).toEqual(['beta', 'Alpha', 'gamma']);
+    expect(w.emitted('sort')).toBeUndefined();
+  });
+
+  it('a CONTROLLED sort is the caller’s: the table reports the click and moves nothing', async () => {
+    const w = draw({ sort: { key: 'size', dir: 'asc' } });
+    expect(names(w)).toEqual(['beta', 'Alpha', 'gamma']);
+    expect(w.find('.fe-list__head [data-col="size"]').attributes('aria-sort')).toBe('ascending');
+    await w.find('.fe-list__head [data-col="name"] button.fe-list__sort').trigger('click');
+    expect(w.emitted('sort')?.[0]).toEqual([{ key: 'name', dir: 'asc' }]);
+    expect(names(w)).toEqual(['beta', 'Alpha', 'gamma']);
   });
 });
 
-describe('hand-rolled admin tables ride the same classes', () => {
-  const views = path.resolve(__dirname, '../../src/views');
-  const read = (f: string) => readFileSync(path.join(views, f), 'utf8');
-
-  /** Views with an actions column: each pinned <th> AND <td> is marked and the
-   *  table sits in TableScroll. The counts are per table (Replica has two). */
-  const withActions: Array<[file: string, tables: number]> = [
-    ['AdminGrants.vue', 1],
-    ['ApiMcp.vue', 1],
-    ['Webhooks.vue', 1],
-    ['Plugins.vue', 1],
-    ['Queue.vue', 1],
-    ['Replica.vue', 2],
-    ['Trash.vue', 1],
-    ['FileVersions.vue', 1],
-  ];
-
-  it.each(withActions)('%s: pinned header + cell per table, inside TableScroll', (file, tables) => {
-    const src = read(file);
-    const ths = src.match(/<th[^>]*\btbl-actions\b/g) ?? [];
-    const tds = src.match(/<td[^>]*\btbl-actions\b/g) ?? [];
-    expect(ths, 'pinned <th> per table').toHaveLength(tables);
-    expect(tds, 'pinned <td> per table').toHaveLength(tables);
-    expect((src.match(/<TableScroll\b/g) ?? []).length, '<TableScroll> per table').toBe(tables);
-    expect(src).toContain("import TableScroll from '@/components/ui/TableScroll.vue'");
-    // The old wrapper is gone: a second scroll container around TableScroll
-    // would scroll the pinned cell out of view with everything else.
-    expect(src).not.toMatch(/class="[^"]*overflow-x-auto[^"]*"\s*>\s*\n?\s*<table/);
+describe('DataTable — resizing, the column menu, and remembering', () => {
+  it('every resizable column has a focusable handle; the arrow keys resize', async () => {
+    const w = draw();
+    const handle = w.find('.fe-list__head [data-col="size"] .fe-list__resize');
+    expect(handle.attributes('role')).toBe('separator');
+    expect(handle.attributes('tabindex')).toBe('0');
+    const before = w.find('.fe-list__head [data-col="size"]').attributes('style');
+    await handle.trigger('keydown', { key: 'ArrowRight' });
+    await nextTick();
+    const after = w.find('.fe-list__head [data-col="size"]').attributes('style');
+    expect(before).toContain('100px');
+    expect(after).toContain('116px');
   });
 
-  it('a pinned header that has no visible text carries a screen-reader label', () => {
-    for (const [file] of withActions) {
-      const src = read(file);
-      for (const th of src.match(/<th[^>]*\btbl-actions\b[^>]*>[\s\S]*?<\/th>/g) ?? []) {
-        const inner = th.replace(/^<th[^>]*>/, '').replace(/<\/th>$/, '').trim();
-        expect(inner, `${file}: ${th}`).not.toBe('');
+  it('the column menu hides a column — and the lead is not the person’s to hide', async () => {
+    const w = draw();
+    await w.find('.fe-list__colmenu-btn').trigger('click');
+    await nextTick();
+    const rows = Array.from(document.querySelectorAll('.fe-colmenu [role="checkbox"]'));
+    expect(rows.map((r) => r.textContent?.trim())).toEqual(['Size']);
+    (rows[0] as HTMLElement).click();
+    await nextTick();
+    expect(w.find('.fe-list__head [data-col="size"]').exists()).toBe(false);
+    expect(w.find('.fe-list__row [data-col="size"]').exists()).toBe(false);
+  });
+
+  it('the arrangement is saved on the account under the table’s own id', async () => {
+    const saved: Record<string, unknown>[] = [];
+    attachViewPrefsStore({ load: async () => ({}), save: (d) => saved.push(d as Record<string, unknown>) });
+    await settle();
+    const w = draw();
+    await w.find('.fe-list__head [data-col="size"] .fe-list__resize').trigger('keydown', { key: 'ArrowRight' });
+    await w.find('.fe-list__head [data-col="name"] button.fe-list__sort').trigger('click');
+    __flushViewPrefs();
+    const doc = saved[saved.length - 1] as { t?: Record<string, { c?: { w?: Record<string, number> }; s?: unknown }> };
+    expect(doc.t?.['test.table']?.c?.w?.size).toBe(116);
+    expect(doc.t?.['test.table']?.s).toEqual({ k: 'name', d: 'asc' });
+  });
+});
+
+describe('the explorer’s listing IS the table', () => {
+  it('ListView renders through DataTable — there is no second copy beside it', () => {
+    const w = mount(ListView, {
+      props: {
+        files: [{ path: 's://a.txt', basename: 'a.txt', type: 'file', size: 1, extension: 'txt' }],
+        selected: new Set<string>(),
+        locale: 'en',
+      },
+    });
+    expect(w.findComponent(DataTable).exists()).toBe(true);
+    // The explorer's own classes are still drawn — by DataTable.
+    expect(w.find('.fe-list__col--name.fe-list__col--lead').exists()).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The source scan — the rule that closes the whole class of drift      */
+/* ------------------------------------------------------------------ */
+
+const SRC = path.resolve(__dirname, '../../src');
+/** ⚠⚠ The half the scan could not see until 2026-09-20: five of the panel's
+ *  tables are core components. Both trees, always. */
+const CORE_SRC = path.resolve(__dirname, '../../../packages/core/src');
+const TABLE_FILE = 'components/DataTable.vue';
+
+function vueFiles(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) vueFiles(full, out);
+    else if (entry.endsWith('.vue')) out.push(full);
+  }
+  return out;
+}
+
+function rel(root: string, f: string): string {
+  return path.relative(root, f).replace(/\\/g, '/');
+}
+
+/** A file's template and script with the comments and the <style> taken
+ *  out — a file that EXPLAINS it used to be a `<table>` is not one. */
+function code(f: string): string {
+  return readFileSync(f, 'utf8')
+    .replace(/<style[\s\S]*?<\/style>/g, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+}
+
+/** The `<template #cell-<id>>…</template>` blocks of one file. */
+function cellSlots(src: string): { name: string; body: string }[] {
+  const out: { name: string; body: string }[] = [];
+  const open = /<template\s+#cell-([A-Za-z0-9_.-]+)(?:="[^"]*")?\s*>/g;
+  for (let m = open.exec(src); m; m = open.exec(src)) {
+    const from = m.index + m[0].length;
+    const scan = /<template\b|<\/template>/g;
+    scan.lastIndex = from;
+    let depth = 1;
+    let end = -1;
+    for (let t = scan.exec(src); t; t = scan.exec(src)) {
+      depth += t[0] === '</template>' ? -1 : 1;
+      if (depth === 0) {
+        end = t.index;
+        break;
       }
     }
+    if (end >= 0) out.push({ name: m[1], body: src.slice(from, end) });
+  }
+  return out;
+}
+
+const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'source', 'wbr']);
+
+/** The slot's ROOT nodes — the boxes the cell lays out beside one another —
+ *  as their opening tags. */
+function rootNodes(body: string): string[] {
+  const out: string[] = [];
+  const tag = /<(\/?)([A-Za-z][\w.-]*)((?:"[^"]*"|'[^']*'|[^>"'])*?)(\/?)>/g;
+  let depth = 0;
+  for (let m = tag.exec(body); m; m = tag.exec(body)) {
+    const [, closing, name, attrs, self] = m;
+    if (closing) {
+      depth -= 1;
+      continue;
+    }
+    if (depth === 0) out.push(`<${name}${attrs}>`);
+    if (!self && !VOID_TAGS.has(name.toLowerCase())) depth += 1;
+  }
+  return out;
+}
+
+/** A root node that means "start a new line": a top/bottom margin. Inline
+ *  spacing (`ms-`/`me-`) is what a flex row is FOR and is not matched. */
+const STACKS = /class="(?:[^"]*\s)?(?:mt|mb)-[\w.[\]/-]+/;
+
+/** A root that is a PILL — the panel's `Badge`, the one way a page draws a
+ *  label with its own background and border. Squeezed below its own width it
+ *  overflows under whatever is beside it (see the rule that uses it). */
+const PILL = /^<Badge[\s>/]/;
+
+/** Roots with `v-else` / `v-else-if` folded into the root before them: only
+ *  one of a branch is ever drawn, so a branch is ONE box. */
+function branches(roots: string[]): string[] {
+  const out: string[] = [];
+  for (const r of roots) {
+    if (out.length && /\sv-else(-if)?[=\s>]/.test(r)) continue;
+    out.push(r);
+  }
+  return out;
+}
+
+const USE_INSTEAD =
+  'Use the product’s ONE table: `DataTable` (packages/core/src/components/DataTable.vue — ' +
+  '`import { DataTable } from "@brftech/filex-core"` in web/src). It is the explorer’s own ' +
+  'table, so resizing, sorting, the column menu, the frozen lead and Actions column and a ' +
+  'remembered arrangement come with it. A table of your own gets none of them, and only the ' +
+  'owner notices. The rule and why: docs/CONTRIBUTING.md → "UI rules" → "One table".';
+
+describe('the product has exactly one table', () => {
+  const files = [
+    ...vueFiles(SRC).map((f) => ({ f, tree: 'web/src', r: rel(SRC, f) })),
+    ...vueFiles(CORE_SRC).map((f) => ({ f, tree: 'packages/core/src', r: rel(CORE_SRC, f) })),
+  ];
+
+  it('finds the sources at all, in BOTH trees', () => {
+    // ⚠ An empty list makes every check below pass by saying nothing
+    // (filex lesson #93) — so each tree has a floor of its own.
+    expect(files.filter((x) => x.tree === 'web/src').length).toBeGreaterThan(30);
+    expect(files.filter((x) => x.tree === 'packages/core/src').length).toBeGreaterThan(30);
   });
 
-  it.each(['Notifications.vue', 'Duplicates.vue', 'Usage.vue', 'Audit.vue', 'Sync.vue'])(
-    '%s (no actions column) still scrolls sideways rather than squeezing',
-    (file) => {
-      const src = read(file);
-      // Either the shared Table (which brings TableScroll) or the bare class.
-      const shared = src.includes("from '@/components/ui/Table.vue'");
-      expect(shared || /\btbl-scroll\b/.test(src)).toBe(true);
-      expect(src).not.toContain('tbl-actions');
-    },
-  );
+  it('no file in either tree writes a `<table>` — not one, no exemptions', () => {
+    const offenders = files.filter((x) => /<table\b/.test(code(x.f))).map((x) => `${x.tree}/${x.r}`);
+    expect(offenders, `These files draw a raw <table>. ${USE_INSTEAD}`).toEqual([]);
+  });
+
+  it('no file but DataTable draws table markup or table roles (a second table component)', () => {
+    /* A second table does not have to say `<table>`: the imitation this rule
+       replaces was a <table>, but the next one could as easily be divs with
+       table roles, or a copy of the explorer's `fe-list` markup. Any of those
+       outside the one file that owns them is a second table. */
+    const MARKERS: [RegExp, string][] = [
+      [/<(thead|tbody|tfoot|tr|td|th)\b/, 'table elements'],
+      [/role="(grid|table|treegrid|rowgroup|columnheader|rowheader|gridcell)"/, 'table roles'],
+      [/\bfe-list__(head|row|col)\b/, 'the table’s own markup (fe-list__head/row/col)'],
+    ];
+    const offenders: string[] = [];
+    for (const x of files) {
+      if (x.tree === 'packages/core/src' && x.r === TABLE_FILE) continue;
+      const src = code(x.f);
+      const tpl = src.slice(src.indexOf('<template'));
+      for (const [re, what] of MARKERS) {
+        if (re.test(tpl)) offenders.push(`${x.tree}/${x.r} (${what})`);
+      }
+    }
+    expect(offenders, `A second table component. ${USE_INSTEAD}`).toEqual([]);
+  });
+
+  it('the imitation is gone and nothing reaches for it', () => {
+    for (const gone of [
+      path.join(SRC, 'components/ui/Table.vue'),
+      path.join(SRC, 'components/ui/TableScroll.vue'),
+      path.join(SRC, 'components/ui/RowActions.vue'),
+      path.join(CORE_SRC, 'composables/useTableScroll.ts'),
+      path.join(SRC, 'styles/table.css'),
+    ]) {
+      expect(existsSync(gone), `${gone} is back — that is a second table`).toBe(false);
+    }
+    const offenders = files
+      .filter((x) => /ui\/Table\.vue|TableScroll|useTableScroll/.test(code(x.f)))
+      .map((x) => `${x.tree}/${x.r}`);
+    expect(offenders, USE_INSTEAD).toEqual([]);
+  });
+
+  it('every DataTable has a table id of its own — where its arrangement is remembered', () => {
+    /* A table with no id still works, but forgets every column a person
+       sizes; two with the SAME literal id would overwrite each other's
+       arrangement. A bound `:table-id` is accepted (SurfaceList builds one per
+       app and node; CsvViewer deliberately passes none — its columns are
+       whatever each file has, and says so beside the binding). */
+    const missing: string[] = [];
+    const ids = new Map<string, string>();
+    const dupes: string[] = [];
+    for (const x of files) {
+      const src = code(x.f);
+      for (const m of src.matchAll(/<DataTable\b([\s\S]*?)\/?>/g)) {
+        const attrs = m[1];
+        const lit = /\stable-id="([^"]+)"/.exec(attrs);
+        /* A bound id, or the explorer's own store (its listing is remembered
+           per FOLDER through `:column-store`, lib/viewPrefs). */
+        const bound = /\s:(table-id|column-store)="/.test(attrs);
+        if (!lit && !bound) missing.push(`${x.tree}/${x.r}`);
+        if (lit) {
+          const prev = ids.get(lit[1]);
+          if (prev && prev !== `${x.tree}/${x.r}`) dupes.push(`${lit[1]}: ${prev} + ${x.tree}/${x.r}`);
+          ids.set(lit[1], `${x.tree}/${x.r}`);
+        }
+      }
+    }
+    expect(ids.size, 'the scan found no DataTable at all — it is not reading what it thinks').toBeGreaterThan(25);
+    expect(missing, 'a DataTable without `table-id`').toEqual([]);
+    expect(dupes, 'two tables share a table id').toEqual([]);
+  });
+
+  it('a cell slot that puts a second LINE in a cell wraps it in ONE element', () => {
+    /* ⚠⚠ A DataTable cell is a flex ROW (`.fe-list__row .fe-list__col {
+       display: flex }`), so a `mt-1` on a second root node of a `#cell-*`
+       slot is a margin on a flex ITEM: it does not start a new line, it
+       nudges the box DOWN over the one beside it.
+
+       Measured in v0.43.0 QA on the Apps table's Label cell, which put a
+       `<span>` label, a `<Badge class="ms-1">` and `<AppPluginLanguages
+       class="mt-1">` side by side in a 180px cell: the badge was drawn over
+       the label and the coverage line over the badge, at 958px and at
+       1440px, in English as well as under a long German label. The cell
+       below it (`#cell-state`) wraps its two lines in one `<div>` and is
+       right.
+
+       `.tbl-sub` as a DIRECT child is the one shape the stylesheet handles
+       (`.fe-list__cell:has(> .tbl-sub)` turns the cell into a column); a
+       margin class is not, and never was. Mutually exclusive roots
+       (`v-if` / `v-else-if` / `v-else`) are ONE root — only one is drawn. */
+    const offenders: string[] = [];
+    for (const x of files) {
+      for (const slot of cellSlots(code(x.f))) {
+        const roots = branches(rootNodes(slot.body));
+        if (roots.length < 2) continue;
+        const stacked = roots.filter((r) => STACKS.test(r));
+        if (stacked.length) offenders.push(`${x.tree}/${x.r} #cell-${slot.name}: ${stacked.join(' + ')}`);
+      }
+    }
+    expect(
+      offenders,
+      'A cell lays its children out in a ROW. Wrap the lines in one <div> — ' +
+        'docs/CONTRIBUTING.md → "UI rules" → "One table".',
+    ).toEqual([]);
+  });
+
+  it('…and that scan sees a broken cell (a detector that finds nothing proves nothing)', () => {
+    const stacks = (src: string) =>
+      cellSlots(src).some((s) => {
+        const roots = branches(rootNodes(s.body));
+        return roots.length > 1 && roots.some((r) => STACKS.test(r));
+      });
+    expect(
+      stacks(`<template #cell-label="{ row }">
+          <span class="font-medium">{{ row.label }}</span>
+          <Badge class="ms-1">pack</Badge>
+          <AppPluginLanguages class="mt-1" :languages="row.languages" />
+        </template>`),
+      'the overlap this rule exists for',
+    ).toBe(true);
+    expect(
+      stacks(`<template #cell-label="{ row }">
+          <div>
+            <span class="font-medium">{{ row.label }}</span>
+            <AppPluginLanguages class="mt-1" :languages="row.languages" />
+          </div>
+        </template>`),
+      'one wrapper is the fix',
+    ).toBe(false);
+    expect(
+      stacks(`<template #cell-state="{ row }">
+          <Badge v-if="row.ok">ok</Badge>
+          <span v-else class="mt-1">—</span>
+        </template>`),
+      'v-if / v-else are never drawn together',
+    ).toBe(false);
+  });
+
+  it('a Badge shares its cell with nothing — it is wrapped with whatever it sits beside', () => {
+    /* ⚠⚠ WHY THE RULE ABOVE MISSED ONE. It reads a second line off a CLASS —
+       a `mt-`/`mb-` on a second root — because that is how the Apps list's
+       Label cell announced its. The admin Notifications page's Webhook cell
+       announced nothing: a `<Badge>` ("Not sent") and a `<span>` with the
+       reason, two roots and no margin. Its second line came from the reason
+       WRAPPING, which no class says, and the scan saw two roots, no margin,
+       and passed (v0.43.0 pack agent, es/ar and a narrow English column).
+
+       The mechanism is not the margin. Every root of a cell is a flex item
+       that may shrink below its content (`:where(.fe-list__cell) > *
+       { min-width: 0 }`, so one long value cannot push a cell past its
+       track). Beside text that wraps, a pill is squeezed narrower than its
+       own label, and the label spills under the text next to it — the
+       overlap, with no margin anywhere. So a Badge is never a co-drawn root:
+       inside ONE wrapper it is an inline box and the text flows after it
+       and under it.
+
+       Two short Badges side by side are the same trap at a narrow width, and
+       the same one-line fix. `v-if` / `v-else` alternatives are one root. */
+    const offenders: string[] = [];
+    for (const x of files) {
+      for (const slot of cellSlots(code(x.f))) {
+        const roots = branches(rootNodes(slot.body));
+        if (roots.length < 2) continue;
+        const pills = roots.filter((r) => PILL.test(r));
+        if (pills.length) offenders.push(`${x.tree}/${x.r} #cell-${slot.name}: ${roots.join(' + ')}`);
+      }
+    }
+    expect(
+      offenders,
+      'A Badge beside another root in a cell is squeezed below its label and overlaps its ' +
+        'neighbour. Wrap the cell’s content in ONE element — docs/CONTRIBUTING.md → "UI rules" → "One table".',
+    ).toEqual([]);
+  });
+
+  it('…and that scan sees the Webhook cell as it was (a detector that finds nothing proves nothing)', () => {
+    const pillBeside = (src: string) =>
+      cellSlots(src).some((s) => {
+        const roots = branches(rootNodes(s.body));
+        return roots.length > 1 && roots.some((r) => PILL.test(r));
+      });
+    expect(
+      pillBeside(`<template #cell-webhook="{ row }">
+          <Badge :tone="row.webhook_status === 'sent' ? 'emerald' : 'zinc'">{{ webhookLabel(row.webhook_status) }}</Badge>
+          <span v-if="webhookReason(row)" class="text-zinc-500">{{ ' — ' + webhookReason(row) }}</span>
+        </template>`),
+      'the overlap on the admin Notifications page — a badge and a reason, no margin anywhere',
+    ).toBe(true);
+    expect(
+      pillBeside(`<template #cell-webhook="{ row }">
+          <div>
+            <Badge tone="zinc">{{ webhookLabel(row.webhook_status) }}</Badge>
+            <span class="text-zinc-500">{{ ' — ' + webhookReason(row) }}</span>
+          </div>
+        </template>`),
+      'one wrapper is the fix',
+    ).toBe(false);
+    expect(
+      pillBeside(`<template #cell-flags="{ row }">
+          <Badge v-if="row.migrations" variant="warning">migrations</Badge>
+          <Badge v-if="row.security" variant="danger">security</Badge>
+        </template>`),
+      'two pills side by side are the same squeeze',
+    ).toBe(true);
+    expect(
+      pillBeside(`<template #cell-state="{ row }">
+          <Badge v-if="row.ok" tone="emerald">ok</Badge>
+          <span v-else class="text-zinc-500">—</span>
+        </template>`),
+      'v-if / v-else are never drawn together',
+    ).toBe(false);
+    expect(
+      pillBeside(`<template #cell-severity="{ row }">
+          <Badge :tone="severityTone(row.severity)">{{ severityLabel(row.severity) }}</Badge>
+        </template>`),
+      'a Badge alone in its cell is fine',
+    ).toBe(false);
+  });
+
+  it('a row ends in ONE control: RowActions is drawn by DataTable, nowhere else', () => {
+    /* The owner, 2026-09-20: "adminde aksiyonlar karma karışık; … en dibe
+       sabitli tek buton olmalı". Pages hand the table their verbs
+       (`:row-actions`), and the table draws the one control. A page that
+       draws its own RowActions — or loose buttons in an actions column — is
+       where the scatter came from. */
+    const offenders = files
+      .filter((x) => !(x.tree === 'packages/core/src' && x.r === TABLE_FILE))
+      .filter((x) => /<RowActions\b/.test(code(x.f)) || /#cell-actions\b/.test(code(x.f)))
+      .map((x) => `${x.tree}/${x.r}`);
+    expect(offenders, 'give the table `:row-actions` instead').toEqual([]);
+  });
+});
+
+describe('the table’s stylesheet', () => {
+  const CSS = readFileSync(path.join(CORE_SRC, 'styles/base.css'), 'utf8');
+
+  it('the frozen edges are the table’s own rules, and the left one is GATED', () => {
+    // A sticky lead wider than its pane covers the pane, so it pins only
+    // while `is-pin-lead` says there is room (DataTable computes it).
+    expect(CSS).toMatch(/\.fe-list\.is-pin-lead \.fe-list__col--lead\s*\{/);
+    expect(CSS).toMatch(/\.fe-list__head \.fe-list__col--menu,\s*\n\.fe-list__row \.fe-list__col--menu\s*\{/);
+    expect(CSS).toContain('.fe-table--framed');
+  });
+
+  it('the imitation’s table rules are gone', () => {
+    const body = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const dead of ['.tbl {', '.tbl thead', '.tbl tbody', '.tbl-scroll', '.tbl-lead', '.tbl-actions', '.tbl-state']) {
+      expect(body, `${dead} is back in base.css`).not.toContain(dead);
+    }
+  });
+
+  it('the one table’s additions carry no colour a palette cannot move', () => {
+    const start = CSS.indexOf('THE ONE TABLE — what DataTable adds');
+    const end = CSS.indexOf('The date headings travel', start);
+    expect(start, 'the DataTable block moved — fix this slice').toBeGreaterThan(0);
+    const block = CSS.slice(start, end).replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(block.length).toBeGreaterThan(1500);
+    expect(block, 'a raw hex colour').not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(block, 'a Tailwind colour').not.toMatch(/\b(zinc|slate|gray)-\d{2,3}\b/);
+  });
+});
+
+describe('the admin views keep to the palette', () => {
+  const files = vueFiles(SRC);
+  it('no admin view hard-codes a `divide-zinc` row list where the palette should decide', () => {
+    /* "admin panel seçili renk paletinden etkilenmiyor, etkilenmeli": seven
+       views drew rows with `divide-zinc-200 dark:divide-zinc-800`, two hexes
+       no palette can reach. */
+    const offenders = files
+      .filter((f) => /\bdivide-(zinc|slate|gray)-\d{2,3}\b/.test(code(f)))
+      .map((f) => rel(SRC, f));
+    expect(offenders).toEqual([]);
+  });
 });

@@ -6,10 +6,12 @@
  * must be identical in both, otherwise split view shows mismatched rows
  * (the trash row missing on one side → visible row-offset).
  */
+import type { TagKind } from './tags';
 import { ref } from 'vue';
 
 import type { FileNode } from '../types/FileNode';
 import { E2E_MARKER_NAME } from './e2ecrypto';
+import { isInternalName, isInternalPath } from './internalPaths';
 
 /** Adapter-strip: `s3-test://fileman/x` → `fileman/x`. */
 export function stripAdapter(p: string): string {
@@ -39,24 +41,21 @@ export function parentDirOf(path: string): string {
 }
 
 /**
- * Hide system/internal entries the user must never see as files:
- * thumbnails, version history, the soft-delete store, keepdir markers,
- * the desktop app's open-with scratch area and the E2E marker. Shared by
- * both panes' listing filters.
+ * Hide system/internal entries the user must never see as files: filex's own
+ * directories and the keep marker (lib/internalPaths — the one client list,
+ * held equal to the server's by a test), the virtual `.trash` row, and the E2E
+ * marker. Shared by both panes' listing filters.
+ *
+ * ⚠ Absolute, not a "hidden files" preference: a user who has switched hidden
+ * files on is asking to see their OWN dotfiles, not ours. The server already
+ * leaves these out of every listing; this is the seatbelt for an embed talking
+ * to an older server — which is also why it judges the whole PATH, so a search
+ * hit such a server returns from inside `.filex-open` is dropped too.
  */
 export function filterInternalEntries(files: FileNode[]): FileNode[] {
   return (files || []).filter((f) => {
-    if (f.path.includes('.thumbs')) return false;
-    if (f.path.includes('.versions') || f.basename === '.versions') return false;
+    if (isInternalName(f.basename) || isInternalPath(f.path)) return false;
     if (f.basename === '.trash') return false;
-    // The desktop app's "open this document with filex" scratch area. Real
-    // files live in it for the length of one editing session, but they are the
-    // app's plumbing, not the user's documents -- and a user who has switched
-    // hidden files on is asking to see their OWN dotfiles, not ours. Hidden
-    // absolutely, like .filex-trash and .versions; stale copies are swept by
-    // the desktop app itself, not by hand.
-    if (f.basename === '.filex-open') return false;
-    if (f.basename === '.keepdir') return false;
     if (f.basename === E2E_MARKER_NAME) return false;
     return true;
   });
@@ -272,16 +271,50 @@ export const VIRTUAL_SEGMENTS: Record<string, string> = {
  */
 export const TAG_SEGMENT_PREFIX = '.tag~';
 
-/** `invoices` → `.tag~invoices`. */
-export function makeTagSegment(tag: string): string {
-  return `${TAG_SEGMENT_PREFIX}${tag}`;
+/**
+ * etiket:k2 (v0.43.0) — the KIND of a tag view. A person can have a personal
+ * "rapor" and their team a "rapor"; the navigation panel lists them apart, so
+ * each opens its own view: `.mytag~rapor` (personal), `.teamtag~rapor` (team).
+ * The plain `.tag~rapor` stays and means BOTH — every link and restored tab
+ * from before kinds existed keeps opening what it opened then.
+ *
+ * ⚠ Listed longest-first is not needed (no prefix is a prefix of another),
+ * but every reader goes through `tagViewOfSegment`, never a `startsWith` of
+ * its own, so a fourth kind would be one line here.
+ */
+const TAG_KIND_PREFIXES: ReadonlyArray<readonly [string, TagKind | '']> = [
+  ['.mytag~', 'personal'],
+  ['.teamtag~', 'team'],
+  [TAG_SEGMENT_PREFIX, ''],
+];
+
+/** `invoices` → `.tag~invoices`; with a kind, `.mytag~` / `.teamtag~`. */
+export function makeTagSegment(tag: string, kind: TagKind | '' = ''): string {
+  const prefix = TAG_KIND_PREFIXES.find(([, k]) => k === kind)?.[0] ?? TAG_SEGMENT_PREFIX;
+  return `${prefix}${tag}`;
 }
 
-/** `.tag~invoices` → `invoices`; '' for anything else (incl. a bare `.tag~`). */
+/** A tag-view segment's name and kind ('' = both), or null for anything else
+ *  (a bare `.tag~` included). */
+export function tagViewOfSegment(segment: string): { tag: string; kind: TagKind | '' } | null {
+  for (const [prefix, kind] of TAG_KIND_PREFIXES) {
+    if (segment.startsWith(prefix)) {
+      const tag = segment.slice(prefix.length);
+      return tag ? { tag, kind } : null;
+    }
+  }
+  return null;
+}
+
+/** `.tag~invoices` (or `.mytag~` / `.teamtag~`) → `invoices`; '' otherwise. */
 export function tagOfSegment(segment: string): string {
-  return segment.startsWith(TAG_SEGMENT_PREFIX)
-    ? segment.slice(TAG_SEGMENT_PREFIX.length)
-    : '';
+  return tagViewOfSegment(segment)?.tag ?? '';
+}
+
+/** The kind of a tag-view path: 'personal', 'team', or '' (both / not a tag view). */
+export function tagKindOfPath(path: string): TagKind | '' {
+  const clean = (path || '').replace(/^\/+|\/+$/g, '');
+  return tagViewOfSegment(clean.split('/').pop() || clean)?.kind ?? '';
 }
 
 /** True when `path` (user-facing form) IS a tag listing. */
@@ -308,8 +341,10 @@ export function virtualSegmentKey(segment: string): string {
 export function virtualSegmentLabel(segment: string, t: (key: string) => string): string {
   const key = VIRTUAL_SEGMENTS[segment];
   if (key) return t(key);
-  const tag = tagOfSegment(segment);
-  return tag ? `#${tag}` : '';
+  const view = tagViewOfSegment(segment);
+  if (!view) return '';
+  // etiket:k2 — the crumb says whose tag this is: "#rapor · Kişisel".
+  return view.kind ? `#${view.tag} · ${t(`tags.kind.${view.kind}`)}` : `#${view.tag}`;
 }
 
 /**

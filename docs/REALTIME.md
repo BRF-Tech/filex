@@ -45,9 +45,10 @@ an embed subscribing with a confine-relative path and a native panel using the
 absolute one can both match frames against what they asked for.
 
 `action` is one of `create`, `delete`, `rename`, `move` or `upload`; a rename
-or move also carries `new_name`. (`modify` is declared in the wire type and not
-sent by anything today — an overwrite announces as `upload`.) **It is
-advisory.** The only thing a client is required to do with a change
+or move also carries `new_name`. An overwrite announces as `upload`. `modify`
+(no `name`) is the folder-size refresh: about two seconds after a change, every
+folder from the changed one up to the storage root is told to repaint its size
+column — the folder's entries did not change. **It is advisory.** The only thing a client is required to do with a change
 frame is re-fetch the listing — `action`/`name` are there for toasts and for
 future incremental patching, and the sections below say exactly when they are
 not populated.
@@ -101,6 +102,68 @@ pending reload and the folder is never re-listed at all. The bundled explorer
 (`@brftech/filex`, and therefore the web app, the desktop app and every embed)
 debounces 200 ms with a 2 s ceiling for exactly that reason.
 
+## Watching a whole tree (sync clients)
+
+A room is one folder, and a connection sits in one room at a time — the right
+shape for an explorer, which shows one folder. A client that **mirrors** a tree
+(the desktop sync engine, `filex sync run --watch`) needs every change at any
+depth, for several trees at once, without appearing in anybody's presence
+strip. That is a watch:
+
+```json
+{"type":"watch","paths":["main://projects","main://inbox"]}
+```
+
+- **Recursive**: a watch on `main://projects` hears every change at or below
+  that folder.
+- **The set is replaced** by each `watch` message; `[]` clears it. Up to 1 000
+  roots per connection.
+- **Silent**: a watcher is not a viewer — it is never listed in a presence
+  roster and never receives presence frames.
+- **Authorised like a subscribe**: the ticket's confinement, then RBAC ≥ viewer
+  on the root, then the tenant boundary. Grants in filex are additive (a grant
+  on a folder covers everything below it), so whoever may read the root may
+  read every folder under it and nothing is checked per event.
+
+Every `watch` is **acknowledged**, even when every root was refused:
+
+```json
+{"type":"watching","roots":["main://projects"],"errors":[{"path":"main://inbox","error":"forbidden"}]}
+```
+
+⚠ The acknowledgement is the capability probe. A server older than the watch
+ignores the message, and without an answer "nothing has changed" and "nothing
+will ever be announced" look the same. The sync engine waits 10 s for it and,
+without one, stays on its interval poll (`live: polling`).
+
+Changes arrive as their own frame type, so a browser that only knows `change`
+and `presence` never mistakes one for the other:
+
+```json
+{"type":"tree_change","root":"main://projects","dirs":["2026/q3"],"action":"upload","name":"plan.md"}
+{"type":"tree_change","root":"main://projects","dirs":["","2026/q3","archive"],"action":"upload","count":17}
+{"type":"tree_change","root":"main://projects","overflow":true,"count":5000}
+```
+
+| Field | Meaning |
+|---|---|
+| `root` | the watched path, exactly as the client spelled it |
+| `dirs` | the changed folders **relative to `root`** (`""` is the root itself) — relative, because a confined client spells its root differently from the storage's absolute path |
+| `action`/`name`/`new_name` | only when every merged change was the same one |
+| `count` | how many changes the frame stands for, when more than one |
+| `overflow` | more than 256 distinct folders changed — they are not named; treat the whole root as changed |
+
+Each watch coalesces like a room (leading frame at once, then one merged frame
+per 200 ms → 1.5 s window), with one difference: **a watch never drops a
+frame**. A room drops a frame when the client's queue is full, which costs a
+viewer one stale listing; for a mirror it would cost a missed edit until it
+next asks the change log (or until its `--full-every` walk), so a watch keeps
+the merge and retries until it is delivered or the client disconnects.
+
+⚠ The size-column refresh (`modify`, above) is **not** delivered to watches: the
+real change already was, and a mirror obeying it would re-list every ancestor
+folder after every save — its own uploads included.
+
 ## Presence
 
 `presence` frames carry everyone **else** in the room — seeing yourself is
@@ -137,6 +200,15 @@ next change made through filex. ⚠ Not on the 12 s poll — that timer only run
 while the socket is degraded (see above), so on a healthy connection there is
 nothing polling to pick the file up. Writes that go through filex — the web
 app, the API, WebDAV, SFTP, FTPS, S3, NFS — all announce.
+
+**filex's own folders** never announce. A change inside `.filex-trash`,
+`.versions`, `.thumbs` or the desktop's `.filex-open` — a trash move, a
+version snapshot, a working copy being saved — and a change that names one
+(the desktop creating `.filex-open` at the root) are dropped as the first
+thing `Hub.EmitChange` does, before any delivery: the one door the HTTP
+handlers, the protocol servers and the folder-size refresher all publish
+through, so rooms and recursive watches are filtered alike. The list is
+`backend/internal/syspath`.
 
 **OnlyOffice save-back** announces, as of v0.34.0: the callback routes through
 the same post-write gate as every other write, so a document saved out of the

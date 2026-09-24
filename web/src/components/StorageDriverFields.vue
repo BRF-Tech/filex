@@ -22,8 +22,15 @@ import Select from './ui/Select.vue';
 import Toggle from './ui/Toggle.vue';
 
 interface Props {
-  driver: StorageDriver;
+  /** The driver whose descriptor supplies the fields — unless `fields` is given. */
+  driver?: StorageDriver;
   modelValue: Record<string, unknown>;
+  /**
+   * An explicit field list, for a form that is not a storage driver's: an
+   * app plugin's settings (its manifest declares `Field[]` in the same shape,
+   * backend/pkg/pluginkit/wire). With this set the driver store is not asked.
+   */
+  fields?: StorageField[];
 }
 
 const props = defineProps<Props>();
@@ -34,11 +41,13 @@ const emit = defineEmits<{
 const { t, te } = useI18n();
 const drivers = useStorageDriversStore();
 
-onMounted(() => drivers.fetch());
+onMounted(() => {
+  if (!props.fields) drivers.fetch();
+});
 
 const showAdvanced = ref(false);
 
-const fields = computed(() => drivers.fields(props.driver));
+const fields = computed(() => props.fields ?? drivers.fields(props.driver));
 const basicFields = computed(() => fields.value.filter((f) => !f.advanced));
 const advancedFields = computed(() => fields.value.filter((f) => f.advanced));
 
@@ -93,10 +102,10 @@ function bool(f: StorageField): boolean {
 
 <template>
   <div class="space-y-3">
-    <p v-if="drivers.loading && !fields.length" class="text-sm text-zinc-500">
+    <p v-if="!props.fields && drivers.loading && !fields.length" class="text-sm text-zinc-500">
       {{ t('common.loading') }}
     </p>
-    <p v-else-if="!fields.length" class="text-sm text-amber-600 dark:text-amber-400">
+    <p v-else-if="!props.fields && !fields.length" class="text-sm text-amber-600 dark:text-amber-400">
       {{ t('storages.driverFieldsUnavailable', { driver }) }}
     </p>
 

@@ -22,6 +22,19 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { Account } from './accounts.js';
 import { portableMode } from './portable.js';
+import {
+  absorbLine,
+  LineReader,
+  markExited,
+  newStatus,
+  refusalApplies,
+  retainPairs,
+  takeHolds,
+  type SyncStatus,
+} from './syncstatus.js';
+import { wantedWatchers, watchArgs, type WatchPrefs } from './sync-policy.js';
+
+export type { SyncActivity, SyncStatus, LiveState, PairHealth, LocalNote } from './syncstatus.js';
 
 export interface Pair {
   id: string;
@@ -31,31 +44,23 @@ export interface Pair {
   paused?: boolean;
   /** Single-file pair: local is a file path, remote names a file. */
   file?: boolean;
+  /** The engine is holding items here that the server does not have (or has
+   *  differently) until someone decides — see heldItems in sync-policy.ts. */
+  hold_new?: boolean;
+  /** How many items the pair holds. */
+  held?: number;
 }
 
-/** One pair's live phase, parsed from the engine's progress lines. */
-export interface SyncActivity {
-  pairId: string;
-  phase: 'inventory' | 'plan' | 'transfer' | 'settling';
-  /** transfer only: actions done / planned. 0/0 elsewhere. */
-  done: number;
-  total: number;
-}
-
-/** What the supervisor has observed about one account's sync process. */
-export interface SyncStatus {
-  accountId: string;
-  running: boolean;
-  lastLine: string;
-  lastRunAt: string | null;
-  lastError: string | null;
-  /** The pair the engine is working on RIGHT NOW, or null between runs.
-   *  One value, not a map: the engine walks its pairs sequentially. */
-  active: SyncActivity | null;
-}
-
-/** How often each account's watcher re-checks. Frequent enough to feel live,
- *  slow enough that a folder of thousands of files is not re-walked constantly. */
+/**
+ * The SAFETY-NET interval. Since 0.43 this is not the speed: the engine syncs
+ * a change the moment the server announces it (or the local file system
+ * reports it), and at this interval it only CHECKS — the server's change log
+ * for what the stream may have missed, the local tree for what the file-system
+ * watcher may have missed, a failed folder that is due a retry — and walks a
+ * pair only when one of those says so, or its --full-every safety net is due.
+ * Measured before the live path: a browser save took 6–25 s to reach the
+ * synced file (median 15 s), because it waited for this lap.
+ */
 const WATCH_INTERVAL = '30s';
 
 /**
@@ -173,6 +178,33 @@ export async function movePair(id: string, newLocal: string): Promise<void> {
   await run(['sync', 'move', id, newLocal]);
 }
 
+/** The items a pair holds go to the server on its next run. Returns the
+ *  engine's one-line answer. */
+export async function confirmHeld(id: string): Promise<string> {
+  return (await run(['sync', 'confirm', id])).trim();
+}
+
+/** The items a pair holds move into its local sync trash (kept 30 days).
+ *  Returns the engine's one-line answer. */
+export async function discardHeld(id: string): Promise<string> {
+  return (await run(['sync', 'discard', id])).trim();
+}
+
+export interface SupervisorHooks {
+  /** Something about sync changed — repaint. */
+  onChange: () => void;
+  /** The server refused this account's token. The watcher is already
+   *  stopped; the caller marks the account so that reconcile() does not start
+   *  it again until the user reconnects. */
+  onSignedOut?: (accountId: string) => void;
+  /** A pair's run held items for a decision: the cue to re-read the pair
+   *  list, which carries the count the app shows. */
+  onHold?: (accountId: string, pairId: string, count: number) => void;
+  /** The bandwidth limits and sync window a watcher is started with (read at
+   *  start; a change means stop + reconcile). */
+  watchPrefs?: () => WatchPrefs;
+}
+
 /**
  * Keeps one `filex sync run --watch` process alive per signed-in account.
  *
@@ -184,8 +216,17 @@ export class SyncSupervisor {
   private procs = new Map<string, ReturnType<typeof spawn>>();
   private status = new Map<string, SyncStatus>();
   private stopping = false;
+  private readonly onChange: () => void;
+  private readonly onSignedOut: (accountId: string) => void;
+  private readonly onHold: (accountId: string, pairId: string, count: number) => void;
+  private readonly watchPrefs: () => WatchPrefs;
 
-  constructor(private onChange: () => void) {}
+  constructor(hooks: SupervisorHooks) {
+    this.onChange = hooks.onChange;
+    this.onSignedOut = hooks.onSignedOut ?? (() => {});
+    this.onHold = hooks.onHold ?? (() => {});
+    this.watchPrefs = hooks.watchPrefs ?? (() => ({}));
+  }
 
   statuses(): SyncStatus[] {
     return [...this.status.values()];
@@ -196,18 +237,23 @@ export class SyncSupervisor {
   async reconcile(accounts: Account[], tokenFor: (id: string) => string | null): Promise<void> {
     if (this.stopping) return;
     const pairs = await listPairs();
-    const wanted = new Set(
-      accounts
-        .filter((a) => pairs.some((p) => p.account === a.id && !p.paused))
-        .map((a) => a.id),
-    );
+    const wanted = wantedWatchers(accounts, pairs);
 
     for (const [id, proc] of this.procs) {
       if (!wanted.has(id)) {
         proc.kill();
         this.procs.delete(id);
-        this.status.delete(id);
       }
+    }
+    // Including a watcher that had already exited on its own: its account
+    // has nothing left to sync, so its last words are not news any more.
+    for (const id of [...this.status.keys()]) {
+      if (!wanted.has(id)) this.status.delete(id);
+    }
+    // A running watcher is not restarted for an unpaired folder (it re-reads
+    // pairs.json between passes), so the folder's last state goes here.
+    for (const [id, st] of this.status) {
+      retainPairs(st, new Set(pairs.filter((p) => p.account === id).map((p) => p.id)));
     }
     for (const acc of accounts) {
       if (wanted.has(acc.id) && !this.procs.has(acc.id)) {
@@ -223,63 +269,56 @@ export class SyncSupervisor {
 
     const proc = spawn(
       bin,
-      ['sync', 'run', '--account', acc.id, '--watch', WATCH_INTERVAL, '--quiet'],
+      // --limit-down / --limit-up / --window only when Settings asks for them.
+      watchArgs(acc.id, this.watchPrefs(), WATCH_INTERVAL),
       {
         env: engineEnv({ FILEX_URL: acc.serverUrl, FILEX_TOKEN: token }),
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     );
-    const st: SyncStatus = {
-      accountId: acc.id,
-      running: true,
-      lastLine: 'starting…',
-      lastRunAt: null,
-      lastError: null,
-      active: null,
-    };
+    const st: SyncStatus = newStatus(acc.id);
     this.status.set(acc.id, st);
     this.procs.set(acc.id, proc);
 
-    // The engine's progress lines are `<pair-id>: <phase>: <detail>` (Engine
-    // .Progress, printed even under --quiet); a run ends with the summary
-    // `<pair-id>: N/N done — …` or `<pair-id>: already in step`. Parsing them
-    // HERE keeps the string format in one place — the UI gets typed data.
-    const progressRe = /^(\S+): (inventory|plan|transfer|settling): (.*)$/;
-    const settledRe = /^(\S+): (?:already in step$|\d+\/\d+ done\b)/;
-    const absorb = (chunk: Buffer, isErr: boolean) => {
-      for (const line of chunk.toString().split('\n')) {
-        const t = line.trim();
-        if (!t) continue;
-        if (isErr) {
-          st.lastError = t;
-          // `<pair-id>: <error>` means that pair's run died — it is not active.
-          const ep = /^(\S+): /.exec(t);
-          if (ep && st.active?.pairId === ep[1]) st.active = null;
-        } else {
-          st.lastLine = t;
-          st.lastRunAt = new Date().toISOString();
-          const p = progressRe.exec(t);
-          if (p) {
-            const tr = p[2] === 'transfer' ? /^(\d+)\/(\d+)/.exec(p[3]) : null;
-            st.active = {
-              pairId: p[1],
-              phase: p[2] as SyncActivity['phase'],
-              done: tr ? Number(tr[1]) : 0,
-              total: tr ? Number(tr[2]) : 0,
-            };
-          } else {
-            const s = settledRe.exec(t);
-            if (s && st.active?.pairId === s[1]) st.active = null;
-          }
-        }
+    // The server refused the token. Said once per watcher; an older engine
+    // that keeps looping on the 401 instead of exiting is stopped here.
+    let refused = false;
+    const signedOut = () => {
+      if (refused || !refusalApplies(this.status.get(acc.id), st)) return;
+      refused = true;
+      if (this.procs.get(acc.id) === proc) {
+        proc.kill();
+        this.procs.delete(acc.id);
       }
-      this.onChange();
+      st.running = false;
+      st.active = null;
+      this.onSignedOut(acc.id);
     };
-    proc.stdout?.on('data', (c: Buffer) => absorb(c, false));
-    proc.stderr?.on('data', (c: Buffer) => absorb(c, true));
+    const holds = () => {
+      for (const h of takeHolds(st)) this.onHold(acc.id, h.pairId, h.count);
+    };
 
-    proc.on('exit', (code) => {
+    // The engine's lines are turned into typed state HERE (syncstatus.ts), so
+    // the string formats live in one place and the UI gets data. One reader
+    // per pipe, fed the raw bytes: a read can end mid-line — or inside a
+    // multi-byte character — and the tail waits for the rest.
+    const out = new LineReader((line) => absorbLine(st, line, false));
+    const err = new LineReader((line) => absorbLine(st, line, true));
+    proc.stdout?.on('data', (c: Buffer) => {
+      out.push(c);
+      holds();
+      this.onChange();
+    });
+    proc.stderr?.on('data', (c: Buffer) => {
+      err.push(c);
+      signedOut();
+      this.onChange();
+    });
+
+    // ⚠ 'close', not 'exit': 'exit' can fire while the pipes still hold the
+    // process's last words — the one line that says WHY it stopped.
+    proc.on('close', (code, signal) => {
       // A watcher this supervisor already let go of — stop() during a root
       // move, reconcile() after a sign-out — must not touch the bookkeeping
       // of its successor. Its exit can land AFTER the replacement started,
@@ -288,14 +327,11 @@ export class SyncSupervisor {
       // engines racing over one baseline.
       if (this.procs.get(acc.id) !== proc) return;
       this.procs.delete(acc.id);
-      st.running = false;
-      st.active = null;
-      // A watcher is meant to run forever. Exiting means the server went away,
-      // the token expired, or the binary crashed — say so instead of leaving a
-      // panel that claims everything is fine.
-      if (!this.stopping && code !== 0) {
-        st.lastError = st.lastError ?? `sync stopped unexpectedly (exit ${code})`;
-      }
+      out.flush();
+      err.flush();
+      markExited(st, code, this.stopping, signal);
+      holds();
+      signedOut();
       this.onChange();
     });
   }

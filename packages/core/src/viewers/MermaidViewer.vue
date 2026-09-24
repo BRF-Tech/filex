@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { sayFailure } from '../lib/errorWords';
 /**
  * MermaidViewer — render a `.mmd` / `.mermaid` source file.
  *
@@ -60,9 +61,7 @@ async function load(): Promise<void> {
   const mermaid = await ensureMermaid();
   if (myToken !== renderToken) return;
   if (!mermaid) {
-    error.value = props.t
-      ? props.t('viewer.peer_not_installed')
-      : 'Mermaid viewer requires `mermaid` — install or use download.';
+    error.value = tt('viewer.peer_not_installed', 'This kind of file cannot be shown here. Download it to open it on your device.');
     loading.value = false;
     return;
   }
@@ -75,7 +74,7 @@ async function load(): Promise<void> {
       credentials: props.authCredentials,
     });
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'fetch failed';
+    error.value = sayFailure(err, tt('viewer.failed_to_load', 'Failed to load file'), { t: props.t }).text;
     loading.value = false;
     return;
   }
@@ -95,7 +94,7 @@ async function load(): Promise<void> {
       }
     }
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'render failed';
+    error.value = sayFailure(err, tt('viewer.failed_to_load', 'Failed to load file'), { t: props.t }).text;
   } finally {
     loading.value = false;
   }

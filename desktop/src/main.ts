@@ -25,6 +25,7 @@ import {
   nativeTheme,
   net,
   powerMonitor,
+  powerSaveBlocker,
   protocol,
   session,
   shell,
@@ -35,19 +36,27 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
+  EMPTY_STATE,
   activeAccount,
   loadState,
   removeAccount,
   saveState,
-  upsertAccount,
+  signIn,
   type Account,
   type DesktopState,
 } from './accounts.js';
 import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } from './browser-auth.js';
+import { failureOf, signInView, type SignInFailure } from './signin-flow.js';
 import { DragOutCache, createPlaceholders, fulfilDrop, type DragItem } from './dragout.js';
 import { localDriveRoots, watchForDrop } from './dropwatch.js';
 import { log, logPath } from './log.js';
-import { DesktopNotifier, type NotificationRow } from './notifications.js';
+import { loginItemExecutable, loginItemWrite, osWillLaunch, preferenceAfterStartup, type LoginItemReport } from './login-item.js';
+import { DesktopNotifier, opensInWindow, type NotificationRow } from './notifications.js';
+// ⚠⚠ The badge's rule comes from the WEB package, exactly as the click
+// destination (notificationTarget) and the sentence (notificationText) do:
+// "exact to 99, `99+` above" is a product rule, and a counter written twice is
+// a counter that disagrees with itself. Same boundary, same reason.
+import { unreadBadgeCount, unreadBadgeLabel } from '../../web/src/lib/unreadBadge.ts';
 import {
   OFFICE_EXTENSIONS,
   OFFICE_MIME_TYPES,
@@ -79,7 +88,31 @@ import {
   uploadFile,
   type RemoteContext,
 } from './openwith-io.js';
-import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, movePair, removePair, type Pair } from './sync.js';
+import {
+  SyncSupervisor,
+  addPair,
+  cliPath,
+  confirmHeld,
+  discardHeld,
+  listPairs,
+  listTrash,
+  movePair,
+  removePair,
+  type Pair,
+} from './sync.js';
+import {
+  LIMIT_PRESETS_KIB,
+  WINDOW_PRESETS,
+  answerHold,
+  heldItems,
+  normLimit,
+  normWindow,
+  folderView,
+  watchPrefsKey,
+  watcherAccounts,
+  type WatchPrefs,
+} from './sync-policy.js';
+import { SleepGuard, quietMomentForUpdate, syncBusy } from './power.js';
 import { PORTABLE_DATA_DIRNAME, portableMode } from './portable.js';
 
 // ─────────────────────────── portable build ───────────────────────────
@@ -147,15 +180,20 @@ const HIDDEN_FLAG = '--hidden';
 // of whatever they were doing. See applyUpdateQuietly().
 const UPDATED_FLAG = '--updated';
 
-let state: DesktopState = { accounts: [], activeId: null, syncFolders: [], runInBackground: true, launchAtLogin: false, locale: 'system', notifications: true };
+let state: DesktopState = structuredClone(EMPTY_STATE);
 /** Watches the active account's bell and raises native notifications. */
 let notifier: DesktopNotifier | null = null;
 let mainWindow: BrowserWindow | null = null;
 let shellWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let pendingAuth: PendingAuth | null = null;
+/** Why the last sign-in hand-back failed, shown on the sign-in window until a
+ *  new attempt starts, one succeeds, or the person cancels (issue #36). */
+let signInFailure: SignInFailure | null = null;
 let quitting = false;
 let supervisor: SyncSupervisor | null = null;
+/** Keeps the computer out of idle sleep while sync is moving files. */
+let sleepGuard: SleepGuard | null = null;
 /** Local copies for dragging files OUT onto the desktop. See dragout.ts. */
 let dragCache: DragOutCache | null = null;
 /** The paths the last successful prepare() produced, keyed by the selection,
@@ -426,12 +464,56 @@ function route(): void {
 // and handed to the page as a structured destination. That is what stops the
 // desktop notification from opening one place while the bell opens another.
 
+// ────────────── the count, on the icon ──────────────
+//
+// Rule 3, docs/NOTIFICATIONS.md → "The bell, and who can reach it": *the count
+// lives ON the icon* — in the explorer, in the desktop app, and on mobile when
+// it comes; exact to 99 and `99+` above that; the SAME rule on every surface.
+//
+// ⚠⚠ The desktop window is the explorer and has no bell in it, so there is
+// no button here to draw a badge on. The icon this app has is the one in the
+// dock / taskbar and the one in the tray, and that is where the number goes.
+// Until now it went nowhere at all: the app polled the bell every 15 s, raised
+// a toast, and then showed no trace that anything was waiting — a person who
+// missed the toast had no way to learn they had 40 unread rows.
+//
+// ⚠ The `99+` ceiling is the WEB badge's, not this one's: it is about how
+// much room a 16px circle has. macOS and Unity draw the number themselves and
+// are perfectly happy with 137, so `setBadgeCount` gets the real count
+// (`unreadBadgeCount`) while the tray tooltip — which is text we lay out
+// ourselves — gets the clamped label. One module decides both.
+
+/** The last count we were told, per account id — so a rail switch shows the
+ *  account in front of you rather than the one you left. */
+let unreadByAccount: Record<string, number> = {};
+
+function applyUnreadBadge(accountId: string, count: number): void {
+  unreadByAccount = { ...unreadByAccount, [accountId]: count };
+  paintUnread();
+}
+
+function paintUnread(): void {
+  const acc = activeAccount(state);
+  const count = acc ? (unreadByAccount[acc.id] ?? 0) : 0;
+  try {
+    // ⚠ Windows has no dock badge: `setBadgeCount` is a no-op there rather
+    // than an error, and the tray tooltip below is what that platform reads.
+    app.setBadgeCount?.(unreadBadgeCount(count));
+  } catch {
+    /* a platform that will not take a badge still gets the tooltip */
+  }
+  const label = unreadBadgeLabel(count);
+  tray?.setToolTip(label ? `filex — ${label}` : 'filex');
+}
+
 function startNotifier(): void {
   if (notifier) return;
   notifier = new DesktopNotifier({
     account: () => {
       const acc = activeAccount(state);
-      return acc ? { id: acc.id, serverUrl: acc.serverUrl, token: acc.token } : null;
+      // A token the server refused is not asked again every 15 seconds —
+      // until Reconnect clears the mark.
+      return acc && !acc.signedOut ? { id: acc.id, serverUrl: acc.serverUrl, token: acc.token } : null;
     },
     enabled: () => state.notifications !== false,
     fetchRows: async (acc, limit) => {
@@ -439,10 +521,17 @@ function startNotifier(): void {
       url.searchParams.set('unread', 'true');
       url.searchParams.set('limit', String(limit));
       const res = await net.fetch(url.toString(), { headers: { Authorization: `Bearer ${acc.token}` } });
-      if (!res.ok) throw new Error(`server said ${res.status}`);
-      const body = (await res.json()) as { items?: NotificationRow[] };
-      return body.items ?? [];
+      // The status travels as a property: isUnauthorized() reads that, not
+      // the wording.
+      if (!res.ok) throw Object.assign(new Error(`server said ${res.status}`), { status: res.status });
+      const body = (await res.json()) as { items?: NotificationRow[]; total?: number };
+      const items = body.items ?? [];
+      // ⚠ `total` is the count for `unread=true` — the unread count, which
+      // the badge below needs and which this one request already carries.
+      return { items, total: typeof body.total === 'number' ? body.total : items.length };
     },
+    onUnread: (accountId, count) => applyUnreadBadge(accountId, count),
+    onUnauthorized: (accountId) => markSignedOut(accountId, 'the bell was refused twice in a row (HTTP 401)'),
     // The reader's language, read per row — see DesktopNotifierOptions.locale.
     locale: () => effectiveLocale(),
     show: (row, text, onClick) => {
@@ -477,7 +566,9 @@ function startNotifier(): void {
       // user clicks has to be able to bring the app back, not silently do
       // nothing. openMainWindow() shows and focuses an existing one.
       openMainWindow();
-      if (dest.kind !== 'folder') return; // nothing to open beyond the window
+      // A folder or the Trash view (opensInWindow); anything else has nothing
+      // to open beyond the window.
+      if (!opensInWindow(dest)) return;
       const send = () => mainWindow?.webContents.send('notify:open', { accountId, dest });
       if (mainWindow && mainWindow.webContents.isLoading()) {
         mainWindow.webContents.once('did-finish-load', send);
@@ -499,7 +590,6 @@ function buildTray(): void {
   let img = nativeImage.createFromPath(ICON_PATH);
   img = img.isEmpty() ? nativeImage.createEmpty() : img.resize({ width: 16, height: 16 });
   tray = new Tray(img);
-  tray.setToolTip('filex');
   refreshTray();
   tray.on('click', () => route());
 }
@@ -527,6 +617,10 @@ function effectiveLocale(): 'en' | 'tr' {
 const TRAY_STRINGS: Record<string, [en: string, tr: string]> = {
   signedOut: ['Not signed in', 'Giriş yapılmadı'],
   open: ['Open filex', "filex'i aç"],
+  signedOutSuffix: ['signed out', 'oturum kapalı'],
+  pause: ['Pause sync', 'Eşitlemeyi duraklat'],
+  resume: ['Resume sync', 'Eşitlemeyi sürdür'],
+  pausedTip: ['filex — sync paused', 'filex — eşitleme duraklatıldı'],
   updateReady: ['Update {v} ready — installs itself (or now)', '{v} güncellemesi hazır — kendiliğinden kurulur (ya da şimdi)'],
   settings: ['Settings…', 'Ayarlar…'],
   quit: ['Quit filex', "filex'ten çık"],
@@ -541,11 +635,29 @@ function trayText(key: string, vars: Record<string, string> = {}): string {
 function refreshTray(): void {
   if (!tray) return;
   const acc = activeAccount(state);
+  const paused = state.syncPaused === true;
+  // The tray icon is often all there is on screen: a paused client has to be
+  // recognisable from it without opening anything.
+  tray.setToolTip(paused ? trayText('pausedTip') : 'filex');
+  // ⚠ The badge follows the ACTIVE account, and every caller of this function
+  // is a moment the active one may just have changed (boot, a rail switch, a
+  // sign-out). Repainting here keeps the number on the icon the number for the
+  // server in front of you rather than for the one you left.
+  paintUnread();
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: acc ? `${acc.email} — ${new URL(acc.serverUrl).host}` : trayText('signedOut'), enabled: false },
+      {
+        label: acc
+          ? `${acc.email} — ${new URL(acc.serverUrl).host}${acc.signedOut ? ` (${trayText('signedOutSuffix')})` : ''}`
+          : trayText('signedOut'),
+        enabled: false,
+      },
       { type: 'separator' },
       { label: trayText('open'), click: () => route() },
+      {
+        label: trayText(paused ? 'resume' : 'pause'),
+        click: () => void setSyncPaused(!paused).catch((e) => log('sync', 'pause failed', String(e))),
+      },
       // The update installs itself — while you are away, or when you quit. This
       // line is for the person who would rather have it now than later, so it
       // says what will happen either way; it is not a prompt to act on.
@@ -585,28 +697,96 @@ async function completeAuth(state_: string, code: string): Promise<void> {
   // Only clear the attempt once it actually worked: a mistyped code must leave
   // the user able to try again rather than sending them back to the start.
   pendingAuth = null;
-  upsertAccount(state, { serverUrl: attempt.serverUrl, email, token });
+  signInFailure = null;
+  const { account, existed } = signIn(state, { serverUrl: attempt.serverUrl, email, token });
   saveState(state);
   accountsChanged();
+  // ⚠ Signing in again to an account this computer already has keeps its id,
+  // pairs and filex folder and replaces only the token — and its watcher was
+  // started with the OLD token in its environment. reconcile() only starts
+  // watchers that are missing, so without this the replaced (often revoked)
+  // token kept being used until the app restarted.
+  if (existed) supervisor?.stop(account.id);
   shellWindow?.close();
+  const hadWindow = !!mainWindow && !mainWindow.isDestroyed();
   openMainWindow();
-  // ⚠ Tell the window. Adding a SECOND account happens in a different window,
-  // and openMainWindow() only shows the existing one — it does not reload it.
-  // Without this the new account was stored but the rail kept showing one
-  // avatar until the app was restarted. Measured, not theorised.
-  mainWindow?.webContents.send('sync:changed');
+  if (existed && hadWindow) {
+    // A reconnect: the window is showing the signed-out screen, or an explorer
+    // built around the refused token. Start it over rather than patch it.
+    mainWindow?.reload();
+  } else {
+    // ⚠ Tell the window. Adding a SECOND account happens in a different
+    // window, and openMainWindow() only shows the existing one — it does not
+    // reload it. Without this the new account was stored but the rail kept
+    // showing one avatar until the app was restarted. Measured, not theorised.
+    mainWindow?.webContents.send('sync:changed');
+  }
+  refreshTray();
   void refreshPairs();
 }
 
-/** OS-delivered deep link. No UI is waiting on it, so failures surface as a
- *  dialog and drop the user back on the connect screen. */
+/**
+ * The server no longer accepts this account's token — it was revoked, or it
+ * expired. Mark the account (stored, so a reboot does not retry it), stop
+ * everything that uses the token, and say so ONCE.
+ *
+ * ⚠ What happened before: a watcher printing `HTTP 401` every 30 seconds, a
+ * bell poll logging it every 15, a file view with only "Try again" on it — and
+ * after a reboot, all of it again. While the mark is set the account has no
+ * watcher (watcherAccounts) and no bell poll; the window offers Reconnect,
+ * which signs in again in the browser and keeps the account's id, pairs and
+ * filex folder (signIn clears the mark).
+ */
+function markSignedOut(accountId: string, why: string): void {
+  const acc = state.accounts.find((a) => a.id === accountId);
+  if (!acc || acc.signedOut) return;
+  acc.signedOut = new Date().toISOString();
+  log('auth', "the server no longer accepts this account's token; sync and the bell stop until Reconnect", {
+    accountId,
+    why,
+  });
+  try {
+    saveState(state);
+  } catch (e) {
+    log('auth', 'could not store the signed-out mark', String((e as Error)?.message ?? e));
+  }
+  supervisor?.stop(accountId);
+  refreshTray();
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
+  try {
+    if (Notification.isSupported()) {
+      const n = new Notification({
+        title: syncText('signedOutTitle', { email: acc.email, host: new URL(acc.serverUrl).host }),
+        body: syncText('signedOutBody'),
+      });
+      n.on('click', () => openMainWindow());
+      n.show();
+    }
+  } catch {
+    /* the notification is a courtesy; the window and Settings say it too */
+  }
+}
+
+/**
+ * OS-delivered deep link.
+ *
+ * ⚠⚠ A failure must NOT drop the person back on the server-address form
+ * (issue #36). It used to — a modal, then `openShell('/connect')`, which
+ * reloaded the sign-in page and threw away its waiting screen: no address to
+ * copy, no code box, while the attempt was still pending here. The window now
+ * comes back on the waiting screen of that same attempt with the reason on it
+ * (src/signin-flow.ts decides what it shows); only when nothing is pending does
+ * it show the server form.
+ */
 async function handleDeepLink(raw: string): Promise<void> {
   const parsed = parseAuthDeepLink(raw);
   if (!parsed) return;
+  const pendingState = pendingAuth?.state ?? null;
   try {
     await completeAuth(parsed.state, parsed.code);
   } catch (err) {
-    await tellUser('error', 'filex — sign-in failed', String((err as Error)?.message ?? err));
+    signInFailure = failureOf(pendingState, parsed.state, err);
+    log('auth', 'a sign-in link did not finish', { kind: signInFailure.kind, detail: signInFailure.detail });
     openShell('/connect', 'filex — Connect');
   }
 }
@@ -844,11 +1024,18 @@ let applying = false;
 function watchForAQuietMoment(): void {
   if (quietMomentTimer) return;
   quietMomentTimer = setInterval(() => {
-    if (applying || updateState.status !== 'ready') return;
-    const windowOpen = BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible());
-    if (windowOpen) return;
-    if (powerMonitor.getSystemIdleTime() < IDLE_SECONDS_BEFORE_APPLY) return;
-    applyUpdateQuietly();
+    // ⚠ The engine counts as "someone": the swap stops every watcher, and an
+    // idle machine with no window open is exactly what an overnight first sync
+    // looks like. See quietMomentForUpdate (src/power.ts).
+    const now = quietMomentForUpdate({
+      ready: updateState.status === 'ready',
+      applying,
+      windowOpen: BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible()),
+      idleSeconds: powerMonitor.getSystemIdleTime(),
+      idleThreshold: IDLE_SECONDS_BEFORE_APPLY,
+      syncBusy: syncBusy(supervisor?.statuses() ?? []),
+    });
+    if (now) applyUpdateQuietly();
   }, 60_000);
 }
 
@@ -867,6 +1054,7 @@ function applyUpdateQuietly(): void {
     quietMomentTimer = null;
   }
   supervisor?.stopAll();
+  sleepGuard?.release();
   quitting = true;
   // (silent, relaunch) — see the ⚠⚠ note above: the defaults are (false, false),
   // which shows the installer and then leaves the app closed.
@@ -894,10 +1082,7 @@ function applyUpdateQuietly(): void {
  *  Windows' getLoginItemSettings only recognises an entry it is asked about
  *  with the SAME path and args it was created with. */
 function loginItemSpec(): { path: string; args: string[] } {
-  // Under an AppImage, execPath is the extracted temp mount — a path that does
-  // not survive the next launch. The image itself is what has to be run.
-  const exe = process.env.APPIMAGE || process.execPath;
-  return { path: exe, args: [HIDDEN_FLAG] };
+  return { path: loginItemExecutable(process.env, process.execPath), args: [HIDDEN_FLAG] };
 }
 
 /** Linux has no login-item API in Electron; XDG autostart is the equivalent.
@@ -931,14 +1116,37 @@ function setLinuxAutostart(on: boolean): void {
   fs.writeFileSync(file, body, 'utf8');
 }
 
-/** True when the OS will actually launch this app at the next sign-in — read
- *  back from the OS, never from our own intent. */
-function loginItemActive(): boolean {
-  if (process.platform === 'linux') return fs.existsSync(linuxAutostartFile());
-  if (!app.isPackaged) return false;
-  return app.getLoginItemSettings(loginItemSpec()).openAtLogin;
+/** Whether this run can have a login item at all: a dev run refuses to write
+ *  one (it could only register the bare electron binary — see above). */
+function loginItemSupported(): boolean {
+  return app.isPackaged || process.platform === 'linux';
 }
 
+/** What the OS says about our login item right now. */
+function loginItemReport(): LoginItemReport {
+  if (process.platform === 'linux') {
+    return { platform: 'linux', autostartFile: fs.existsSync(linuxAutostartFile()) };
+  }
+  if (!app.isPackaged) return { platform: process.platform };
+  const s = app.getLoginItemSettings(loginItemSpec());
+  return {
+    platform: process.platform,
+    openAtLogin: s.openAtLogin,
+    executableWillLaunchAtLogin: s.executableWillLaunchAtLogin,
+    launchItems: s.launchItems,
+    status: s.status,
+  };
+}
+
+/** True when the OS will actually launch this app at the next sign-in — read
+ *  back from the OS, never from our own intent. See src/login-item.ts for why
+ *  that is not `openAtLogin` on Windows. */
+function loginItemActive(): boolean {
+  return osWillLaunch(loginItemReport());
+}
+
+/** ⚠ Called from the Settings switch ONLY. Startup never writes the login
+ *  item — see reconcileLoginItem(). */
 function setLoginItem(on: boolean): void {
   if (process.platform === 'linux') {
     setLinuxAutostart(on);
@@ -947,7 +1155,31 @@ function setLoginItem(on: boolean): void {
   // A dev run must not write a login item at all: the only command it could
   // write is the one described above.
   if (!app.isPackaged) return;
-  app.setLoginItemSettings({ openAtLogin: on, ...loginItemSpec() });
+  app.setLoginItemSettings(loginItemWrite(on, process.platform, loginItemSpec()));
+}
+
+/**
+ * At startup the PREFERENCE follows the OS — never the other way round.
+ *
+ * ⚠ This used to be "re-assert the login item whenever the preference is on",
+ * so an install that had moved kept working — and so did a client the user had
+ * disabled in Task Manager or removed from the OS list: it came back, with its
+ * sync, at the next sign-in. Whoever switched it off out there meant it. If the
+ * OS will no longer launch us, the switch in Settings goes off to match, and
+ * nothing is written; turning it back on is one click, and that click is the
+ * only thing that writes a login item.
+ */
+function reconcileLoginItem(): void {
+  const report = loginItemReport();
+  const keep = preferenceAfterStartup(state.launchAtLogin, loginItemSupported(), report);
+  if (keep === state.launchAtLogin) return;
+  log('login', 'the OS will not start filex at sign-in any more; the preference follows it', report);
+  state.launchAtLogin = keep;
+  try {
+    saveState(state);
+  } catch (e) {
+    log('login', 'could not store the preference', String((e as Error)?.message ?? e));
+  }
 }
 
 function publicState() {
@@ -963,13 +1195,42 @@ function publicState() {
       remotePath: p.remote,
       localPath: p.local,
       enabled: !p.paused,
+      // Items the engine is holding for a decision (0 = nothing to decide).
+      held: heldItems(p),
+      // What to say under this folder — decided in src/sync-policy.ts, so
+      // the page only turns it into words.
+      view: folderView({
+        pairId: p.id,
+        paused: state.syncPaused === true,
+        signedOut: !!state.accounts.find((a) => a.id === p.account)?.signedOut,
+        status: supervisor?.statuses().find((st) => st.accountId === p.account) ?? null,
+        minuteOfDay: new Date().getHours() * 60 + new Date().getMinutes(),
+      }),
     })),
     syncStatuses: supervisor?.statuses() ?? [],
+    // Bandwidth limits and the sync window, with the presets Settings offers
+    // (one list, here, rather than a copy in the page).
+    limitDownKiB: normLimit(state.limitDownKiB),
+    limitUpKiB: normLimit(state.limitUpKiB),
+    syncWindow: normWindow(state.syncWindow),
+    limitPresets: LIMIT_PRESETS_KIB,
+    windowPresets: WINDOW_PRESETS,
     syncEngine: cliPath() ? 'bundled' : 'missing',
     runInBackground: state.runInBackground,
     launchAtLogin: state.launchAtLogin,
     locale: state.locale,
     notifications: state.notifications !== false,
+    syncPaused: state.syncPaused === true,
+    // The sign-in waiting in the browser. The URL carries the state and the
+    // challenge HASH only — no secret (see auth:begin).
+    pendingAuth: pendingAuth ? { serverUrl: pendingAuth.serverUrl, authUrl: pendingAuth.authUrl } : null,
+    // ⚠ What the sign-in window DRAWS. The page keeps nothing of its own, so a
+    // reload (the tray, the Dock, a second launch, a failed link) comes back on
+    // the same screen (issue #36, src/signin-flow.ts).
+    signIn: signInView(
+      pendingAuth ? { serverUrl: pendingAuth.serverUrl, authUrl: pendingAuth.authUrl } : null,
+      signInFailure,
+    ),
     // What 'system' currently resolves to, so the window does not have to
     // re-derive it from navigator.language and disagree with the tray.
     effectiveLocale: effectiveLocale(),
@@ -979,7 +1240,7 @@ function publicState() {
     launchAtLoginEffective: loginItemActive(),
     // A dev run deliberately refuses to write one (see setLoginItem), and the
     // settings panel has to say WHY rather than show a switch that does nothing.
-    launchAtLoginSupported: app.isPackaged || process.platform === 'linux',
+    launchAtLoginSupported: loginItemSupported(),
     appVersion: app.getVersion(),
     update: updateState,
     // Set on a build that can never apply an update in place — an ad-hoc
@@ -1004,7 +1265,41 @@ let knownPairs: Pair[] = [];
 
 async function refreshPairs(): Promise<void> {
   knownPairs = await listPairs();
-  await supervisor?.reconcile(state.accounts, (id) => state.accounts.find((a) => a.id === id)?.token ?? null);
+  // Paused hands the supervisor no accounts: every watcher stops and none
+  // starts — at launch too. See watcherAccounts().
+  await supervisor?.reconcile(
+    watcherAccounts(state.accounts, { paused: state.syncPaused === true }),
+    (id) => state.accounts.find((a) => a.id === id)?.token ?? null,
+  );
+}
+
+/** The limits and window every watcher is started with (Settings). */
+function currentWatchPrefs(): WatchPrefs {
+  return { limitDownKiB: state.limitDownKiB, limitUpKiB: state.limitUpKiB, syncWindow: state.syncWindow };
+}
+
+/** Restarts every watcher, so a changed limit or window takes effect now. A
+ *  stopped engine flushes its checkpoint (SIGTERM; on Windows the kill is
+ *  abrupt, and the checkpoint and resumable uploads bound what repeats). */
+async function restartWatchers(): Promise<void> {
+  for (const acc of state.accounts) supervisor?.stop(acc.id);
+  await refreshPairs();
+}
+
+/**
+ * Pause sync / Resume sync — the tray item and the Settings switch.
+ *
+ * ⚠ Stored, not just applied. "Quit it" was the only way to stop a client in a
+ * bad state, and it lasted until the next sign-in started it again, hidden,
+ * syncing. A pause survives the restart; resuming starts the watchers again.
+ */
+async function setSyncPaused(paused: boolean): Promise<void> {
+  if ((state.syncPaused === true) === paused) return;
+  state.syncPaused = paused;
+  saveState(state);
+  log('sync', paused ? 'paused by the user' : 'resumed by the user');
+  refreshTray();
+  await refreshPairs();
 }
 
 // ─────────────────────────── selective sync ───────────────────────────
@@ -1043,6 +1338,21 @@ const SYNC_STRINGS: Record<string, [en: string, tr: string]> = {
     'Şu ankinin içinde olmayan (ve onu içermeyen) bir klasör seç.',
   ],
   unexpectedTitle: ['filex hit an unexpected error', 'filex beklenmedik bir hatayla karşılaştı'],
+  discardTitle: ['Move held items to the local trash', 'Bekleyen öğeleri yerel çöpe taşı'],
+  discardMessageOne: ['Move the 1 held item off this computer?', 'Bekleyen 1 öğe bu bilgisayardan kaldırılsın mı?'],
+  discardMessage: ['Move the {n} held items off this computer?', 'Bekleyen {n} öğe bu bilgisayardan kaldırılsın mı?'],
+  discardDetail: [
+    'They go to the sync trash on this computer and are kept there for 30 days (Settings → Removed by sync). Nothing on the server changes.\n\n{local}',
+    'Bu bilgisayardaki eşitleme çöpüne gider ve orada 30 gün saklanır (Ayarlar → Eşitlemenin sildikleri). Sunucuda hiçbir şey değişmez.\n\n{local}',
+  ],
+  discardButton: ['Move to local trash', 'Yerel çöpe taşı'],
+  holdTitle: ['Items held for a decision', 'Karar bekleyen öğeler'],
+  holdFailed: ['filex could not do that: {err}', 'filex bunu yapamadı: {err}'],
+  signedOutTitle: ['{email} is signed out of {host}', '{email}, {host} oturumundan çıkarıldı'],
+  signedOutBody: [
+    "The server no longer accepts this computer's sign-in, so sync for this account has stopped. Open filex and choose Reconnect.",
+    "Sunucu bu bilgisayarın oturumunu artık kabul etmiyor; bu hesabın eşitlemesi durdu. filex'i açıp Yeniden bağlan'ı seç.",
+  ],
   dragFailedTitle: ['Drag out failed', 'Dışarı sürükleme başarısız'],
   dragFailedBody: [
     'The files were dropped in {dir} but could not be downloaded there: {err}',
@@ -1715,7 +2025,9 @@ function docChromeScript(): string {
         b.type = 'button'; b.setAttribute('aria-label', label); b.title = label;
         b.innerHTML = svg;
         b.style.cssText = 'width:46px;height:100%;display:flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--fe-text-muted,#8a94a6);cursor:pointer;-webkit-app-region:no-drag;transition:background .12s,color .12s;';
-        b.onmouseenter = () => { b.style.background = danger ? '#e53935' : 'var(--fe-bg-hover,rgba(128,128,128,.16))'; b.style.color = danger ? '#fff' : 'var(--fe-text,#e6eaf0)'; };
+        // The same danger pair as the main window's close button (ui/app.html
+        // #winctl): one red for every window of the app, and the theme's own.
+        b.onmouseenter = () => { b.style.background = danger ? 'var(--fe-danger,#dc2626)' : 'var(--fe-bg-hover,rgba(128,128,128,.16))'; b.style.color = danger ? 'var(--fe-text-on-primary,#ffffff)' : 'var(--fe-text,#e6eaf0)'; };
         b.onmouseleave = () => { b.style.background = 'transparent'; b.style.color = 'var(--fe-text-muted,#8a94a6)'; };
         b.onclick = fn;
         return b;
@@ -2147,6 +2459,7 @@ function wireIpc(): void {
 
   ipcMain.handle('auth:begin', (_e, serverUrl: string) => {
     pendingAuth = beginBrowserAuth(serverUrl);
+    signInFailure = null;
     // The URL is always handed back: the waiting screen shows it so a user
     // whose browser did not open (none installed, portable browser with no OS
     // handler, locked-down machine) can copy it and go there themselves. It
@@ -2164,14 +2477,37 @@ function wireIpc(): void {
     if (!pendingAuth) throw new Error('no sign-in is waiting — start again');
     const trimmed = String(code || '').trim();
     if (!trimmed) throw new Error('paste the code shown in your browser');
-    await completeAuth(pendingAuth.state, trimmed);
+    try {
+      await completeAuth(pendingAuth.state, trimmed);
+    } catch (err) {
+      // The server refused it, and a refused exchange uses the attempt up —
+      // the window says so and offers a new one rather than a box that can
+      // only fail again.
+      if (pendingAuth) signInFailure = failureOf(pendingAuth.state, pendingAuth.state, err);
+      throw err;
+    }
     return publicState();
   });
 
-  ipcMain.handle('auth:signOut', (_e, id: string) => {
+  // Cancel on the waiting screen: the person chose the server form, so the
+  // attempt ends here as well — otherwise the next reload would bring the
+  // waiting screen back (issue #36 made the window follow the attempt).
+  ipcMain.handle('auth:cancel', () => {
+    pendingAuth = null;
+    signInFailure = null;
+    return publicState();
+  });
+
+  ipcMain.handle('auth:signOut', async (_e, id: string) => {
     removeAccount(state, id);
     saveState(state);
     accountsChanged();
+    // ⚠ The account's watcher goes with it. Nothing reconciled here before:
+    // the process kept syncing with the signed-out account's token — the one
+    // credential the user had just asked this computer to forget — until the
+    // app restarted. Its pairs stay in pairs.json, inert (no account, no
+    // watcher); see docs/DESKTOP.md on signing out vs Reconnect.
+    await refreshPairs();
     if (!activeAccount(state)) {
       mainWindow?.destroy();
       mainWindow = null;
@@ -2219,6 +2555,19 @@ function wireIpc(): void {
     openShell('/connect', 'filex — Add an account');
   });
 
+  // Reconnect: the same browser sign-in, for the SAME server — so a user
+  // whose token was revoked gets it back without retyping the address, and
+  // without signing out (which would forget the account's synced folders).
+  // Signing in as the same person replaces the token and keeps everything
+  // else; see completeAuth().
+  ipcMain.handle('auth:reconnect', (_e, id: string) => {
+    const acc = state.accounts.find((a) => a.id === id);
+    if (!acc) throw new Error('unknown account');
+    pendingAuth = beginBrowserAuth(acc.serverUrl);
+    openShell('/reconnect', 'filex — Reconnect');
+    return publicState();
+  });
+
   // Host-owned open: a file opens in its OWN frameless document window. The
   // explorer emits `file-opened` (config.openInHost) and the app page calls this.
   ipcMain.handle('doc:open', (_e, accountId: string, remote: string) => {
@@ -2257,6 +2606,11 @@ function wireIpc(): void {
     const res = await net.fetch(url.toString(), {
       headers: { Authorization: `Bearer ${acc.token}` },
     });
+    // ⚠ A 401 here is the server saying the token is dead, not "try again":
+    // the window used to show "Can't reach" with a Try again that could never
+    // work. Mark the account; the window asks the main process and offers
+    // Reconnect instead.
+    if (res.status === 401) markSignedOut(acc.id, 'the file listing was refused (HTTP 401)');
     if (!res.ok) throw new Error(`server said ${res.status}`);
     const body = (await res.json()) as { storages?: string[] };
     return (body.storages ?? []).map((name) => ({ name }));
@@ -2299,6 +2653,7 @@ function wireIpc(): void {
     const res = await net.fetch(url.toString(), {
       headers: { Authorization: `Bearer ${acc.token}` },
     });
+    if (res.status === 401) markSignedOut(acc.id, 'the folder picker was refused (HTTP 401)');
     if (!res.ok) throw new Error(`server said ${res.status}`);
     const body = (await res.json()) as {
       storages?: string[];
@@ -2433,7 +2788,14 @@ function wireIpc(): void {
     return publicState();
   });
 
-  ipcMain.handle('settings:set', (_e, patch: Partial<DesktopState>) => {
+  ipcMain.handle('settings:set', async (_e, patch: Partial<DesktopState>) => {
+    if (typeof patch.syncPaused === 'boolean') await setSyncPaused(patch.syncPaused);
+    // Limits and the window are engine flags: a change restarts the watchers.
+    const watchBefore = watchPrefsKey(currentWatchPrefs());
+    if ('limitDownKiB' in patch) state.limitDownKiB = normLimit(patch.limitDownKiB);
+    if ('limitUpKiB' in patch) state.limitUpKiB = normLimit(patch.limitUpKiB);
+    if ('syncWindow' in patch) state.syncWindow = normWindow(patch.syncWindow);
+    const watchChanged = watchPrefsKey(currentWatchPrefs()) !== watchBefore;
     if (typeof patch.runInBackground === 'boolean') state.runInBackground = patch.runInBackground;
     if (typeof patch.notifications === 'boolean') state.notifications = patch.notifications;
     if (typeof patch.launchAtLogin === 'boolean') {
@@ -2453,6 +2815,10 @@ function wireIpc(): void {
       refreshTray();
     }
     saveState(state);
+    if (watchChanged) {
+      log('sync', 'limits or window changed; restarting the watchers', currentWatchPrefs());
+      await restartWatchers();
+    }
     return publicState();
   });
 
@@ -2488,6 +2854,56 @@ function wireIpc(): void {
 
   ipcMain.handle('sync:refresh', async () => {
     await refreshPairs();
+    return publicState();
+  });
+
+  // ── items the engine holds for a decision (`hold_new` / `held`) ──
+  //
+  // A first sync that would push a stale mirror's worth of files into a
+  // server folder with content holds them instead. The two answers are the
+  // engine's own commands; afterwards the pair's watcher is restarted so the
+  // decision is acted on now rather than at the next tick.
+
+  const holdAnswer = async (pairId: string, act: (id: string) => Promise<string>): Promise<void> => {
+    const pair = knownPairs.find((p) => p.id === pairId);
+    if (!pair) return; // the list was stale; the next refresh says so
+    // The order — watcher stopped first — is answerHold's (sync-policy.ts).
+    const said = await answerHold({
+      stop: () => {
+        if (pair.account) supervisor?.stop(pair.account);
+      },
+      act: () => act(pair.id),
+      refresh: () => refreshPairs(),
+      onError: (e) =>
+        tellUser('error', syncText('holdTitle'), syncText('holdFailed', { err: String((e as Error)?.message ?? e) })),
+    });
+    if (said !== null) log('sync', 'hold answered', { pairId, said });
+  };
+
+  ipcMain.handle('sync:holdUpload', async (_e, pairId: string) => {
+    await holdAnswer(String(pairId), confirmHeld);
+    return publicState();
+  });
+
+  ipcMain.handle('sync:holdDiscard', async (_e, pairId: string) => {
+    const pair = knownPairs.find((p) => p.id === String(pairId));
+    if (!pair) return publicState();
+    const n = heldItems(pair);
+    // ⚠ Asked natively, defaulting to Cancel: these are files on this
+    // computer, and one misplaced click next to "Upload them" must not be
+    // what moves them. They go to the sync trash, not away.
+    const response = await askChoice({
+      type: 'question',
+      title: syncText('discardTitle'),
+      message: n === 1 ? syncText('discardMessageOne') : syncText('discardMessage', { n: String(n) }),
+      detail: syncText('discardDetail', { local: pair.local }),
+      buttons: [syncText('discardButton'), syncText('cancel')],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (response !== 0) return publicState();
+    await holdAnswer(pair.id, discardHeld);
     return publicState();
   });
 
@@ -2922,13 +3338,16 @@ function wireIpc(): void {
   // component never learns about pair ids at all.
   ipcMain.handle('sync:status', (_e, accountId: string) => {
     const st = supervisor?.statuses().find((s) => s.accountId === accountId);
-    if (!st) return { running: false, lastError: null, active: null };
+    if (!st) return { running: false, lastError: null, active: null, live: null };
     const remote = st.active
       ? (knownPairs.find((p) => p.id === st.active?.pairId)?.remote ?? null)
       : null;
     return {
       running: st.running,
-      lastError: st.lastError,
+      // The explorer's contract has one error per account: the account's own,
+      // else any pair's (each pair's card shows its own — see syncstatus.ts).
+      lastError: st.lastError ?? Object.values(st.pairs).find((h) => h.error)?.error ?? null,
+      live: st.live,
       active: st.active && remote
         ? { remote, phase: st.active.phase, done: st.active.done, total: st.active.total }
         : null,
@@ -3020,7 +3439,15 @@ if (!app.requestSingleInstanceLock()) {
     // default Edit/View/Window scaffolding only offers devtools and reload.
     Menu.setApplicationMenu(null);
 
-    if (process.defaultApp) {
+    if (process.env.FILEX_NO_BROWSER === '1') {
+      // ⚠⚠ A test run registers NOTHING with the operating system. The scheme
+      // lives in the user's registry (HKCU\Software\Classes\filex on
+      // Windows), and a suite run from a checkout used to point it at
+      // `electron.exe <checkout>` — so the next browser sign-in of the app the
+      // person actually uses opened a dev build instead, until that app
+      // happened to restart and re-register itself. The suites sign in through
+      // the manual-code path (harness.mjs signIn) and never need the link.
+    } else if (process.defaultApp) {
       // Dev runs are `electron .`, so the scheme has to point at the binary
       // plus the project path or Windows hands the link to a bare electron.
       if (process.argv.length >= 2) {
@@ -3036,8 +3463,23 @@ if (!app.requestSingleInstanceLock()) {
     // The supervisor keeps a `filex sync run --watch` alive per account. It is
     // started here, not when the Sync folders window opens: syncing that only
     // happens while a panel is on screen is not syncing.
-    supervisor = new SyncSupervisor(() => {
-      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
+    sleepGuard = new SleepGuard(powerSaveBlocker, (msg) => log('power', msg));
+    supervisor = new SyncSupervisor({
+      onChange: () => {
+        // While any pair is being worked on the machine does not idle-sleep;
+        // the moment none is, it may again. See src/power.ts.
+        sleepGuard?.update(syncBusy(supervisor?.statuses() ?? []));
+        for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
+      },
+      onSignedOut: (accountId) => markSignedOut(accountId, 'the sync engine was refused (HTTP 401)'),
+      // A run held items: re-read the pair list (it carries the count the
+      // notice shows) unless it already says exactly this.
+      onHold: (_accountId, pairId, count) => {
+        const known = knownPairs.find((p) => p.id === pairId);
+        if (known && heldItems(known) === count && known.hold_new === true) return;
+        void refreshPairs();
+      },
+      watchPrefs: () => currentWatchPrefs(),
     });
     // Local copies for dragging files out. Under userData rather than the OS
     // temp dir: the point of keeping them is that the SECOND drag of the same
@@ -3058,12 +3500,14 @@ if (!app.requestSingleInstanceLock()) {
     // Whether this build can swap itself decides WHICH updater to wire, so it
     // runs first.
     void detectManualUpdates().then(wireAutoUpdate);
-    // Re-assert the login item on every packaged start. The command stored in
-    // the registry is a full path, and an install that MOVES leaves it pointing
-    // at nothing — which is what an upgrade from a per-machine install to a
-    // per-user one does. Rewriting it here costs a registry write and keeps the
-    // setting honest across reinstalls.
-    if (state.launchAtLogin && !loginItemActive()) setLoginItem(true);
+    // The login item is NOT re-asserted here. It used to be, whenever the
+    // preference was on — which brought back a client the user had disabled
+    // in Task Manager (setLoginItemSettings also clears that flag). Now the
+    // preference follows the OS; see reconcileLoginItem(). The cost: after an
+    // install that MOVED (per-machine → per-user), the old entry points
+    // elsewhere, the switch reads off, and one click in Settings writes the
+    // new one.
+    reconcileLoginItem();
     // A launch the user did not initiate stays in the tray. Opening a window at
     // sign-in — on top of whatever else the desktop is still restoring — is the
     // behaviour that makes people turn the setting off again.
@@ -3109,6 +3553,7 @@ if (!app.requestSingleInstanceLock()) {
     // after the app is gone, which is both surprising and impossible to stop
     // from the UI that no longer exists.
     supervisor?.stopAll();
+    sleepGuard?.release();
   });
 
   app.on('window-all-closed', () => {

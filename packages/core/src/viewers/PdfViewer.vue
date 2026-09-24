@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { requestFailure, sayFailure } from '../lib/errorWords';
 /**
  * PdfViewer — rich PDF preview/edit via `pdfjs-dist`.
  *
@@ -23,6 +24,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 import { fetchViewerArrayBuffer } from '../composables/useViewerFetch';
+import { loadPdfjs } from '../lib/pdfjsLoader';
 
 const props = defineProps<{
   url: string;
@@ -60,21 +62,10 @@ let renderToken = 0;
 
 async function ensurePdfjs(): Promise<any | null> {
   if (pdfjs) return pdfjs;
-  try {
-    // Use the legacy build for broader browser compatibility and
-    // simpler worker bootstrap (no module worker requirement).
-    const mod = await import(/* @vite-ignore */ 'pdfjs-dist/legacy/build/pdf');
-    pdfjs = mod.default ?? mod;
-    if (pdfjs.GlobalWorkerOptions) {
-      const version = pdfjs.version || '4.0.379';
-      pdfjs.GlobalWorkerOptions.workerSrc =
-        props.pdfWorkerUrl ||
-        `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/legacy/build/pdf.worker.min.js`;
-    }
-    return pdfjs;
-  } catch {
-    return null;
-  }
+  // One loader for every pdf.js consumer in the package (lib/pdfjsLoader):
+  // the legacy build, the host's worker URL or the pinned CDN copy.
+  pdfjs = await loadPdfjs(props.pdfWorkerUrl);
+  return pdfjs;
 }
 
 // useNativeViewer flips the renderer to <embed type="application/pdf">
@@ -311,14 +302,14 @@ async function saveAnnotations(): Promise<void> {
       credentials: props.authCredentials || 'same-origin',
       body: JSON.stringify({ path: props.filePath, base64 }),
     });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    if (!res.ok) throw requestFailure(res.status, await res.text().catch(() => ''), undefined);
     saveStatus.value = 'saved';
     setTimeout(() => {
       if (saveStatus.value === 'saved') saveStatus.value = 'idle';
     }, 2500);
   } catch (err) {
     saveStatus.value = 'error';
-    error.value = err instanceof Error ? err.message : 'save failed';
+    error.value = sayFailure(err, tt('err.save_failed', 'Your changes could not be saved.'), { t: props.t }).text;
   }
 }
 

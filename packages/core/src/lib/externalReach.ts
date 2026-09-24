@@ -130,7 +130,11 @@ function domLoadFramed(url: string, timeoutMs: number): Promise<'ready' | 'timeo
     }
     const frame = document.createElement('iframe');
     frame.setAttribute('aria-hidden', 'true');
-    frame.style.cssText = 'position:absolute;left:-9999px;width:1px;height:1px;border:0';
+    // ⚠ RTL: parked off the START edge (`inset-inline-start`), never `left`:
+    // in a right-to-left page the left edge is the END, where overflow is
+    // scrollable — `left:-9999px` there hangs a 10 000px scrollbar under the
+    // page for as long as the probe runs.
+    frame.style.cssText = 'position:absolute;inset-inline-start:-9999px;width:1px;height:1px;border:0';
     let done = false;
     const finish = (r: 'ready' | 'timeout') => {
       if (done) return;

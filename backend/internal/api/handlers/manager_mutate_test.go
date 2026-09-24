@@ -32,12 +32,22 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/testutil"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // newMutateFixture spins up a temp-dir backed local driver, registers a
 // matching storage row, and returns the Manager handler wired to both.
 func newMutateFixture(t *testing.T) (*handlers.Manager, db.Store, *local.Driver, *model.Storage, string) {
 	t.Helper()
+	// ⚠⚠ Start from a clean process: the pre-write overwrite guard is
+	// PROCESS-WIDE (writehook), and a test that built a router with a
+	// versioning service installs one over ITS store. Left behind, every
+	// write through this fixture snapshots through that test's CLOSED
+	// database — TestPublicDrop_* went red only in subset runs
+	// (`-run 'PublicDrop|Upload'`), green in the full one, because the order
+	// decided who ran after whom. Two fixtures now clear it on cleanup; this
+	// one no longer depends on every other test remembering to.
+	writehook.ConfigureOverwriteGuard(nil)
 	_, store := testutil.NewTestDB(t)
 	dir := t.TempDir()
 

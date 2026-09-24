@@ -10,8 +10,11 @@ import {
 } from 'lucide-vue-next';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue';
 import { useI18n } from 'vue-i18n';
+import { ProductVersion, localeTag, personInitial, personName, productVersionLine } from '@brftech/filex-core';
 
 import { useAuthStore } from '@/stores/auth';
+import { useCapabilitiesStore } from '@/stores/capabilities';
+import { signOut } from '@/lib/signOut';
 // gorunum:v3-shell — ⚠ no LocaleSwitcher and no DarkModeToggle here any more.
 // Both did a job the user-settings modal already does, one click away in the
 // account menu below (Preferences → Language, Preferences → Theme), and the
@@ -56,11 +59,11 @@ watch(
   { immediate: true },
 );
 const auth = useAuthStore();
-const { t } = useI18n();
+const caps = useCapabilitiesStore();
+const { t, locale } = useI18n();
 
 async function logout() {
-  await auth.logout();
-  router.push({ name: 'login' });
+  await signOut(auth, router);
 }
 
 function gotoSearch() {
@@ -90,21 +93,26 @@ function gotoSearch() {
       <span>{{ t('search.queryPlaceholder') }}</span>
     </button>
 
-    <div class="ml-auto flex items-center gap-1.5">
+    <div class="ms-auto flex items-center gap-1.5">
       <QuotaWidget />
       <NotificationBell />
 
       <Menu as="div" class="relative">
+        <!-- ⚠ Named, because the only IN-PAGE way to the person's own
+             settings is through this menu: `?settings=1` is a deep link and
+             opening it is a full page load, which a test measuring a page
+             whose server went away cannot do (e2e/132). -->
         <MenuButton
+          data-testid="account-menu"
           class="inline-flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
         >
           <span
             class="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-brand-700 text-xs font-semibold dark:bg-brand-500/20 dark:text-brand-300"
           >
-            {{ ((auth.user?.display_name || '').trim() || (auth.user?.email || '?')).slice(0, 1).toUpperCase() }}
+            {{ personInitial(auth.user, localeTag(locale)) || '?' }}
           </span>
           <span class="hidden sm:inline truncate max-w-[12rem]">
-            {{ (auth.user?.display_name || '').trim() || auth.user?.email || '—' }}
+            {{ personName(auth.user) || '—' }}
           </span>
           <ChevronDown class="h-4 w-4 opacity-60" />
         </MenuButton>
@@ -118,7 +126,7 @@ function gotoSearch() {
           leave-to-class="transform opacity-0 scale-95"
         >
           <MenuItems
-            class="absolute right-0 mt-1 w-56 origin-top-right rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-lg focus:outline-none overflow-hidden"
+            class="absolute end-0 mt-1 w-56 origin-top-right rtl:origin-top-left rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-lg focus:outline-none overflow-hidden"
           >
             <div class="px-3 py-2 text-xs text-zinc-500 dark:text-zinc-400 truncate">
               {{ auth.user?.email }}
@@ -161,6 +169,14 @@ function gotoSearch() {
                 {{ t('nav.logout') }}
               </button>
             </MenuItem>
+            <!-- Which filex this is, at the foot of the menu: not a row,
+                 nothing to press — the line somebody reads out when asked
+                 "which version are you on?" (Burak, 2026-09-24). The same
+                 piece the explorer's avatar menu and user settings draw. -->
+            <template v-if="productVersionLine(caps.data.version)">
+              <div class="divider" />
+              <ProductVersion :version="caps.data.version" class="px-3 py-2" />
+            </template>
           </MenuItems>
         </transition>
       </Menu>

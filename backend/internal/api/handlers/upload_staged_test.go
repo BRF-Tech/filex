@@ -54,6 +54,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // stagedFixture is a full router over an in-memory DB, a real local-FS storage
@@ -137,6 +138,12 @@ func newStagedFixtureWith(t *testing.T, tweak func(*api.Deps)) *stagedFixture {
 		tweak(deps)
 	}
 	router := api.BuildRouter(deps)
+	// ⚠ BuildRouter with a versioning service (withVersions) installs the
+	// process-wide overwrite guard over THIS fixture's store; left behind,
+	// the next test that writes without a router of its own snapshots
+	// through a closed database (`go test -run 'Upload|TestPublicDrop'`
+	// failed TestPublicDrop_* that way).
+	t.Cleanup(func() { writehook.ConfigureOverwriteGuard(nil) })
 
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)

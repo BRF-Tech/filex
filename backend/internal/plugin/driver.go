@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -196,6 +197,14 @@ func (r *readOps) List(ctx context.Context, path string) ([]storage.Object, erro
 		}
 		out = make([]storage.Object, 0, len(objs))
 		for _, o := range objs {
+			// A plugin that lists by name alone is met half-way; one that
+			// lists the root, "." or ".." as a child is not listed at all.
+			if o.Path == "" && o.Name != "" {
+				o.Path = strings.TrimPrefix(path+"/"+o.Name, "/")
+			}
+			if !o.listable() {
+				continue
+			}
 			out = append(out, o.toStorage())
 		}
 		return nil

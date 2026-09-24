@@ -244,7 +244,7 @@ function isCode(b: GuideBlock): boolean {
 }
 .fe-guide__steps {
   margin: 0;
-  padding-left: 20px;
+  padding-inline-start: 20px;
   display: flex;
   flex-direction: column;
   gap: 6px;

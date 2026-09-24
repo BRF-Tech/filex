@@ -16,8 +16,8 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Toggle from '@/components/ui/Toggle.vue';
-import Checkbox from '@/components/ui/Checkbox.vue';
 import Badge from '@/components/ui/Badge.vue';
+import { DataTable, type DataColumn } from '@brftech/filex-core';
 import StorageDriverFields from '@/components/StorageDriverFields.vue';
 
 const { t, te } = useI18n();
@@ -55,11 +55,20 @@ onMounted(async () => {
   config.value = drivers.defaults(driver.value);
 });
 
+/** The storage's scan settings (issue #44): the same for every driver. */
+const scanFields = computed(() => drivers.scanFields(driver.value));
+
 function onDriverChange(d: StorageDriver) {
   driver.value = d;
   // Defaults come from the driver's descriptor. Switching drivers
   // replaces the config wholesale — stale keys are never carried over.
-  config.value = drivers.defaults(d);
+  // The scan settings are the exception: they belong to the storage, not
+  // to the driver, and every driver has them.
+  const kept: Record<string, unknown> = {};
+  for (const f of drivers.scanFields(d)) {
+    if (config.value[f.key] !== undefined) kept[f.key] = config.value[f.key];
+  }
+  config.value = { ...drivers.defaults(d), ...kept };
   testResult.value = null;
   discovered.value = null;
   discoverError.value = '';
@@ -124,6 +133,29 @@ const rootKey = computed(() => drivers.fields(driver.value).find((f) => f.root)?
 const discovering = ref(false);
 const discoverError = ref('');
 const discovered = ref<Candidate[] | null>(null);
+
+/** The folders found under the root, in the explorer's table (DataTable,
+ *  remembered under `admin.storage.discover`). ⚠ `folder` is the lead and
+ *  freezes left; `root` can be long enough to scroll the table sideways, and
+ *  losing the folder it belongs to is exactly the failure the frozen lead
+ *  exists to stop. The tick is the table's own tick column (`selectable`),
+ *  the same one the explorer's rows carry — it used to be a hand-drawn
+ *  checkbox inside the first cell.
+ *
+ *  ⚠ The storage-name column is NOT sortable: it is an input, and a table
+ *  that re-sorts while somebody types would move the row out from under the
+ *  cursor on every keystroke. */
+const discoverColumns = computed<DataColumn<Candidate>[]>(() => [
+  {
+    id: 'folder',
+    label: t('common.folder'),
+    sortable: true,
+    width: 200,
+    format: (c) => c.name,
+  },
+  { id: 'name', label: t('storages.discover.nameLabel'), width: 260 },
+  { id: 'root', label: t('common.root'), sortable: true, width: 260, sortValue: (c) => c.root },
+]);
 const bulkSaving = ref(false);
 
 const selectedCount = computed(() => (discovered.value ?? []).filter((c) => c.selected).length);
@@ -261,6 +293,17 @@ async function createDiscovered() {
     </div>
 
     <div
+      v-if="scanFields.length"
+      class="card card-body"
+    >
+      <StorageDriverFields
+        v-model="config"
+        :fields="scanFields"
+        data-testid="storage-scan-fields"
+      />
+    </div>
+
+    <div
       v-if="testResult"
       class="card card-body"
     >
@@ -389,32 +432,35 @@ async function createDiscovered() {
               {{ t('storages.discover.selectNone') }}
             </button>
           </div>
-          <ul
-            class="divide-y divide-zinc-200 dark:divide-zinc-800"
+          <!-- ⚠ A tick, a name and a root per row is a table. It was a
+               `<ul class="divide-y divide-zinc-200 dark:divide-zinc-800">`,
+               which is the shared table's hairline written twice in hexes the
+               palette cannot move. The tick is the lead and freezes left, so
+               scrolling a long root sideways never loses the folder it
+               belongs to. -->
+          <DataTable
+            table-id="admin.storage.discover"
+            :columns="discoverColumns"
+            :rows="discovered"
+            :row-key="(c: Candidate) => c.root"
+            :row-attrs="(c: Candidate) => ({ 'data-testid': c.name })"
+            :empty="t('storages.discover.none')"
+            selectable
+            :is-selected="(c: Candidate) => c.selected"
             data-testid="discover-folders"
+            @check-click="(c: Candidate) => (c.selected = !c.selected)"
           >
-            <li
-              v-for="c in discovered"
-              :key="c.root"
-              class="py-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 items-start"
-              :data-folder="c.name"
-            >
-              <Checkbox
-                v-model="c.selected"
-                :label="c.name"
+            <template #cell-name="{ row }">
+              <Input
+                v-model="row.storageName"
+                :aria-label="t('storages.discover.nameLabel')"
+                :disabled="!row.selected"
               />
-              <div class="space-y-1">
-                <Input
-                  v-model="c.storageName"
-                  :label="t('storages.discover.nameLabel')"
-                  :disabled="!c.selected"
-                />
-                <p class="font-mono text-xs text-zinc-500 dark:text-zinc-400 break-all">
-                  {{ rootKey }} = {{ c.root }}
-                </p>
-              </div>
-            </li>
-          </ul>
+            </template>
+            <template #cell-root="{ row }">
+              <span class="tbl-mono break-all">{{ rootKey }} = {{ row.root }}</span>
+            </template>
+          </DataTable>
           <div class="flex justify-end">
             <Button
               type="button"

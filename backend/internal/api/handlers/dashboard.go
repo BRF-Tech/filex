@@ -6,28 +6,43 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
-	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
+	"github.com/brf-tech/filex/backend/internal/queue"
 )
+
+// QueueStats is the one question the dashboard asks the job queue: how many
+// jobs are waiting or running. queue.Driver satisfies it.
+type QueueStats interface {
+	Stats(ctx context.Context) (queue.Stats, error)
+}
 
 // Dashboard handles /api/admin/dashboard.
 type Dashboard struct {
-	Store  db.Store
-	Caps   *capability.Service
-	Worker *syncpkg.Worker
+	Store db.Store
+	Caps  *capability.Service
+	// Queue answers "Queue depth": the jobs waiting or running in the op queue
+	// (the same counters the Queue page's Pending and Running cards show).
+	// Nil reads as an empty queue.
+	Queue QueueStats
 	// DemoMode marks a public playground. The `recent_activity` block below
 	// is the same audit rows the Audit page serves, client addresses and all,
 	// on the FIRST page of the admin panel. See maskAuditRecent.
 	DemoMode bool
 }
 
-// NewDashboard constructs the handler.
-func NewDashboard(store db.Store, caps *capability.Service, worker *syncpkg.Worker) *Dashboard {
-	return &Dashboard{Store: store, Caps: caps, Worker: worker}
+// NewDashboard constructs the handler. q is the op queue ("Queue depth");
+// nil reads as an empty queue.
+func NewDashboard(store db.Store, caps *capability.Service, q queue.Driver) *Dashboard {
+	h := &Dashboard{Store: store, Caps: caps}
+	if q != nil {
+		h.Queue = q
+	}
+	return h
 }
 
 // StorageSummary is a per-storage row in the dashboard response.
@@ -62,6 +77,10 @@ type CapabilitiesShort struct {
 type ActivityRow struct {
 	*model.AuditEntry
 	UserEmail string `json:"user_email,omitempty"`
+	// TargetName: which thing, in words (handlers/audit_targets.go).
+	TargetName string `json:"target_name,omitempty"`
+	// UserName is who acted, as every screen names a person (PersonLabel).
+	UserName string `json:"user_name,omitempty"`
 }
 
 // Response is the shape returned to the admin UI.
@@ -104,10 +123,19 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 		if last, err := h.Store.GetLastSyncRun(ctx, st.ID); err == nil && last != nil {
 			row.LastSyncAt = last.StartedAt
 			row.LastSyncStatus = last.Status
-			if last.Status == "error" {
+			// ⚠ The statuses the sync worker actually writes (poll.go). This
+			// compared with "error", which it has never written, so a storage
+			// whose last scan failed showed as "ok" here.
+			switch last.Status {
+			case "failed":
 				row.State = "error"
-			} else if last.Status == "running" {
+			case "running":
 				row.State = "running"
+			case "aborted":
+				// Stopped before it finished (closed when the server next
+				// started): the catalogue is behind the backend until a run
+				// completes.
+				row.State = "stale"
 			}
 		} else {
 			row.State = "stale"
@@ -134,9 +162,20 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// ⚠⚠ Queue depth is the JOB QUEUE's backlog — pending plus running, the
+	// same two numbers the Queue page shows. It used to be the number of
+	// storage watchers the sync worker had started (one per enabled storage),
+	// so the panel read "Queue depth 2" while the Queue page said 0 pending
+	// and 0 running (release-candidate sweep, 2026-09-21). The queue is
+	// instance-wide and its page is supertenant-only, so a confined tenant
+	// admin is shown 0 rather than the platform's backlog.
 	queueDepth := 0
-	if h.Worker != nil {
-		queueDepth = h.Worker.QueueDepth()
+	if h.Queue != nil {
+		if _, confined := confinedScope(ctx); !confined {
+			if qs, qerr := h.Queue.Stats(ctx); qerr == nil {
+				queueDepth = int(qs.Pending + qs.Running)
+			}
+		}
 	}
 
 	recent, _ := h.Store.ListAuditRecent(ctx, 10)
@@ -167,19 +206,23 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	emails := map[int64]string{}
+	names := map[int64]string{}
 	if users, uerr := h.Store.ListUsers(ctx); uerr == nil {
 		for _, u := range users {
 			emails[u.ID] = u.Email
+			names[u.ID] = u.Label()
 		}
 	}
 	activity := make([]ActivityRow, 0, len(recent))
+	namer := newAuditNamer(ctx, h.Store)
 	for _, e := range recent {
 		if e == nil {
 			continue
 		}
-		row := ActivityRow{AuditEntry: e}
+		row := ActivityRow{AuditEntry: e, TargetName: namer.name(e)}
 		if e.UserID != nil {
 			row.UserEmail = emails[*e.UserID]
+			row.UserName = names[*e.UserID]
 		}
 		activity = append(activity, row)
 	}

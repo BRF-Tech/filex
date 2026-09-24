@@ -1067,21 +1067,28 @@ async function run(tokens) {
     const dctx = await newContext(browser, 1440, 900, 'dark');
     const dpage = await dctx.newPage();
     await signIn(dpage, '/drive/', USER);
+    // ⚠⚠ Said AFTER signing in, and read from the ACCOUNT from then on — see
+    // the note in the 390px loop below. Seeded before the session exists it
+    // counts for nothing, and the light context that ran first had left
+    // "light" on this person's account: `driveshell-dark-1440.png` came back
+    // LIGHT (v0.43.0 take), and the check under it did not notice because
+    // "the search box has SOME background" is true in both modes.
+    await dpage.evaluate(() => localStorage.setItem('filex.thememode', 'dark'));
     await dpage.goto(`${URL}/drive/explore`);
     await waitForExplorer(dpage);
     await dpage.locator('[data-testid="sidenav-storage-My files"]').click();
     await sleep(1300);
     await dpage.locator('.fe-subhead__actions [data-testid="view-grid"]').click();
     await sleep(900);
+    const darkPaint = await dpage.evaluate(() => {
+      const bg = getComputedStyle(document.querySelector('.fe')).backgroundColor;
+      const n = (bg.match(/\d+/g) ?? []).map(Number);
+      return { bg, dark: n.length >= 3 && (n[0] + n[1] + n[2]) / 3 < 128 };
+    });
     check(
       'the shell paints itself in dark mode too',
-      (await dpage.locator('[data-testid="drive-search"]').count()) === 1 &&
-        (await dpage.evaluate(
-          () => getComputedStyle(document.querySelector('.fe-drivesearch')).backgroundColor,
-        )) !== 'rgba(0, 0, 0, 0)',
-      await dpage.evaluate(
-        () => getComputedStyle(document.querySelector('.fe-drivesearch')).backgroundColor,
-      ),
+      (await dpage.locator('[data-testid="drive-search"]').count()) === 1 && darkPaint.dark,
+      `.fe background ${darkPaint.bg}`,
     );
     await shot(dpage, 'driveshell-dark-1440.png');
     // Selected through its checkbox — the one click that selects (issue #26).
@@ -1099,10 +1106,34 @@ async function run(tokens) {
       const mob = await newContext(browser, 390, 844, scheme);
       const mpage = await mob.newPage();
       await signIn(mpage, '/drive/', USER);
+      // ⚠⚠ Light or dark is a PERSON's answer now, kept on the ACCOUNT
+      // (`filex.thememode`, registerPersonalMirror in core/lib/themes.ts) and
+      // read only once there IS a session — so the value this context seeded
+      // before signing in counts for nothing, and the account's answer beats
+      // `prefers-color-scheme`. The light pass therefore left "light" on the
+      // account and the dark pass photographed a LIGHT phone into
+      // `driveshell-390-dark.png`: two byte-identical pictures, one of them
+      // lying about its own name (found taking the v0.43.0 set; the pictures
+      // differed in v0.42.2, when the mode still lived under `filex.theme`).
+      // Say it after signing in, and then reload so the boot reads it.
+      await mpage.evaluate((s) => localStorage.setItem('filex.thememode', s), scheme);
       await mpage.goto(`${URL}/drive/explore`);
       await mpage.waitForSelector('.fe', { timeout: 25_000 });
       await sleep(1200);
       await openRow(mpage, 'My files');
+
+      // …and MEASURE it, the way the 1440 dark context does: a picture named
+      // `-dark` that is light is worse than no picture.
+      const paint = await mpage.evaluate(() => {
+        const bg = getComputedStyle(document.querySelector('.fe')).backgroundColor;
+        const n = (bg.match(/\d+/g) ?? []).map(Number);
+        return { bg, dark: n.length >= 3 && (n[0] + n[1] + n[2]) / 3 < 128 };
+      });
+      check(
+        `at 390px the phone is painted in ${scheme}`,
+        paint.dark === (scheme === 'dark'),
+        `.fe background ${paint.bg}`,
+      );
 
       // ⚠ The EXPLORER's own box, measured on `.fe` and `.fe__body` — not the
       // document. There is a known 8px overflow at 390px coming from the admin

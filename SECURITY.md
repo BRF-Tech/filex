@@ -12,7 +12,7 @@ on `main` and in the next tag. Please run a recent version.
 Report privately instead — use this repository's **private vulnerability
 reporting**: the **Security** tab → **Report a vulnerability** (GitHub Security
 Advisories). This opens a channel visible only to the maintainers.
-Alternatively, e-mail **security@brf.sh**.
+Alternatively, email **security@brf.sh**.
 
 Include, where possible:
 
@@ -29,5 +29,6 @@ as soon as practical, coordinating a disclosure timeline with you.
 filex is a self-hosted application; the operator controls storage backends,
 auth providers, network exposure and secrets. Reports about the software itself
 (auth bypass, path traversal / confinement escape, injection, SSRF, privilege
-escalation, secret leakage, RBAC bypass) are in scope. Misconfiguration of a
+escalation, secret leakage, RBAC bypass, and an app-plugin sandbox escape or
+permission bypass) are in scope. Misconfiguration of a
 specific deployment is not, though we welcome hardening suggestions.

@@ -11,6 +11,11 @@
 # found on /api/files/capabilities, so a missing one is a disabled feature with
 # a reason, not a crash or a silent failure.
 #
+# ⚠ Since v0.43.0 the same missing engines also gate APP actions: an app's
+# "Convert…" or "Sign…" on an office document needs LibreOffice, and an
+# administrator sees that row greyed with the reason. Use latest/full if you
+# install apps that need an engine.
+#
 # Use this image when you want a file manager, not a preview generator: it
 # pulls in seconds instead of minutes and has a fraction of the attack surface.
 # Want the previews? Use `latest` / `full`, built from docker/Dockerfile.
@@ -122,6 +127,9 @@ FROM alpine:3.20
 #   ca-certificates — outbound TLS (S3, WebDAV, OIDC, update checks).
 #   tzdata          — local-time rendering and scheduled jobs.
 #   su-exec         — drop root in the entrypoint.
+#   tini            — PID 1: reaps orphaned processes (see ENTRYPOINT below).
+#                     The slim image runs no thumbnail tools, but plugins and
+#                     their helpers are processes too.
 #
 # Deliberately absent: ffmpeg, ghostscript, poppler-utils, libreoffice,
 # openjdk, rsvg-convert, imagemagick and the font packages. Together they are
@@ -131,6 +139,7 @@ RUN apk --no-cache add \
         ca-certificates \
         tzdata \
         su-exec \
+        tini \
     && addgroup -S filex && adduser -S -G filex filex
 
 COPY --from=backend-build /out/filex /usr/local/bin/filex
@@ -155,5 +164,14 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# ⚠⚠ tini is PID 1, not filex. A process that is PID 1 inherits every orphan
+# in the container, and the Go runtime only ever waits for the children it
+# started itself: LibreOffice's helpers (gpgconf, gpgsm, gpg) were never
+# collected, and one deployment measured 19,110 zombies in ten days — until
+# the task limit was full, the healthcheck could not fork and every thumbnail
+# failed. tini reaps them, and forwards SIGTERM to the entrypoint, which
+# `exec`s filex so that filex is the process that receives it. `-s` also
+# registers tini as a subreaper, so an outer init (compose `init: true`,
+# `docker run --init`) is harmless rather than a warning.
+ENTRYPOINT ["/sbin/tini", "-s", "--", "/usr/local/bin/docker-entrypoint.sh"]
 CMD ["serve"]

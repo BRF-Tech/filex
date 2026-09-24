@@ -13,6 +13,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
 // Reading an object. GET and HEAD are one function with one flag, because the
@@ -155,7 +156,7 @@ func (h *Handler) readable(p *protocolauth.Principal, set *acl.Set, key string) 
 	// internal trees here is what stops a caller who already knows (or
 	// guesses) a key like .versions/42/1 from reading it directly — not just
 	// from finding it in a listing, which is list.go's half.
-	if hiddenPath(key) {
+	if syspath.InDir(key) {
 		return false
 	}
 	if c := p.Confine; c != nil && c.Rel != "" {

@@ -28,7 +28,7 @@ one line each:
 - **Cypress (`web/cypress/`)** pins **rules**. One spec is one surface with
   many small cases: what every admin GET answers, what shape the `external`
   envelope has, what the navigation panel does when you collapse it, what the
-  OnlyOffice config endpoint returns when no Document Server is configured. It
+  ONLYOFFICE config endpoint returns when no Document Server is configured. It
   runs on every push and pull request.
 
 The practical difference is that a Cypress case can assert the UI and the API
@@ -85,7 +85,7 @@ cypress/
     65…86                    manager API, trash, versions, search, uploads
     87-search-fuzzy          filename search ORDER and FILTERING, not "returns
                              an array"
-    88…99                    PWA, webhooks, OnlyOffice, capabilities, public
+    88…99                    PWA, webhooks, ONLYOFFICE, capabilities, public
   support/
     e2e.ts                   global setup — read the two exception filters
     commands.ts              cy.apiLogin / cy.uiLogin / cy.adminGet
@@ -97,9 +97,10 @@ cypress/
   `fixed inset-x-0 bottom-0 z-40` with no `pointer-events-none` (its neighbour
   `PendingOpsTray` has one), so the whole bottom strip of every admin page is a
   hit target — including the 256px the sidebar occupies. At the configured
-  1440x900 viewport that is eleven nav destinations (Settings, Branding,
-  Protection, External, Replication, Queue, Notifications, Webhooks, Plugins,
-  Audit, Updates, About) that neither Cypress nor a person can click without
+  1440x900 viewport that is thirteen nav destinations (Settings, Branding,
+  Appearance, Protection, External, Replication, Queue, Notifications,
+  Webhooks, Plugins, Usage, Audit, Updates) plus About, and Identity
+  providers under Access, that neither Cypress nor a person can click without
   dismissing the banner first. `support/e2e.ts` dismisses it before every load
   using the product's own key; `90-pwa-install` opts back in.
   **The overlap itself is NOT fixed — it is a real UI bug.**

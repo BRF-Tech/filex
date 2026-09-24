@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/update"
 	"github.com/brf-tech/filex/backend/internal/version"
 )
@@ -74,7 +75,7 @@ func (h *Update) Status(w http.ResponseWriter, r *http.Request) {
 	if !requireSupertenant(w, r, updateIsInstanceWide) {
 		return
 	}
-	writeJSON(w, http.StatusOK, h.status())
+	writeJSON(w, http.StatusOK, h.status(langOf(r)))
 }
 
 // Check forces a fetch. Used by the "check now" button; a failure is reported
@@ -85,11 +86,11 @@ func (h *Update) Check(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.svc == nil || !h.svc.Enabled() {
-		writeJSON(w, http.StatusOK, h.status())
+		writeJSON(w, http.StatusOK, h.status(langOf(r)))
 		return
 	}
 	_, _ = h.svc.Check(r.Context())
-	writeJSON(w, http.StatusOK, h.status())
+	writeJSON(w, http.StatusOK, h.status(langOf(r)))
 }
 
 // Apply installs the pending release. Refused with 409 when the install cannot
@@ -133,14 +134,14 @@ func (h *Update) Apply(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Update) status() updateStatusResponse {
+func (h *Update) status(lang string) updateStatusResponse {
 	resp := updateStatusResponse{
 		Current: version.Version,
 		Action:  string(update.ActionNone),
 		Step:    string(update.StepNone),
 	}
 	if h.svc == nil {
-		resp.Reason = "update checking is disabled"
+		resp.Reason = srvtext.Text(lang, "server.update.reason.disabled", nil)
 		resp.Policy = string(update.PolicyOff)
 		resp.Mode = string(update.DetectInstallMode())
 		return resp
@@ -161,6 +162,9 @@ func (h *Update) status() updateStatusResponse {
 		resp.Action = string(d.Action)
 		resp.Step = string(d.Step)
 		resp.Reason = d.Reason
+		if d.ReasonKey != "" {
+			resp.Reason = srvtext.Text(lang, d.ReasonKey, reasonVars(lang, d.ReasonVars))
+		}
 		if d.Target.Version != "" {
 			rel := toRelease(d.Target)
 			resp.Latest = &rel
@@ -208,4 +212,18 @@ func (h *Update) instructions(d update.Decision) []string {
 	}
 	steps = append(steps, "# or download manually for "+runtime.GOOS+"/"+runtime.GOARCH+" and restart the service")
 	return steps
+}
+
+// reasonVars fills a decision's placeholders for lang: the policy is named by
+// its word in that language (`server.update.policy.*`), not by the setting's
+// value ("manual").
+func reasonVars(lang string, in map[string]string) srvtext.Vars {
+	out := srvtext.Vars{}
+	for k, v := range in {
+		out[k] = v
+	}
+	if p, ok := out["policy"]; ok && p != "" {
+		out["policy"] = srvtext.Text(lang, "server.update.policy."+p, nil)
+	}
+	return out
 }

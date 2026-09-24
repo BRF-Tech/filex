@@ -141,14 +141,33 @@ const ALIASES: Record<string, string> = {
   'Asia/Kolkata': 'india calcutta ist',
 };
 
-/** Every way a person might type an offset the platform prints as "GMT+03:00". */
-function offsetAliases(offset: string): string {
-  const m = /GMT([+-])(\d{1,2})(?::?(\d{2}))?/.exec(offset);
-  if (!m) return 'gmt utc';
-  const [, sign, hRaw, minRaw] = m;
-  const h = String(Number(hRaw));
+/**
+ * A zone's offset from UTC in minutes, or null when the engine will not say.
+ *
+ * ⚠⚠ Read in ONE fixed shape — `en-US` — and parsed as a NUMBER. The offset
+ * the row DISPLAYS is in the interface language, and that is not "GMT…"
+ * everywhere: Arabic prints "غرينتش+3", other languages print their own word
+ * or their own digits. The search aliases used to be parsed out of that
+ * localised text with a `GMT` pattern, so under Arabic not one zone could be
+ * found by typing "+3" or "UTC+3" (translator finding, v0.43.0).
+ */
+function offsetMinutes(zone: string): number | null {
+  const m = /^GMT(?:([+-])(\d{1,2})(?::(\d{2}))?)?$/.exec(namePart(zone, 'en-US', 'shortOffset').trim());
+  if (!m) return null;
+  if (!m[1]) return 0;
+  const minutes = Number(m[2]) * 60 + Number(m[3] ?? 0);
+  return m[1] === '-' ? -minutes : minutes;
+}
+
+/** Every way a person might type an offset — "+3", "+03", "+03:00", "gmt+3", "utc+0300". */
+function offsetAliases(minutes: number | null): string {
+  if (minutes === null) return '';
+  if (minutes === 0) return 'gmt utc';
+  const sign = minutes < 0 ? '-' : '+';
+  const abs = Math.abs(minutes);
+  const h = String(Math.floor(abs / 60));
   const hh = h.padStart(2, '0');
-  const mm = minRaw ?? '00';
+  const mm = String(abs % 60).padStart(2, '0');
   const forms = [`${sign}${h}`, `${sign}${hh}`, `${sign}${hh}:${mm}`, `${sign}${hh}${mm}`];
   return [...forms.map((f) => `gmt${f}`), ...forms.map((f) => `utc${f}`), ...forms].join(' ');
 }
@@ -226,7 +245,7 @@ function buildIndex(): TzRow[] {
     const genericLocal = namePart(zone, loc, 'longGeneric');
     const genericEn = loc === 'en-US' ? '' : namePart(zone, 'en-US', 'longGeneric');
     const haystack = fold(
-      [zone, city, region, genericLocal, genericEn, ALIASES[zone] ?? '', offsetAliases(offset)]
+      [zone, city, region, genericLocal, genericEn, ALIASES[zone] ?? '', offset, offsetAliases(offsetMinutes(zone))]
         .filter(Boolean)
         .join(' '),
     );
@@ -605,8 +624,8 @@ function onKeydown(ev: KeyboardEvent): void {
 .fe-tzpick__list {
   position: absolute;
   top: calc(100% + 4px);
-  left: 0;
-  right: 0;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
   z-index: 5;
   box-sizing: border-box;
   margin: 0;

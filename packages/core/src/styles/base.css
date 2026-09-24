@@ -7,6 +7,80 @@
    reported). The general default comes first, the component writes its own
    exception afterwards. */
 
+/* === RTL — the one sign every direction-bearing MOTION reads ==========
+   Layout here is written in logical properties (margin-inline-start,
+   inset-inline-end, text-align: start …), and those turn by themselves under
+   `dir="rtl"`. What does not turn by itself is anything written as an
+   x-OFFSET: a translateX, a box-shadow's first length. Those multiply by this
+   sign instead — `translateX(calc(8px * var(--filex-dir-x, 1)))` — so the
+   inspector still slides in from ITS edge, a switch's knob still travels
+   toward "on", and a pinned column's edge still falls on the side the rows
+   scroll under. In LTR it is `* 1`: the same pixels as before.
+
+   ⚠ Set on the element that CARRIES `dir` and inherited from there, so the
+   NEAREST `dir` wins — which is the nesting rule (an English explorer inside
+   an Arabic page keeps +1; see lib/direction).
+
+   ⚠⚠ Never in document space. A PDF page, an image, a drawing, a signature
+   box has its own coordinates; a box at the left of a page is at the left of
+   the page in every language (lib/pdfFieldsGeom). */
+[dir='ltr'] { --filex-dir-x: 1; }
+[dir='rtl'] { --filex-dir-x: -1; }
+
+/* ⚠ RTL — MACHINE text reads left to right in every language: a command, a
+   path, a URL, an address, a key. The connection guides print
+   `sftp -P 2022 {user}@host` with the placeholder translated; laid out right
+   to left the command's words swap places and the line cannot be typed back.
+   Isolated, so the Arabic around it stays right to left and an Arabic word
+   inside it (a translated placeholder) stays a readable word.
+   Keyed on `[dir='rtl']` so an LTR page is untouched — this rule does not
+   exist for English or Turkish. */
+[dir='rtl'] :is(pre, code, kbd, samp, .font-mono, .tbl-mono, .fe-share__url, .fe-inspector__share-url) {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+/* A plain-text file and a notebook's raw markdown are the person's PROSE in a
+   <pre>: each line decides its own direction (declared after the rule above,
+   which it overrides for exactly these two). */
+[dir='rtl'] :is(.fe-preview__pre, .filex-viewer-ipynb__md-raw) {
+  unicode-bidi: plaintext;
+}
+/* An app's own sentences are in the APP's language, which is not always the
+   interface's: an English hint inside an Arabic wizard keeps its full stop at
+   its end. `plaintext` lets each paragraph take the direction of its own first
+   letter — for English or Turkish in an LTR page that is exactly what it was. */
+:is(.fe-surface__text, .fe-surface__error) {
+  unicode-bidi: plaintext;
+}
+/* …and what a person TYPES decides its own direction: an e-mail, a URL, a
+   file name or `tag:invoice` in a right-to-left form reads left to right,
+   Arabic reads right to left, and a placeholder follows its own words.
+   `plaintext` is `dir="auto"` for every field at once, without touching the
+   markup of each. RTL only, so no English or Turkish field changes. */
+[dir='rtl'] :is(input:not([type]), input[type='text'], input[type='search'], input[type='email'], input[type='url'], input[type='tel'], textarea) {
+  unicode-bidi: plaintext;
+}
+
+/* ⚠ RTL — icons that MEAN a direction, mirrored in one place. The set is
+   decided where the glyph is drawn: lib/actionIcons marks its directional
+   keys `fe-aicon--dir`; the few glyphs drawn inline are listed here — the
+   viewer's previous / next chevrons (which now sit at the start / end edges)
+   and the destination picker's "go into" chevron.
+   `:dir(rtl)` on the ICON, never `[dir='rtl'] .icon`: an English explorer
+   inside an Arabic page keeps its arrows. Text arrows need nothing — the `›`
+   of a breadcrumb and the `‹ ›` of a pager are bidi-MIRRORED characters and
+   the browser turns them itself. */
+:is(.fe-aicon--dir, .fe-viewer__chev > svg, .fe-destpick__rowinto):dir(rtl) {
+  transform: scaleX(-1);
+}
+/* A sideways disclosure caret points the way the line reads while closed
+   (left, in RTL) and DOWN when open in both directions. Turned rather than
+   mirrored so the open state's `rotate(90deg)` (declared later, same weight)
+   animates the short way round. */
+:is(.fe-share__caret, .fe-pinsp__chev):dir(rtl) {
+  transform: rotate(180deg);
+}
+
 /* === ui-fix — scrollbars ==============================================
    The platform scrollbar ignores the theme completely: on Terminal Green or
    any dark variant it paints a wide light-grey slab down the edge of the
@@ -129,6 +203,16 @@ filex-explorer {
   border-bottom: 1px solid var(--fe-border, rgba(0, 0, 0, 0.06));
 }
 
+/* "More results than shown" — a search answer the server cut (FileExplorer's
+ * banners slot). Quiet on purpose: it qualifies the list, it is not an error. */
+.fe-search-cut {
+  flex: 0 0 auto;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--fe-border, rgba(0, 0, 0, 0.06));
+  color: var(--fe-text-muted);
+  font-size: 0.8125rem;
+}
+
 /* Initial-load spinner (shown until the first listing arrives). */
 .fe__loading {
   display: flex;
@@ -194,7 +278,7 @@ filex-explorer {
 
 .fe__file-input {
   position: absolute;
-  left: -9999px;
+  inset-inline-start: -9999px;
   width: 1px;
   height: 1px;
   opacity: 0;
@@ -379,7 +463,7 @@ filex-explorer {
 }
 /* Edit pencil button — V1.5, verbatim (translated): "let me type a path and go" */
 .fe-breadcrumb__edit {
-  margin-left: auto;
+  margin-inline-start: auto;
   background: none;
   border: 1px solid transparent;
   color: var(--fe-text-muted);
@@ -612,7 +696,7 @@ filex-explorer {
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
-  text-align: left;
+  text-align: start;
 }
 .fe-grid__empty {
   grid-column: 1 / -1;
@@ -651,7 +735,7 @@ filex-explorer {
 
 .fe-upload {
   position: absolute;
-  right: 16px;
+  inset-inline-end: 16px;
   bottom: 16px;
   width: min(360px, calc(100% - 32px));
   background: var(--fe-bg);
@@ -751,7 +835,7 @@ filex-explorer {
  * two stacks don't overlap when both are active. */
 .fe-ops {
   position: absolute;
-  left: 16px;
+  inset-inline-start: 16px;
   bottom: 16px;
   width: min(320px, calc(100% - 32px));
   display: flex;
@@ -863,7 +947,7 @@ filex-explorer {
   color: var(--fe-text);
   font: inherit;
   width: 100%;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .fe-ctx__item:hover:not(.is-disabled) {
@@ -889,12 +973,22 @@ filex-explorer {
 }
 .fe-ctx__key {
   flex: 0 0 auto;
-  margin-left: auto;
-  padding-left: 16px;
+  margin-inline-start: auto;
+  padding-inline-start: 16px;
   color: var(--fe-text-muted);
   font-size: 11px;
   font-family: var(--fe-font-mono);
   white-space: nowrap;
+}
+/* A key on a touch screen is an instruction nobody holding it can follow:
+ * the phone's row sheet listed "Enter", "Ctrl+X", "F2" beside every verb (QA,
+ * 2026-09-21). The same test the explorer uses to open the menu as a sheet
+ * (`(pointer: coarse)`), so every menu — the sheet, the New menu, the
+ * toolbar's — answers alike. */
+@media (pointer: coarse) {
+  .fe-ctx__key {
+    display: none;
+  }
 }
 .fe-ctx__sep {
   height: 1px;
@@ -1022,7 +1116,7 @@ filex-explorer {
   line-height: 1.6;
   background: var(--fe-bg, #fff);
   color: var(--fe-text, #111);
-  border-right: 1px solid var(--fe-border, #e2e6ed);
+  border-inline-end: 1px solid var(--fe-border, #e2e6ed);
   overflow: auto;
   tab-size: 2;
 }
@@ -1050,7 +1144,7 @@ filex-explorer {
     grid-template-rows: 1fr 1fr;
   }
   .fe-preview__md-split-input {
-    border-right: 0;
+    border-inline-end: 0;
     border-bottom: 1px solid var(--fe-border, #e2e6ed);
   }
 }
@@ -1246,7 +1340,7 @@ filex-explorer {
   letter-spacing: 0.04em;
 }
 .fe-preview__code-toolbar > .fe-btn {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 .fe-preview__code-status {
   font-size: 12px;
@@ -1265,6 +1359,15 @@ filex-explorer {
 }
 .fe-preview__code-editor .cm-scroller {
   font-family: var(--fe-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+/* An administrator's second line under a viewer failure — the raw words
+   behind the sentence (lib/errorWords). Nobody else is given it. */
+.fe-preview__error-detail {
+  font-family: var(--fe-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--fe-text-muted);
+  overflow-wrap: anywhere;
+  max-width: 60ch;
 }
 .fe-preview__fallback {
   text-align: center;
@@ -1350,10 +1453,10 @@ filex-explorer {
 }
 .fe-preview__md pre code { background: transparent; padding: 0; }
 .fe-preview__md ul,
-.fe-preview__md ol { padding-left: 2em; margin: 0.8em 0; }
+.fe-preview__md ol { padding-inline-start: 2em; margin: 0.8em 0; }
 .fe-preview__md li { margin: 0.3em 0; }
 .fe-preview__md blockquote {
-  border-left: 3px solid var(--fe-border-strong);
+  border-inline-start: 3px solid var(--fe-border-strong);
   padding: 0 1em;
   color: var(--fe-text-muted);
   margin: 0.8em 0;
@@ -1367,7 +1470,7 @@ filex-explorer {
 .fe-preview__md td {
   border: 1px solid var(--fe-border);
   padding: 6px 10px;
-  text-align: left;
+  text-align: start;
 }
 .fe-preview__md th { background: var(--fe-bg-elev); }
 .fe-preview__md img { max-width: 100%; }
@@ -1377,7 +1480,7 @@ filex-explorer {
 .fe-toast {
   position: absolute;
   bottom: 24px;
-  left: 50%;
+  left: 50%; /* rtl-physical: centred by translate(-50%) — the same place in both directions */
   transform: translateX(-50%);
   background: var(--fe-text);
   color: var(--fe-bg);
@@ -1394,7 +1497,7 @@ filex-explorer {
 .fe-toast-enter-from,
 .fe-toast-leave-to {
   opacity: 0;
-  transform: translate(-50%, 10px);
+  transform: translate(-50%, 10px); /* rtl-physical: centred (see .fe-toast) */
 }
 
 /* ---------- Responsive ---------- */
@@ -1623,7 +1726,7 @@ filex-explorer {
   align-items: center;
   gap: 10px;
   width: 100%;
-  text-align: left;
+  text-align: start;
   background: transparent;
   border: 0;
   border-radius: var(--fe-radius-sm);
@@ -1747,7 +1850,7 @@ filex-explorer {
 .fe-breadcrumb__menu {
   position: absolute;
   top: calc(100% + 4px);
-  left: 0;
+  inset-inline-start: 0;
   z-index: 80;
   min-width: 160px;
   max-width: 280px;
@@ -1762,7 +1865,7 @@ filex-explorer {
   box-shadow: var(--fe-shadow);
 }
 .fe-breadcrumb__menu-item {
-  text-align: left;
+  text-align: start;
   background: transparent;
   border: 0;
   padding: 6px 10px;
@@ -1831,7 +1934,8 @@ filex-explorer {
   content: '';
   position: absolute;
   inset: 0;
-  transform: translateX(-100%);
+  /* ⚠ RTL: the sweep runs the way the line reads (--filex-dir-x, top of file). */
+  transform: translateX(calc(-100% * var(--filex-dir-x, 1)));
   background: linear-gradient(
     90deg,
     transparent,
@@ -1841,7 +1945,7 @@ filex-explorer {
   animation: fe-skel-shimmer 1.4s ease-in-out infinite;
 }
 @keyframes fe-skel-shimmer {
-  to { transform: translateX(100%); }
+  to { transform: translateX(calc(100% * var(--filex-dir-x, 1))); }
 }
 @media (prefers-reduced-motion: reduce) {
   /* Static faint blocks — no sweep. */
@@ -1954,7 +2058,7 @@ filex-explorer {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 8px 10px 8px 14px;
+  padding-block: 8px; padding-inline: 14px 10px;
   cursor: pointer;
   max-width: min(480px, calc(100% - 32px));
 }
@@ -2005,6 +2109,67 @@ filex-explorer {
   height: 7px;
   border-radius: 50%;
   background: var(--fe-warning, #f59e0b);
+}
+
+/* The one line a page shows while the SERVER cannot be reached at all —
+   components/ConnectionNotice.vue, drawn from the shared folding rule in
+   lib/connection instead of a toast per failed request.
+   ⚠⚠ Here and not in the component's own `<style>`: a single-file component's
+   styles are emitted only into a bundle that IMPORTS it, and the web-component
+   distribution mounts the explorer without this one — so the sheet it ships
+   lost these rules while core's kept them, and
+   web/tests/deploy/packageLook.test.ts ("the two shipped stylesheets have
+   drifted") caught it. base.css is in both.
+   ⚠ Logical properties only; web/tests/quality/rtlLogical.test.ts refuses the
+   physical spellings, and this strip is drawn in Arabic too.
+   ⚠ Only tokens declared in styles/variables.css — a `--fe-*` invented at a
+   call site is a phantom to every other reader of the theme
+   (web/tests/api/themeTokens.test.ts). The amber is carried by the border and
+   the dot, the way the connection badge above says it. */
+.fe-connlost {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--fe-text);
+  background: var(--fe-bg-elev);
+  border-block-end: 1px solid var(--fe-warning);
+  /* A statement, not a control: it must never take a click from what is
+     underneath it. */
+  pointer-events: none;
+}
+.fe-connlost__dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fe-warning);
+}
+.fe-connlost__text {
+  min-width: 0;
+}
+
+/* `filex 0.43.0` — which filex this is, at the foot of an account menu and in
+   the user settings dialog's head (components/ProductVersion.vue). A quiet
+   line: the muted colour and the smallest size, selectable so it can be
+   copied into a bug report. ⚠ Here, not in the component: see `.fe-connlost`
+   above for why (lesson #416). */
+.fe-version {
+  margin: 0;
+  font-size: var(--fe-text-xs);
+  line-height: 1.4;
+  color: var(--fe-text-muted);
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+  white-space: nowrap;
 }
 
 /* === bul:s3 === */
@@ -2135,7 +2300,7 @@ filex-explorer {
 /* Upload FAB — bottom-right corner of the explorer (narrow mode only). */
 .fe-fab {
   position: absolute;
-  right: 16px;
+  inset-inline-end: 16px;
   bottom: 16px;
   width: 56px;
   height: 56px;
@@ -2174,8 +2339,8 @@ filex-explorer {
 }
 .fe-sheet {
   position: fixed;
-  left: 0;
-  right: 0;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
   bottom: 0;
   max-height: 70vh;
   display: flex;
@@ -2184,8 +2349,8 @@ filex-explorer {
   color: var(--fe-text);
   border: 1px solid var(--fe-border);
   border-bottom: 0;
-  border-top-left-radius: var(--fe-radius-lg);
-  border-top-right-radius: var(--fe-radius-lg);
+  border-start-start-radius: var(--fe-radius-lg);
+  border-start-end-radius: var(--fe-radius-lg);
   box-shadow: 0 -10px 32px rgba(15, 23, 42, 0.28);
   padding: 0 8px calc(8px + env(safe-area-inset-bottom, 0px));
   outline: none;
@@ -2268,7 +2433,7 @@ filex-explorer {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--fe-border);
+  border-inline-start: 1px solid var(--fe-border);
   background: var(--fe-bg);
   color: var(--fe-text);
 }
@@ -2279,7 +2444,7 @@ filex-explorer {
   inset: 0;
   z-index: 60;
   width: auto;
-  border-left: none;
+  border-inline-start: none;
 }
 
 .fe-inspector__head {
@@ -2402,7 +2567,7 @@ filex-explorer {
   text-overflow: ellipsis;
   white-space: nowrap;
   direction: rtl; /* keep the tail (basename) visible when truncated */
-  text-align: left;
+  text-align: start;
 }
 .fe-inspector__mime {
   font-family: var(--fe-font-mono);
@@ -2558,7 +2723,8 @@ filex-explorer {
   @keyframes fe-inspector-in {
     from {
       opacity: 0;
-      transform: translateX(8px);
+      /* From the inspector's own edge — the inline END, left in RTL. */
+      transform: translateX(calc(8px * var(--filex-dir-x, 1)));
     }
     to {
       opacity: 1;
@@ -2575,7 +2741,7 @@ filex-explorer {
   color: var(--fe-text-muted);
 }
 .fe-shortcuts__custom {
-  margin-left: 4px;
+  margin-inline-start: 4px;
   font-size: 9px;
   vertical-align: 2px;
   color: var(--fe-primary);
@@ -2663,7 +2829,7 @@ filex-explorer {
 }
 /* tus:t1 — "Desktop app only" on a combo the browser keeps for itself. */
 .fe-shortset__reserved {
-  margin-left: 6px;
+  margin-inline-start: 6px;
   font-size: 10.5px;
   color: var(--fe-text-muted);
   border: 1px dashed var(--fe-border);
@@ -2715,7 +2881,7 @@ filex-explorer {
  * the pill grew to the full viewport height inside the admin UI. */
 .fe.fe-ql-hint {
   position: fixed;
-  left: 50%;
+  left: 50%; /* rtl-physical: centred by translate(-50%) — the same place in both directions */
   bottom: 14px;
   transform: translateX(-50%);
   z-index: 72;
@@ -2761,7 +2927,7 @@ filex-explorer {
 
 .fe-opc {
   position: absolute;
-  right: 16px;
+  inset-inline-end: 16px;
   bottom: 16px;
   z-index: 45;
   display: flex;
@@ -2775,7 +2941,7 @@ filex-explorer {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px 8px 10px;
+  padding-block: 8px; padding-inline: 10px 14px;
   border-radius: 999px;
   border: 1px solid var(--fe-border);
   background: var(--fe-bg);
@@ -2922,6 +3088,26 @@ filex-explorer {
 .fe-opc__item.is-error .fe-opc__state {
   color: var(--fe-danger);
 }
+/* An administrator's second line under a failure: the raw words behind the
+   sentence (lib/errorWords). Muted and monospace — it is evidence, not the
+   message. */
+.fe-opc__sub--detail {
+  font-family: var(--fe-font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+/* An app job's output mode ("new file" / "new version") — the one fact a
+   finished row cannot show any other way, because in `version` mode "Open"
+   lands on the file the job started from. */
+.fe-opc__outmode {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid var(--fe-border);
+  border-radius: 8px;
+  line-height: 15px;
+  white-space: nowrap;
+  cursor: help;
+}
 .fe-opc__state {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3029,8 +3215,8 @@ filex-explorer {
 /* Narrow / embedded: clear the FAB and behave like a bottom sheet —
  * badge stays compact at the right, panel stretches edge to edge. */
 .fe--narrow .fe-opc {
-  left: 12px;
-  right: 12px;
+  inset-inline-start: 12px;
+  inset-inline-end: 12px;
   bottom: 84px;
   max-width: none;
 }
@@ -3117,7 +3303,7 @@ filex-explorer {
   margin-top: 10px;
   max-width: 480px;
   font-size: 12px;
-  text-align: left;
+  text-align: start;
 }
 .fe-state__details-summary {
   cursor: pointer;
@@ -3183,7 +3369,7 @@ filex-explorer {
 }
 .fe-tour__card--center {
   top: 50%;
-  left: 50%;
+  left: 50%; /* rtl-physical: centred by translate(-50%) — the same place in both directions */
   transform: translate(-50%, -50%);
   width: min(360px, calc(100vw - 24px));
 }
@@ -3322,7 +3508,7 @@ filex-explorer {
   gap: 6px;
   max-width: 180px;
   min-width: 72px;
-  padding: 4px 6px 4px 10px;
+  padding-block: 4px; padding-inline: 10px 6px;
   font-size: 12px;
   color: var(--fe-text-muted);
   background: transparent;
@@ -3346,8 +3532,8 @@ filex-explorer {
 .fe-tabs__tab.is-active::after {
   content: '';
   position: absolute;
-  left: 0;
-  right: 0;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
   bottom: -1px;
   height: 1px;
   background: var(--fe-bg);
@@ -3454,7 +3640,7 @@ filex-explorer {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--fe-border);
+  border-inline-start: 1px solid var(--fe-border);
   background: var(--fe-bg);
   color: var(--fe-text);
 }
@@ -3677,8 +3863,8 @@ filex-explorer {
    title is enough). */
 .fe-gal__meta {
   position: absolute;
-  left: 0;
-  right: 0;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
   bottom: 0;
   display: flex;
   flex-direction: column;
@@ -3766,7 +3952,7 @@ filex-explorer {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  margin-left: 6px;
+  margin-inline-start: 6px;
   border-radius: 8px;
   font-size: 10px;
   font-weight: 600;
@@ -3950,7 +4136,7 @@ filex-explorer {
   font-size: 12.5px;
   color: var(--fe-primary);
   cursor: pointer;
-  text-align: left;
+  text-align: start;
 }
 .fe-e2e-optlink:hover {
   text-decoration: underline;
@@ -3994,7 +4180,7 @@ filex-explorer {
 }
 .fe-e2e-rk__escrow {
   border: 1px solid var(--fe-border);
-  border-left: 3px solid var(--fe-warning, var(--fe-primary));
+  border-inline-start: 3px solid var(--fe-warning, var(--fe-primary));
   border-radius: var(--fe-radius-sm);
   padding: 8px 10px;
   font-size: 12.5px;
@@ -4038,7 +4224,7 @@ filex-explorer {
   line-height: 1.45;
   color: var(--fe-text);
   border: 1px solid var(--fe-border);
-  border-left: 3px solid var(--fe-warning, #f59e0b);
+  border-inline-start: 3px solid var(--fe-warning, #f59e0b);
   border-radius: var(--fe-radius);
   background: var(--fe-bg-elev);
 }
@@ -4090,7 +4276,7 @@ filex-explorer {
   margin: 0 0 10px;
   padding: 10px 12px;
   border: 1px solid var(--fe-border);
-  border-left: 3px solid var(--fe-primary);
+  border-inline-start: 3px solid var(--fe-primary);
   border-radius: var(--fe-radius-sm);
   background: color-mix(in srgb, var(--fe-primary) 6%, transparent);
 }
@@ -4120,7 +4306,7 @@ filex-explorer {
    accepting hands the operator a permanent second key. Amber rather than
    the recovery offer's primary tint, so it does not read as routine. */
 .fe-e2e-upgrade--escrow {
-  border-left-color: var(--fe-warning, #f59e0b);
+  border-inline-start-color: var(--fe-warning, #f59e0b);
   background: color-mix(in srgb, var(--fe-warning, #f59e0b) 7%, transparent);
 }
 /* The link to the honest long version has to LOOK like a link: it inherits
@@ -4248,7 +4434,7 @@ filex-explorer {
 .fe-keepbadge {
   flex: 0 0 auto;
   display: inline-block;
-  margin-left: 4px;
+  margin-inline-start: 4px;
   font-size: 11px;
   line-height: 1;
   vertical-align: middle;
@@ -4278,8 +4464,8 @@ filex-explorer {
    pointer-events none — it reports, it never blocks a click. */
 .fe-keep-strip {
   position: absolute;
-  left: 12px;
-  right: 12px;
+  inset-inline-start: 12px;
+  inset-inline-end: 12px;
   bottom: 10px;
   z-index: 30;
   display: flex;
@@ -4332,7 +4518,7 @@ filex-explorer {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--fe-border);
+  border-inline-end: 1px solid var(--fe-border);
   /* No `background: var(--fe-bg)` here on purpose — see .fe-conn. This one IS
      inside the full-screen explorer, whose root already paints --fe-bg, so a
      second identical fill would only be a second chance to disagree with it. */
@@ -4410,7 +4596,7 @@ filex-explorer {
   font: inherit;
   font-size: 13.5px;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -4480,7 +4666,7 @@ filex-explorer {
   font: inherit;
   font-size: 13.5px;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -4519,7 +4705,7 @@ filex-explorer {
 }
 /* "Shared" marker on a storage the caller only reaches through a grant. */
 .fe-sidenav__tag {
-  margin-left: auto;
+  margin-inline-start: auto;
   flex: 0 0 auto;
   padding: 1px 6px;
   border-radius: 999px;
@@ -4529,12 +4715,46 @@ filex-explorer {
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+/* The read-only mark (StorageTags, the one tag for that fact on every
+   surface): at the row's end in the side panel; on a Home card, under the
+   size line, from the start edge, and never wider than the card. */
+.fe-sidenav__stags {
+  margin-inline-start: auto;
+  flex: 0 0 auto;
+}
+.fe-home__storage-ro {
+  align-self: flex-start;
+  margin-top: 3px;
+  max-width: 100%;
+}
+.fe-home__storage-ro .fe-stag {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* === etiket:t1 — the Tags section ==================================== */
 /* A tag row is an ordinary panel item; only its label wraps differently,
    because a tag is user text and can be long. */
 .fe-sidenav__item--tag .fe-sidenav__text {
   text-transform: none;
+}
+/* etiket:k2 — "Personal" / "Team" under the Tags caption: quieter than the
+   caption itself (no capitals, no tracking) and carrying the kind's glyph, the
+   same one on every row below it and on every chip on a file. Logical
+   properties, so a right-to-left language mirrors it for free. */
+.fe-sidenav__subheading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding-inline: 18px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fe-text-muted);
+}
+.fe-sidenav__subheading .fe-tagkind {
+  flex: none;
 }
 /* "Show all (12)" / "Show fewer" — a link, not a button: it changes what this
    section shows, it is not a destination. */
@@ -4549,7 +4769,7 @@ filex-explorer {
   color: var(--fe-primary);
   font: inherit;
   font-size: 12.5px;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .fe-sidenav__more:hover {
@@ -4576,7 +4796,7 @@ filex-explorer {
 .fe-gal__star {
   position: absolute;
   top: 6px;
-  right: 6px;
+  inset-inline-end: 6px;
   z-index: 2;
   /* Hidden until the tile is hovered or something inside it is focused —
      EXCEPT when the file is starred, which is the whole point: the mark has
@@ -4671,7 +4891,7 @@ filex-explorer {
 .fe-gal__check {
   position: absolute;
   top: 6px;
-  left: 6px;
+  inset-inline-start: 6px;
   z-index: 2;
 }
 
@@ -4711,7 +4931,7 @@ filex-explorer {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 0;
+  inset-inline-start: 0;
   width: min(280px, 84%);
   flex: none;
   /* Same layer as .fe-inspector--overlay: above the listing and the FAB (45),
@@ -4719,7 +4939,7 @@ filex-explorer {
      appended to <body> and would paint over anything lower anyway. */
   z-index: 60;
   background: var(--fe-bg);
-  border-right: 1px solid var(--fe-border);
+  border-inline-end: 1px solid var(--fe-border);
   box-shadow: var(--fe-shadow);
 }
 .fe-sidenav__scrim {
@@ -4851,7 +5071,7 @@ filex-explorer {
   flex-wrap: wrap;
 }
 .fe-tokform__row .fe-s3keys__btn {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 /* --- /gezinti:g1 --- */
 
@@ -4889,7 +5109,7 @@ filex-explorer {
   flex: 1 1 auto;
   min-width: 0;
   max-width: 720px;
-  padding: 0 10px 0 12px;
+  padding-block: 0; padding-inline: 12px 10px;
   height: 40px;
   border-radius: 999px;
   border: 1px solid transparent;
@@ -4959,7 +5179,7 @@ filex-explorer {
   font: inherit;
   font-size: 14px;
   font-weight: 600;
-  text-align: left;
+  text-align: start;
   white-space: nowrap;
   overflow: hidden;
   cursor: pointer;
@@ -5044,7 +5264,7 @@ filex-explorer {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-right: 8px;
+  padding-inline-end: 8px;
 }
 
 /* ── the filter row ───────────────────────────────────────────────────── */
@@ -5070,7 +5290,7 @@ filex-explorer {
   align-items: center;
   gap: 4px;
   height: 32px;
-  padding: 0 10px 0 12px;
+  padding-block: 0; padding-inline: 12px 10px;
   border: 1px solid var(--fe-border-strong);
   border-radius: 999px;
   background: transparent;
@@ -5116,8 +5336,8 @@ filex-explorer {
 }
 .fe-filterbar__count {
   flex: 0 0 auto;
-  margin-left: auto;
-  padding-left: 8px;
+  margin-inline-start: auto;
+  padding-inline-start: 8px;
   font-size: 12px;
   color: var(--fe-text-muted);
   white-space: nowrap;
@@ -5151,7 +5371,7 @@ filex-explorer {
   color: inherit;
   font: inherit;
   font-size: 13px;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .fe-filterpop__item:hover {
@@ -5290,7 +5510,7 @@ filex-explorer {
   max-width: none;
 }
 .fe--narrow .fe-subhead__actions {
-  padding-right: 4px;
+  padding-inline-end: 4px;
 }
 .fe--narrow .fe-filterbar {
   padding: 6px 8px;
@@ -5435,12 +5655,12 @@ filex-explorer {
 }
 .fe-grid__card--folder .fe-grid__foot {
   min-height: 54px;
-  padding: 0 var(--fe-gap-xs) 0 var(--fe-gap);
+  padding-block: 0; padding-inline: var(--fe-gap) var(--fe-gap-xs);
   gap: var(--fe-gap);
 }
 .fe-grid__card--file .fe-grid__foot {
   min-height: 56px;
-  padding: 0 var(--fe-gap-xs) 0 var(--fe-gap-sm);
+  padding-block: 0; padding-inline: var(--fe-gap-sm) var(--fe-gap-xs);
   gap: var(--fe-gap-sm);
 }
 
@@ -5648,7 +5868,7 @@ filex-explorer {
 .fe-drivesearch {
   height: var(--fe-h-lg);
   max-width: 560px;
-  padding: 0 var(--fe-gap-sm) 0 var(--fe-gap);
+  padding-block: 0; padding-inline: var(--fe-gap) var(--fe-gap-sm);
   gap: var(--fe-gap-sm);
   border-radius: var(--fe-radius);
   border: 1px solid var(--fe-border);
@@ -5726,7 +5946,7 @@ filex-explorer {
 }
 .fe-subhead__actions {
   gap: var(--fe-gap-sm);
-  padding-right: var(--fe-gap);
+  padding-inline-end: var(--fe-gap);
 }
 .fe-breadcrumb {
   gap: var(--fe-gap-xs);
@@ -5781,7 +6001,7 @@ filex-explorer {
    caret that says it opens something. */
 .fe-filterbar__chip {
   height: var(--fe-h-sm);
-  padding: 0 var(--fe-gap-sm) 0 var(--fe-gap);
+  padding-block: 0; padding-inline: var(--fe-gap) var(--fe-gap-sm);
   gap: var(--fe-gap-xs);
   border-radius: var(--fe-radius);
   border-color: var(--fe-border);
@@ -5969,7 +6189,7 @@ filex-explorer {
 .fe-selbar__measure {
   position: absolute;
   top: 0;
-  left: 0;
+  inset-inline-start: 0;
   display: flex;
   align-items: center;
   gap: var(--fe-gap-xs);
@@ -6062,12 +6282,12 @@ filex-explorer {
 .fe-list__check.is-on::after {
   content: '';
   position: absolute;
-  left: 6px;
+  left: 6px; /* rtl-physical: a tick reads the same in every script — it is not an arrow */
   top: 2.5px;
   width: 4px;
   height: 9px;
   border: solid var(--fe-text-on-primary);
-  border-width: 0 2px 2px 0;
+  border-width: 0 2px 2px 0; /* rtl-physical: the tick's two strokes (see `left` above) */
   transform: rotate(45deg);
 }
 .fe-list__check:focus-visible {
@@ -6187,10 +6407,12 @@ filex-explorer {
 .fe--narrow .fe-list__col--type,
 .fe--narrow .fe-list__col--owner,
 .fe--narrow .fe-list__col--mod,
+.fe--narrow .fe-list__col--remaining,
 .fe--narrow .fe-list__col--star,
 .fe--narrow .fe-list__head .fe-list__col--type,
 .fe--narrow .fe-list__head .fe-list__col--owner,
 .fe--narrow .fe-list__head .fe-list__col--mod,
+.fe--narrow .fe-list__head .fe-list__col--remaining,
 .fe--narrow .fe-list__head .fe-list__col--star {
   display: none;
 }
@@ -6204,6 +6426,7 @@ filex-explorer {
   .fe-list__col--type,
   .fe-list__col--owner,
   .fe-list__col--mod,
+  .fe-list__col--remaining,
   .fe-list__col--star,
   /* ⚠ The header's cells need the same two-class weight as the rule that
      lays them out (`.fe-list__head .fe-list__col`), or they stay visible and
@@ -6212,6 +6435,7 @@ filex-explorer {
   .fe-list__head .fe-list__col--type,
   .fe-list__head .fe-list__col--owner,
   .fe-list__head .fe-list__col--mod,
+  .fe-list__head .fe-list__col--remaining,
   .fe-list__head .fe-list__col--star {
     display: none;
   }
@@ -6240,7 +6464,7 @@ filex-explorer {
   font-size: 8.5px;
   line-height: 11px;
   color: var(--fe-text-muted);
-  text-align: left;
+  text-align: start;
   white-space: pre;
   overflow: hidden;
   /* The box always ends mid-file, so END it. A hard crop through a line of
@@ -6532,13 +6756,13 @@ filex-explorer {
   background: var(--fe-bg-hover);
   color: var(--fe-text);
 }
-.fe-viewer__chev--prev { left: var(--fe-gap); }
-.fe-viewer__chev--next { right: var(--fe-gap); }
+.fe-viewer__chev--prev { inset-inline-start: var(--fe-gap); }
+.fe-viewer__chev--next { inset-inline-end: var(--fe-gap); }
 
 /* ---- Zoom pill ---- */
 .fe-viewer__zoom {
   position: absolute;
-  left: 50%;
+  left: 50%; /* rtl-physical: centred by translate(-50%) — the same place in both directions */
   bottom: 20px;
   transform: translateX(-50%);
   display: inline-flex;
@@ -6607,8 +6831,8 @@ filex-explorer {
     gap: var(--fe-gap-sm);
     padding: 0 var(--fe-gap-sm);
   }
-  .fe-viewer__chev--prev { left: var(--fe-gap-xs); }
-  .fe-viewer__chev--next { right: var(--fe-gap-xs); }
+  .fe-viewer__chev--prev { inset-inline-start: var(--fe-gap-xs); }
+  .fe-viewer__chev--next { inset-inline-end: var(--fe-gap-xs); }
 }
 /* === /gorunum:v1-viewer === */
 
@@ -6794,6 +7018,42 @@ filex-explorer {
 .fe-advsearch__hint--block {
   margin: 0;
 }
+/* etiket:k2 — the known tags under the Tags box: one-click picks, each with
+   its kind's glyph, grouped Personal then Team like the navigation panel. */
+.fe-advsearch__tagpicks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin-top: 6px;
+}
+.fe-advsearch__tagkind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fe-text-muted);
+  margin-inline-end: 2px;
+}
+.fe-advsearch__tagpick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--fe-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fe-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.fe-advsearch__tagpick:hover,
+.fe-advsearch__tagpick:focus-visible {
+  border-color: var(--fe-primary);
+  color: var(--fe-primary);
+}
 
 /* The live count. Boxed, because it is a measurement and not a caption: the
    number and the sentence explaining what it cost belong to each other. */
@@ -6831,7 +7091,7 @@ filex-explorer {
 
 /* Reset sits apart from Cancel/Search: it changes the form, they leave it. */
 .fe-advsearch__reset {
-  margin-right: auto;
+  margin-inline-end: auto;
 }
 
 /* One column on a narrow viewport — two 1fr fields at 390px leave a date
@@ -7029,7 +7289,7 @@ filex-explorer {
    the crumbs ended at x=381 and the pencil sat at x=1242. It belongs beside the
    chevron, which is where the reference puts it. */
 .fe-breadcrumb__edit {
-  margin-left: 0;
+  margin-inline-start: 0;
 }
 .fe-breadcrumb__edit .fe-icon,
 .fe-breadcrumb__edit .fe-aicon {
@@ -7215,7 +7475,7 @@ filex-explorer {
 .fe-share__knob {
   position: absolute;
   top: 2px;
-  left: 2px;
+  inset-inline-start: 2px;
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -7224,7 +7484,8 @@ filex-explorer {
 }
 .fe-share__switch[aria-checked='true'] .fe-share__knob {
   background: var(--fe-text-on-primary);
-  transform: translateX(16px);
+  /* Toward "on" = toward the inline end, in either direction. */
+  transform: translateX(calc(16px * var(--filex-dir-x, 1)));
 }
 
 /* The sentence. Full-strength text on purpose: it is the answer to the
@@ -7270,27 +7531,38 @@ filex-explorer {
   background: var(--fe-bg-elev);
 }
 .fe-share__copy {
+  /* ⚠⚠ THE copy button — every "Copy" in this dialog (the link, the PIN, the
+     command line, an older link, the upload link) is this one control. There
+     were three: a filled primary button, a small text button and the same
+     small button beside a revoke cross (QA, 2026-09-21). Same glyph, same
+     words, same "Copied" answer; only the row decides the height. */
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: var(--fe-gap-xs);
-  height: var(--fe-h-lg);
-  padding: 0 var(--fe-gap);
-  border: 1px solid var(--fe-primary);
+  height: var(--fe-h-md);
+  padding: 0 var(--fe-gap-sm);
+  border: 1px solid var(--fe-border);
   border-radius: var(--fe-radius);
-  background: var(--fe-primary);
-  color: var(--fe-text-on-primary);
+  background: var(--fe-bg);
+  color: var(--fe-text);
   font-family: inherit;
-  font-size: var(--fe-text-md);
+  font-size: var(--fe-text-sm);
   font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
 }
 .fe-share__copy .fe-aicon {
   color: inherit;
+  width: 14px;
+  height: 14px;
 }
 .fe-share__copy:hover {
-  background: var(--fe-primary-hover);
-  border-color: var(--fe-primary-hover);
+  background: var(--fe-bg-hover);
+  border-color: var(--fe-border-strong);
+}
+.fe-share__linkrow > .fe-share__copy {
+  height: var(--fe-h-lg);
 }
 
 .fe-share__pinrow {
@@ -7334,7 +7606,7 @@ filex-explorer {
   font-family: inherit;
   font-size: var(--fe-text-md);
   font-weight: 500;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .fe-share__sechead:hover .fe-share__seclabel {
@@ -7363,7 +7635,7 @@ filex-explorer {
 .fe-share__secmeta {
   flex: 1 1 auto;
   min-width: 0;
-  text-align: right;
+  text-align: end;
   font-size: var(--fe-text-xs);
   font-weight: 400;
   color: var(--fe-text-muted);
@@ -7374,7 +7646,7 @@ filex-explorer {
 /* Indented to the label, not to the caret: the panel belongs to the heading
    it opened from. */
 .fe-share__panel {
-  padding: 0 0 var(--fe-gap) calc(var(--fe-gap-lg) + var(--fe-gap-sm));
+  padding-block: 0 var(--fe-gap); padding-inline: calc(var(--fe-gap-lg) + var(--fe-gap-sm)) 0;
 }
 
 /* ---- fields ---- */
@@ -7384,7 +7656,7 @@ filex-explorer {
   gap: var(--fe-gap-sm) var(--fe-gap);
   align-items: end;
 }
-.fe-share__opts > .fe-share__check {
+.fe-share__opts > .fe-share__togglerow {
   grid-column: 1 / -1;
 }
 .fe-share__field {
@@ -7416,6 +7688,13 @@ filex-explorer {
   outline: none;
   border-color: var(--fe-primary);
 }
+/* Greyed with its reason above it (RBAC off on the storage): it has to LOOK
+   unusable, not merely refuse the click. */
+.fe-share__select:disabled,
+.fe-share__input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 /* The per-row level select sits in a 34px row and takes that height rather
    than stretching the row it lives in. */
 .fe-share__select--sm {
@@ -7428,13 +7707,20 @@ filex-explorer {
   width: 140px;
   height: var(--fe-h-md);
 }
-.fe-share__check {
-  display: inline-flex;
+/* A yes/no option: its words, then the dialog's one switch. The whole row is
+   the label, so a click on the words flips it too. */
+.fe-share__togglerow {
+  display: flex;
   align-items: center;
-  gap: var(--fe-gap-xs);
+  justify-content: space-between;
+  gap: var(--fe-gap);
+  min-height: var(--fe-h-md);
   font-size: var(--fe-text-md);
   color: var(--fe-text);
   cursor: pointer;
+}
+.fe-share__togglelabel {
+  min-width: 0;
 }
 
 /* ---- buttons ---- */
@@ -7478,22 +7764,6 @@ filex-explorer {
 .fe-share__btn .fe-aicon {
   color: inherit;
 }
-.fe-share__mini {
-  flex: 0 0 auto;
-  height: var(--fe-h-sm);
-  padding: 0 var(--fe-gap-sm);
-  border: 1px solid var(--fe-border);
-  border-radius: var(--fe-radius-sm);
-  background: var(--fe-bg);
-  color: var(--fe-text);
-  font-family: inherit;
-  font-size: var(--fe-text-xs);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.fe-share__mini:hover {
-  background: var(--fe-bg-hover);
-}
 /* A verb rendered as text, for the two doors that lead somewhere else
    ("just send a link", "upload limits") rather than acting here. */
 .fe-share__linkbtn {
@@ -7505,7 +7775,7 @@ filex-explorer {
   color: var(--fe-primary);
   font-family: inherit;
   font-size: var(--fe-text-sm);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .fe-share__linkbtn:hover {
@@ -7553,8 +7823,8 @@ filex-explorer {
 .fe-share__suggest {
   position: absolute;
   top: calc(100% + var(--fe-gap-xs));
-  left: 0;
-  right: 0;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
   z-index: 5;
   margin: 0;
   padding: var(--fe-gap-xs);
@@ -7829,13 +8099,13 @@ filex-explorer {
    control in the row for a control that did not move. */
 .fe-toolbar__brand--gutter {
   min-width: calc(var(--fe-sidenav-w) - 12px);
-  padding-right: var(--fe-gap-sm);
+  padding-inline-end: var(--fe-gap-sm);
 }
 /* At 390px there is no room to reserve anything: the row is toggle · field ·
    "⋯" and the brand mark is not rendered at all (Toolbar.vue). */
 .fe--narrow .fe-toolbar__brand--gutter {
   min-width: 0;
-  padding-right: 0;
+  padding-inline-end: 0;
 }
 /* The host's mark. It is a slot, so this styles whatever arrives: enough room
    for a 22px logo beside a word, ellipsised rather than wrapped — a two-line
@@ -7883,7 +8153,7 @@ filex-explorer {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  padding-left: var(--fe-gap-xs);
+  padding-inline-start: var(--fe-gap-xs);
   font-size: var(--fe-text-md);
   font-weight: 600;
   line-height: 1.3;
@@ -7909,7 +8179,9 @@ filex-explorer {
   grid-template-columns: repeat(auto-fill, 186px);
   gap: var(--fe-gap);
   align-content: start;
-  align-items: start;
+  /* A read-only card carries one more line (its tag); its row-mates grow
+     with it rather than standing short beside it. */
+  align-items: stretch;
 }
 /* The storage card IS the grid's folder card — 186×56, the solid glyph inset
    12px — because in the explorer's own root listing a storage is a folder row.
@@ -7922,7 +8194,7 @@ filex-explorer {
   width: 186px;
   min-height: 56px;
   padding: 0 var(--fe-gap);
-  text-align: left;
+  text-align: start;
   border: 1px solid var(--fe-border);
   border-radius: var(--fe-radius-md);
   background: var(--fe-bg);
@@ -7991,7 +8263,7 @@ filex-explorer {
   min-height: 0;
   height: auto;
   align-items: flex-start;
-  text-align: left;
+  text-align: start;
   padding: var(--fe-gap) 2px var(--fe-gap-lg);
 }
 /* The grids inside Home are GridView's, and GridView fills its pane. Inside a
@@ -8083,7 +8355,7 @@ filex-explorer {
   justify-content: center;
   width: var(--fe-h-sm);
   height: var(--fe-h-sm);
-  margin: -2px -4px 0 0;
+  margin-block: -2px 0; margin-inline: 0 -4px;
   padding: 0;
   border: 0;
   border-radius: var(--fe-radius-sm);
@@ -8128,12 +8400,12 @@ filex-explorer {
   align-items: center;
   justify-content: center;
   border-radius: 0;
-  border-right: 1px solid var(--fe-border);
+  border-inline-end: 1px solid var(--fe-border);
   padding: 0 var(--fe-gap-sm);
   min-width: 0;
 }
 .fe-advsearch__seg--tabs .fe-advsearch__seg-btn:last-child {
-  border-right: 0;
+  border-inline-end: 0;
 }
 .fe-advsearch__seg--tabs .fe-advsearch__seg-btn.is-active {
   background: var(--fe-primary-soft);
@@ -8261,13 +8533,17 @@ filex-explorer {
 .fe-advsearch__viewall::after {
   content: ' \2192';
 }
+/* ⚠ RTL: "view all" points the way the line reads. */
+.fe-advsearch__viewall:dir(rtl)::after {
+  content: ' \2190';
+}
 .fe-advsearch__viewall:hover {
   text-decoration: underline;
 }
 
 .fe-advsearch__btn-icon {
   display: inline-flex;
-  margin-right: 6px;
+  margin-inline-end: 6px;
   vertical-align: -3px;
 }
 .fe-advsearch__btn-icon .fe-aicon {
@@ -8410,7 +8686,7 @@ filex-explorer {
 .fe-inspector__close {
   font-size: 0;
   padding: 0;
-  margin-right: -4px;
+  margin-inline-end: -4px;
 }
 
 /* Tabs: two equal halves under the head, the active one underlined. */
@@ -8602,10 +8878,10 @@ filex-explorer {
 .fe-thumb__play {
   position: absolute;
   top: 50%;
-  left: 50%;
+  left: 50%; /* rtl-physical: centred by the negative margins below — symmetric */
   width: 34px;
   height: 34px;
-  margin: -17px 0 0 -17px;
+  margin: -17px 0 0 -17px; /* rtl-physical: half the disc, to centre it */
   border-radius: 50%;
   background: color-mix(in srgb, var(--fe-bg-elev) 88%, transparent);
   box-shadow: 0 1px 4px color-mix(in srgb, var(--fe-text) 22%, transparent);
@@ -8617,22 +8893,22 @@ filex-explorer {
   content: '';
   position: absolute;
   top: 50%;
-  left: 50%;
-  margin: -6px 0 0 -4px;
+  left: 50%; /* rtl-physical: ⚠ PLAY points the way media plays, in every language — never mirrored */
+  margin: -6px 0 0 -4px; /* rtl-physical: optical centre of the play triangle */
   border-style: solid;
-  border-width: 6px 0 6px 10px;
-  border-color: transparent transparent transparent var(--fe-text);
+  border-width: 6px 0 6px 10px; /* rtl-physical: the play triangle, pointing right */
+  border-color: transparent transparent transparent var(--fe-text); /* rtl-physical: the play triangle */
 }
 /* The gallery tile is several times the area of a grid card's preview box, so
    the badge scales with it. Scale only: one badge, one rule, two sizes. */
 .fe-gal__thumb .fe-thumb__play {
   width: 46px;
   height: 46px;
-  margin: -23px 0 0 -23px;
+  margin: -23px 0 0 -23px; /* rtl-physical: half the disc, to centre it */
 }
 .fe-gal__thumb .fe-thumb__play::after {
-  margin: -8px 0 0 -5px;
-  border-width: 8px 0 8px 13px;
+  margin: -8px 0 0 -5px; /* rtl-physical: optical centre of the play triangle */
+  border-width: 8px 0 8px 13px; /* rtl-physical: the play triangle, pointing right */
 }
 /* === /gorunum:v1-preview === */
 
@@ -8667,17 +8943,17 @@ filex-explorer {
   /* The trailing edge. ⚠ `.fe-filterbar__count` carried this same `auto`
      while it was the last child; leaving both would split the free space
      between them and park the count in mid-row the moment a filter is set. */
-  margin-left: auto;
+  margin-inline-start: auto;
   display: flex;
   align-items: center;
   /* Flush, deliberately: the chevron belongs TO the button on its left — it
      opens the menu that changes what that button says. A gap would read as
      two unrelated controls. */
   gap: 0;
-  padding-left: var(--fe-gap-sm);
+  padding-inline-start: var(--fe-gap-sm);
 }
 .fe-filterbar__count {
-  margin-left: 0;
+  margin-inline-start: 0;
 }
 
 .fe-filterbar__sortdir {
@@ -8808,9 +9084,11 @@ filex-explorer {
    under a transparent button. */
 .fe-filterbar__actions {
   position: sticky;
-  right: 0;
+  inset-inline-end: 0;
   background: var(--fe-bg);
-  box-shadow: -8px 0 8px -6px var(--fe-bg);
+  /* The fade falls on the START side of this end-pinned cell, where the chips
+     slide under it. */
+  box-shadow: calc(-8px * var(--filex-dir-x, 1)) 0 8px -6px var(--fe-bg);
 }
 .fe-filterbar__actions:hover,
 .fe-filterbar__actions[aria-expanded='true'] {
@@ -8942,7 +9220,7 @@ filex-explorer {
 .fe-toolbar__soon-tip {
   position: absolute;
   top: calc(100% + var(--fe-gap-xs));
-  right: 0;
+  inset-inline-end: 0;
   z-index: 6;
   padding: 4px 8px;
   border: 1px solid var(--fe-border);
@@ -9262,7 +9540,7 @@ filex-explorer {
   color: var(--fe-text);
   font: inherit;
   font-size: var(--fe-text-md);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .fe-newdoc__row:hover {
@@ -9372,9 +9650,14 @@ filex-explorer {
    the label beside it. */
 .fe-list__resize {
   position: absolute;
+  /* Above the pinned ⋮ cell (z-index 1): the LAST column's handle straddles
+     into it, and under it the edge could not be grabbed at all — measured in
+     LTR and RTL alike (elementFromPoint at the handle = the column-menu
+     button). Below the frozen lead (3). */
+  z-index: 2;
   top: 0;
   bottom: 0;
-  right: calc(var(--fe-gap-sm) / -2 - 1px);
+  inset-inline-end: calc(var(--fe-gap-sm) / -2 - 1px);
   width: 9px;
   cursor: col-resize;
   /* ⚠ `touch-action: none` or a drag on a touchscreen scrolls the listing
@@ -9387,7 +9670,7 @@ filex-explorer {
   position: absolute;
   top: 20%;
   bottom: 20%;
-  left: 4px;
+  inset-inline-start: 4px;
   width: 1px;
   background: var(--fe-border);
   opacity: 0;
@@ -9470,7 +9753,7 @@ filex-explorer {
   background: transparent;
   color: inherit;
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .fe-colmenu__row:hover {
@@ -9528,6 +9811,13 @@ filex-explorer {
 }
 .fe-trashbar__action {
   flex: 0 0 auto;
+}
+/* A purge that goes on in the background, counted as it goes. */
+.fe-trashbar__progress {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--fe-text);
+  font-variant-numeric: tabular-nums;
 }
 
 /* tablo:t1 — the row's real thumbnail. Exactly the type tile's box (24px), so
@@ -9684,10 +9974,10 @@ filex-explorer {
   background: var(--fe-primary);
 }
 .fe-list__col.is-drop-before::before {
-  left: calc(var(--fe-gap-sm) / -2 - 1px);
+  inset-inline-start: calc(var(--fe-gap-sm) / -2 - 1px);
 }
 .fe-list__col.is-drop-after::after {
-  right: calc(var(--fe-gap-sm) / -2 - 1px);
+  inset-inline-end: calc(var(--fe-gap-sm) / -2 - 1px);
 }
 
 /* ══ tasi:m1 — the destination picker ("Move to" / "Copy to") ══════════
@@ -9809,7 +10099,7 @@ filex-explorer {
   background: transparent;
   color: var(--fe-text);
   font-size: var(--fe-text-md);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .fe-destpick__row:hover:not(:disabled) {
@@ -10016,7 +10306,7 @@ filex-explorer {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding-right: var(--fe-gap-xs);
+  padding-inline-end: var(--fe-gap-xs);
 }
 .fe-colmenu__line .fe-colmenu__row {
   flex: 1 1 auto;
@@ -10084,7 +10374,7 @@ filex-explorer {
  * and that only the second one can be closed.
  */
 .fe-pane--split {
-  border-left: 1px solid var(--fe-border);
+  border-inline-start: 1px solid var(--fe-border);
 }
 /* The pane's × — the one control the main pane does not have. Sized like the
    view switcher beside it so the address row keeps its 37px height, which is
@@ -10323,6 +10613,22 @@ filex-explorer {
   display: block;
   height: 100%;
   overflow: auto;
+  /* ⚠⚠ Reserve the vertical scrollbar's room even when it is not showing
+     (PR #39, Berk Başarır). Every table in the product (DataTable) lays itself
+     out against THIS box's width, and the layout decides whether the box
+     needs scrollbars — so without the reserve there is a loop waiting to
+     close: the table overflows by a pixel, the horizontal bar takes a row's
+     height, the vertical bar comes, the box is a scrollbar narrower, the table
+     fits, both bars go, the box is wide again — every frame. Reported from a
+     Windows PC (a 12-file folder froze the tab); not reproduced on v0.42.2 or
+     v0.43.0, whose widths round to the pixel the box snaps to. But a table
+     that is told it has 2px more than it does on alternate width bands loops
+     exactly like that in a pane its rows just fit — and stops looping with
+     this one line (e2e 139 measures both). The reserve is what makes the
+     table's width independent of its own vertical scrollbar, so no future
+     width rule can close the loop. Overlay scrollbars (macOS by default,
+     phones) take no room, so there it reserves nothing. */
+  scrollbar-gutter: stable;
 }
 
 /* ⚠⚠ FLEX ROWS, not grid rows. A sticky GRID item is confined to its own grid
@@ -10391,8 +10697,9 @@ filex-explorer {
   display: contents;
 }
 /* Location was never in the muted-value rule above it — it is a value like
-   Type and Owner and reads like one. */
-.fe-list__col--location {
+   Type and Owner and reads like one. So is the Trash's "time left". */
+.fe-list__col--location,
+.fe-list__col--remaining {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10420,15 +10727,12 @@ filex-explorer {
 .fe-list__row,
 .fe--density-compact .fe-list__head,
 .fe--density-compact .fe-list__row {
-  padding-right: 0;
+  padding-inline-end: 0;
 }
 .fe-list__head .fe-list__col--menu,
 .fe-list__row .fe-list__col--menu {
-  position: sticky;
-  right: 0;
-  z-index: 1;
   flex: 0 0 calc(var(--fe-h-sm) + var(--fe-gap));
-  padding-right: var(--fe-gap);
+  padding-inline-end: var(--fe-gap);
   justify-content: center;
   background: var(--fe-bg);
 }
@@ -10441,36 +10745,413 @@ filex-explorer {
 .fe-list__row.is-droptarget .fe-list__col--menu {
   background: var(--fe-bg-selected);
 }
+/* Frozen to the end edge — but only while it leaves the columns sliding
+   under it somewhere to be (DataTable: `pinMenu` / PIN_MENU_ROOM).
+
+   ⚠⚠ The cell carries an opaque ground, as a sticky cell must, so what it
+   covers is GONE, not dimmed. At 104px of a 265px inspector panel it covered
+   both columns an app's list was drawing and its signer table read as names
+   and buttons with a blank gap between them (v0.43.0). Below the threshold
+   nothing is pinned and the row scrolls as one piece — the same answer the
+   frozen lead gives, for the same reason. */
+.fe-list.is-pin-menu .fe-list__head .fe-list__col--menu,
+.fe-list.is-pin-menu .fe-list__row .fe-list__col--menu {
+  position: sticky;
+  inset-inline-end: 0;
+  z-index: 1;
+}
+
 /* The edge, only while there is something scrolled underneath. A permanent
    divider would claim the column is floating when it is simply the last cell
    of a table that fits. `box-shadow` rather than a border so turning it on
    moves nothing. */
-.fe-list.is-scrolled-x .fe-list__col--menu {
-  box-shadow: -1px 0 0 0 var(--fe-border);
+.fe-list.is-pin-menu.is-scrolled-x .fe-list__col--menu {
+  /* On the cell's START side — the side the rows scroll under (left in LTR,
+     right in RTL, where the ⋮ is pinned to the left edge). */
+  box-shadow: calc(-1px * var(--filex-dir-x, 1)) 0 0 0 var(--fe-border);
 }
 
-/* The key/token tables in the connection panels (S3KeysPanel, SSHKeysPanel
-   and TokensPanel share `.fe-s3keys__*`) follow the same model as the list
-   view above: the table is as wide as its content and the panel scrolls
-   sideways, the actions cell rides the right edge over the columns sliding
-   under it, carrying the panel's own ground (`--fe-bg-elev`, what
-   `.fe-s3keys` paints), and its divider appears only while something is
-   scrolled underneath (`useScrolledX` flips the class). One rule here rather
-   than three copies in the panels, so they cannot drift apart. */
-.fe-s3keys__scroll {
-  overflow-x: auto;
+/* ══ THE FROZEN LEAD: the tick and Name ═══════════════════════════════
+   (owner, 2026-09-20: "yatay kaydırmada ad solda, işlemler sağda kalsın;
+   ikisinin de kendi gölgesi olsun")
+
+   The ⋮ has ridden the right edge since this became a table; the left edge was
+   never frozen, so a listing scrolled sideways to reach Size or Modified lost
+   the one column that says WHICH FILE each row is, and read as a wall of
+   `PDF document · Sep 20, 2026`. Name is the row's handle — the tick, the type
+   tile, the click target — so the tick freezes with it rather than sliding out
+   from under its own checkboxes.
+
+   The same three parts as the ⋮, mirrored:
+
+   1. The padding moves INTO the cell. `sticky; left: 0` pulls the cell to the
+      scrollport's edge, so a 12px inset living on the ROW would be scrolled
+      away and the ticks would sit against the glass. The tick's track is
+      `28 + 12` with the 12 as its own padding — the same total width, so
+      `tableLayout`'s arithmetic is untouched (exactly the trade the ⋮ makes).
+
+   2. Opaque grounds, hover and selection included, or the columns sliding
+      underneath show through the frozen cells.
+
+   3. An edge only while something is actually scrolled under it.
+
+   ⚠⚠ GATED ON `.is-pin-lead`, which ListView computes. Name is the person's to
+   resize, and a sticky cell WIDER than the pane covers the pane: 900px of Name
+   frozen in a 706px list paints over every column it was frozen to keep
+   company. The class is set only while the frozen lead leaves at least 160px
+   of pane for the columns that slide under it; below that nothing is pinned
+   and the table scrolls as one piece, which is the honest answer.
+
+   ⚠ `--fe-list-lead` (Name's offset) is inline on `.fe-list`, because it is
+   the tick's track plus the flex gap and only the component knows the first. */
+/* ⚠ The loading ghosts are deliberately NOT in this list: they have no cells
+   of their own to carry the padding, so taking it off the row would start them
+   12px left of the rows they stand in for and the swap to real rows would
+   jump. They keep the ordinary inset and line up either way. */
+.fe-list.is-pin-lead .fe-list__head,
+.fe-list.is-pin-lead .fe-list__row,
+.fe--density-compact .fe-list.is-pin-lead .fe-list__head,
+.fe--density-compact .fe-list.is-pin-lead .fe-list__row {
+  padding-inline-start: 0;
 }
-.fe-s3keys__scroll .fe-s3keys__table {
-  min-width: max-content;
-}
-.fe-s3keys__table .fe-s3keys__actions {
+.fe-list.is-pin-lead .fe-list__col--check {
   position: sticky;
-  right: 0;
-  z-index: 1;
-  background: var(--fe-bg-elev);
+  inset-inline-start: 0;
+  z-index: 2;
+  flex: 0 0 calc(var(--fe-h-sm) + var(--fe-gap));
+  padding-inline-start: var(--fe-gap);
+  background: var(--fe-bg);
 }
-.fe-s3keys__scroll.is-scrolled-x .fe-s3keys__actions {
-  box-shadow: -1px 0 0 0 var(--fe-border);
+.fe-list.is-pin-lead .fe-list__col--lead {
+  position: sticky;
+  inset-inline-start: var(--fe-list-lead, calc(var(--fe-h-sm) + var(--fe-gap) + var(--fe-gap-sm)));
+  z-index: 2;
+  background: var(--fe-bg);
+}
+.fe-list.is-pin-lead .fe-list__row:hover .fe-list__col--check,
+.fe-list.is-pin-lead .fe-list__row:hover .fe-list__col--lead {
+  background: var(--fe-bg-hover);
+}
+.fe-list.is-pin-lead .fe-list__row.is-selected .fe-list__col--check,
+.fe-list.is-pin-lead .fe-list__row.is-selected .fe-list__col--lead,
+.fe-list.is-pin-lead .fe-list__row.is-droptarget .fe-list__col--check,
+.fe-list.is-pin-lead .fe-list__row.is-droptarget .fe-list__col--lead {
+  background: var(--fe-bg-selected);
+}
+/* Its own edge, mirroring the ⋮'s — drawn on Name's trailing side, and only
+   while there is something scrolled underneath it. */
+.fe-list.is-pin-lead.is-scrolled-x .fe-list__col--lead {
+  /* Name's END side, whichever physical side that is. */
+  box-shadow: calc(1px * var(--filex-dir-x, 1)) 0 0 0 var(--fe-border);
+}
+/* ⚠ The header's frozen cells sit ABOVE the rows' (the head is drawn first and
+   a row's sticky cell would otherwise paint over it while the head is the
+   thing being scrolled past). Same reason the header's ⋮ outranks a row's. */
+.fe-list.is-pin-lead .fe-list__head .fe-list__col--check,
+.fe-list.is-pin-lead .fe-list__head .fe-list__col--lead {
+  z-index: 3;
+}
+
+/* ══ THE ONE TABLE — what DataTable adds over the explorer's list ═════════
+   (packages/core/src/components/DataTable.vue)
+
+   The rules above were written for the explorer's listing, and since
+   2026-09-21 they are the stylesheet of EVERY table in the product: the
+   explorer's list renders through DataTable, and so does every admin page,
+   the connection panels and an app's `list` node. The owner: "Artık explore
+   tablomuz bizim her yerde kullanacağımız tablo yapısıdır." What follows is
+   only what a table that is not a file listing needs on top — the frozen lead
+   is `.fe-list__col--lead` (the explorer's Name carries both classes), a table
+   with no tick column freezes its lead at the glass, cells that are plain
+   text, a card for the admin pages, and the pager.
+
+   ⚠ Every value is a `--fe-*` token. A Tailwind colour cannot follow the
+   palette the person picked, and the panel following it was half of the
+   complaint that started the admin-table work ("admin panel seçili renk
+   paletinden etkilenmiyor, etkilenmeli"). */
+
+/* The explorer's listing is not framed: the wrapper generates no box, so its
+   pane lays `.fe-list` out exactly as it did before there was a wrapper. */
+.fe-table--bare {
+  display: contents;
+}
+/* An admin page's table is a card: the toolbar, the table and the pager in one
+   box. `--tbl-bg` is the ground the frozen cells paint with, so a table on a
+   raised panel (the connection panels) can say so once. */
+.fe-table--framed {
+  display: block;
+  min-width: 0;
+  background: var(--tbl-bg, var(--fe-bg));
+  border: 1px solid var(--fe-border-soft);
+  border-radius: var(--fe-radius-lg);
+  overflow: hidden;
+}
+/* ⚠ Not the explorer's `height: 100%`: a card on a page is as tall as its rows,
+   and a percentage of an auto-height parent is nothing. It still owns the
+   sideways scroll. */
+.fe-table--framed .fe-list {
+  height: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.fe-table--framed .fe-list__head,
+.fe-table--framed .fe-list__head .fe-list__col--menu,
+.fe-table--framed .fe-list__row .fe-list__col--menu,
+.fe-table--framed .fe-list.is-pin-lead .fe-list__col--lead,
+.fe-table--framed .fe-list.is-pin-lead .fe-list__col--check {
+  background: var(--tbl-bg, var(--fe-bg));
+}
+.fe-table--framed .fe-list__row:hover .fe-list__col--menu,
+.fe-table--framed .fe-list.is-pin-lead .fe-list__row:hover .fe-list__col--lead,
+.fe-table--framed .fe-list.is-pin-lead .fe-list__row:hover .fe-list__col--check {
+  background: var(--fe-bg-hover);
+}
+.fe-table--framed .fe-list.is-pin-lead .fe-list__row.is-selected .fe-list__col--lead,
+.fe-table--framed .fe-list__row.is-selected .fe-list__col--menu {
+  background: var(--fe-bg-selected);
+}
+/* The last row's hairline would double the card's own border. */
+.fe-table--framed .fe-list__row:last-child {
+  border-bottom: 0;
+}
+.fe-table--framed .tbl-bar {
+  border-bottom: 1px solid var(--fe-border-soft);
+}
+
+/* With no tick in front of it, a frozen lead sits at the glass and takes the
+   row's leading padding INTO itself (DataTable adds the 12px to its track) —
+   the same trade the ⋮ makes on the right, so the table's arithmetic is
+   untouched. */
+.fe-list.is-pin-lead.fe-list--nocheck .fe-list__col--lead {
+  inset-inline-start: 0;
+  padding-inline-start: var(--fe-gap);
+}
+
+/* A plain cell: one line, cut with an ellipsis, the whole value in its title.
+   ⚠ `min-width: 0` on the text too, or one long unbroken value would push its
+   cell past the track the header allocated. */
+/* ⚠ `:where()`, zero specificity: the explorer's own cells carry this class AND
+   `fe-list__col--type` / `--owner` / `--mod` / `--size`, whose muted colour is
+   written earlier in this file at one class of weight. A plain `.fe-list__cell`
+   here would out-rank them by source order and turn every file's Type and
+   Size into body-coloured text. */
+:where(.fe-list__cell) {
+  font-size: var(--fe-text-md);
+  color: var(--fe-text);
+  overflow: hidden;
+}
+.fe-list__cell.is-right {
+  justify-content: flex-end;
+  text-align: end;
+}
+.fe-list__cell.is-center {
+  justify-content: center;
+  text-align: center;
+}
+.fe-list__cell-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-list__col--lead .fe-list__cell-text {
+  font-weight: 500;
+}
+/* A labelled Actions control is wider than the explorer's ⋮ and reads best
+   flush with the row's right edge; the header's column ⋮ lines up with it. */
+.fe-list__head .fe-list__col--menu.is-wide,
+.fe-list__row .fe-list__col--menu.is-wide {
+  justify-content: flex-end;
+}
+.fe-list__row.is-clickable {
+  cursor: pointer;
+}
+/* A row the page wants to quieten (a notification already read, a key that
+   is disabled). Opacity rather than a colour, so it reads the same under
+   every palette. */
+.fe-list__row.is-muted {
+  opacity: 0.65;
+}
+/* Whatever a page puts in a cell may shrink below its content, or one long
+   value would push its cell past the track the header allocated. Zero
+   specificity, so a component's own rule still wins. */
+:where(.fe-list__cell) > * {
+  min-width: 0;
+}
+/* The admin pages' "do not let free text stretch the table" helper: inside a
+   cell of fixed width the cell IS the clamp, so it only has to fill it. */
+.fe-list__cell .tbl-clamp {
+  max-width: 100%;
+}
+/* A cell whose slot puts secondary text (`.tbl-sub`) straight under its main
+   value: stack them. A cell lays its children out in a ROW, so without this
+   the value and the line meant to sit under it were drawn side by side — the
+   Panel's Recent activity read "Profil: güncellendiProfil" and Duplicates put
+   a file's path beside its name (release-candidate sweep, 2026-09-22). */
+.fe-list__cell:has(> .tbl-sub) {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+}
+.fe-list__empty--loading {
+  color: var(--fe-text-muted);
+}
+.tbl-pager {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+}
+.tbl-pager__at {
+  padding: 0 var(--fe-gap-xs);
+}
+
+/* ==================================================================
+   THE ONE TABLE'S CELL VOCABULARY — and what is left of "the admin table".
+
+   Until 2026-09-21 this block was a second table: `web/src/components/ui/
+   Table.vue` drew a real <table class="tbl"> with these rules, frozen edges
+   of its own (`.tbl-lead`, `.tbl-actions`, `.tbl-scroll`) and a sort button
+   of its own. It IMITATED the explorer's list and never got what lives in
+   the explorer's code — resizing, the column menu, persistence. The owner:
+   "Admin tabloları hâlâ explore tablolarıyla AYNI KODDA DEĞİL … tablo
+   sütunları düzenlenebilir değil, büyütme küçültme yok, sıralama yok." Every
+   table is DataTable now (components/DataTable.vue, styled by the
+   `fe-list` rules above), and those table rules are deleted rather than kept
+   "just in case": a stylesheet for a table nobody draws is an invitation to
+   draw one.
+
+   What remains is what a CELL or the card around a table uses, whichever
+   page draws it:
+     · `.tbl-sub` / `.tbl-clamp` / `.tbl-mono` — secondary text, a
+       free-text value that must not stretch its column, a technical value;
+     · `.tbl-rowactions*` — the row's ONE labelled Actions control
+       (components/RowActions.vue), the admin counterpart of the ⋮;
+     · `.tbl-bar` / `.tbl-foot` / `.tbl-page` — the toolbar above a framed
+       table and the pager below it (DataTable draws both).
+
+   ⚠ EVERY COLOUR IS A `--fe-*` TOKEN: "admin panel seçili renk paletinden
+   etkilenmiyor, etkilenmeli" was half of the complaint that started this.
+   ================================================================== */
+
+/* The raised box a connection panel draws is not the page's ground, and the
+   table's frozen cells paint with `--tbl-bg` — so the token moves, not the
+   rules. */
+.fe-s3keys .fe-table--framed {
+  --tbl-bg: var(--fe-bg-elev);
+}
+
+/* Secondary text inside a cell — a path under a name, a timestamp under a
+   badge. One class rather than a `text-xs text-zinc-500` in twelve files. */
+.tbl-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+/* A cell that must not be allowed to stretch the table: `min-width:
+   max-content` means a free-text column otherwise sets the table's width and
+   pushes every other column off the right-hand edge. */
+.tbl-clamp {
+  display: block;
+  max-width: 28rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tbl-mono {
+  font-family: var(--fe-font-mono);
+  font-size: var(--fe-text-xs);
+}
+
+/* The row's ONE control, and the label the owner asked for. The explorer's
+   handle is the ⋮ glyph; the admin panel's says what it is, because an
+   admin row's verbs (revoke a token, reset a password, purge a version) are
+   not guessable from a glyph. Sized to the row so a table of them does not
+   grow taller than one without. */
+.tbl-rowactions {
+  display: inline-flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+.tbl-rowactions__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+  height: var(--fe-h-sm);
+  padding: 0 var(--fe-gap-sm);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text);
+  font: inherit;
+  font-size: var(--fe-text-md);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tbl-rowactions__btn:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+  border-color: var(--fe-border-strong);
+}
+.tbl-rowactions__btn:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+.tbl-rowactions__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.tbl-rowactions__caret {
+  font-size: 10px;
+  color: var(--fe-text-muted);
+}
+
+
+/* The bar above the table (search, filters) and the one below it (the pager).
+   Part of the same card, so they carry the card's ground and its hairlines. */
+.tbl-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--fe-gap-sm);
+  padding: var(--fe-gap-sm) var(--fe-gap);
+  border-bottom: 1px solid var(--fe-border-soft);
+}
+.tbl-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fe-gap-sm);
+  padding: var(--fe-gap-sm) var(--fe-gap);
+  border-top: 1px solid var(--fe-border-soft);
+  font-size: var(--fe-text-md);
+  color: var(--fe-text-muted);
+}
+.tbl-page {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  padding: 0 var(--fe-gap-sm);
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.tbl-page:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.tbl-page:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+.tbl-page:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* The date headings travel with the horizontal scroll rather than sliding off
@@ -10478,7 +11159,7 @@ filex-explorer {
    them to (a full-width block has none). */
 .fe-list__group {
   position: sticky;
-  left: 0;
+  inset-inline-start: 0;
   width: max-content;
   max-width: 100%;
 }
@@ -10669,7 +11350,7 @@ filex-explorer {
 }
 .filex-viewer-ipynb__md ul,
 .filex-viewer-ipynb__md ol {
-  padding-left: 2em;
+  padding-inline-start: 2em;
 }
 
 /* 2. A form field with a visible name (EncryptedFolderModal, NewFolderModal).
@@ -10686,3 +11367,1952 @@ filex-explorer {
   color: var(--fe-text-muted);
 }
 /* === /agent-fix2 === */
+
+/* === App plugins — a plugin's declarative screen (components/plugin/) ===
+ * Drawn from data with our own elements; the classes here are the whole
+ * vocabulary a surface can reach, which is the point. */
+.fe-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fe-surface__text {
+  margin: 0;
+  font-size: var(--fe-text-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.fe-surface__text--heading {
+  font-size: var(--fe-text-md, 15px);
+  font-weight: 600;
+}
+.fe-surface__text--muted {
+  color: var(--fe-text-muted);
+}
+.fe-surface__text--danger {
+  color: var(--fe-danger);
+}
+.fe-surface__text--info {
+  color: var(--fe-primary);
+}
+.fe-surface__divider {
+  border: 0;
+  border-top: 1px solid var(--fe-border);
+  margin: 4px 0;
+}
+.fe-surface__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+}
+.fe-surface__row > .fe-surface {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+.fe-surface__unknown {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px dashed var(--fe-border-strong);
+  border-radius: var(--fe-radius-sm);
+  color: var(--fe-text-muted);
+  font-size: 12px;
+}
+.fe-surface__error {
+  color: var(--fe-danger);
+  font-size: 12px;
+  margin: 0;
+}
+.fe-plugin-view {
+  min-width: 0;
+}
+/* === /App plugins === */
+
+/* === App plugins — M2 surface components (components/plugin/nodes/*) === */
+.fe-surface__form {
+  min-width: 0;
+}
+.fe-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+.fe-steps__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text-muted);
+}
+.fe-steps__item.is-active {
+  color: var(--fe-text);
+  font-weight: 600;
+}
+.fe-steps__item.is-done {
+  color: var(--fe-text);
+}
+.fe-steps__marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--fe-border-strong);
+  font-size: 12px;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+.fe-steps__marker .fe-ficon {
+  width: 14px;
+  height: 14px;
+}
+.fe-steps__item.is-active .fe-steps__marker {
+  border-color: var(--fe-primary);
+  background: var(--fe-primary);
+  color: #fff;
+}
+.fe-steps__item.is-done .fe-steps__marker {
+  border-color: var(--fe-primary);
+  color: var(--fe-primary);
+}
+/* The plugin surfaces' `list` node draws `.tbl` — the one admin table — so
+   everything `.fe-slist__table` used to say (12px/600 headers, 6px 8px cells,
+   `--fe-border`, a `text-align: right` actions cell that was never actually
+   pinned) is deleted rather than tuned. What is left is the node's own box:
+   it must be allowed to be narrower than its content so the table inside can
+   scroll instead of squeezing a surface into a column of single words. */
+.fe-slist {
+  min-width: 0;
+}
+
+.fe-sprogress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fe-sprogress__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: var(--fe-text-sm);
+}
+.fe-sprogress__pct {
+  color: var(--fe-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.fe-sprogress__track {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--fe-border);
+  overflow: hidden;
+}
+.fe-sprogress__bar {
+  height: 100%;
+  background: var(--fe-primary);
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}
+.fe-sprogress__track.is-indeterminate .fe-sprogress__bar {
+  position: absolute;
+  width: 35%;
+  animation: fe-sprogress-slide 1.2s ease-in-out infinite;
+}
+@keyframes fe-sprogress-slide {
+  0% {
+    inset-inline-start: -35%;
+  }
+  100% {
+    inset-inline-start: 100%;
+  }
+}
+.fe-speople {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.fe-speople__chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fe-speople__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-block: 3px; padding-inline: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--fe-border-strong);
+  background: var(--fe-bg-elev);
+  font-size: 12.5px;
+  max-width: 100%;
+}
+.fe-speople__av {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--fe-primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+.fe-speople__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-speople__remove {
+  border: 0;
+  background: none;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+}
+.fe-speople__remove .fe-ficon {
+  width: 14px;
+  height: 14px;
+}
+.fe-speople__remove:hover {
+  color: var(--fe-danger);
+}
+.fe-speople__addwrap {
+  position: relative;
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.fe-speople__input {
+  flex: 1 1 auto;
+}
+.fe-speople__suggest {
+  top: 100%;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
+}
+.fe-speople.is-invalid .fe-speople__input {
+  border-color: var(--fe-danger);
+}
+.fe-spin {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.fe-spin__input {
+  width: auto;
+  max-width: calc(var(--spin-len, 6) * 1.6ch + 24px);
+  letter-spacing: 0.5ch;
+  font-size: 18px;
+  text-align: center;
+}
+.fe-spin__input.is-invalid {
+  border-color: var(--fe-danger);
+}
+.fe-sfile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.fe-sfile__value {
+  flex: 1 1 160px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fe-text-sm);
+  padding: 6px 10px;
+  border: 1px solid var(--fe-border-strong);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg);
+}
+.fe-sfile__value--empty {
+  color: var(--fe-text-muted);
+}
+.fe-sfile.is-invalid .fe-sfile__value {
+  border-color: var(--fe-danger);
+}
+.fe-destpick__row.is-file .fe-destpick__rowname {
+  color: var(--fe-text);
+}
+.fe-destpick__row.is-picked {
+  background: var(--fe-primary-soft, rgba(37, 99, 235, 0.12));
+  outline: 1px solid var(--fe-primary);
+}
+.fe-spreview {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.fe-spreview__media {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: var(--fe-radius);
+  object-fit: contain;
+  background: var(--fe-bg-elev);
+}
+.fe-spreview__audio {
+  width: 100%;
+}
+.fe-spreview__tile {
+  display: inline-flex;
+  width: 48px;
+  height: 48px;
+}
+.fe-spreview__tile > * {
+  width: 100%;
+  height: 100%;
+}
+.fe-spreview__name {
+  font-size: 12px;
+  color: var(--fe-text-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* inspector placement */
+.fe-pinsp__heading {
+  margin: 0;
+}
+.fe-pinsp__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+.fe-pinsp__chev {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.15s ease;
+}
+.fe-pinsp__chev.is-open {
+  transform: rotate(90deg);
+}
+.fe-pinsp__body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fe-pinsp__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* home placement — the "Apps" rows */
+.fe-sidenav__appicon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.fe-sidenav__appicon .fe-aicon,
+.fe-sidenav__appicon svg {
+  width: 18px;
+  height: 18px;
+}
+/* === /App plugins M2 === */
+
+/* === App plugins — M3 sign track (signature-pad, pdf-fields) + the public page === */
+.fe-ssig {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.fe-ssig__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fe-ssig__padwrap,
+.fe-ssig__typewrap,
+.fe-ssig__uploadwrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.fe-ssig__canvas,
+.fe-ssig__preview {
+  display: block;
+  width: 100%;
+  border: 1px dashed var(--fe-border-strong);
+  border-radius: var(--fe-radius);
+  /* Paper, on both palettes: the ink is black and lands on a document. */
+  background: #fff;
+  touch-action: none;
+  cursor: crosshair;
+}
+.fe-ssig__preview {
+  cursor: default;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-height: 48px;
+}
+.fe-ssig__img {
+  max-width: 100%;
+  max-height: 200px;
+  display: block;
+}
+.fe-ssig.is-invalid .fe-ssig__canvas,
+.fe-ssig.is-invalid .fe-ssig__preview {
+  border-color: var(--fe-danger);
+}
+.fe-ssig.is-disabled .fe-ssig__canvas {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.fe-ssig__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fe-text-muted);
+}
+.fe-ssig__pick {
+  position: relative;
+  overflow: hidden;
+  align-self: flex-start;
+}
+.fe-ssig__file {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.fe-ssig__foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.fe-ssig__signed {
+  font-size: 12px;
+  color: var(--fe-ok);
+}
+
+.fe-spdf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.fe-spdf__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.fe-spdf__palette,
+.fe-spdf__zoom,
+.fe-spdf__props {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.fe-spdf__zoomval {
+  min-width: 52px;
+  font-variant-numeric: tabular-nums;
+}
+.fe-spdf__hint {
+  margin: 0;
+}
+/* ⚠⚠ The `place` step's one strip (component: `fe-spdf__strip`). Its height
+ * is CONSTANT whatever it says — a hint, the selected box's controls, or an
+ * idle line — because in a `page` layout the document is fitted to the pane
+ * below it, and a strip that came and went re-fitted and redrew the whole
+ * page on every tap (measured 2026-09-21: 383px → 349px wide mid-gesture).
+ * One line of controls, scrolled sideways on a phone rather than wrapped to
+ * a second line, for the same reason. */
+.fe-spdf__strip {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.fe-spdf__strip > .fe-spdf__props {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  white-space: nowrap;
+  min-width: 0;
+}
+.fe-spdf__strip > .fe-spdf__hint {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 18px;
+}
+.fe-spdf__props {
+  padding: 6px 8px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+  font-size: var(--fe-text-sm);
+}
+.fe-spdf__propname {
+  font-weight: 600;
+}
+.fe-spdf__prop {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.fe-spdf__select {
+  width: auto;
+  padding: 2px 6px;
+  height: 26px;
+}
+.fe-spdf__num {
+  width: 72px;
+  padding: 2px 6px;
+  height: 26px;
+}
+/* The field's own name (v3 §3.1). Wide enough for "Yetkili imzası" and no
+   wider: the property row is a strip over the document, not a form. */
+.fe-spdf__name {
+  width: 160px;
+  padding: 2px 6px;
+  height: 26px;
+}
+/* The choice rows in the property strip are small — they sit beside the
+   document rather than on a form of their own. */
+.fe-spdf__prop .fe-choice {
+  gap: 4px;
+}
+.fe-spdf__prop .fe-choice__btn {
+  padding: 3px 8px;
+  font-size: var(--fe-text-xs);
+}
+.fe-spdf__prop .fe-choice__label {
+  font-weight: 500;
+}
+/* What a text box will accept, or what is wrong with what is in it. ⚠ Drawn
+   OUTSIDE the box: a field is a few millimetres of a page, and a hint inside
+   it would cover the value it is about. */
+.fe-spdf__rule {
+  position: absolute;
+  top: 100%;
+  inset-inline-start: 0;
+  margin-top: 2px;
+  padding: 1px 4px;
+  max-width: 240px;
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-elev);
+  border: 1px solid var(--fe-border);
+  color: var(--fe-text-muted);
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 2;
+}
+.fe-spdf__rule.is-bad {
+  color: var(--fe-danger);
+  border-color: var(--fe-danger);
+}
+.fe-spdf__scroll {
+  overflow: auto;
+  max-height: 70vh;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-hover);
+  padding: 12px;
+  min-width: 0;
+}
+
+/* ⚠⚠ v3 §3.2 — `page` placement: the node owns the screen.
+ *
+ * The complaint that started this round was a signature page you had to
+ * scroll in two directions to read: the document was fitted to the column's
+ * WIDTH, so a portrait page in a landscape window ran off the bottom, and
+ * the boxes were found by hunting. Here the node is a column of its own
+ * height (`--spdf-h`, handed down by the frame), the toolbar and the
+ * property strip keep their natural size, and the document takes the rest —
+ * with the drawn width fitted to that remainder (component: `fitWidth`).
+ *
+ * `min-height: 0` is not decoration: without it a flex child refuses to
+ * shrink below its content and the scroll area grows past the box instead
+ * of scrolling inside it. */
+/* ── define: the boxes as cards, no document ──────────────────────────
+ *
+ * The step that asks WHAT is being asked of whom. Each card carries the
+ * signer's colour down its edge, so the same box is recognisable on the
+ * next step when it is dropped on the page. */
+.fe-spdf.is-define {
+  gap: 12px;
+}
+.fe-spdf__define {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fe-spdf__card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-block: 10px; padding-inline: 14px 12px;
+  border: 1px solid var(--fe-border);
+  border-inline-start: 3px solid var(--spdf-color, var(--fe-primary));
+  border-radius: var(--fe-radius-md, 8px);
+  background: var(--fe-bg-elev);
+}
+.fe-spdf__card .fe-spdf__props {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  /* Row by row rather than one long line: a card is read, not scanned. */
+  row-gap: 8px;
+  column-gap: 10px;
+}
+.fe-spdf__card .fe-spdf__propname {
+  flex: 0 0 auto;
+  min-width: 84px;
+  font-weight: 600;
+}
+.fe-spdf__card .fe-spdf__name {
+  min-width: 180px;
+}
+/* The face row starts a line of its own — five buttons in the middle of a
+   sentence of controls read as noise. */
+.fe-spdf__card .fe-signfonts {
+  flex-basis: 100%;
+}
+/* What is printed under a signature: the choice, and the plugin's own words
+   for it underneath — a card previews the paper, it does not describe it. */
+/* The date a box will carry, under the two answers that make it. Plain
+   text, never a control: it is the result, not a third question. */
+.fe-spdf__dateex {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: var(--fe-text-sm);
+}
+.fe-spdf__dateex-title {
+  color: var(--fe-text-muted);
+}
+.fe-spdf__dateex-value {
+  font-family: var(--fe-font-mono);
+  font-weight: 600;
+}
+.fe-spdf__lines {
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  row-gap: 6px;
+}
+.fe-spdf__linepreview {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  border: 1px dashed var(--fe-border-strong, var(--fe-border));
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg);
+  font-size: var(--fe-text-xs, 11px);
+  line-height: 1.35;
+  color: var(--fe-text);
+}
+.fe-spdf__linepreview-title {
+  color: var(--fe-text-muted);
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.fe-spdf__linepreview-line.is-none {
+  color: var(--fe-text-muted);
+  font-style: italic;
+}
+.fe-spdf__propwho {
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text-muted);
+}
+.fe-spdf__cardno {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: var(--fe-text-xs, 11px);
+  font-weight: 600;
+  color: var(--fe-text-on-primary);
+  background: var(--spdf-color, var(--fe-primary));
+}
+.fe-spdf__add {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 2px;
+}
+.fe-spdf__addlbl {
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text-muted);
+  margin-inline-end: 4px;
+}
+.fe-spdf__empty {
+  padding: 14px;
+  border: 1px dashed var(--fe-border);
+  border-radius: var(--fe-radius-md, 8px);
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-sm);
+  line-height: 1.5;
+}
+.fe-spdf__done {
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text-muted);
+  align-self: center;
+}
+/* A waiting box wears its signer's colour, so the toolbar and the page
+   agree about which box is which. */
+.fe-spdf__palette .fe-btn[style*='--spdf-color'] {
+  border-inline-start: 3px solid var(--spdf-color, var(--fe-primary));
+}
+
+.fe-spdf--page {
+  display: flex;
+  flex-direction: column;
+  height: var(--spdf-h, 100%);
+  min-height: 0;
+}
+.fe-spdf--page .fe-spdf__scroll {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+}
+/* Centred, because a fitted page is narrower than the box it is fitted in
+   and a document pinned to the left edge of a wide screen reads as broken. */
+.fe-spdf--page .fe-spdf__pages {
+  align-items: center;
+}
+.fe-spdf__pages {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+/* ⚠⚠ DOCUMENT SPACE from here in. A page is the PDF's own coordinate system:
+   its boxes are placed with PHYSICAL inline `left`/`top` in % of the page
+   (SurfacePdfFields, lib/pdfFieldsGeom → the signer stamps at those
+   fractions), so a box at the left of the page is at the left of the page in
+   Arabic too. Nothing inside a page may use logical properties or read
+   `--filex-dir-x` — the RTL guard (web/tests/quality/rtlLogical.test.ts)
+   allow-lists exactly these rules. */
+.fe-spdf__page {
+  position: relative;
+  background: #fff;
+  box-shadow: var(--fe-shadow-sm);
+  flex: 0 0 auto;
+  touch-action: pan-y;
+  user-select: none;
+}
+.fe-spdf.is-placing .fe-spdf__page {
+  cursor: crosshair;
+}
+.fe-spdf__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.fe-spdf__field {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px solid var(--spdf-color, var(--fe-primary));
+  background: color-mix(in srgb, var(--spdf-color, var(--fe-primary)) 12%, transparent);
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.15;
+  color: var(--spdf-color, var(--fe-primary));
+  cursor: pointer;
+}
+.fe-spdf.is-edit .fe-spdf__field {
+  cursor: move;
+  /* ⚠ A finger that drags a box must move the BOX. The page allows vertical
+     panning (`pan-y`) so a signer can scroll a document with a finger; on a
+     box that same pan was taken by the browser, which then cancelled the
+     pointer — the box stopped half way and the pane scrolled instead. */
+  touch-action: none;
+}
+.fe-spdf.is-edit.is-placing .fe-spdf__page {
+  touch-action: none;
+}
+.fe-spdf__field.is-selected {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+  z-index: 2;
+}
+.fe-spdf__field.is-foreign {
+  border-style: dashed;
+  border-color: var(--fe-border-strong);
+  background: rgba(128, 128, 128, 0.12);
+  color: var(--fe-text-muted);
+  cursor: default;
+  pointer-events: none;
+}
+.fe-spdf__field.is-required::after {
+  content: '*';
+  position: absolute;
+  top: 0;
+  right: 3px; /* rtl-physical: ⚠⚠ DOCUMENT SPACE — drawn on the page, which never mirrors */
+  font-weight: 700;
+}
+.fe-spdf__field--ghost {
+  pointer-events: none;
+  border-style: dotted;
+  z-index: 3;
+}
+.fe-spdf__label {
+  text-align: center;
+  padding: 0 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.fe-spdf__who {
+  font-size: 9px;
+  opacity: 0.8;
+}
+.fe-spdf__sig {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+.fe-spdf__text {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: #111;
+  font: inherit;
+  font-size: 12px;
+  padding: 0 4px;
+  outline: none;
+  min-width: 0;
+}
+.fe-spdf__check .fe-aicon {
+  width: 90%;
+  height: 90%;
+  color: #111;
+}
+.fe-spdf__val {
+  color: #111;
+  font-variant-numeric: tabular-nums;
+}
+.fe-spdf__handle {
+  position: absolute;
+  /* ⚠⚠ DOCUMENT SPACE. The box sits at its PDF coordinates (inline `left`/`top`
+     in % of the page, SurfacePdfFields) and grows right and down from there in
+     every UI language — the resize maths reads the pointer against the page's
+     own left edge. A handle mirrored to the box's left corner would drag the
+     RIGHT edge while the pointer sits on the left one. */
+  right: -5px; /* rtl-physical: document space (above) */
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--spdf-color, var(--fe-primary));
+  border: 2px solid #fff;
+  cursor: nwse-resize;
+  z-index: 3;
+}
+.fe-spdf__pad {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+}
+.fe-spdf__pad > .fe-btn {
+  align-self: flex-end;
+}
+.fe-spreview__embed {
+  width: 100%;
+  height: 60vh;
+  max-height: none;
+}
+
+/* ── The outward-facing page ─────────────────────────────────────────────
+ *
+ * A share, a file request and an app plugin's public page are ONE page with
+ * three bodies (v3 §1), and this is what that page LOOKS like. The shape is
+ * the one the Go-rendered PIN gate had until v0.42.2 — a calm centred card
+ * on a soft ground, the instance's mark above it, a tinted round badge, a
+ * heading, a quiet line under it, a full-width field and a full-width accent
+ * button — restored here so that unifying the pages levelled them UP.
+ *
+ * ⚠⚠ It was levelled DOWN in v0.43.0 (owner, 2026-09-23: "iki sayfa aynı
+ * olsun dediğim için ikisini de kötü hale çevirmişsin"). The measurements
+ * that had been lost, and are back: the card is 400px and CENTRED in the
+ * viewport rather than 720px glued to the top; it is LIGHTER than the ground
+ * (v0.43.0 drew `--fe-bg-elev`, the app's *sunken* tone, on `--fe-bg` — a
+ * card you cannot see); 16px radius and 32/28 padding, not 12 and 20; a
+ * 64px badge; a 20px/700 heading; and the primary button and the PIN box
+ * span the card instead of hugging its left edge.
+ *
+ * Three widths, one family — exactly the old stylesheet's three cards:
+ *   · `--gate` 400px, centred text: the PIN gate, "this link is not
+ *     available", an error, an acceptance, and a single document.
+ *   · `--form` 520px, text from the start edge: a file request.
+ *   · `--wide` 880px: a folder's listing, and an app's screen.
+ * The mode is the SHELL's (`layout`, forced to `gate` for every state that
+ * is not `ready`), so no body carries a layout of its own.
+ *
+ * ⚠ The ground and the card are the public page's own tokens rather than
+ * `--fe-bg`/`--fe-bg-elev`: in the app those two mean "surface" and "sunken
+ * strip", and a card has to sit ABOVE its ground, not below it.
+ * ⚠ Logical properties only (`padding-inline`, `margin-inline`): the page is
+ * opened in Arabic too, and web/tests/quality/rtlLogical.test.ts says so. */
+.fe.fe-ppage {
+  /* The ground, the card and the three widths are declared in
+     styles/variables.css (light + dark) — see the note there. */
+  min-height: 100vh;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* ⚠ `safe center` and not plain `center`: a tall body (an app's wizard with
+     a document in it) is taller than the window, and a plainly centred flex
+     column overflows past the TOP of the scrollport, where nothing can scroll
+     it back. `safe` falls back to start alignment exactly then. The plain
+     value stays as the fallback for anything that does not know the keyword. */
+  justify-content: center;
+  justify-content: safe center;
+  gap: 18px;
+  padding: 40px 16px;
+  background: linear-gradient(160deg, var(--fe-ppage-ground-1), var(--fe-ppage-ground-2));
+  color: var(--fe-text);
+}
+/* The instance's mark, ABOVE the card and centred on it — the first thing a
+ * stranger reads, and (v3 §1.2) theirs, not ours. */
+.fe-ppage__brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  max-width: 100%;
+  min-width: 0;
+}
+.fe-ppage__logo {
+  height: 34px;
+  width: auto;
+  max-width: 200px;
+  object-fit: contain;
+  display: block;
+  flex: none;
+}
+.fe-ppage__brandname {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--fe-text);
+  overflow-wrap: anywhere;
+}
+
+.fe-ppage__card {
+  width: 100%;
+  max-width: var(--fe-ppage-max);
+  background: var(--fe-ppage-card);
+  border: 1px solid var(--fe-border);
+  border-radius: 16px;
+  box-shadow: var(--fe-ppage-shadow);
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.fe-ppage--gate .fe-ppage__card {
+  padding: 32px 28px;
+  text-align: center;
+  gap: 12px;
+}
+
+/* The round, accent-tinted badge the card opens with. One element with three
+ * tones, so "protected", "gone" and "done" are the same shape in a different
+ * colour rather than three drawings. */
+.fe-ppage__badge {
+  width: 64px;
+  height: 64px;
+  margin-block-end: 2px;
+  margin-inline: auto;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: var(--fe-primary-soft);
+  color: var(--fe-primary-ink);
+}
+.fe-ppage__badge svg {
+  width: 30px;
+  height: 30px;
+}
+.fe-ppage__badge--ok {
+  background: color-mix(in srgb, var(--fe-ppage-ok) 14%, transparent);
+  color: var(--fe-ppage-ok);
+}
+.fe-ppage__badge--err {
+  background: color-mix(in srgb, var(--fe-danger) 12%, transparent);
+  color: var(--fe-danger);
+}
+.fe-ppage__spinner {
+  width: 26px;
+  height: 26px;
+  border: 2.5px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  animation: fe-ppage-spin 0.8s linear infinite;
+  opacity: 0.6;
+}
+@keyframes fe-ppage-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fe-ppage__spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+.fe-ppage__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fe-ppage__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.fe-ppage__subject {
+  margin: 0;
+  color: var(--fe-text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.fe-ppage__state {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fe-ppage__state-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+.fe-ppage__state--ok .fe-ppage__state-title {
+  color: var(--fe-ppage-ok);
+}
+/* The shell's OWN paragraphs at the reading size the old page used (0.9rem)
+ * rather than the app's 13px table type.
+ * ⚠ Scoped to the card's own children and to the shell's states — NOT to
+ * every `.fe-surface__text` under `.fe-ppage`. An app plugin's screen is the
+ * same `SurfaceConversation` a signed-in person sees, and resizing its text
+ * only on a public link is exactly the surface-specific divergence the one
+ * shell exists to prevent. */
+.fe-ppage__card > .fe-surface__text,
+.fe-ppage__state > .fe-surface__text,
+.fe-ppage__pin > .fe-surface__text,
+.fe-ppage__pin .fe-ppage__state > .fe-surface__text,
+.fe-pdrop > .fe-surface__text,
+.fe-pdrop__zone > .fe-surface__text,
+.fe-ppage__file-one > .fe-surface__text {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ⚠ On the gate the primary act spans the card: a 4-digit box and a
+ * "Continue" hugging the left edge of a 400px card is what v0.43.0 shipped,
+ * and it reads as a form fragment rather than the one thing to do. */
+.fe-ppage--gate .fe-btn {
+  justify-content: center;
+}
+.fe-ppage--gate .fe-btn--primary {
+  width: 100%;
+  padding-block: 11px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 10px;
+}
+.fe-ppage__pin {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* The code box: the whole width, big, spaced and centred, as it was. A PIN is
+ * read off a message and typed once — it is not a text field among others. */
+.fe-ppage__pinput.fe-ppage__pinput {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  padding: 12px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  text-indent: 0.32em;
+  text-align: center;
+  border: 1.5px solid var(--fe-border-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+}
+.fe-ppage__pinput:focus {
+  outline: none;
+  border-color: var(--fe-primary);
+  box-shadow: 0 0 0 3px var(--fe-primary-soft);
+}
+.fe-ppage__pinput.is-invalid {
+  border-color: var(--fe-danger);
+}
+/* Named for a screen reader, not for the eye: the heading above it already
+ * says what the box is, and a "PIN" label over a PIN box is furniture. */
+.fe-ppage__srlabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.fe-ppage__error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fe-danger) 10%, transparent);
+  color: var(--fe-danger);
+  font-size: 13.5px;
+}
+
+/* A card's actions: a full-width row under a rule. ⚠ `width: 100%` is load
+   bearing — inside a body that packs its children to the start
+   (`__file-one`) the row shrink-wrapped and its rule stopped halfway across
+   the card, which is what a folder share shipped as. */
+.fe-ppage__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding-top: 12px;
+  border-top: 1px solid var(--fe-border-soft);
+}
+.fe-ppage--gate .fe-ppage__file-one {
+  align-items: center;
+  gap: 14px;
+}
+.fe-ppage--gate .fe-ppage__actions {
+  justify-content: center;
+  border-top: 0;
+  padding-top: 0;
+}
+.fe-ppage__files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--fe-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.fe-ppage__file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+}
+.fe-ppage__file + .fe-ppage__file {
+  border-top: 1px solid var(--fe-border);
+}
+.fe-ppage__file:hover {
+  background: var(--fe-primary-soft);
+}
+.fe-ppage__file a {
+  color: var(--fe-primary-ink);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-ppage__file a:hover {
+  text-decoration: underline;
+}
+.fe-ppage__filesize {
+  color: var(--fe-text-muted);
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The phone. 390px is the measurement that matters: the card gives up its
+ * generous side padding rather than its rhythm, and keeps a 12px gutter each
+ * side. (A body too tall to centre starts at the top by itself — that is
+ * `justify-content: safe center` above, not a rule here.) */
+@media (max-width: 560px) {
+  .fe.fe-ppage {
+    padding: 24px 12px 32px;
+  }
+  .fe-ppage__card {
+    padding: 24px 18px;
+  }
+  .fe-ppage--gate .fe-ppage__card {
+    padding: 28px 20px;
+  }
+  .fe-ppage__logo {
+    height: 28px;
+  }
+  .fe-ppage__title,
+  .fe-ppage__state-title {
+    font-size: 18px;
+  }
+  .fe-ppage__actions .fe-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+/* === /App plugins M3 === */
+
+/* === App plugins v3 — the shared choice control and the ONE public
+ * shell (docs/APP-PLUGINS-V3.md §1–§2).
+ *
+ * ⚠⚠ These rules live HERE and not in the components, for a reason the
+ * build makes and not a taste: the web component ships only the styles of
+ * the modules its entry imports, while `packages/core` ships all of them,
+ * so a `<style>` block in a component one distribution does not mount makes
+ * the two published stylesheets differ. `web/tests/deploy/packageLook` is
+ * the gate that says so. === */
+
+/* ChoiceButtons.vue */
+.fe-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fe-choice__btn {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  font: inherit;
+  font-size: 13.5px;
+  text-align: start;
+  padding: 8px 12px;
+  border-radius: var(--fe-radius);
+  border: 1px solid var(--fe-border-strong);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  cursor: pointer;
+}
+.fe-choice__btn:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+}
+.fe-choice__btn:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+/* ⚠ The chosen one is marked by BORDER and BACKGROUND, not by colour alone:
+   a palette where the primary is close to the surface still shows which is
+   on, and so does a screen nobody has calibrated. */
+.fe-choice__btn.is-on {
+  border-color: var(--fe-primary);
+  background: var(--fe-bg-selected);
+  color: var(--fe-text);
+  box-shadow: inset 0 0 0 1px var(--fe-primary);
+}
+.fe-choice__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.fe-choice.is-invalid .fe-choice__btn {
+  border-color: var(--fe-danger);
+}
+.fe-choice__label {
+  font-weight: 600;
+}
+.fe-choice__help {
+  font-size: 12px;
+  color: var(--fe-text-muted);
+  line-height: 1.4;
+}
+
+/* SurfaceFooterButtons.vue */
+/* Back sits at the far end of the row, away from the way forward: a step's
+   two directions must not be two neighbouring buttons. `margin-right: auto`
+   works in every frame that lays the row out as a flex line, and is inert in
+   one that does not. */
+.fe-surface__back {
+  margin-inline-end: auto;
+}
+
+/* PublicShell.vue — the meta line and the foot.
+   The expiry and the visit counter are a quiet line under the heading, and
+   the language picker + attribution sit OUTSIDE the card, centred under it,
+   the way the old page's brand footer did. */
+.fe-ppage__meta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--fe-text-muted);
+}
+.fe-ppage--gate .fe-ppage__meta {
+  justify-content: center;
+}
+.fe-ppage__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.fe-ppage__footmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--fe-text-muted);
+}
+.fe-ppage__footmark img,
+.fe-ppage__footmark svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 3px;
+  object-fit: contain;
+}
+.fe-ppage__footline {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--fe-text-muted);
+  text-align: center;
+  max-width: 480px;
+  overflow-wrap: anywhere;
+}
+
+/* PublicShareBody.vue */
+.fe-ppage__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fe-text-muted);
+}
+.fe-ppage__crumb {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-ppage__entry {
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--fe-primary);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: start;
+  cursor: pointer;
+  text-decoration: none;
+}
+.fe-ppage__entry:hover {
+  text-decoration: underline;
+}
+.fe-ppage__file-one {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+/* An app page's exposed files, drawn as a shared file is, under a rule that
+   separates them from the app's own screen above. */
+.fe-ppage__appfiles {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--fe-border);
+}
+.fe-ppage__shot {
+  max-width: 100%;
+  max-height: 46vh;
+  border-radius: var(--fe-radius);
+  border: 1px solid var(--fe-border);
+  object-fit: contain;
+}
+
+/* PublicRequestBody.vue */
+.fe-pdrop {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* The uploader's name — above the drop area, because dropping sends. */
+.fe-pdrop__who {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fe-pdrop__wholabel {
+  font-size: var(--fe-text-sm);
+  font-weight: 500;
+  color: var(--fe-text);
+}
+.fe-pdrop__whoinput {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--fe-h-lg);
+  padding: 0 var(--fe-gap-sm);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font-family: inherit;
+  font-size: var(--fe-text-md);
+}
+.fe-pdrop__whoinput:focus {
+  outline: none;
+  border-color: var(--fe-primary);
+}
+.fe-pdrop__zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 28px 16px;
+  border: 2px dashed var(--fe-border-strong);
+  border-radius: var(--fe-radius-lg);
+  background: var(--fe-bg-elev);
+  cursor: pointer;
+  text-align: center;
+}
+.fe-pdrop__zone:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 2px;
+}
+.fe-pdrop__zone.is-over {
+  border-color: var(--fe-primary);
+  background: var(--fe-bg-selected);
+}
+.fe-pdrop__zone.is-disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.fe-pdrop__icon {
+  width: 38px;
+  height: 38px;
+  margin-block-end: 6px;
+  color: inherit;
+}
+.fe-pdrop__lead {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fe-text);
+}
+/* The zone answers the pointer the way the old one did: the accent's tint,
+   its border and its ink, all three at once. */
+.fe-pdrop__zone:hover:not(.is-disabled),
+.fe-pdrop__zone.is-over {
+  border-color: var(--fe-primary);
+  background: var(--fe-primary-soft);
+  color: var(--fe-primary-ink);
+}
+.fe-pdrop__zone:hover:not(.is-disabled) .fe-pdrop__lead,
+.fe-pdrop__zone.is-over .fe-pdrop__lead {
+  color: inherit;
+}
+.fe-pdrop__input {
+  display: none;
+}
+.fe-pdrop__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fe-pdrop__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fe-text);
+}
+.fe-pdrop__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-pdrop__bar {
+  flex: 0 0 120px;
+  height: 6px;
+}
+.fe-pdrop__ok {
+  color: var(--fe-ok);
+}
+
+/* PublicLanguagePicker.vue */
+.fe-plang {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fe-plang__btn {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--fe-border);
+  background: transparent;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+}
+.fe-plang__btn:hover {
+  color: var(--fe-text);
+  background: var(--fe-bg-hover);
+}
+.fe-plang__btn.is-on {
+  color: var(--fe-text);
+  border-color: var(--fe-primary);
+  background: var(--fe-bg-selected);
+}
+.fe-plang__btn:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+.fe-plang__src {
+  font-size: 10.5px;
+  opacity: 0.75;
+}
+
+
+/* === App plugins v2 ===================================================
+ * A `page` view (`{base}apps/{plugin}/{view}`), the lock badge an app's
+ * hold puts on a row, and the face picker a typed signature carries. */
+
+/* The page view is a whole document, not a panel: the `.fe` root's explorer
+ * chrome (border, radius, fixed height, hidden overflow) is undone here for
+ * the same reason `.fe-ppage` undoes it. ⚠ Without this the wizard is a
+ * 420px-tall bordered box floating in an empty tab. */
+.fe.fe-apppage {
+  min-height: 100vh;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+  padding: 0 0 40px;
+  gap: 0;
+}
+.fe-apppage__bar {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px;
+  border-bottom: 1px solid var(--fe-border);
+  background: var(--fe-bg-elev);
+}
+.fe-apppage__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.fe-apppage__path {
+  margin: 0;
+  flex: 1 1 200px;
+  min-width: 0;
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-sm);
+  font-family: var(--fe-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-apppage__back {
+  flex: 0 0 auto;
+  text-decoration: none;
+}
+.fe-apppage__body {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* ⚠⚠ v3 §3.2 — the step that shows a DOCUMENT is shaped by the window,
+ * not by the text column.
+ *
+ * A form step is a readable 960px column that the page scrolls; a step
+ * carrying a `pdf-fields` node is not a form, it is a document. Measured
+ * before this rule, on the request wizard's "place the fields" step at
+ * 1440x900: the page box was 916x1296 inside a 916x618 viewport, i.e. the
+ * document ran off the bottom AND sideways — which is the complaint that
+ * started this round, reproduced exactly.
+ *
+ * `min-height: 0` on the body is not decoration: without it a flex child
+ * refuses to shrink below its content, and the "remainder" the document is
+ * fitted into grows to the document's own height, which is the bug again
+ * wearing a fix's clothes. */
+.fe.fe-apppage.is-doc {
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+.fe-apppage.is-doc .fe-apppage__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-width: none;
+  overflow: hidden;
+}
+/* ⚠⚠ ...and one step further down, or none of the above does anything.
+ * `.fe-surface` sits between the body and the document node and grows to its
+ * content by default, so `.fe-spdf--page { height: 100% }` resolved against
+ * an auto-height parent and came back as "as tall as the document" —
+ * measured at 1440x900: a 775px body holding a 1466px document, i.e. the
+ * page running off the bottom exactly as before, with every rule above this
+ * one in place and looking correct. */
+.fe-apppage.is-doc .fe-surface {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.fe-apppage__state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+}
+.fe-apppage__state-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.fe-apppage__state-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+.fe-apppage__state-actions .fe-btn {
+  text-decoration: none;
+}
+.fe-apppage__foot {
+  position: sticky;
+  bottom: 0;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--fe-border);
+  background: var(--fe-bg);
+}
+
+/* The SAME screen inside a HOST's page (`PluginPageView frame="embedded"`) —
+ * the admin panel's Apps section, an embed that already has a header.
+ *
+ * Exactly three things the tab frame provides have to go, and they are the
+ * three the host has already decided: the viewport height (the panel's page
+ * is as tall as its content), the 960px reading column (the host fixed the
+ * width, and an app's home screen is a TABLE, which a text column cramps) and
+ * the tail padding a scrolling tab needs.
+ *
+ * ⚠ The footer stops being sticky too. In a tab it hovers over the document
+ * it belongs to; inside a card `bottom: 0` would pin it to the WINDOW's edge,
+ * a screenful away from the form it submits. */
+.fe.fe-apppage--embedded {
+  min-height: 0;
+  padding: 0;
+}
+.fe-apppage--embedded .fe-apppage__body {
+  max-width: none;
+  padding: var(--fe-gap);
+}
+.fe-apppage--embedded .fe-apppage__foot {
+  position: static;
+  max-width: none;
+  padding: var(--fe-gap);
+  background: transparent;
+}
+
+/* A home page's section menu (`SurfaceSections`, `surface.sections`). The
+ * product's own underlined tab strip — the look of the Connections and
+ * Plugins screens — and ⚠ one line on a phone, scrolled sideways: a strip
+ * that wrapped moved the table under it every time a count changed. */
+.fe-sections {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--fe-border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.fe-sections__tab {
+  font: inherit;
+  font-size: 13.5px;
+  border: 0;
+  background: none;
+  color: var(--fe-text-muted);
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fe-sections__tab:hover:not(:disabled) {
+  color: var(--fe-text);
+}
+.fe-sections__tab.is-active {
+  color: var(--fe-primary);
+  border-bottom-color: var(--fe-primary);
+  font-weight: 600;
+}
+.fe-sections__tab:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+.fe-sections__count {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--fe-bg-hover);
+  color: var(--fe-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.fe-sections__tab.is-active .fe-sections__count {
+  background: color-mix(in srgb, var(--fe-primary) 14%, transparent);
+  color: var(--fe-primary);
+}
+
+/* The lock badge. ⚠ Drawn OUTSIDE `.fe-list__name`: the shot scripts read
+ * that element's textContent as the filename, and a row whose name reads
+ * "nda.pdf 🔒" breaks them silently (lesson #29). */
+.fe-applock {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  height: 18px;
+  border-radius: 9px;
+  border: 1px solid var(--fe-border);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text-muted);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: help;
+}
+.fe-applock__glyph {
+  font-size: 11px;
+}
+.fe-applock--inline {
+  vertical-align: middle;
+}
+
+/* issue #34 — the badge on a symlink the server will not follow. Same chip as
+ * the lock badge above, deliberately: a row that is not ordinary is marked one
+ * way in this product, and a second vocabulary is how two marks end up meaning
+ * the same thing on neighbouring rows.
+ * ⚠ Drawn OUTSIDE `.fe-list__name` for the same reason (lesson #29). */
+.fe-symlink {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  height: 18px;
+  border-radius: 9px;
+  border: 1px solid var(--fe-border);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text-muted);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: help;
+}
+.fe-symlink__glyph {
+  font-size: 11px;
+}
+/* A broken link is the one state nothing can be configured back into working,
+ * so it is the one state that gets the amber. The other three are boundaries
+ * the operator chose, not faults. */
+.fe-symlink--broken {
+  border-color: var(--fe-warning);
+  color: var(--fe-warning);
+}
+
+/* One notice box, two names: an app's hold on a file and a link that cannot be
+ * opened are the same shape of fact — the thing above the panel's facts that
+ * explains why the facts alone mislead. */
+.fe-inspector__lock,
+.fe-inspector__linknote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text);
+  font-size: var(--fe-text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* The face picker a typed signature and a pdf text field share. */
+.fe-signfonts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fe-signfonts__btn {
+  padding: 4px 10px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text);
+  font-size: 15px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.fe-signfonts__btn:hover:not(:disabled) {
+  border-color: var(--fe-primary);
+}
+.fe-signfonts__btn.is-on {
+  border-color: var(--fe-primary);
+  box-shadow: inset 0 0 0 1px var(--fe-primary);
+}
+.fe-signfonts__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* === /App plugins v2 === */
+
+/* ── StorageTags: a storage's driver, "Read-only", "Disabled" ───────────
+   ONE vocabulary for every list of storages (components/StorageTags.vue,
+   QA #34: "RO" on one admin list, "SALT OKUNUR" on the other). Global, like
+   every core rule — scoped styles do not survive the web-component build. */
+.fe-stags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.fe-stag {
+  font-size: 11px;
+  line-height: 16px;
+  border: 1px solid var(--fe-border-strong, currentColor);
+  border-radius: 999px;
+  padding: 0 8px;
+  color: var(--fe-text-muted, inherit);
+  white-space: nowrap;
+}
+.fe-stag--warn {
+  color: var(--fe-warning, var(--fe-danger));
+  border-color: var(--fe-warning, var(--fe-danger));
+}
+
+/* ── PublicLinkPreview: the public page inside the admin's Corporate identity
+   page. The page is a whole document (`min-height: 100vh`); in the admin card
+   it is a panel. Only the height is undone — padding, width, colours and
+   alignment stay the page's own, so what the operator sees is what a visitor
+   gets. It is looked at, not used. */
+.fe-ppreview {
+  pointer-events: none;
+  user-select: none;
+  border-radius: var(--fe-radius-lg, 12px);
+  overflow: hidden;
+}
+.fe-ppreview > .fe.fe-ppage {
+  min-height: 0;
+}

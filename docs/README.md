@@ -23,7 +23,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 ## Storage
 
 - [Storage](STORAGE.md) — how mounts work, adding one, and the adapters:
-  local · S3 / S3‑compatible · SFTP · WebDAV · FTP · SMB/CIFS
+  local · S3 / S3‑compatible · SFTP · WebDAV · FTP · SMB/CIFS — including
+  [symlinks inside a local storage](STORAGE.md#symlinks) and the
+  *Follow symlinks that leave this folder* option
 - [Moving files between storages](STORAGE.md#moving-files-between-storages) — what
   copy, cut and drag mean when the two ends are different storages
 - [NAS over NFS / SMB](STORAGE.md#nas-nfs-smb-and-friends) — mount it with the
@@ -36,6 +38,38 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   installing one, upgrading it in place, and writing one (the protocol, the Go
   SDK, presigned URLs and multipart) — plus **conformance**, the probes that
   refuse a plugin which cannot do what it claims
+- [Apps (app plugins)](APP-PLUGINS.md) — sandboxed WebAssembly apps that add
+  actions to the file menu, screens filex draws for them, and public links for
+  outside participants: the two that ship (**e-Signature**,
+  `BRF-Tech/filex-sign`, and **Convert**, `BRF-Tech/filex-convert`), installing
+  one from GitHub through the permission review, what the administrator
+  controls, apps that wake up on their own,
+  [signing documents end to end](APP-PLUGINS.md#signing-documents-end-to-end)
+  (inside and outside signers, PINs, deadlines, the audit trail, verifying, your
+  own certificate authority), [converting files](APP-PLUGINS.md#converting-files),
+  what guards an app's public links, limits, troubleshooting
+- [Writing an app plugin](PLUGIN-KIT.md) — the manifest, the six exports,
+  every host function and its permission, the screen catalogue, the **hourly
+  wake-up** that lets an app schedule its own work to the minute, the test kit
+  that runs before the wasm build, and a signing walk-through with stock Go
+- [App plugin wire contract](APP-PLUGINS-API.md) — the exact routes, JSON
+  shapes and frontend conventions the explorer, admin panel and public shell
+  are built against
+
+## Language & direction
+
+- [Writing a language pack](PLUGIN-KIT.md#writing-a-language-pack) — adding a
+  language to filex without waiting for a release: what makes a manifest a
+  language pack, the exported catalogue and the per-key context that comes with
+  it, the byte limits, CLDR plural categories (`<key>_few` …), the `server.*`
+  table that carries the text the server writes — mail, notifications, the
+  pages behind a link — and the validator that refuses a pack this version
+  would not accept. Spanish, German and French ship as examples, and
+  `BRF-Tech/filex-lang-template` is the template to start from
+- [Right-to-left languages](RTL.md) — how filex turns for Arabic, Hebrew,
+  Persian, Urdu: the one list that decides, the `dir` rule for pages and
+  embeds, what never mirrors (document space, machine text), mixed-direction
+  text, and the logical-properties rule the RTL guard test enforces
 
 ## Reaching filex without a browser
 
@@ -56,7 +90,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 ## Integrations
 
 - [OnlyOffice](ONLYOFFICE.md) — in‑browser editing of Office documents
-- [Converter](CONVERT-INTEGRATION.md) — universal file conversion
+- [Converter side-car](CONVERT-INTEGRATION.md) — universal file conversion
+  through a separate service (the [Convert app](APP-PLUGINS.md#converting-files)
+  is the sandboxed alternative)
 
 ## Features
 
@@ -68,7 +104,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Uploads](UPLOADS.md) — the staged, resumable upload path: chunked, works on
   every driver, survives a dropped connection
 - [Sharing & file requests](SHARING.md) — public download links + upload/file‑drop;
-  the maximum link life, and how the folder-ZIP cache is bounded
+  **My shares** and reading a link's PIN back, the one branded public screen and
+  its PIN lock-out, the maximum link life, and how the folder-ZIP cache is bounded
 - [Thumbnails](thumbnails.md) — image / video / pdf / office previews
 - [Search](SEARCH.md) — embedded full‑text index: forgiving filename
   matching (separators, several words in any order, folders, typos), VS
@@ -78,7 +115,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   runs on: the ticket, the change and presence frames, how a burst is
   coalesced (and why a plain trailing debounce starves), and the 12 s polling
   fallback
-- [Notifications](NOTIFICATIONS.md) — webhook + in‑app bell
+- [Notifications](NOTIFICATIONS.md) — webhook + in‑app bell: the unread badge,
+  the full list inside the explorer for everybody, and where a click goes
 - [Trash & versioning](TRASH-VERSIONING.md) — soft‑delete/restore + file history
 - [Replication](REPLICATION.md) — primary→replica mirroring & reconcile
 - [Quotas](QUOTAS.md) — per‑user ceilings: what counts, when it is
@@ -107,11 +145,14 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Architecture](ARCHITECTURE.md) — how the pieces fit
 - [Backend](BACKEND.md) — internals
 - [HTTP / component API](API.md)
+- [Themes & appearance](INTEGRATION.md#themes) — the shipped palettes, an
+  operator's own themes and instance default (Admin → **Appearance**), and the
+  custom stylesheet that is off until you switch it on
 - [Embedding the explorer](INTEGRATION.md) — Vue / React / Web Component, and the
   two options every wrapper shares: the **navigation panel** (`sideNav`) and how
   much of the explorer to show (`uiProfile`: `standard` · `simple` — two values,
   and the third one, `drive`, was **removed** after v0.40.0; pass `simple`)
-- [AI & MCP](MCP.md) — API tokens (including the `user` / `app` token kinds), scopes, the MCP endpoint for agents, and credential-free upload tickets for large local files
+- [AI & MCP](MCP.md) — API tokens (including the `user` / `app` token kinds), the permissions a token names — at least one, and never a blank list meaning all of them — the ceiling that stops a narrow token issuing a wider credential (`403 token_ceiling`), the MCP endpoint for agents, and credential-free upload tickets for large local files
 
 ## Repo only — not published to docs.filex.sh
 

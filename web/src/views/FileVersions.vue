@@ -26,15 +26,13 @@ import { ArrowLeft, History, RotateCcw, Trash2, Download, ChevronRight } from 'l
 
 import { useToastStore } from '@/stores/toast';
 import { useAuthStore } from '@/stores/auth';
-import { versionsApi, type NodeVersion } from '@/api/versions';
+import { versionsApi, type NodeVersion, type VersionedFile } from '@/api/versions';
 import { extractError } from '@/api/client';
 import { formatBytes, formatDate } from '@/lib/format';
 import Button from '@/components/ui/Button.vue';
-import EmptyState from '@/components/ui/EmptyState.vue';
-import Spinner from '@/components/ui/Spinner.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
-import TableScroll from '@/components/ui/TableScroll.vue';
+import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
 const route = useRoute();
@@ -44,6 +42,8 @@ const auth = useAuthStore();
 
 const nodeId = computed(() => Number(route.params.nodeId));
 const versions = ref<NodeVersion[]>([]);
+/** The file the history is of — named on the page, not "Node #31". */
+const file = ref<VersionedFile | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
@@ -68,15 +68,33 @@ const purgeOpen = computed({
 
 const isAdmin = computed(() => auth.isAdmin);
 
+/* The explorer's table (DataTable), remembered under `admin.file-versions`.
+ * A file's versions arrive all at once, so the table's own sort is honest. */
+const columns = computed<DataColumn<NodeVersion>[]>(() => [
+  { id: 'version_n', label: t('versions.col.version'), sortable: true, sortDir: 'desc', width: 160 },
+  { id: 'size', label: t('versions.col.size'), sortable: true, align: 'right', width: 110 },
+  {
+    id: 'created_at',
+    label: t('versions.col.createdAt'),
+    sortable: true,
+    sortDir: 'desc',
+    width: 180,
+    sortValue: (v) => (v.created_at ? Date.parse(v.created_at) : null),
+  },
+  { id: 'etag', label: t('versions.col.etag'), sortable: true, width: 160 },
+]);
+
 async function load() {
   if (!Number.isFinite(nodeId.value) || nodeId.value <= 0) {
-    error.value = t('versions.badNodeId');
+    error.value = t('versions.notFound');
     return;
   }
   loading.value = true;
   error.value = null;
   try {
-    versions.value = await versionsApi.list(nodeId.value);
+    const h = await versionsApi.history(nodeId.value);
+    versions.value = h.versions;
+    file.value = h.file;
   } catch (e: unknown) {
     error.value = extractError(e, t('versions.loadFailed'));
   } finally {
@@ -125,6 +143,39 @@ async function doPurge() {
 }
 
 onMounted(load);
+
+/** The row's verbs, behind its one pinned `Actions` control.
+ *
+ * ⚠ Download stays VISIBLE and disabled, with the reason in its title, rather
+ * than being dropped from the menu: a verb that is currently impossible reads
+ * as a rule when it is greyed and as a missing feature when it is absent —
+ * the same rule ContextMenu states for the explorer. Purge stays admin-only
+ * (`hidden`), which is a permission, not a state. */
+function rowActions(_row: NodeVersion): ContextAction[] {
+  return [
+    {
+      key: 'download',
+      label: t('versions.download'),
+      icon: 'download',
+      disabled: true,
+      title: t('versions.downloadDisabled'),
+    },
+    { key: 'restore', label: t('versions.restore'), icon: 'restore' },
+    {
+      key: 'purge',
+      label: t('versions.purge'),
+      icon: 'delete',
+      danger: true,
+      hidden: !isAdmin.value,
+      title: t('versions.purgeTooltip'),
+    },
+  ];
+}
+
+function onRowAction(key: string, row: NodeVersion) {
+  if (key === 'restore') confirmRestore(row);
+  else if (key === 'purge') confirmPurge(row);
+}
 </script>
 
 <template>
@@ -141,7 +192,12 @@ onMounted(load);
             {{ t('versions.backToFiles') }}
           </button>
           <ChevronRight class="h-3.5 w-3.5 opacity-60" />
-          <span class="truncate">{{ t('versions.nodeLabel', { id: nodeId }) }}</span>
+          <!-- ⚠ The file by name and place — it said "Node #31", an id the
+               operator had to have typed in (QA #30). -->
+          <span v-if="file?.name" class="truncate" data-testid="versions-file">
+            <bdi>{{ file.name }}</bdi>
+            <span v-if="file.path" class="text-zinc-400"> · {{ file.storage_name ? `${file.storage_name}:` : '' }}<bdi>{{ file.path }}</bdi></span>
+          </span>
         </div>
         <h1 class="mt-2 flex items-center gap-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
           <History class="h-6 w-6 text-zinc-500 dark:text-zinc-400" />
@@ -158,83 +214,43 @@ onMounted(load);
       {{ error }}
     </div>
 
-    <div v-if="loading" class="flex justify-center py-12">
-      <Spinner size="md" class="text-brand-600" />
-    </div>
-
-    <EmptyState
-      v-else-if="!versions.length && !error"
-      :icon="History"
-      :title="t('versions.empty')"
-      :description="t('versions.emptyDescription')"
-    />
-
-    <TableScroll
-      v-else-if="versions.length"
-      class="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900"
+    <DataTable
+      table-id="admin.file-versions"
+      :columns="columns"
+      :rows="versions"
+      :loading="loading"
+      row-key="id"
+      :row-actions="(row: NodeVersion) => rowActions(row)"
+      :row-actions-test-id="(row: NodeVersion) => `version-actions-${row.id}`"
+      @row-action="(key: string, row: NodeVersion) => onRowAction(key, row)"
     >
-      <table class="w-full text-sm">
-        <thead class="bg-zinc-50 dark:bg-zinc-900 text-left text-zinc-600 dark:text-zinc-400">
-          <tr>
-            <th class="px-4 py-2 font-medium">{{ t('versions.col.version') }}</th>
-            <th class="px-4 py-2 font-medium">{{ t('versions.col.size') }}</th>
-            <th class="px-4 py-2 font-medium">{{ t('versions.col.createdAt') }}</th>
-            <th class="px-4 py-2 font-medium">{{ t('versions.col.etag') }}</th>
-            <th class="px-4 py-2 font-medium text-right tbl-actions">{{ t('common.actions') }}</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
-          <tr
-            v-for="(v, idx) in versions"
-            :key="v.id"
-            class="bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-          >
-            <td class="px-4 py-2">
-              <div class="flex items-center gap-2">
-                <Badge :tone="idx === 0 ? 'brand' : 'zinc'" size="sm">
-                  v{{ v.version_n }}
-                </Badge>
-                <span v-if="idx === 0" class="text-xs text-zinc-500">{{ t('versions.newest') }}</span>
-              </div>
-            </td>
-            <td class="px-4 py-2 tabular-nums">{{ formatBytes(v.size, locale) }}</td>
-            <td class="px-4 py-2 text-zinc-500 dark:text-zinc-400">
-              {{ formatDate(v.created_at, locale) }}
-            </td>
-            <td class="px-4 py-2 font-mono text-xs text-zinc-500 dark:text-zinc-400">
-              <span v-if="v.etag" :title="v.etag">{{ v.etag.slice(0, 12) }}…</span>
-              <span v-else>—</span>
-            </td>
-            <td class="px-4 py-2 text-right tbl-actions">
-              <div class="inline-flex gap-1">
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  :title="t('versions.downloadDisabled')"
-                  disabled
-                >
-                  <Download class="h-3.5 w-3.5" />
-                  {{ t('versions.download') }}
-                </Button>
-                <Button size="xs" variant="outline" @click="confirmRestore(v)">
-                  <RotateCcw class="h-3.5 w-3.5" />
-                  {{ t('versions.restore') }}
-                </Button>
-                <Button
-                  v-if="isAdmin"
-                  size="xs"
-                  variant="danger"
-                  :title="t('versions.purgeTooltip')"
-                  @click="confirmPurge(v)"
-                >
-                  <Trash2 class="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </TableScroll>
+      <template #empty>
+        <p class="font-medium">{{ t('versions.empty') }}</p>
+        <p class="tbl-sub">{{ t('versions.emptyDescription') }}</p>
+      </template>
+
+      <!-- "Newest" is a property of the row's POSITION in the SERVER's
+           answer, which arrives newest-first; `indexOf` asks that array rather
+           than the order on screen, so a person who sorts by size still sees
+           the badge on the newest version rather than on whichever row the
+           sort put first. -->
+      <template #cell-version_n="{ row }">
+        <span class="inline-flex items-center gap-2">
+          <Badge :tone="versions.indexOf(row) === 0 ? 'brand' : 'zinc'" size="sm">v{{ row.version_n }}</Badge>
+          <span v-if="versions.indexOf(row) === 0" class="text-xs">{{ t('versions.newest') }}</span>
+        </span>
+      </template>
+      <template #cell-size="{ row }">
+        <span class="tabular-nums">{{ formatBytes(row.size, locale) }}</span>
+      </template>
+      <template #cell-created_at="{ row }">
+        <span class="whitespace-nowrap">{{ formatDate(row.created_at, locale) }}</span>
+      </template>
+      <template #cell-etag="{ row }">
+        <span v-if="row.etag" class="tbl-mono" :title="row.etag">{{ row.etag.slice(0, 12) }}…</span>
+        <span v-else>—</span>
+      </template>
+    </DataTable>
 
     <Modal v-model="restoreOpen" :title="t('versions.restoreModalTitle')">
       <p v-if="restoreTarget" class="text-sm text-zinc-700 dark:text-zinc-300">

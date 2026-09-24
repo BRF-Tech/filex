@@ -53,7 +53,7 @@ const sizeClass = computed(() => {
 
 <template>
   <span
-    class="inline-flex items-center font-medium ring-1 ring-inset"
+    class="inline-flex items-center font-medium ring-1 ring-inset whitespace-nowrap"
     :class="[toneClass, sizeClass, pill ? 'rounded-full' : 'rounded-md']"
   >
     <span v-if="dot" class="h-1.5 w-1.5 rounded-full" :class="dotColor" />

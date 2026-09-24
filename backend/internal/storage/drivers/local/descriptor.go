@@ -25,6 +25,20 @@ func init() {
 				// "root" is the pre-0.19 spelling; Init still reads it.
 				Aliases: []string{"root"},
 			},
+			{
+				Key:     "follow_symlinks",
+				Type:    storage.FieldBool,
+				Label:   "Follow symlinks that leave this folder",
+				I18nKey: "storages.fields.followSymlinks",
+				Default: false,
+				Help: "A symlink pointing INSIDE this folder is always followed. " +
+					"This governs only links pointing outside it: off, they are listed " +
+					"but cannot be opened, written to or deleted through; on, filex " +
+					"treats the linked files as part of the storage — including for " +
+					"indexing, virus scanning, quota and deletion.",
+				HelpI18nKey: "storages.fieldHelp.followSymlinks",
+				Advanced:    true,
+			},
 		},
 	})
 }

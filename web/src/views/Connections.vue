@@ -5,15 +5,17 @@
  *
  * ⚠ There is no form on this page. It mounts `ConnectionsPanel` from
  * `@brftech/filex-core`, which is the same component the desktop app
- * mounts as `<filex-connections>`; the driver fields come from the
- * server's own descriptors and the client instructions from the live
- * deployment. Anything that needs fixing here gets fixed once, in the
- * package, and lands on every surface.
+ * mounts as `<filex-connections>`; the client instructions are generated
+ * from the live deployment. Anything that needs fixing here gets fixed
+ * once, in the package, and lands on every surface.
  *
- * The deep operational knobs of a storage — sync mode and interval, RBAC,
- * sync runs, drift reports — stay on the admin-only Storages pages. Those
- * are console features, not connection features, and they have no meaning
- * in a desktop file manager.
+ * ⚠ And there is no storage LIST either, since v0.43.0. The panel used to
+ * open on a "Storages" tab holding a poorer copy of the Storages pages —
+ * the owner, testing the release: "ikisinde de depolar gözüküyor bu
+ * depolar sekmesine hiç ihtiyaç yok". Storages are created, edited and
+ * deleted on the Storages pages, which also hold the knobs this page never
+ * had (sync mode and interval, RBAC, sync runs, drift reports). The link in
+ * the header is the door; do not grow a second one here.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
@@ -24,11 +26,9 @@ import '@brftech/filex-core/style.css';
 
 import { explorerAuth } from '@/lib/explorerConfig';
 import { effectiveTheme } from '@/lib/theme';
-import { useStoragesStore } from '@/stores/storages';
 
 const { t, locale } = useI18n();
 const router = useRouter();
-const storages = useStoragesStore();
 
 // The panel is theme-aware but has no idea the admin shell toggles `.dark`
 // on <html>; hand it the resolved answer, like Explore.vue does.
@@ -48,14 +48,8 @@ const config = computed<ExplorerConfig>(() => ({
   endpoint: '/api/files/manager',
   auth: explorerAuth(),
   theme: currentTheme.value,
-  locale: locale.value === 'en' ? 'en' : 'tr',
+  locale: locale.value, // the active language — a language pack's too
 }));
-
-/** A storage added or removed here changes the admin store the rest of the
- *  panel reads (the dashboard counts, the explorer roots). */
-function onChanged() {
-  void storages.fetch().catch(() => {});
-}
 </script>
 
 <template>
@@ -74,6 +68,6 @@ function onChanged() {
       </button>
     </div>
 
-    <ConnectionsPanel :config="config" @changed="onChanged" />
+    <ConnectionsPanel :config="config" />
   </div>
 </template>

@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
+	"unicode"
 
 	"github.com/blevesearch/bleve/v2"
 	searchpkg "github.com/blevesearch/bleve/v2/search"
@@ -25,6 +27,7 @@ import (
 	index "github.com/blevesearch/bleve_index_api"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/namefold"
 )
 
 // Index is the search facade.
@@ -132,11 +135,19 @@ func Open(path string) (*Index, error) {
 // stampSchemaVersion records the schema of the documents this build
 // writes. Best effort: a Bleve that cannot hold the marker still serves
 // queries, it just cannot tell the operator a rebuild would help.
+//
+// It also stamps WHEN the index was built (a new index, or a rebuild's
+// replacement — the two callers): the Search page's "Last built" card read a
+// field nothing ever filled, so it said "—" on every install.
 func stampSchemaVersion(bx bleve.Index) {
 	if err := bx.SetInternal([]byte(indexVersionKey), []byte(indexSchemaVersion)); err != nil {
 		slog.Warn("could not stamp search index schema version", slog.String("err", err.Error()))
 	}
+	_ = bx.SetInternal([]byte(indexBuiltAtKey), []byte(time.Now().UTC().Format(time.RFC3339)))
 }
+
+// indexBuiltAtKey holds the RFC 3339 time the index was built.
+const indexBuiltAtKey = "filex_built_at"
 
 // schemaLabel renders the marker read off an index; pre-#15 indexes have
 // no marker at all, which is the common case rather than an error.
@@ -258,13 +269,20 @@ func (i *Index) indexNode(ctx context.Context, n *model.Node, allowHook bool) er
 }
 
 // docFor renders the indexable document for a node.
+//
+// Name and Path are indexed composed (namefold.Canonical) — the form every
+// query is put in — so the legacy match and wildcard sub-queries compare like
+// with like too, and their normalised copies are folded by namefold through
+// Normalize. The node row keeps the bytes the storage has; results are always
+// read back from it, never from the index.
 func docFor(n *model.Node) doc {
+	name, path := namefold.Canonical(n.Name), namefold.Canonical(n.Path)
 	return doc{
 		StorageID: n.StorageID,
-		Name:      n.Name,
-		Path:      n.Path,
-		NameNorm:  Normalize(n.Name),
-		PathNorm:  Normalize(n.Path),
+		Name:      name,
+		Path:      path,
+		NameNorm:  Normalize(name),
+		PathNorm:  Normalize(path),
 		Mime:      n.Mime,
 		Type:      string(n.Type),
 	}
@@ -488,6 +506,9 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 	if fetch < limit {
 		fetch = limit
 	}
+	// The documents are composed (docFor); so is the query, whichever form
+	// it was typed or pasted in.
+	q = namefold.Canonical(q)
 
 	out := make([]ranked, 0, fetch)
 	seen := map[string]int{} // doc id → position in out
@@ -672,7 +693,7 @@ func nameQuery(term string) query.Query {
 	// Lower-case for the wildcard side: Bleve stores tokens lower-cased
 	// by default but wildcard queries are NOT analysed, so an upper-case
 	// term in the user's input would miss every row.
-	wcTerm := "*" + strings.ToLower(term) + "*"
+	wcTerm := "*" + legacyWildcardTerm(term) + "*"
 
 	matchQ := bleve.NewMatchQuery(term)
 	matchQ.SetField("name")
@@ -707,6 +728,22 @@ func nameQuery(term string) query.Query {
 		}
 	}
 	return bleve.NewDisjunctionQuery(parts...)
+}
+
+// legacyWildcardTerm is a query lower-cased the way Bleve's analyser
+// lower-cased the legacy `name` and `path` tokens (unicode.ToLower, rune by
+// rune), with each of the four Latin i's left open (`?`, one character). The
+// analyser keeps `ı` apart from `i` — it lowers `IŞIK` to `işik` and leaves
+// `ışık` alone — while namefold, which every other half of a search folds
+// by, calls them one letter; without the `?` a single typed word like `IŞI`
+// answered `IŞIK.pdf` and not `ışık.pdf`, on the index path only.
+func legacyWildcardTerm(term string) string {
+	return strings.Map(func(r rune) rune {
+		if namefold.IsI(r) {
+			return '?'
+		}
+		return unicode.ToLower(r)
+	}, term)
 }
 
 // wordWildcards requires a `*word*` wildcard match for EVERY word — a
@@ -818,8 +855,17 @@ func (i *Index) SafeSearchFiltered(ctx context.Context, query string, limit int,
 
 // IndexStats summarizes the Bleve index size + last update.
 type IndexStats struct {
-	DocCount    uint64
-	SizeBytes   int64
+	DocCount uint64
+	// Files and Folders split DocCount by node type. ⚠ DocCount counts every
+	// node — folders too — while the Panel's "indexed files" counts files, so
+	// the two pages disagreed about the same index (28 on the Panel, 37 on
+	// Search: 28 files and 9 folders; release-candidate sweep, 2026-09-21).
+	// The Search page reports these two instead of the bare document count.
+	Files     uint64
+	Folders   uint64
+	SizeBytes int64
+	// LastUpdated is when the index was built (RFC 3339), or "" for an
+	// index built before the stamp existed.
 	LastUpdated string
 	// NeedsRebuild is true when the index was written by a build with an
 	// older document schema. Search still works — see Open — but the
@@ -846,6 +892,11 @@ func (i *Index) Stats() IndexStats {
 		if dc, err := bx.DocCount(); err == nil {
 			out.DocCount = dc
 		}
+		out.Files = countType(bx, model.NodeTypeFile)
+		out.Folders = countType(bx, model.NodeTypeDirectory)
+		if v, err := bx.GetInternal([]byte(indexBuiltAtKey)); err == nil {
+			out.LastUpdated = string(v)
+		}
 	}
 	if path != "" {
 		if size, err := dirSize(path); err == nil {
@@ -853,6 +904,19 @@ func (i *Index) Stats() IndexStats {
 		}
 	}
 	return out
+}
+
+// countType is how many documents in bx are nodes of type t — a term query
+// on the `type` field with no hits requested, only the total.
+func countType(bx bleve.Index, t model.NodeType) uint64 {
+	tq := bleve.NewTermQuery(string(t))
+	tq.SetField("type")
+	req := bleve.NewSearchRequestOptions(tq, 0, 0, false)
+	res, err := bx.Search(req)
+	if err != nil || res == nil {
+		return 0
+	}
+	return res.Total
 }
 
 // RebuildAll reindexes every node row into a replacement index and swaps
@@ -875,8 +939,6 @@ func (i *Index) RebuildAllWithContent(ctx context.Context, store NodeLister) err
 type NodeLister interface {
 	AllNodesForIndex(ctx context.Context) ([]*model.Node, error)
 }
-
-// SQLLike is implemented in query.go to keep this file focused on Bleve.
 
 func dirSize(path string) (int64, error) {
 	var total int64

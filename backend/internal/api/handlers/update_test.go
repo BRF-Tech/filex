@@ -78,3 +78,16 @@ func TestUpdateCheck_DisabledDoesNotReachTheNetwork(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	assert.Empty(t, body["check_error"], "no request was attempted, so there is no error to report")
 }
+
+// The reason is said in the reader's language (the server catalogue), not in
+// the English the log keeps.
+func TestUpdateStatus_ReasonIsInTheReadersLanguage(t *testing.T) {
+	h := handlers.NewUpdate(nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/update", nil)
+	req.Header.Set("Accept-Language", "tr-TR,tr;q=0.9")
+	rec := httptest.NewRecorder()
+	h.Status(rec, req)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, "Güncelleme denetimi kapalı.", body["reason"])
+}

@@ -47,6 +47,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/tenant"
@@ -62,6 +63,21 @@ func confinedScope(ctx context.Context) (*tenant.Scope, bool) {
 		return nil, false
 	}
 	return s, true
+}
+
+// callerMayConfigureInstance reports whether this caller could act on an
+// instance-level fix (an environment variable, External services, the admin
+// settings): an administrator account (`CallerMayAdminister`, which also
+// refuses an API token without the admin scope) that is not confined to a
+// tenant — a tenant admin is refused those surfaces, so telling them what to
+// set would send them to a 403. It decides only who is TOLD the technical fix
+// (lib/errorWords: an admin may see the detail, nobody else does).
+func callerMayConfigureInstance(r *http.Request) bool {
+	if !auth.CallerMayAdminister(r.Context()) {
+		return false
+	}
+	_, confined := confinedScope(r.Context())
+	return !confined
 }
 
 // notFound writes the refusal. Deliberately shaped like a genuine miss — see

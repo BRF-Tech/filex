@@ -26,11 +26,18 @@
 import { computed, ref, watch } from 'vue';
 import type { FileApi, Grant, NodeVersion } from '../composables/useFileApi';
 import type { FileNode, ShareInfo } from '../types/FileNode';
-import type { LocaleCode } from '../types/ExplorerConfig';
-import { useLocale } from '../composables/useLocale';
-import { fileIconTile, typeLabelFor } from '../lib/fileIcons';
+import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
+import type { PluginViewRow } from '../types/Plugins';
+import { localeTag, useLocale } from '../composables/useLocale';
+import { fileIconTile, isStorageRow, typeLabelFor } from '../lib/fileIcons';
 import { actionIconSvg } from '../lib/actionIcons';
+import { appliesToNodes } from '../lib/pluginApplies';
+import { lockedRefusal, lockOf, lockWords } from '../lib/appLock';
+import { linkWordsFor } from '../lib/symlink'; /* issue #34 */
+import { personInitial as initialOfPerson, personName as nameOfPerson } from '../lib/personName';
 import TagPicker from './TagPicker.vue';
+import type { TagKind } from '../lib/tags';
+import PluginInspectorSection from './plugin/PluginInspectorSection.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -59,6 +66,16 @@ const props = withDefaults(
   locale: LocaleCode;
   /** Narrow/embed mode → full-size overlay presentation. */
   narrow?: boolean;
+  /**
+   * Is the reader an administrator (`capabilities.caller_admin`)?
+   *
+   * ⚠ Only the NODE ID row depends on it (Burak, 2026-09-23). The id is a
+   * support handle — what an administrator quotes in Admin → File history or
+   * an audit row — and it means nothing to anybody else; on a shared surface
+   * it was a number in front of every reader. Absent = not an administrator,
+   * which is the safe answer for an embed that never asks the server.
+   */
+  callerAdmin?: boolean;
   /** Authenticated thumbnail resolver (useThumbs.src). Optional. */
   thumbSrc?: (n: FileNode) => string | null;
   /* === surucu:d1 — the Drive shell's details panel ===================== */
@@ -96,6 +113,17 @@ const props = withDefaults(
   apiBase?: string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
+  /* === App plugins (docs/APP-PLUGINS-API.md → Placements, `inspector`) ===
+   * The `views[]` rows with placement `inspector`, as the host fetched them
+   * (`usePluginActions.views`); `[]` while the feature is off. One collapsible
+   * section per row whose `applies` rule accepts the selected SINGLE item —
+   * the client-side mirror the menu uses (lib/pluginApplies), re-checked by
+   * the server when the view loads. */
+  pluginViews?: PluginViewRow[];
+  /** Resolved theme, for the dialogs a plugin surface can open. */
+  theme?: ThemeMode;
+  /** Storage names a surface's file-chooser may span. */
+  storages?: string[];
   }>(),
   {
     /* ⚠ ON by default, and that is the owner's call of 2026-09-12, not a
@@ -111,6 +139,7 @@ const props = withDefaults(
     narrow: false,
     dirPerm: '',
     thumbSrc: undefined,
+    pluginViews: () => [],
   },
 );
 
@@ -141,7 +170,16 @@ const emit = defineEmits<{
    * is a `.tag~<name>` sentinel, how to leave whatever view is on screen to get
    * there, and what that does to the tab strip.
    */
-  (e: 'open-tag', tag: string): void;
+  (e: 'open-tag', tag: string, kind: TagKind): void;
+  /** App plugins — an inspector view's event enqueued a job: the raw ops row. */
+  (e: 'plugin-op', op: Record<string, unknown>): void;
+  /**
+   * v3 §3.0 — an app's inspector screen answered "go to this file".
+   *
+   * ⚠ Carried UP with the plugin's name rather than acted on: the panel
+   * cannot navigate, and the explorer that can is the one holding it.
+   */
+  (e: 'plugin-open', payload: { plugin: string; req: { path: string; action?: string; view?: string } }): void;
 }>();
 
 const { t, formatSize, formatDate: formatDateOf, nodeDisplayName } = useLocale(
@@ -153,6 +191,17 @@ const single = computed<FileNode | null>(() =>
   props.nodes.length === 1 ? props.nodes[0] : null,
 );
 const isMulti = computed(() => props.nodes.length > 1);
+
+/* App plugins — the app holding this file, in the same words the row's badge
+ * uses (lib/appLock). ⚠ It goes ABOVE the facts, not among them: the panel's
+ * "Permission: viewer" line is TRUE and misleading on its own, because the
+ * reason is not a permission the owner can change. */
+const lockLine = computed(() => lockWords(lockOf(single.value), { t, formatDate: formatDateOf, locale: props.locale }));
+/* issue #34 — a symlink the server will not follow. It goes in the SAME place
+ * and for the same reason as the lock above: this panel's "Size: 0 bytes" and
+ * "Type: file" are both true and both misleading on their own, and the reason
+ * is not something the person can read off any of the facts below. */
+const linkNote = computed(() => linkWordsFor(single.value, { t }));
 const isFile = computed(() => single.value?.type === 'file');
 const nodeId = computed<number | null>(() =>
   typeof single.value?.id === 'number' ? (single.value.id as number) : null,
@@ -167,6 +216,15 @@ const etag = computed<string | null>(() => {
 const thumb = computed<string | null>(() =>
   single.value && isFile.value && props.thumbSrc ? props.thumbSrc(single.value) : null,
 );
+
+/** App plugins — the inspector views whose rule accepts the selected item. */
+const pluginSections = computed<PluginViewRow[]>(() => {
+  const n = single.value;
+  if (!n || isStorageRow(n) || n.trashed === true) return [];
+  return (props.pluginViews ?? []).filter(
+    (v) => v.placement === 'inspector' && appliesToNodes(v.applies, [n], v.plugin),
+  );
+});
 
 /* === gorunum:v4-dialogs — what the head says =============================
  *
@@ -289,9 +347,15 @@ const effectivePerm = computed<string>(() => {
   if (typeof own === 'string' && own !== '') return own;
   return props.dirPerm || '';
 });
-const canManagePerms = computed(
-  () => effectivePerm.value === 'editor' || effectivePerm.value === 'owner',
-);
+/**
+ * "Manage permissions" — for an OWNER only.
+ *
+ * ⚠ It used to be offered to editors too, and an editor cannot read the grant
+ * list at all (`GET /api/files/permissions` answers 403): the button opened a
+ * dialog with no permissions in it, and the refusal was swallowed (QA,
+ * 2026-09-21). An editor shares from the row's "Share" like everybody else.
+ */
+const canManagePerms = computed(() => effectivePerm.value === 'owner');
 function permLabel(level: string): string {
   return t(`inspector.perm.${level}`) === `inspector.perm.${level}`
     ? level
@@ -383,7 +447,11 @@ async function confirmRestore(v: NodeVersion): Promise<void> {
     emit('changed');
     await loadVersions(++refreshSeq);
   } catch (err) {
-    emit('toast', (err as Error).message);
+    // ⚠ A 423 is an app's freeze (the signing app, while signatures are
+    // collected): say which app and why, in the reader's language — the
+    // server's own text is English and names a path.
+    const held = lockedRefusal(err);
+    emit('toast', held ? lockWords(held, { t, formatDate: formatDateOf, locale: props.locale }) : (err as Error).message);
   } finally {
     versionBusy.value = false;
   }
@@ -460,13 +528,17 @@ async function loadPeople(): Promise<void> {
   }
 }
 
+/* One rule for naming a person (lib/personName). */
+function grantPerson(g: Grant) {
+  return { name: g.user_name, display_name: g.user_display_name, email: g.user_email };
+}
+
 function personName(g: Grant): string {
-  return g.user_display_name || g.user_email || `#${g.user_id}`;
+  return nameOfPerson(grantPerson(g)) || `#${g.user_id}`;
 }
 
 function personInitial(g: Grant): string {
-  const n = personName(g).trim();
-  return n ? n[0].toUpperCase() : '?';
+  return initialOfPerson(grantPerson(g), localeTag(props.locale)) || '?';
 }
 
 /** The share-link row: the first live link, or the Create button. */
@@ -602,7 +674,7 @@ function relativeTime(iso: string): string {
   ];
   try {
     const rtf = new Intl.RelativeTimeFormat(
-      props.locale === 'en' ? 'en' : 'tr',
+      localeTag(props.locale),
       { numeric: 'auto' },
     );
     for (const [unit, secs] of units) {
@@ -640,7 +712,7 @@ watch(
       <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons -->
       <span class="fe-inspector__head-icon" aria-hidden="true" v-html="headIcon"></span>
       <div class="fe-inspector__head-text">
-        <h2 class="fe-inspector__title" :title="headName">{{ headName }}</h2>
+        <h2 class="fe-inspector__title" :title="headName"><bdi>{{ headName }}</bdi></h2>
         <p class="fe-inspector__caption">{{ headCaption }}</p>
         <!-- pane:p1 — the held-subject line. Drawn ONLY while this panel is
              describing the last selected thing rather than a live selection,
@@ -703,6 +775,24 @@ watch(
       <section v-if="!tabs || tab === 'details'" class="fe-inspector__section">
         <h3 class="fe-inspector__heading">{{ t('inspector.section.general') }}</h3>
 
+        <!-- App plugins — an app is holding this file read-only. -->
+        <p v-if="lockLine" class="fe-inspector__lock" role="note" data-testid="inspector-lock">
+          <span aria-hidden="true">&#128274;</span>
+          <span><strong>{{ t('applock.inspector') }}</strong><br />{{ lockLine }}</span>
+        </p>
+
+        <!-- issue #34 — a link the server will not follow. -->
+        <p
+          v-if="linkNote"
+          class="fe-inspector__linknote"
+          role="note"
+          data-testid="inspector-symlink"
+          :data-link-state="linkNote.state"
+        >
+          <span aria-hidden="true">&#128279;</span>
+          <span><strong>{{ t('symlink.inspector') }}</strong><br />{{ linkNote.why }}</span>
+        </p>
+
         <!-- Multi selection → summary. The head already counts them, so this
              is the one fact the head does not carry. -->
         <dl v-if="isMulti" class="fe-inspector__meta">
@@ -740,7 +830,7 @@ watch(
             <div class="fe-inspector__row">
               <dt>{{ t('inspector.path') }}</dt>
               <dd class="fe-inspector__pathcell">
-                <span class="fe-inspector__path" :title="single.path">{{ single.path }}</span>
+                <span class="fe-inspector__path" :title="single.path"><bdi>{{ single.path }}</bdi></span>
                 <button
                   type="button"
                   class="fe-inspector__copy"
@@ -772,8 +862,14 @@ watch(
                  technical facts about a file already are (Path, MIME, ETag), and
                  it is still one click to copy. Drawn only when the row actually
                  has one: a client-synthesized row (a multi-storage folder) has
-                 no backend id, and an empty "ID —" teaches nothing. -->
-            <div v-if="typeof single.id === 'number'" class="fe-inspector__row">
+                 no backend id, and an empty "ID —" teaches nothing.
+
+                 ⚠⚠ And only for an ADMINISTRATOR (Burak, 2026-09-23): the id
+                 is the handle admin screens take (Admin → File history, an
+                 audit row), and it says nothing to anyone else. Here, in the
+                 shared panel, so every surface that draws it — the explorer,
+                 the Drive shell, an embed — answers the same way. -->
+            <div v-if="callerAdmin && typeof single.id === 'number'" class="fe-inspector__row">
               <dt>{{ t('inspector.nodeId') }}</dt>
               <dd class="fe-inspector__pathcell">
                 <span class="fe-inspector__path">{{ single.id }}</span>
@@ -831,10 +927,31 @@ watch(
           :auth-headers="authHeaders"
           :auth-credentials="authCredentials"
           @change="(tags: string[]) => emit('tags-changed', tags)"
-          @open="(tag: string) => emit('open-tag', tag)"
+          @open="(tag: string, kind: TagKind) => emit('open-tag', tag, kind) /* etiket:k2 —
+                 the KIND travels with the name: a file can carry a personal
+                 and a team tag of one name, and the chip that was clicked
+                 decides which view opens. */"
           @error="() => emit('toast', t('inspector.error'))"
         />
       </section>
+
+      <!-- ══ App plugins — one collapsible section per matching `inspector`
+           view. Lazy: nothing is requested until the section is opened. -->
+      <template v-if="single && (!tabs || tab === 'details')">
+        <PluginInspectorSection
+          v-for="v in pluginSections"
+          :key="`${v.plugin}/${v.id}`"
+          :api="api"
+          :view="v"
+          :path="single.path"
+          :locale="locale"
+          :theme="theme"
+          :storages="storages"
+          @op="(op) => emit('plugin-op', op)"
+          @toast="(m) => emit('toast', m)"
+          @open="(req) => emit('plugin-open', { plugin: v.plugin, req })"
+        />
+      </template>
 
       <!-- ══ Sürümler ══ -->
       <section

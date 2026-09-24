@@ -1,7 +1,7 @@
 # filex — full stack (production-shaped) with toggleable integrations.
 #
 # Always-on core:  filex + PostgreSQL (DB) + Redis (queue) + Caddy (HTTPS proxy)
-# Opt-in add-ons:  OnlyOffice · Drawio · universal Converter · MinIO (S3)
+# Opt-in add-ons:  ONLYOFFICE · draw.io · the LEGACY Converter side-car · MinIO (S3)
 #                  · ClamAV (antivirus — this image ships no scanner)
 #
 # ── Toggling add-ons ────────────────────────────────────────────────────
@@ -10,7 +10,7 @@
 #
 #   COMPOSE_PROFILES=onlyoffice,drawio,minio,clamav   # (convert left out → off)
 #
-# To drop OnlyOffice tomorrow: remove `onlyoffice` from COMPOSE_PROFILES and
+# To drop ONLYOFFICE tomorrow: remove `onlyoffice` from COMPOSE_PROFILES and
 # blank FILEX_ONLYOFFICE_URL, then:
 #   docker compose -f docker-compose.full.yml --env-file .env up -d --remove-orphans
 #
@@ -67,11 +67,13 @@ services:
       # FILEX_CLAMAV_SAVE_WINDOW_MINUTES: "30" # editor save-scan window, 2-60
       # ── Reaching filex without a browser (docs/PROTOCOLS.md) ───────────
       # The S3 endpoint and /dav are already on and need no port of their own.
-      # ⚠ Set this before anybody mints an S3 access key: the secret must be
-      # recoverable (SigV4 recomputes an HMAC chain), so it is sealed with this
-      # key rather than hashed. Without it, minting FAILS instead of storing
-      # plaintext — and losing it stops every existing access key verifying, so
-      # back it up with the database.
+      # ⚠ Set this before anybody mints an S3 access key, saves an identity
+      # provider on the admin page, puts a PIN on a share (My shares reads it
+      # back) or installs an app that signs. The secret must be recoverable
+      # (SigV4 recomputes an HMAC chain), so it is sealed with this key rather
+      # than hashed. Without it those refuse instead of storing plaintext — and
+      # losing it stops every existing access key verifying, so back it up with
+      # the database.
       FILEX_SECRET_KEY: ${FILEX_SECRET_KEY:-}
       # Optional operator key escrow for end-to-end encrypted folders, and
       # the one decision on this list that a fresh deployment cannot defer
@@ -238,6 +240,10 @@ services:
     restart: unless-stopped
 
   convert:
+    # ⚠⚠ LEGACY since v0.43.0 — the Convert APP (a WebAssembly app plugin,
+    # installed from Admin → Plugins → Apps) supersedes this and hides it
+    # wherever it is installed. Keep this service only for an installation
+    # that does not use apps.
     # filex embeds the p2r3/convert universal converter (GPL-2.0, in-browser
     # WASM) in a hidden iframe. This is our fork with the embed bridge; see
     # docs/CONVERT-INTEGRATION.md. Caddy serves it under /convert.

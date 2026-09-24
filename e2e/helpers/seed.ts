@@ -123,6 +123,23 @@ export async function newAuthedRequest(
 }
 
 /**
+ * One row of `/api/files/ops`.
+ *
+ * ⚠ `message` is not a column of `pending_ops`: for a plugin action the ops
+ * service DECORATES the row from the `app_plugin_jobs` row behind it
+ * (`wasmplugin.Registry.DecorateOps`), which is where a plugin's own answer —
+ * a public link, a summary — comes from. It is absent for every other kind.
+ */
+export interface OpRow {
+  id: number;
+  status: string;
+  error?: string;
+  total?: number;
+  done?: number;
+  message?: string;
+}
+
+/**
  * Polls /api/files/ops/{id} until the op reaches a terminal state
  * ("ok" / "failed" / "partial") or the deadline elapses.
  *
@@ -135,10 +152,10 @@ export async function waitForOp(
   request: APIRequestContext,
   opID: number,
   timeoutMs = 10_000,
-): Promise<{ id: number; status: string; error?: string; total?: number; done?: number }> {
+): Promise<OpRow> {
   const deadline = Date.now() + timeoutMs;
   const terminal = new Set(['ok', 'failed', 'partial', 'done']);
-  let last: { id: number; status: string; error?: string; total?: number; done?: number } = {
+  let last: OpRow = {
     id: opID,
     status: 'unknown',
   };

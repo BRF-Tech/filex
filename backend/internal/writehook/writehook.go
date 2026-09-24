@@ -16,18 +16,19 @@
 // api.BuildRouter) with the same nil-safe, package-level sink pattern
 // as handlers.SetNotifySink / SetAntivirusEnqueue: unconfigured hooks
 // are no-ops, so tests and unwired deployments never crash. It imports
-// only auth/model/notify — no handlers, db, or storage — so any surface
-// package (api/handlers, dav, …) can import it without a cycle.
+// only auth/model/notify and quotastore's context keys — no handlers, db
+// access, or storage — so any surface package (api/handlers, dav, …) can
+// import it without a cycle.
 package writehook
 
 import (
 	"context"
 	"log/slog"
-	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
 )
 
 // Origin values for the `origin` parameter — the frozen set every
@@ -49,6 +50,9 @@ const (
 	// and a subscriber deciding whether to re-run a pipeline needs to be able
 	// to tell an office save from a drag-and-drop upload.
 	OriginOnlyOffice = "onlyoffice"
+	// OriginPlugin is an app plugin's action output (internal/wasmplugin),
+	// written by the ops worker on behalf of the person who ran the action.
+	OriginPlugin = "plugin"
 )
 
 // WriteKind says whether the bytes that just landed created the file or
@@ -273,22 +277,16 @@ func OnFileTrashed(ctx context.Context, storageID int64, path, name, trashPath, 
 		Body:  path,
 		Meta:  m,
 		Node:  &notify.NodeRef{StorageID: storageID, Path: path, Name: name},
-		// ⚠ trashPath, not path. A soft delete moved the file; the copy that
-		// exists is the one in `.filex-trash/`, and the explorer shows it
-		// (trashVisible). Targeting the original path would open a folder
-		// where the file provably is not.
-		Target: trashedTarget(path, trashPath),
+		// ⚠⚠ The Trash VIEW with the item selected — addressed by the
+		// ORIGINAL path, which is how that view lists it — never trashPath.
+		// This used to target `.filex-trash/<key>` on the reasoning that "the
+		// copy that exists is the one in the trash, and the explorer shows
+		// it"; the explorer never did. A click opened the bin's raw folder —
+		// breadcrumb `docs › .filex-trash`, an empty listing, nothing to
+		// restore — which is the owner's report of 2026-09-21. trashPath stays
+		// in meta for webhook receivers (documented for file.infected too).
+		Target: notify.TrashTarget(path),
 	})
-}
-
-// trashedTarget picks what a `file.trashed` click opens: the file in the
-// trash when we know where it went, the folder it came from when we do not
-// (a surface may pass an empty trashPath).
-func trashedTarget(orig, trashPath string) *notify.Target {
-	if strings.TrimSpace(trashPath) != "" {
-		return notify.FileTarget(trashPath)
-	}
-	return notify.ParentDirTarget(orig)
 }
 
 // mergeMeta folds the variadic extra maps into one meta map and stamps
@@ -320,6 +318,13 @@ func emit(ctx context.Context, e notify.Event) {
 	if e.Actor == nil {
 		if u := auth.UserFrom(ctx); u != nil {
 			e.Actor = &notify.ActorRef{ID: u.ID, Email: u.Email}
+		} else if id := quotastore.ExplicitActorFrom(ctx); id > 0 {
+			// ⚠ The ops worker (queued copy/move/delete, and the commit of
+			// every staged upload) has no request user, but the queue row names
+			// who asked and ops.execute puts them back with WithActor. Asking
+			// only auth.UserFrom wrote all of that activity with user_id NULL —
+			// a broadcast into the bell of every member, whatever their grants.
+			e.Actor = &notify.ActorRef{ID: id}
 		}
 	}
 	if e.UserID == nil && e.Actor != nil && e.Actor.ID != 0 {

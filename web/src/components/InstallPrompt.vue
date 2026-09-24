@@ -37,6 +37,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useDesktopDownloads, useInstallPrompt } from '@/composables/useInstallPrompt';
+import { placeChip, probeDom } from '@/lib/keepClear';
 
 // gorunum:v1 — the banner is painted from the product's palette (`--fe-*`),
 // and this is the component that has to carry the import: it is mounted at the
@@ -114,8 +115,15 @@ function checkFit() {
   // What must stay reachable is a CONTROL — a field, a button, a link — not the
   // card's own padding, which may run under the offer's top edge harmlessly.
   const box = card.getBoundingClientRect();
-  const controls = area.querySelectorAll('button, input, select, textarea, a[href]');
-  for (const el of Array.from(controls)) {
+  // ⚠ Plus `[data-install-keep]` ANYWHERE on the page — text that must stay
+  // readable although nobody presses it. The version line under the card is
+  // outside `[data-install-clear]`, and a tester measured the full card on it
+  // at 1440×900 (2026-09-21).
+  const controls = [
+    ...Array.from(area.querySelectorAll('button, input, select, textarea, a[href]')),
+    ...Array.from(document.querySelectorAll('[data-install-keep]')),
+  ];
+  for (const el of controls) {
     if (overlaps(el.getBoundingClientRect(), box)) {
       fits.value = false;
       return;
@@ -148,6 +156,7 @@ watch(() => route?.name, rearmFit);
 /** Corner chip: closed until it is asked to open. Never persisted — this is
  *  "I am looking at it now", not a preference. */
 const open = ref(false);
+
 /** The body (downloads / iOS help / install button) is on screen. */
 const expanded = computed(() => loud.value || open.value);
 
@@ -237,7 +246,91 @@ watch(
   { flush: 'post', immediate: true },
 );
 
+/* ── the corner chip never stands on a control ──────────────────────────
+ *
+ * ⚠⚠ Measured 2026-09-21 on the signing page's last step: at 1366×768 the
+ * chip hid the "İmzala" button completely, at 1440×1000 the element at the
+ * button's centre was the chip's icon, at 390×844 its head. The sign-in page
+ * was guarded (`checkFit` above); no other page was. `lib/keepClear.ts`
+ * decides where the chip may stand — its corner, on top of a pinned bar of
+ * actions, or aside (hidden) while something to press is under it — and this
+ * asks it again whenever what is under the chip can have changed: a scroll
+ * (of the window or of any inner pane — hence `capture`), a resize, or the
+ * page's DOM changing (a step of a wizard replaces its footer without the
+ * window scrolling at all). One answer per animation frame.
+ *
+ * ⚠ Never while the person has OPENED the chip: then it is a panel they asked
+ * for, standing where they asked for it. */
+const lift = ref(0);
+const aside = ref(false);
+let clearFrame = 0;
+let clearMo: MutationObserver | null = null;
+
+function keepClear() {
+  const el = installEl.value;
+  if (!el || loud.value) {
+    lift.value = 0;
+    aside.value = false;
+    return;
+  }
+  if (open.value) return;
+  // ⚠ The chip's HOME is where it would be with no lift. Its box is read with
+  // the current lift applied (the `bottom` offset carries it), so the lift is
+  // added back — and `bottom` is deliberately not transitioned, so the box is
+  // never read half-way between two positions.
+  const r = el.getBoundingClientRect();
+  const home = { top: r.top + lift.value, bottom: r.bottom + lift.value, left: r.left, right: r.right };
+  const next = placeChip(home, (b) => probeDom(b, el), window.innerHeight, window.innerWidth);
+  lift.value = next.lift;
+  aside.value = next.aside;
+}
+
+function scheduleKeepClear() {
+  if (clearFrame || typeof requestAnimationFrame === 'undefined') return;
+  clearFrame = requestAnimationFrame(() => {
+    clearFrame = 0;
+    keepClear();
+  });
+}
+
+function watchClear(on: boolean) {
+  if (typeof window === 'undefined') return;
+  if (on && !clearMo) {
+    window.addEventListener('scroll', scheduleKeepClear, { capture: true, passive: true });
+    window.addEventListener('resize', scheduleKeepClear, { passive: true });
+    if (typeof MutationObserver !== 'undefined') {
+      clearMo = new MutationObserver(scheduleKeepClear);
+      clearMo.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'hidden'],
+      });
+    }
+    scheduleKeepClear();
+  } else if (!on && clearMo) {
+    window.removeEventListener('scroll', scheduleKeepClear, { capture: true });
+    window.removeEventListener('resize', scheduleKeepClear);
+    clearMo.disconnect();
+    clearMo = null;
+    lift.value = 0;
+    aside.value = false;
+  }
+}
+
+watch(
+  [installEl, loud],
+  ([el, isLoud]) => watchClear(!!el && !isLoud),
+  { flush: 'post', immediate: true },
+);
+// Closing the opened chip asks again: it may be standing on something now.
+watch(open, (o) => {
+  if (!o) scheduleKeepClear();
+});
+
 onBeforeUnmount(() => {
+  watchClear(false);
+  if (clearFrame && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(clearFrame);
   if (typeof window !== 'undefined') window.removeEventListener('resize', onViewportResize);
   ro?.disconnect();
   ro = null;
@@ -280,7 +373,10 @@ onBeforeUnmount(() => {
   <div
     v-if="shouldOfferInstall"
     ref="installEl"
-    :class="['ip-dock', loud ? 'ip-dock--band' : 'ip-dock--corner']"
+    :class="['ip-dock', loud ? 'ip-dock--band' : 'ip-dock--corner', { 'ip-dock--aside': aside && !loud && !open }]"
+    :style="!loud && lift ? { '--ip-lift': `${lift}px` } : undefined"
+    :inert="(aside && !loud && !open) || undefined"
+    :data-place="loud ? 'band' : aside && !open ? 'aside' : lift ? 'lifted' : 'corner'"
     data-testid="pwa-install-banner"
   >
     <div
@@ -426,11 +522,23 @@ onBeforeUnmount(() => {
    over it instead of sitting under it on a narrow screen where the bar spans
    the full width. */
 .ip-dock--corner {
-  right: 12px;
-  bottom: calc(12px + var(--filex-install-banner-h, 0px));
-  left: auto;
+  inset-inline-end: 12px;
+  /* `--ip-lift`: standing on a pinned bar of actions (lib/keepClear.ts).
+     ⚠ Not transitioned — keepClear reads the box and must never find it
+     half-way between two positions. */
+  bottom: calc(12px + var(--filex-install-banner-h, 0px) + var(--ip-lift, 0px));
+  inset-inline-start: auto;
   z-index: 30;
   max-width: min(22rem, calc(100vw - 24px));
+  transition: opacity 0.15s ease;
+}
+/* Something to press is under the corner: the chip steps aside. `visibility`
+   (not only opacity) so it can be neither clicked nor tabbed to, and it keeps
+   its box, so keepClear can still ask whether the corner is clear again. */
+.ip-dock--aside {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, visibility 0s linear 0.15s;
 }
 
 /* ── the card ───────────────────────────────────────────────────────────── */
@@ -451,7 +559,7 @@ onBeforeUnmount(() => {
 /* Collapsed: a chip. The padding shrinks with it — a 16px inset around one
    line of text is what made the old card look like a dialog. */
 .ip-card--chip {
-  padding: 6px 6px 6px 10px;
+  padding-block: 6px; padding-inline: 10px 6px;
   border-radius: 999px;
 }
 /* It is a control, so it says so on hover. Without this the chip reads as a
@@ -584,7 +692,7 @@ onBeforeUnmount(() => {
 .ip-close {
   flex: 0 0 auto;
   padding: 4px;
-  margin: -4px -4px 0 0;
+  margin-block: -4px 0; margin-inline: 0 -4px;
   border: 0;
   border-radius: var(--fe-radius-sm);
   background: none;

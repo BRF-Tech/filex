@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
 // RemoteLister is the slice of the API client this package needs. Declaring it
@@ -50,6 +52,20 @@ var skipNames = map[string]bool{
 	"System Volume Information": true,
 }
 
+// skipName is the ONE question every reader asks of a name: the engine's own
+// state and OS junk (skipNames), and filex's own reserved names
+// (syspath.IsName — the trash, version history, thumbnails, the desktop's
+// open-with working area and the keep marker).
+//
+// ⚠ The reserved names come from syspath, never from a copy here. The server
+// refuses a write that lands inside any of them (writegate) and never lists
+// them, so a local folder called `.versions` used to be uploaded on every
+// pass and answered 403 every time — an error under the folder that nothing
+// the person could do would clear. Ignored, it simply stays on this computer.
+func skipName(name string) bool {
+	return skipNames[name] || syspath.IsName(name)
+}
+
 // WalkLocal snapshots a directory tree. Unreadable entries are skipped rather
 // than failing the run: one locked file must not stop the other thousand from
 // syncing. The names of skipped entries are returned so the caller can report
@@ -70,47 +86,16 @@ func WalkLocal(root string) (Snapshot, []string, error) {
 		if p == root {
 			return nil
 		}
-		name := d.Name()
-		if skipNames[name] {
+		n, verdict := localEntry(relOf(root, p), d)
+		switch verdict {
+		case entryIgnore:
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
-			return nil
-		}
-		// Half-written downloads from an interrupted run. Never sync
-		// material: treating one as a user file uploads crash debris to the
-		// server with a name nobody chose.
-		if strings.HasPrefix(name, ".filex-part-") {
-			return nil
-		}
-		// Symlinks are not followed. A link pointing outside the pair would
-		// upload files the user never put in the folder, and a link pointing
-		// inside it makes the walk infinite.
-		if d.Type()&fs.ModeSymlink != 0 {
+		case entrySkipped:
 			skipped = append(skipped, relOf(root, p))
-			return nil
-		}
-		rel := relOf(root, p)
-		if rel == "" {
-			return nil
-		}
-		if d.IsDir() {
-			out[rel] = Node{Rel: rel, IsDir: true}
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			skipped = append(skipped, rel)
-			return nil
-		}
-		if !info.Mode().IsRegular() {
-			skipped = append(skipped, rel)
-			return nil
-		}
-		out[rel] = Node{
-			Rel:       rel,
-			Size:      info.Size(),
-			ModMillis: info.ModTime().UnixMilli(),
+		case entryTracked:
+			out[n.Rel] = n
 		}
 		return nil
 	})
@@ -119,6 +104,117 @@ func WalkLocal(root string) (Snapshot, []string, error) {
 	}
 	sort.Strings(skipped)
 	return out, skipped, nil
+}
+
+// IgnoredName reports whether a file or folder name is never sync material:
+// the engine's own state, OS junk, filex's own reserved names (syspath) and
+// its half-written downloads. A file-system watcher uses it to drop events
+// the walk would ignore anyway —
+// above all the `.filex-part-*` temporaries every download creates, which
+// would otherwise wake the engine up once per file it writes.
+func IgnoredName(name string) bool {
+	return skipName(name) || strings.HasPrefix(name, ".filex-part-")
+}
+
+// entryVerdict is what the local walk does with one directory entry.
+type entryVerdict int
+
+const (
+	entryTracked entryVerdict = iota // part of the snapshot
+	entryIgnore                      // never sync material (state dir, OS junk, partial downloads)
+	entrySkipped                     // real content sync cannot handle (symlink, unreadable, not regular) — reported
+)
+
+// localEntry is the ONE rule for what a local directory entry means to sync,
+// shared by the full walk (WalkLocal) and the one-folder listing a live
+// change triggers (ListLocalDir). Two copies would disagree about some name
+// sooner or later, and a name one reader tracks and the other ignores reads
+// as "deleted here" on every other pass.
+func localEntry(rel string, d fs.DirEntry) (Node, entryVerdict) {
+	name := d.Name()
+	if skipName(name) {
+		return Node{}, entryIgnore
+	}
+	// Half-written downloads from an interrupted run. Never sync material:
+	// treating one as a user file uploads crash debris to the server with a
+	// name nobody chose.
+	if strings.HasPrefix(name, ".filex-part-") {
+		return Node{}, entryIgnore
+	}
+	// Symlinks are not followed. A link pointing outside the pair would upload
+	// files the user never put in the folder, and a link pointing inside it
+	// makes the walk infinite.
+	if d.Type()&fs.ModeSymlink != 0 {
+		return Node{}, entrySkipped
+	}
+	if rel == "" {
+		return Node{}, entryIgnore
+	}
+	if d.IsDir() {
+		return Node{Rel: rel, IsDir: true}, entryTracked
+	}
+	info, err := d.Info()
+	if err != nil || !info.Mode().IsRegular() {
+		return Node{}, entrySkipped
+	}
+	return Node{Rel: rel, Size: info.Size(), ModMillis: info.ModTime().UnixMilli()}, entryTracked
+}
+
+// ListLocalDir snapshots ONE local folder (dir is pair-relative, "" = the
+// root) without descending: the direct children only, keyed by their full
+// pair-relative path. It is the local half of a targeted pass — a change
+// announced for one folder is reconciled by looking at that folder, not by
+// walking the whole tree. The folder itself missing is reported as
+// os.ErrNotExist so the caller can widen the scope to its parent.
+func ListLocalDir(root, dir string) (Snapshot, error) {
+	abs := root
+	if dir != "" {
+		p, err := localPathOf(root, dir)
+		if err != nil {
+			return nil, err
+		}
+		abs = p
+	}
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		return nil, err
+	}
+	out := Snapshot{}
+	for _, d := range entries {
+		rel := d.Name()
+		if dir != "" {
+			rel = dir + "/" + d.Name()
+		}
+		if n, v := localEntry(rel, d); v == entryTracked {
+			out[rel] = n
+		}
+	}
+	return out, nil
+}
+
+// ListRemoteDir is ListLocalDir's server half: one listing, direct children
+// only, keyed by full pair-relative path.
+func ListRemoteDir(ctx context.Context, api RemoteLister, remoteRoot, dir string) (Snapshot, error) {
+	l, err := api.List(ctx, joinRemote(remoteRoot, dir))
+	if err != nil {
+		return nil, err
+	}
+	out := Snapshot{}
+	for _, f := range l.Files {
+		if skipName(f.Basename) {
+			continue
+		}
+		rel := f.Basename
+		if dir != "" {
+			rel = dir + "/" + f.Basename
+		}
+		if f.IsDir {
+			out[rel] = Node{Rel: rel, IsDir: true}
+			continue
+		}
+		out[rel] = Node{Rel: rel, Size: f.Size, ModMillis: f.LastModified}
+	}
+	return out, nil
 }
 
 func relOf(root, p string) string {
@@ -207,7 +303,7 @@ func WalkRemote(ctx context.Context, api RemoteLister, remoteRoot string, progre
 			}
 			dirsListed++
 			for _, f := range r.listing.Files {
-				if skipNames[f.Basename] {
+				if skipName(f.Basename) {
 					continue
 				}
 				childRel := f.Basename

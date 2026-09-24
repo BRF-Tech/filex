@@ -116,12 +116,55 @@ report it came from — read that before changing an assertion.
 | `tests/85-resumable-upload.spec.ts` / `86-slow-storage-cache.spec.ts` | resumable chunks / prepared copies on slow storage |
 | `tests/90-deployment-smoke.spec.ts` | **deployment profile only** — read-only smoke against a live URL |
 | `tests/91-rounds-4-6-regression.spec.ts` | round 4-8 regressions; seeds its own fixtures, or `E2E_FIXTURE_STORAGE` |
+| `tests/95-app-plugins.spec.ts` | an app plugin end to end: install → menu → job → output → public page (the `echo` fixture) |
+| `tests/96-app-plugin-convert.spec.ts` | the **convert** app: install, the target picker as a row of buttons, the grey list for a missing engine, PNG → a real JPEG |
+| `tests/97-app-plugin-sign.spec.ts` | the **sign** app: install, state-aware menu rows, every screen against the renderer rules, a signed sibling carrying a real PAdES signature |
 | `tests/101-quicklook-hint.spec.ts` | the quick-look legend stays a pill (issue #22) |
 | `tests/102-touch-tap-opens.spec.ts` | on a touch screen a tap opens, a long press selects (issue #26) |
+| `tests/98-custom-theme.spec.ts` | the **Appearance** screen: compose a theme, make it the instance default, see it on the explorer and on the signed-out page |
+| `tests/99-app-plugin-sign-round.spec.ts` | a whole signature round: inside signer, outside signer behind a PIN, the finished document |
+| `tests/103-sso-button-branding.spec.ts` | the sign-in page wears the instance default, never the last viewer's palette |
+| `tests/104-readonly-storage.spec.ts` | a read-only storage says so to everybody, and its menu offers only what it can do |
+| `tests/106-virtual-view-menu.spec.ts` | a right-click on Home's cards and the other virtual views opens the background menu |
+| `tests/107-search-scope-placeholder.spec.ts` | the header field says what it will search, and the mode matches the place |
+| `tests/108-column-reorder.spec.ts` | the one table: resize, hide and drag a column, everywhere it is drawn |
+| `tests/109-notifications-non-admin.spec.ts` | the bell's count and **View all** for somebody who is not an administrator |
+| `tests/110-symlink-badge.spec.ts` | a symlink that leaves the storage is badged with the reason, and refused |
+| `tests/111-internal-dirs.spec.ts` | `.filex-trash`, `.versions`, `.thumbs`, `.filex-open`: refused as names, absent from every view |
+| `tests/112-language-pack-server-text.spec.ts` | a pack's language reaches the text the SERVER writes (mail, the pages behind a link) |
+| `tests/113-app-plugin-sign-seal.spec.ts` | the platform seal: the finished document sealed by filex, and the hash everybody is sent |
+| `tests/114-language-pack.spec.ts` | a **language pack** end to end: install from a manifest with no module, the pickers, the explorer and the admin panel in it |
+| `tests/115-tag-kinds.spec.ts` | personal vs team tags: who sees which, and who may take one off |
+| `tests/116-admin-says-which.spec.ts` | the panel names the thing, not only its kind (audit target, file history by name) |
+| `tests/120-tour-once-per-person.spec.ts` | the first-use tour is offered once per person, not once per mount |
+| `tests/121-share-dialog-one-link.spec.ts` | the share dialog makes ONE link, with one copy style |
+| `tests/122-public-drop-page.spec.ts` | the public drop page: the name it asks for, its limits, a refused file said in words |
+| `tests/123-trash-columns-and-touch-menu.spec.ts` | the Trash's facts (deleted when, from where, how long left) and a phone's row menu |
+| `tests/124-app-plugin-levels.spec.ts` | an app action a person could only be refused is not offered; an admin sees it greyed with the reason |
+| `tests/125-app-plugin-readonly-destination.spec.ts` | Convert on a read-only storage: the wizard's **Where** step and the server's re-check |
+| `tests/126-rtl-server-text.spec.ts` | a right-to-left language: the layout turns, and machine text stays left to right inside it |
 
-`helpers/auth.ts`  → `loginAs`, `apiLogin`, `logout`
-`helpers/seed.ts`  → `seedLocalStorage`, `dropStorageByName`, `waitForOp`
-`fixtures/`         → small files used by upload tests
+`helpers/auth.ts`     → `loginAs`, `apiLogin`, `logout`
+`helpers/seed.ts`     → `seedLocalStorage`, `dropStorageByName`, `waitForOp`
+`helpers/surface.ts`  → app-plugin surfaces over HTTP: `checkSurface` / `checkLanguages` (the renderer's rules, the browser-side twin of `pkg/pluginkit/plugintest`), `choices`, `driveToJob`
+`helpers/appPlugin.ts` → finding and installing a real app module: `resolveApp`, `guardFixture`, `installThroughWizard` (adds `APP_INSTALL_ALLOWANCE_MS` = 90 s to the test's timeout — filex compiles the module before it answers, ~23 s idle and well over 30 s on a busy machine; a spec sets no install timeout of its own)
+`helpers/rowMenu.ts`  → an admin row's verbs: `openRowMenu`, `rowMenuVerbs`, `pickRowAction`, `confirmRowAction`. ⚠ Every admin row ends in ONE **Actions** control and its menu is teleported to `<body>`, so `row.getByRole('button', …)` can never reach a verb; entries are addressed by the words a person reads
+`helpers/prefs.ts`    → `setAccountViewMode`. ⚠ The view mode, the sort and the columns live on the ACCOUNT (`/api/files/manager/view-prefs`), and so do theme, palette, density and language (`/api/me/prefs?surface=web`). The `localStorage` keys are a FIRST-PAINT CACHE that the account's answer overwrites a moment after boot, so a spec that only seeds them measures a race it usually loses
+`fixtures/`            → small files used by upload tests
+
+> ⚠ The two app specs read their module from a sibling checkout's `dist/`, and
+> `dist/filex-app.json` there is refreshed only by `bash scripts/build.sh
+> --stamp`. A plain `build.sh` leaves the previous release's manifest beside a
+> new `plugin.wasm`, filex refuses the pair with `describe_mismatch`, and the
+> install simply never completes. `installThroughWizard` reads the wizard's own
+> error so that shows up as the sentence the screen is displaying rather than
+> as a timeout.
+
+> The two app specs need a built `plugin.wasm` from a sibling checkout
+> (`../filex-convert`, `../filex-sign/dist`, or `FILEX_CONVERT_APP_DIR` /
+> `FILEX_SIGN_APP_DIR`). Without one they SKIP — unless
+> `FILEX_REQUIRE_WASM_FIXTURE=1`, which CI sets so that "green" can never
+> mean "skipped".
 
 ## Screenshots (`shots/`)
 
@@ -138,7 +181,9 @@ pnpm shots --only sidenav,capture   # a subset
 `scripts/shots.mjs` builds the whole chain in order, proves with
 `scripts/check-embed.mjs` that the binary serves `web/dist` byte for byte
 **before** a picture is taken, runs every script in `shots/` (`capture`,
-`driveshell`, `sidenav`, `starstags`, `e2e-recovery`, …), syncs the site assets
+`driveshell`, `sidenav`, `starstags`, `tags`, `langpack`, `notifications`,
+`e2e-recovery`, `apps`, `signing`, `appearance`, `symlinks` — all twelve),
+syncs the site assets
 and writes one contact sheet, `e2e/.artifacts/shots/contact-sheet.html` — look
 at it. Pictures land in `docs/screenshots/<release>/`.
 
@@ -159,6 +204,14 @@ variables:
 | `SHOTS_PLUGIN_BIN` | an already-built `examples/plugin-memfs` binary for the shots machine. Normally unnecessary: when `go` is not on the PATH the script cross-builds the plugin **through WSL**. ⚠ A path that is set and wrong is an error, not a shrug |
 | `SHOTS_ALLOW_SKIP` | permit a deliberate partial run. ⚠ Without it, **a shot the script was asked for and could not take fails the run** — that is the point: `admin-plugins.png` sat outdated for several releases behind a script that logged one line, skipped it and exited 0, and a release step that reports success while leaving the old file in place is not a gate |
 | `SHOTS_KEEP` | leave the instance running afterwards |
+| `FILEX_SIGN_APP_DIR` / `FILEX_CONVERT_APP_DIR` | where `apps.mjs` and `signing.mjs` find the two apps' `plugin.wasm` + `filex-app.json` — the same variables and the same fallbacks (`../filex-sign/dist`, `../filex-convert`) as the Playwright specs' `resolveApp`. Set, a directory is the only one looked in. Missing, the script **fails** rather than skipping the pictures; `pnpm shots` passes these two through and no other `FILEX_*` |
+
+`apps.mjs`, `signing.mjs`, `appearance.mjs` and `symlinks.mjs` share one stage,
+`shots/scene.mjs`: an instance on its own port and data directory with no
+`FILEX_*` inherited from your shell, an API client per person, a browser
+pinned to English, `shot()`, and the agreement PDF the signing scenes send
+round. ⚠ `symlinks.mjs` needs a host that can create symlinks (Windows only
+with Developer Mode or elevation) and fails where it cannot.
 
 ## Notes
 
@@ -186,7 +239,7 @@ The public repository's GitHub Actions (`.github/workflows/`):
 | Workflow · job | When | What |
 |---|---|---|
 | `ci.yml` · `browser` | every push to `main` and every pull request | `node e2e/run.mjs cypress --build` — the Cypress suite against a throwaway build of that commit; failure screenshots and video are uploaded |
-| `shots.yml` | every `v*` tag, and on demand | `pnpm shots` on Linux — a shot script that no longer fits the product turns red here instead of on release night |
+| `shots.yml` | every `v*` tag, and on demand | `pnpm shots` on Linux — a shot script that no longer fits the product turns red here instead of on release night. ⚠ The scenes that need an app build (`apps.mjs`, `signing.mjs`) are **left out** in CI and taken locally at release step 2 — see [CONTRIBUTING.md → Screenshots](../docs/CONTRIBUTING.md#screenshots) |
 
 ⚠ **No CI job runs the Playwright suite** (`node e2e/run.mjs local`). It gates a
 release because the release process runs it (`docs/CONTRIBUTING.md` → *Release

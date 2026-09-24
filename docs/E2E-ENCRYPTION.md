@@ -506,7 +506,7 @@ read content is **off or limited** inside an encrypted folder:
 | **Open in a new tab** | **Off** — the standalone viewer route fetches raw bytes from the server, which would show ciphertext |
 | **OnlyOffice** | **Off** — the document server would have to read the file. The backend's config endpoint sniffs the magic and returns **415 `file is e2e-encrypted`**, and the UI does not offer OnlyOffice at all |
 | **Convert** | **Off** — the action is hidden; ciphertext is meaningless to the converter |
-| **Share links / file requests** | **Off** — the whole **Share / Permissions** entry is hidden, because a recipient would download ciphertext with no way to decrypt it. Note this also hides per-item permissions for that folder |
+| **Share links / file requests** | **Off** — the whole **Share** entry is hidden, because a recipient would download ciphertext with no way to decrypt it. Note this also hides per-item permissions for that folder |
 | **Password change** | **Off.** The v2 marker makes it cheap in principle (re-wrap `fmk_pw`, touch no file) but no flow exists — and it would not be cheap for a folder upgraded from v1, whose FMK *is* the password-derived key. See [Not implemented](#not-implemented) |
 | **Desktop "keep local" / folder sync pinning** | **Off** — not offered for encrypted folders or their contents |
 | **Reads over DAV / CLI / ShareX / AI (REST + MCP)** | Return the raw ciphertext (magic and all). Those surfaces have no key and cannot decrypt |
@@ -603,11 +603,11 @@ plaintext on disk.
 
 | | |
 |---|---|
-| ![Creating an encrypted folder](screenshots/v0.42.2/e2e-recovery/create-encrypted-folder.png) | ![The recovery key, shown once](screenshots/v0.42.2/e2e-recovery/recovery-key-shown-once.png) |
+| ![Creating an encrypted folder](screenshots/v0.43.0/e2e-recovery/create-encrypted-folder.png) | ![The recovery key, shown once](screenshots/v0.43.0/e2e-recovery/recovery-key-shown-once.png) |
 | Creating the folder. The escrow notice appears only when the installation has escrow on. | The recovery key, shown once. The dialog will not close until you tick that you saved it. |
-| ![The lock screen](screenshots/v0.42.2/e2e-recovery/locked-folder.png) | ![Unlocking with a recovery key](screenshots/v0.42.2/e2e-recovery/unlock-with-recovery-key.png) |
+| ![The lock screen](screenshots/v0.43.0/e2e-recovery/locked-folder.png) | ![Unlocking with a recovery key](screenshots/v0.43.0/e2e-recovery/unlock-with-recovery-key.png) |
 | A wrong password, and the way out underneath it. | The recovery-key dialog. The **Escrow key** tab appears only when both the installation and the folder have escrow. |
-| ![The escrow tab](screenshots/v0.42.2/e2e-recovery/unlock-with-escrow-key.png) | ![The offer to a pre-v0.31 folder](screenshots/v0.42.2/e2e-recovery/legacy-folder-upgrade-offer.png) |
+| ![The escrow tab](screenshots/v0.43.0/e2e-recovery/unlock-with-escrow-key.png) | ![The offer to a pre-v0.31 folder](screenshots/v0.43.0/e2e-recovery/legacy-folder-upgrade-offer.png) |
 | Escrow says up front that the owner will be told. | A folder from before v0.31, just opened by password: the offer is visible, and it discloses the escrow consequence. |
 
 Retake them with

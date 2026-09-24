@@ -14,6 +14,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
@@ -40,7 +41,7 @@ func (h *Search) AttachACL(r *acl.Resolver) { h.ACL = r }
 // materialised first. 10k nodes per tag is far past any hand-applied
 // tag and keeps a runaway tag from turning one search into a
 // ten-thousand-clause boolean query. A tag larger than this is truncated
-// newest-first (the order ListNodesByTag returns), which is stated in
+// newest-first (the order ListNodesByTagIDs returns), which is stated in
 // docs/SEARCH.md rather than silently absorbed.
 const tagFilterMax = 10000
 
@@ -52,14 +53,32 @@ const tagFilterMax = 10000
 // resolves to an empty include set, and an empty include set with
 // Restrict set means "no results" — never "ignore the filter", which
 // would answer a typo'd tag with the entire storage.
+//
+// v0.43.0: a `tag:x` means every tag named x (by tagname.Key) that the
+// CALLER can see — their personal x and their tenant's team x — and nobody
+// else's. Before, it read the one shared label, so `tag:` was a way to list
+// files by a label somebody else had put on them; now a personal tag filters
+// only its owner's searches. No caller in the context (never on these
+// authenticated routes) resolves every tag to nothing: fail closed.
 func resolveTagFilter(ctx context.Context, store db.Store, p search.Parsed) (*search.Filter, []*model.Node, error) {
 	if !p.HasTagFilter() {
 		return nil, nil, nil
 	}
+	caller, known := tagCallerOf(ctx)
+	nodesTagged := func(tag string) ([]*model.Node, error) {
+		if !known {
+			return nil, nil
+		}
+		ids, _, err := resolveTagIDs(ctx, store, caller, tag, "")
+		if err != nil || len(ids) == 0 {
+			return nil, err
+		}
+		return store.ListNodesByTagIDs(ctx, ids, tagFilterMax)
+	}
 	f := &search.Filter{}
 	var included []*model.Node
 	for i, tag := range p.Tags {
-		nodes, err := store.ListNodesByTag(ctx, tag, tagFilterMax)
+		nodes, err := nodesTagged(tag)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -84,7 +103,7 @@ func resolveTagFilter(ctx context.Context, store db.Store, p search.Parsed) (*se
 		f.IncludeIDs = append(f.IncludeIDs, n.ID)
 	}
 	for _, tag := range p.ExcludeTags {
-		nodes, err := store.ListNodesByTag(ctx, tag, tagFilterMax)
+		nodes, err := nodesTagged(tag)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -325,17 +344,21 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []searchResult{}
+	// truncated: more matched than came back (see the response below).
+	truncated := false
 	switch {
 	case parsed.HasTagFilter() && parsed.Text == "":
 		// A bare `tag:x` is a listing, not a search: there is no text to
 		// score, so the tagged nodes ARE the answer (newest first, the
-		// order ListNodesByTag already returns them in).
-		for _, n := range tagged {
+		// order ListNodesByTagIDs already returns them in).
+		for i, n := range tagged {
 			if req.StorageID != 0 && n.StorageID != req.StorageID {
 				continue
 			}
-			/* wiring:e2 — the marker file stays hidden in name search too */
-			if n.Name == e2e.MarkerName {
+			/* wiring:e2 — the marker file stays hidden in name search too, and so
+			   does everything in filex's own directories (syspath.Hidden: the
+			   desktop's open-with working copies were found by name, 2026-09-21) */
+			if n.Name == e2e.MarkerName || syspath.Hidden(n.Path) {
 				continue
 			}
 			if !withinRoot(n.StorageID, n.Path) {
@@ -343,16 +366,21 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 			}
 			results = append(results, searchResult{Node: n, Matched: search.MatchedName})
 			if len(results) >= req.Limit {
+				truncated = i < len(tagged)-1
 				break
 			}
 		}
 	case h.Index != nil:
 		hits := h.Index.SafeSearchFiltered(r.Context(), parsed.Text, req.Limit, sc, tagFilter)
+		// The index returns at most `limit` hits; a full page is a cut answer.
+		truncated = len(hits) >= req.Limit
 		for _, hit := range hits {
 			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
 			if err == nil && (req.StorageID == 0 || n.StorageID == req.StorageID) {
-				/* wiring:e2 — the marker file stays hidden in name search too */
-				if n.Name == e2e.MarkerName {
+				/* wiring:e2 — the marker file stays hidden in name search too, and so
+				   does everything in filex's own directories (syspath.Hidden: the
+				   desktop's open-with working copies were found by name, 2026-09-21) */
+				if n.Name == e2e.MarkerName || syspath.Hidden(n.Path) {
 					continue
 				}
 				if !withinRoot(n.StorageID, n.Path) {
@@ -369,13 +397,28 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	// index cannot answer would otherwise LIKE-scan every mount in the
 	// deployment. That gate is deliberate and predates this change; it is
 	// documented in docs/SEARCH.md and left alone here.
+	//
+	// ⚠ Ranked BEFORE it is cut to `limit`, twice over. The database ranks the
+	// window it returns (its longest word: exact and prefix names first), and the
+	// whole window is ranked here before `limit` rows are kept. This loop used
+	// to stop at `limit` rows in `ORDER BY name` and rank only those, so with
+	// a small limit the exact match was never among them.
 	if len(results) == 0 && req.StorageID != 0 && parsed.Text != "" && sc != search.ScopeContent {
 		plan := search.PlanFallback(parsed.Text)
-		fallback, err := h.Store.SearchNodes(r.Context(), req.StorageID, plan.Like, req.Limit*search.FallbackOverFetch)
+		truncated = false
+		window := req.Limit * search.FallbackOverFetch
+		// One row past the window: a row beyond it is the proof it was full.
+		fallback, err := plan.Candidates(r.Context(), h.Store, req.StorageID, window+1)
 		if err == nil {
+			if len(fallback) > window {
+				truncated = true
+				fallback = fallback[:window]
+			}
 			for _, n := range fallback {
-				/* wiring:e2 — the marker file stays hidden in name search too */
-				if n.Name == e2e.MarkerName {
+				/* wiring:e2 — the marker file stays hidden in name search too, and so
+				   does everything in filex's own directories (syspath.Hidden: the
+				   desktop's open-with working copies were found by name, 2026-09-21) */
+				if n.Name == e2e.MarkerName || syspath.Hidden(n.Path) {
 					continue
 				}
 				if !plan.Accepts(n.Name, n.Path) || !tagFilterAccepts(tagFilter, n.ID) {
@@ -385,11 +428,12 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				results = append(results, searchResult{Node: n, Matched: search.MatchedName})
-				if len(results) >= req.Limit {
-					break
-				}
 			}
 			sortByRank(results, plan)
+			if len(results) > req.Limit {
+				truncated = true
+				results = results[:req.Limit]
+			}
 		}
 	}
 	// Multi-tenant: drop hits in storages outside the caller's tenant. This is
@@ -429,5 +473,9 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	// to drop — and so a dropped row can never leak the name of whoever owns
 	// it.
 	h.describeHits(r.Context(), results)
-	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+	// `truncated`: more rows matched than came back — the index filled its
+	// page, or the fallback filled its window or had more than `limit` left
+	// after ranking. Rows the tenant or RBAC filters then dropped do not make
+	// an answer "cut"; only the page and the window do.
+	writeJSON(w, http.StatusOK, map[string]any{"results": results, "truncated": truncated})
 }

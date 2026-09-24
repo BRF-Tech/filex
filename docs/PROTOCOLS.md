@@ -74,7 +74,7 @@ and "How to connect" keeps the guides but replaces the mint forms with a line
 saying this session cannot create credentials. See
 [MCP.md → Token kinds](MCP.md#token-kinds--user-vs-app).
 
-Your login is your **username** if you have set one, otherwise your e-mail. Both work
+Your login is your **username** if you have set one, otherwise your email. Both work
 everywhere; an `@` in an SSH or FTP login has to be quoted in most clients' config files,
 which is what usernames are for.
 
@@ -119,9 +119,12 @@ switch that off with `auth.ldap.protocol_login: false`.
 > you are not allowed answers **AccessDenied**, because a client told "no such key" would
 > retry forever against a permission problem.
 
-filex's own bookkeeping trees — `.versions/`, `.thumbs/` and `.filex-trash/` —
-are **not** exposed here, at any depth, on any verb: not listed, not readable
-by known key, and not writable. Every other protocol has always hidden them;
+filex's own bookkeeping trees — `.versions/`, `.thumbs/`, `.filex-trash/` and
+the desktop app's open-with working area `.filex-open/` — are **not** exposed
+here, at any depth, on any verb: not listed, not readable by known key, and not
+writable. Every protocol judges this by the same list (`backend/internal/syspath`);
+before it existed each carried its own three-name copy and all of them listed
+`.filex-open/`. Every other protocol has always hidden the first three;
 the S3 gateway is the one that had to catch up, and it matters most here
 because [version history](TRASH-VERSIONING.md#what-triggers-a-snapshot) holds a
 copy of every file this gateway has replaced — the `.versions/` tree is real
@@ -264,7 +267,7 @@ Stop it with Ctrl-C in that window.
 
 SMB is the one asymmetric row: filex can use a NAS as a storage, but does not serve SMB.
 
-Add a storage with driver **SMB / CIFS**, give it the host, the share name alone
+Add a storage (Admin → Storages) with driver **SMB / CIFS**, give it the host, the share name alone
 (`media`, not `\\nas\media`), an account and optionally a sub-folder. Everything else —
 RBAC, trash, versions, quota, search, thumbnails — behaves as it does on any other
 storage.

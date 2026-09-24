@@ -22,6 +22,7 @@ import { BarChart3, Save, RefreshCw, Info, ExternalLink } from 'lucide-vue-next'
 import { UsageApi, type UsageReport, type UsageDay } from '@/api/usage';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
+import { localeTag } from '@brftech/filex-core';
 import { formatBytes, formatNumber } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
@@ -29,6 +30,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Spinner from '@/components/ui/Spinner.vue';
+import { DataTable, type DataColumn } from '@brftech/filex-core';
 
 const DOCS_URL = 'https://github.com/BRF-Tech/filex/blob/main/docs/USAGE.md';
 
@@ -114,6 +116,21 @@ const perBucket = computed(() => {
     .sort((a, b) => b.stored - a.stored);
 });
 
+type BucketRow = (typeof perBucket.value)[number];
+
+/* The explorer's table (DataTable), remembered under `admin.usage.buckets`.
+ * Every bucket of the window is on screen, so the table sorts the rows
+ * itself; the figures are raw numbers (the cells format them), so a sort by
+ * Stored compares bytes, not the "1,2 GB" text. Until somebody picks a column
+ * the rows keep `perBucket`'s own order — largest first. */
+const bucketColumns = computed<DataColumn<BucketRow>[]>(() => [
+  { id: 'bucket', label: t('usage.buckets.bucket'), sortable: true, width: 220 },
+  { id: 'stored', label: t('usage.buckets.stored'), align: 'right', sortable: true, sortDir: 'desc', width: 120 },
+  { id: 'up', label: t('usage.buckets.uploaded'), align: 'right', sortable: true, sortDir: 'desc', width: 120 },
+  { id: 'down', label: t('usage.buckets.downloaded'), align: 'right', sortable: true, sortDir: 'desc', width: 120 },
+  { id: 'ops', label: t('usage.buckets.ops'), align: 'right', sortable: true, sortDir: 'desc', width: 110 },
+]);
+
 /** The daily trend, as one point per day across every bucket. */
 const trend = computed(() => {
   const by = new Map<string, number>();
@@ -130,9 +147,9 @@ function money(n: number | undefined): string {
   if (n === undefined) return '—';
   const cur = cost.value?.currency || 'USD';
   try {
-    return new Intl.NumberFormat(locale.value, { style: 'currency', currency: cur }).format(n);
+    return new Intl.NumberFormat(localeTag(locale.value), { style: 'currency', currency: cur }).format(n);
   } catch {
-    return `${n.toFixed(4)} ${cur}`;
+    return `${formatNumber(n, locale.value)} ${cur}`;
   }
 }
 
@@ -247,7 +264,7 @@ onMounted(load);
               <div class="text-xs text-zinc-500">{{ t('usage.cost.storage') }}</div>
               <div class="tabular-nums">{{ money(cost?.storage_cost) }}</div>
               <div class="text-xs text-zinc-500">
-                {{ formatNumber(Number((cost?.avg_stored_gb ?? 0).toFixed(2)), locale) }} GB
+                {{ bytes((cost?.avg_stored_gb ?? 0) * 1e9) }}
                 <Badge v-if="cost?.storage_covered" tone="emerald">{{ t('usage.cost.covered') }}</Badge>
               </div>
             </div>
@@ -255,16 +272,29 @@ onMounted(load);
               <div class="text-xs text-zinc-500">{{ t('usage.cost.egress') }}</div>
               <div class="tabular-nums">{{ money(cost?.egress_cost) }}</div>
               <div class="text-xs text-zinc-500">
-                {{ formatNumber(Number((cost?.downloaded_gb ?? 0).toFixed(2)), locale) }} GB
+                {{ bytes((cost?.downloaded_gb ?? 0) * 1e9) }}
                 <Badge v-if="cost?.egress_covered" tone="emerald">{{ t('usage.cost.covered') }}</Badge>
               </div>
             </div>
             <div>
               <div class="text-xs text-zinc-500">{{ t('usage.cost.transactions') }}</div>
               <div class="tabular-nums">{{ money(cost?.ops_cost) }}</div>
+              <!-- ⚠ One message with both numbers in it — "free" was a
+                   separately translated word glued after the numbers, which a
+                   language that puts it first, or makes it agree with the
+                   number, could not say. ⚠ NOT a plural: it was written as a
+                   choice whose two English forms were byte-identical, so every
+                   translator had to write one sentence twice (v0.43.0
+                   translation sweep). English does not inflect here; a
+                   language that must would need two DIFFERENT English forms
+                   first, and the count back as the third argument. -->
               <div class="text-xs text-zinc-500">
-                {{ formatNumber(cost?.billable_ops ?? 0, locale) }} / {{ formatNumber(cost?.free_ops ?? 0, locale) }}
-                {{ t('usage.cost.billableFree') }}
+                {{
+                  t('usage.cost.billableAndFree', {
+                    billable: formatNumber(cost?.billable_ops ?? 0, locale),
+                    free: formatNumber(cost?.free_ops ?? 0, locale),
+                  })
+                }}
               </div>
             </div>
           </div>
@@ -300,35 +330,37 @@ onMounted(load);
         </div>
 
         <!-- Per bucket. -->
-        <div v-if="perBucket.length" class="card card-body space-y-2" data-testid="usage-buckets">
-          <h2 class="text-sm font-semibold">{{ t('usage.buckets.title') }}</h2>
-          <div class="tbl-scroll">
-            <table class="w-full text-sm">
-              <thead class="text-xs text-zinc-500 text-left">
-                <tr>
-                  <th class="py-1">{{ t('usage.buckets.bucket') }}</th>
-                  <th class="py-1 text-right">{{ t('usage.buckets.stored') }}</th>
-                  <th class="py-1 text-right">{{ t('usage.buckets.uploaded') }}</th>
-                  <th class="py-1 text-right">{{ t('usage.buckets.downloaded') }}</th>
-                  <th class="py-1 text-right">{{ t('usage.buckets.ops') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="b in perBucket" :key="b.bucket" class="border-t border-zinc-100 dark:border-zinc-800">
-                  <td class="py-1 font-mono text-xs">{{ b.bucket }}</td>
-                  <td class="py-1 text-right tabular-nums">{{ bytes(b.stored) }}</td>
-                  <td class="py-1 text-right tabular-nums">{{ bytes(b.up) }}</td>
-                  <td class="py-1 text-right tabular-nums">{{ bytes(b.down) }}</td>
-                  <td class="py-1 text-right tabular-nums">{{ formatNumber(b.ops, locale) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+        <div v-if="perBucket.length" class="space-y-2" data-testid="usage-buckets">
+          <DataTable
+            table-id="admin.usage.buckets"
+            :columns="bucketColumns"
+            :rows="perBucket"
+            row-key="bucket"
+          >
+            <template #toolbar>
+              <h2 class="text-sm font-semibold">{{ t('usage.buckets.title') }}</h2>
+            </template>
+            <template #cell-bucket="{ row }">
+              <span class="tbl-mono">{{ row.bucket }}</span>
+            </template>
+            <template #cell-stored="{ row }">
+              <span class="tabular-nums">{{ bytes(row.stored) }}</span>
+            </template>
+            <template #cell-up="{ row }">
+              <span class="tabular-nums">{{ bytes(row.up) }}</span>
+            </template>
+            <template #cell-down="{ row }">
+              <span class="tabular-nums">{{ bytes(row.down) }}</span>
+            </template>
+            <template #cell-ops="{ row }">
+              <span class="tabular-nums">{{ formatNumber(row.ops, locale) }}</span>
+            </template>
+          </DataTable>
 
           <!-- ⚠ Beside the table, never inside it. -->
           <p
             v-if="(totals?.account_ops?.A ?? 0) + (totals?.account_ops?.B ?? 0) + (totals?.account_ops?.C ?? 0) + (totals?.account_ops?.D ?? 0) > 0"
-            class="text-xs text-zinc-500"
+            class="help-text"
             data-testid="usage-account-ops"
           >
             {{

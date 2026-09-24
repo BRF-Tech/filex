@@ -6,8 +6,8 @@ newest release). Full walkthroughs: [`docs/INSTALLATION.md`](../docs/INSTALLATIO
 
 | Directory / file | Target |
 |---|---|
-| [`compose/`](compose/) | Docker Compose — `docker-compose.minimal.yml` (one container, SQLite) and `docker-compose.full.yml` (Postgres + Redis + Caddy + opt-in OnlyOffice/Drawio/Convert/MinIO/ClamAV), plus a multi-tenant variant. |
-| [`helm/filex/`](helm/filex/) | Kubernetes Helm chart (PVC + Ingress; optional bundled Postgres/Redis/MinIO, OnlyOffice wiring). |
+| [`compose/`](compose/) | Docker Compose — `docker-compose.minimal.yml` (one container, SQLite) and `docker-compose.full.yml` (Postgres + Redis + Caddy + opt-in ONLYOFFICE / draw.io / the legacy Convert side-car / MinIO / ClamAV), plus a multi-tenant variant. |
+| [`helm/filex/`](helm/filex/) | Kubernetes Helm chart (PVC + Ingress; optional bundled Postgres/Redis/MinIO, ONLYOFFICE wiring). |
 | [`umbrel/filex/`](umbrel/filex/) | Umbrel app package (`umbrel-app.yml` + app-proxy compose). |
 | [`casaos/`](casaos/) | CasaOS compose with the `x-casaos` store extension. |
 | [`runtipi/filex/`](runtipi/filex/) | Runtipi app package (`config.json` + dynamic `docker-compose.json`). |

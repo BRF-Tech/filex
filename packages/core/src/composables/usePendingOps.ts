@@ -17,10 +17,23 @@ import { computed, ref, onBeforeUnmount } from 'vue';
 import type { ExplorerConfig } from '../types/ExplorerConfig';
 import type { FileApi } from './useFileApi';
 
+/**
+ * The queue kinds this package knows by name. A server may emit others (an
+ * app-plugin job is `plugin-action` on the wire and `plugin` here); anything
+ * unknown is carried through verbatim rather than being read as a delete.
+ */
+export type PendingOpType = 'copy' | 'move' | 'delete' | 'plugin' | 'trash-empty' | (string & {});
+
+/** One produced file of a finished plugin job, as an adapter-qualified path. */
+export interface PendingOpOutput {
+  path: string;
+}
+
 export interface PendingOp {
   id: number;
-  op_type: 'copy' | 'move' | 'delete';
-  status: 'pending' | 'running' | 'done' | 'error';
+  op_type: PendingOpType;
+  /** `cancelled` — somebody stopped it (POST /ops/{id}/cancel). */
+  status: 'pending' | 'running' | 'done' | 'error' | 'cancelled';
   progress_total: number;
   progress_done: number;
   /** Running cross-storage transfer's bytes (issue #27); absent otherwise. */
@@ -30,9 +43,24 @@ export interface PendingOp {
   source_dir: string | null;
   source_count: number;
   error_message: string | null;
+  /** A failed APP job, classified by the server (lib/errorWords `jobFailure`
+   *  says it); absent on copy/move/delete rows and on an older server. */
+  error_code?: string;
+  /** The engine a job needed and the server lacks (`error_code: engine_missing`). */
+  error_engine?: string;
   started_at: string | null;
   finished_at: string | null;
   created_at: string | null;
+  /* App-plugin jobs (`op_type: "plugin-action"` on the wire) — absent on
+   * copy/move/delete rows. See docs/APP-PLUGINS-API.md → Ops rows. */
+  plugin?: string;
+  action?: string;
+  /** The action's label in the caller's locale — the tray's row title. */
+  label?: string;
+  /** The last `job_progress` message. */
+  message?: string;
+  /** Files the job committed, once finished. */
+  outputs?: PendingOpOutput[];
 }
 
 const POLL_MS = 2000;
@@ -46,7 +74,7 @@ const RETAIN_MS = 8000;
  * running op (progress_* were undefined) and never treated an 'ok'/'failed'
  * row as terminal. Tolerant of an already-normalized shape (idempotent).
  */
-function normalizeOp(raw: Record<string, unknown>): PendingOp {
+export function normalizeOp(raw: Record<string, unknown>): PendingOp {
   const num = (...vals: unknown[]): number => {
     for (const v of vals) if (typeof v === 'number') return v;
     return 0;
@@ -56,19 +84,35 @@ function normalizeOp(raw: Record<string, unknown>): PendingOp {
     return null;
   };
   const rawStatus = String(raw.status ?? 'pending');
+  // ⚠ `cancelled` is an ending of its own. It used to fall through to
+  // 'pending', so a job somebody cancelled sat in the operations centre as
+  // "Queued" for as long as the list still carried the row.
   const status: PendingOp['status'] =
     rawStatus === 'ok' || rawStatus === 'done'
       ? 'done'
       : rawStatus === 'failed' || rawStatus === 'partial' || rawStatus === 'error'
         ? 'error'
-        : rawStatus === 'running'
-          ? 'running'
-          : 'pending';
+        : rawStatus === 'cancelled'
+          ? 'cancelled'
+          : rawStatus === 'running'
+            ? 'running'
+            : 'pending';
   const sources = Array.isArray(raw.sources) ? raw.sources : [];
+  // ⚠ Unknown kinds pass through. This used to fold everything that was not
+  // copy/move into `delete`, which drew a bin beside a plugin job and read
+  // "Deleted (1)" when it finished. `plugin-action` (the wire name) becomes
+  // `plugin`; a row with no kind at all is the one case still read as delete
+  // (the legacy delete endpoint's rows carried none).
   const opType = str(raw.op_type, raw.kind) ?? 'delete';
+  const outputs = Array.isArray(raw.outputs)
+    ? (raw.outputs as unknown[])
+        .map((o) => (o && typeof o === 'object' ? str((o as { path?: unknown }).path) : null))
+        .filter((p): p is string => p !== null)
+        .map((path) => ({ path }))
+    : undefined;
   return {
     id: num(raw.id),
-    op_type: (opType === 'copy' || opType === 'move' ? opType : 'delete') as PendingOp['op_type'],
+    op_type: opType === 'plugin-action' ? 'plugin' : opType,
     status,
     progress_total: num(raw.progress_total, raw.total, sources.length),
     progress_done: num(raw.progress_done, raw.done),
@@ -78,9 +122,16 @@ function normalizeOp(raw: Record<string, unknown>): PendingOp {
     source_dir: str(raw.source_dir),
     source_count: num(raw.source_count, sources.length),
     error_message: str(raw.error_message, raw.error),
+    error_code: str(raw.error_code) ?? undefined,
+    error_engine: str(raw.error_engine) ?? undefined,
     started_at: str(raw.started_at),
     finished_at: str(raw.finished_at),
     created_at: str(raw.created_at),
+    plugin: str(raw.plugin) ?? undefined,
+    action: str(raw.action) ?? undefined,
+    label: str(raw.label) ?? undefined,
+    message: str(raw.message) ?? undefined,
+    outputs,
   };
 }
 
@@ -133,7 +184,7 @@ export function usePendingOps(
       const incoming = (res.ops || []).map(normalizeOp);
 
       for (const op of incoming) {
-        if ((op.status === 'done' || op.status === 'error') && !announced.has(op.id)) {
+        if ((op.status === 'done' || op.status === 'error' || op.status === 'cancelled') && !announced.has(op.id)) {
           announced.add(op.id);
           settledAt.set(op.id, Date.now());
           if (firstPollDone) {

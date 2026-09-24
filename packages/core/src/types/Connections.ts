@@ -46,6 +46,23 @@ export interface StorageField {
   monospace?: boolean;
   multiline?: boolean;
   advanced?: boolean;
+  /**
+   * Draw the choice as BUTTONS rather than a dropdown — every option on the
+   * screen, readable without clicking (`components/ChoiceButtons`).
+   *
+   * ⚠ Set by the DECLARATION, not by the surface drawing it. An app
+   * plugin's fields always carry it (v3 §2: "no dropdowns anywhere in a
+   * surface", applied by `lib/surfaceValues.storageFieldOf`), and a storage
+   * driver may ask for it on a short choice. Branching on "am I in a
+   * surface?" inside the renderer would be the same control behaving two
+   * ways on two screens, which is the thing this package keeps un-writing.
+   *
+   * On a `bool` it means the two-button Yes/No decision; a bool without it
+   * stays the on/off checkbox a driver setting wants.
+   */
+  choice?: boolean;
+  /** A `select` that takes several of its options; the value is then a list. */
+  multi?: boolean;
   /** THE field that scopes the storage inside the backend (s3 prefix,
    *  local path, sftp/ftp/webdav root). The backend rejects an empty or
    *  "/" value with ROOT_PATH_FORBIDDEN. */

@@ -6,6 +6,7 @@
 //   pnpm shots --only sidenav,capture   a subset (no site sync, no leftover check)
 //   pnpm shots --skip packages,web      reuse builds you trust (the verify step still runs)
 //   pnpm shots --no-build [--binary p]  shoot an existing binary (still verified)
+//   pnpm shots --without-apps           leave out the scenes that need app builds (CI's default)
 //
 // ⚠⚠ Why this exists. The screenshots for v0.41.0 were taken three times by
 // hand. Not for want of automation — every script in e2e/shots/ is Playwright —
@@ -40,6 +41,26 @@
 //   cleanup   every process the run started, by marker, then listed again
 //
 // ⚠ The release folder is named once, in e2e/shots/release.mjs.
+//
+// ⚠⚠ The scenes that photograph an APP (a script calling `findApp('sign')` —
+// apps.mjs and signing.mjs) need that app's build, which is not in this tree:
+// filex-sign and filex-convert are their own repositories. Locally a missing
+// build is a refusal, before the build step rather than an hour into it —
+// a skipped scene keeps the previous picture in the README. In CI (`CI` set,
+// as GitHub Actions and GitLab both set it) those scenes are LEFT OUT instead,
+// loudly — in the log, the verdict and the contact sheet — and their folders
+// are spared the leftover check. `--with-apps` overrides that; `--without-apps`
+// asks for it anywhere. Why CI does not fetch or build the apps (decided for
+// v0.43.0, when both repositories are published for the first time):
+//   · at the tag there may be nothing to fetch — the apps' first public
+//     releases are cut at the same release, and a CI that depends on another
+//     repository's tag turns "tag filex" into "tag three things in order";
+//   · the converter scene also needs the conversion engines, which it gets
+//     from Docker (e2e/shots/scene.mjs → bootInstance({ engines })), and the
+//     private CI's runner cannot run Docker;
+//   · CI's pictures are an artefact that catches a script that no longer fits
+//     the product; the pictures that ship are taken locally at release step 2
+//     (docs/CONTRIBUTING.md), where the sibling checkouts exist.
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
@@ -48,10 +69,12 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { SHOTS_RELEASE, SHOTS_ROOT, SHOTS_ROOT_REL } from '../e2e/shots/release.mjs';
+import { SHOTS_LDFLAGS, SHOTS_RELEASE, SHOTS_ROOT, SHOTS_ROOT_REL } from '../e2e/shots/release.mjs';
 import { checkEmbeddedUI, freePort } from './check-embed.mjs';
+import { APP_LOCATIONS, locateApp } from '../e2e/helpers/app-locations.mjs';
+import { removeRunContainers } from './lib/containers.mjs';
 import { goBuild } from './lib/go-build.mjs';
-import { findShotScripts } from './lib/shot-scripts.mjs';
+import { appScenesLeftOutBy, findShotScripts, planAppScenes, scriptNeeds } from './lib/shot-scripts.mjs';
 import { RUN_MARKER, describeProcess, killProcess, listProcesses, runProcesses, sweepRun } from './lib/procs.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -72,7 +95,7 @@ const list = (name) => (value(name) ?? '').split(',').map((s) => s.trim()).filte
 
 const BUILD_STEP_IDS = ['packages', 'web', 'embed', 'backend'];
 if (has('help')) {
-  console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 8).join('\n').replace(/^\/\/ ?/gm, ''));
+  console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 9).join('\n').replace(/^\/\/ ?/gm, ''));
   process.exit(0);
 }
 const skip = new Set(has('no-build') ? BUILD_STEP_IDS : list('skip'));
@@ -86,6 +109,8 @@ for (const s of skip) {
 const only = list('only').map((s) => s.replace(/\.mjs$/, ''));
 const timeoutMs = Number(value('timeout-min') ?? 30) * 60_000;
 const partial = only.length > 0;
+const whyWithoutApps = appScenesLeftOutBy({ withApps: has('with-apps'), withoutApps: has('without-apps') });
+const withoutApps = whyWithoutApps !== '';
 
 const say = (msg) => console.log(`[shots] ${msg}`);
 const banner = (msg) => console.log(`\n[shots] ━━ ${msg} ${'━'.repeat(Math.max(4, 64 - msg.length))}`);
@@ -107,6 +132,11 @@ function finalSweep(reason) {
     say(`cleanup (${reason}): ended ${res.killed.length} process(es) the run left behind`);
     for (const p of res.killed) say(`    ${describeProcess(p)}`);
   }
+  // ⚠ A container is not a process of this run: the sweep above cannot see
+  // it. Every one a scene starts is labelled with the run id instead
+  // (scripts/lib/containers.mjs).
+  const boxes = removeRunContainers(RUN_ID);
+  if (boxes.length) say(`cleanup (${reason}): removed container(s) the run left behind: ${boxes.join(', ')}`);
   try {
     fs.rmSync(runDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
   } catch (err) {
@@ -151,6 +181,8 @@ function sweepStaleRuns() {
     }
     const { killed, survivors } = sweepRun({ dir, marker: info?.id ?? '', procs });
     if (killed.length) say(`ended ${killed.length} process(es) left by an earlier run that did not finish (${name})`);
+    const boxes = removeRunContainers(info?.id ?? '');
+    if (boxes.length) say(`removed container(s) left by an earlier run that did not finish: ${boxes.join(', ')}`);
     if (survivors.length) throw new Refusal(`could not end processes of an earlier run: ${survivors.map(describeProcess).join('; ')}`);
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
   }
@@ -177,7 +209,7 @@ function build(runBin) {
       label: 'go build ./cmd/filex',
       run: () => {
         try {
-          goBuild({ cwd: path.join(REPO, 'backend'), pkg: './cmd/filex', out: runBin, log: say });
+          goBuild({ cwd: path.join(REPO, 'backend'), pkg: './cmd/filex', out: runBin, ldflags: SHOTS_LDFLAGS, log: say });
         } catch (err) {
           throw new Refusal(err.message);
         }
@@ -221,6 +253,12 @@ function pngState() {
   return state;
 }
 
+const APP_DIR_VARS = new Set(['FILEX_SIGN_APP_DIR', 'FILEX_CONVERT_APP_DIR']);
+// Where the converter scene's engines come from (e2e/shots/scene.mjs →
+// bootInstance). They choose a machine to run on; none of them can make a
+// picture go missing, which is what the SHOTS_* filter below is for.
+const SHOTS_PASS = new Set(['SHOTS_VERBOSE', 'SHOTS_ENGINES', 'SHOTS_ENGINES_IMAGE', 'SHOTS_LINUX_BIN']);
+
 function scriptEnv(runBin, runTmp, port) {
   const env = {};
   for (const [k, v] of Object.entries(process.env)) {
@@ -228,8 +266,13 @@ function scriptEnv(runBin, runTmp, port) {
     // a script at somebody else's server, SHOTS_ALLOW_SKIP would let a shot go
     // missing, and any FILEX_* (a database URL, a config file) would be spread
     // into every filex the scripts boot.
-    if (/^(FILEX_|NOTIFY_|E2E_)/i.test(k)) continue;
-    if (/^SHOTS_/i.test(k) && k.toUpperCase() !== 'SHOTS_VERBOSE') continue;
+    //
+    // The one exception is where the APP BUILDS are: FILEX_SIGN_APP_DIR and
+    // FILEX_CONVERT_APP_DIR are read by the scripts that photograph the apps
+    // (e2e/shots/scene.mjs → findApp). They configure nothing in a filex, and
+    // scene.mjs's boot strips every FILEX_* before it spawns one regardless.
+    if (/^(FILEX_|NOTIFY_|E2E_)/i.test(k) && !APP_DIR_VARS.has(k.toUpperCase())) continue;
+    if (/^SHOTS_/i.test(k) && !SHOTS_PASS.has(k.toUpperCase())) continue;
     if (/^(TEMP|TMP|TMPDIR)$/i.test(k)) continue;
     env[k] = v;
   }
@@ -316,7 +359,7 @@ function writeContactSheet({ meta, results, orphans, duplicates, verdict }) {
   const total = results.reduce((n, r) => n + r.files.length, 0);
   const sections = results
     .map((r) => {
-      const state = r.notRun ? 'not run' : r.ok ? 'passed' : r.timedOut ? 'timed out' : `failed (exit ${r.code})`;
+      const state = r.excluded ? `left out: ${r.excluded}` : r.notRun ? 'not run' : r.ok ? 'passed' : r.timedOut ? 'timed out' : `failed (exit ${r.code})`;
       return `<section><h2><span class="pill ${r.notRun ? 'idle' : r.ok ? 'ok' : 'bad'}">${esc(state)}</span> e2e/shots/${esc(r.file)}</h2>
 <p class="sub">${r.files.length} picture(s)${r.checks ? ` · ${esc(r.checks)}` : ''}${r.ms ? ` · ${(r.ms / 1000).toFixed(0)} s` : ''}${
         r.log ? ` · <a href="${href(r.log)}">log</a>` : ''
@@ -373,6 +416,22 @@ async function main() {
   const scripts = partial ? found.scripts.filter((f) => only.includes(f.replace(/\.mjs$/, ''))) : found.scripts;
   say(`shot scripts: ${found.scripts.join(', ')}  (modules: ${found.modules.join(', ')})`);
 
+  // The scenes that need an app build — left out, or checked BEFORE the build
+  // step: an hour of building is no way to learn that a sibling checkout is
+  // missing (see the note at the top of this file).
+  const needs = new Map(scripts.map((f) => [f, scriptNeeds(SHOTS_DIR, f)]));
+  const { excluded, refused } = planAppScenes({ needs, withoutApps, locate: locateApp });
+  if (refused.length) {
+    const repos = Object.values(APP_LOCATIONS).map((a) => `${a.repo} (${a.env})`).join(', ');
+    throw new Refusal(
+      `${refused.join('\n  ')}\n  Build the app — ${repos} — or run with --without-apps to leave these scenes out.`,
+    );
+  }
+  if (excluded.size) {
+    say(`left out (${whyWithoutApps}): ${[...excluded].map(([f, why]) => `${f} — ${why}`).join('; ')}`);
+    say('  their release pictures are taken locally, where the app builds are (docs/CONTRIBUTING.md → Release process, step 2)');
+  }
+
   // Playwright's browser, before an hour of building: the failure is cheap to
   // name now and expensive to meet after the build.
   try {
@@ -404,9 +463,10 @@ async function main() {
 
   fs.rmSync(ARTIFACTS, { recursive: true, force: true });
   fs.mkdirSync(path.join(ARTIFACTS, 'logs'), { recursive: true });
-  const results = scripts.map((file) => ({ file, files: [], ok: false, notRun: true }));
+  const results = scripts.map((file) => ({ file, files: [], ok: false, notRun: true, excluded: excluded.get(file) ?? null }));
   let failure = null;
   for (const r of results) {
+    if (r.excluded) continue;
     banner(`shoot: e2e/shots/${r.file}`);
     const before = pngState();
     const port = await freePort();
@@ -420,6 +480,8 @@ async function main() {
       say(`${r.file} left ${killed.length} process(es) running after it exited — ended:`);
       for (const p of killed) say(`    ${describeProcess(p)}`);
     }
+    const boxes = removeRunContainers(RUN_ID);
+    if (boxes.length) say(`${r.file} left container(s) running after it exited — removed: ${boxes.join(', ')}`);
     if (survivors.length) {
       failure = `could not end processes ${r.file} left behind: ${survivors.map(describeProcess).join('; ')}`;
       break;
@@ -434,7 +496,13 @@ async function main() {
   // Every picture in the release folder this run did not write is a picture of
   // an older product — a renamed shot, or one a script stopped taking.
   const written = new Set(results.flatMap((r) => r.files));
-  const orphans = failure || partial ? [] : [...pngState().keys()].filter((f) => !written.has(f)).sort();
+  // ⚠ A scene that was LEFT OUT wrote nothing on purpose; the pictures in its
+  // folder are the ones taken locally, not leftovers of a renamed shot.
+  const spared = [...excluded.keys()].map((f) => path.join(SHOTS_ROOT, needs.get(f).set) + path.sep);
+  const orphans =
+    failure || partial
+      ? []
+      : [...pngState().keys()].filter((f) => !written.has(f) && !spared.some((dir) => f.startsWith(dir))).sort();
   const bySha = new Map();
   for (const f of written) {
     const h = createHash('sha256').update(fs.readFileSync(f)).digest('hex');
@@ -464,6 +532,9 @@ async function main() {
   const dirty = spawnSync('git', ['status', '--porcelain'], { cwd: REPO, encoding: 'utf8' }).stdout.split('\n').filter(Boolean).length;
   const verdictText = [
     failure ? `✗ ${failure}` : `✓ ${written.size} picture(s), every script passed${partial ? ' (partial run)' : ', site assets in sync'}`,
+    ...(excluded.size
+      ? [`  left out (${whyWithoutApps}): ${[...excluded.keys()].join(', ')} — their pictures are taken locally, where the app builds are`]
+      : []),
     '',
     'UI check — the binary served back:',
     embed.report,

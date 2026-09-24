@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,9 +12,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/plugin"
+	"github.com/brf-tech/filex/backend/internal/scanrule"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 )
@@ -30,6 +34,55 @@ func validateStorageRootPath(st *model.Storage) error {
 		}
 	}
 	return storage.ValidateNonRootPath(st.Driver, cfg)
+}
+
+// validateScanExclusions refuses a storage whose scan exclusions (issue #44)
+// do not compile — a bad glob, a `!`, a `..`, or a pattern that would exclude
+// everything. Refused here, where the operator can still fix it; a row that
+// got past this some other way scans everything (sync.ruleFor).
+func validateScanExclusions(st *model.Storage) error {
+	cfg := map[string]any{}
+	if len(st.ConfigJSON) > 0 {
+		if err := json.Unmarshal(st.ConfigJSON, &cfg); err != nil {
+			return err
+		}
+	}
+	_, err := scanrule.FromConfig(cfg)
+	return err
+}
+
+// refuseStorageConfig answers a storage configuration the handler will not
+// save: a machine code in `error` and, for the refusals a person can act on,
+// the sentence in `message` — in the reader's language, from the server
+// catalogue (`server.storage.*`). Anything else (a config that is not JSON)
+// keeps the plain `error` it always had.
+func refuseStorageConfig(w http.ResponseWriter, r *http.Request, err error) {
+	var bad *scanrule.InvalidError
+	switch {
+	case errors.Is(err, storage.ErrRootPathForbidden):
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":   "ROOT_PATH_FORBIDDEN",
+			"message": srvtext.Text(langOf(r), "server.storage.root_path_forbidden", nil),
+		})
+	case errors.As(err, &bad):
+		key := "server.storage.scan_exclude_syntax"
+		switch bad.Problem {
+		case scanrule.ProblemEverything:
+			key = "server.storage.scan_exclude_everything"
+		case scanrule.ProblemLimit:
+			key = "server.storage.scan_exclude_limit"
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "SCAN_EXCLUDE_INVALID",
+			"message": srvtext.Text(langOf(r), key, srvtext.Vars{
+				"pattern": bad.Pattern,
+				"max":     strconv.Itoa(scanrule.MaxPatterns),
+				"length":  strconv.Itoa(scanrule.MaxPatternLength),
+			}),
+		})
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
 }
 
 // Storages handles /api/admin/storages.
@@ -192,7 +245,11 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateStorageRootPath(&st); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		refuseStorageConfig(w, r, err)
+		return
+	}
+	if err := validateScanExclusions(&st); err != nil {
+		refuseStorageConfig(w, r, err)
 		return
 	}
 	if err := h.denyOnDemo(st.Driver); err != nil {
@@ -227,6 +284,7 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 		// would otherwise abort the in-flight worker.
 		_ = h.Worker.AddStorage(context.Background(), created)
 	}
+	auth.SetAuditTarget(r.Context(), strconv.FormatInt(created.ID, 10), created.Name)
 	writeJSON(w, http.StatusOK, created)
 }
 
@@ -263,7 +321,11 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateStorageRootPath(cur); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		refuseStorageConfig(w, r, err)
+		return
+	}
+	if err := validateScanExclusions(cur); err != nil {
+		refuseStorageConfig(w, r, err)
 		return
 	}
 	if err := h.Store.UpdateStorage(r.Context(), cur); err != nil {
@@ -324,7 +386,8 @@ func (h *Storages) Delete(w http.ResponseWriter, r *http.Request) {
 	// "no rows" for some drivers + RemoveStorage silently no-ops on
 	// unknown ids). Without this, DELETE on a bogus id returns
 	// {ok:true} which is misleading.
-	if _, gerr := h.Store.GetStorage(r.Context(), id); gerr != nil {
+	gone, gerr := h.Store.GetStorage(r.Context(), id)
+	if gerr != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "storage not found"})
 		return
 	}
@@ -338,10 +401,17 @@ func (h *Storages) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// The row is gone once the log is read: keep its name.
+	auth.SetAuditTarget(r.Context(), "", gone.Name)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// TriggerSync forces an immediate sync run for a storage.
+// ScopedRescanTimeout bounds a folder rescan (TriggerSync with ?path=), which
+// answers inside the request.
+var ScopedRescanTimeout = 10 * time.Minute
+
+// TriggerSync forces an immediate sync run for a storage — or, with
+// ?path=<folder>, a rescan of that one catalogued folder (rescanFolder).
 func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
@@ -354,6 +424,20 @@ func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 	if h.Worker == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "worker offline"})
 		return
+	}
+	// ?path=<folder> rescans that one catalogued folder instead of the whole
+	// storage. "", "/" and anything that cleans to the root are the full scan
+	// below, exactly as before.
+	if raw := r.URL.Query().Get("path"); raw != "" {
+		dir, err := syncpkg.ScopePath(raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if dir != "" {
+			h.rescanFolder(w, r, id, dir)
+			return
+		}
 	}
 	// ⚠⚠ The run is DETACHED from the request, and answered immediately.
 	//
@@ -402,4 +486,61 @@ func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 		"status": "started",
 		"note":   "the sync runs in the background; watch its progress under sync runs",
 	})
+}
+
+// rescanFolder is TriggerSync for one folder (sync.Worker.RescanFolder).
+//
+// Unlike the full scan it answers with its result, because a folder is small
+// enough to wait for — and bounded by ScopedRescanTimeout, because some are
+// not. It runs detached from the request like the full scan (a client that
+// gives up must not cancel a walk half way); on the time limit it answers 504
+// with the counts so far: the rows it reached are updated, and nothing was
+// removed, since the tombstone pass never runs on a partial view. No sync_runs
+// row is written and the storage's last-synced time does not move.
+func (h *Storages) rescanFolder(w http.ResponseWriter, r *http.Request, id int64, dir string) {
+	if !h.Worker.Known(id) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "storage not found"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), ScopedRescanTimeout)
+	defer cancel()
+	res, err := h.Worker.RescanFolder(ctx, id, dir)
+	body := map[string]any{
+		"path":       res.Path,
+		"scanned":    res.Scanned,
+		"added":      res.Added,
+		"updated":    res.Updated,
+		"removed":    res.Removed,
+		"reconciled": res.Reconciled,
+	}
+	if res.RemovalSkipped != "" {
+		body["removal_skipped"] = res.RemovalSkipped
+	}
+	switch {
+	case err == nil:
+		body["ok"] = true
+		writeJSON(w, http.StatusOK, body)
+	case errors.Is(err, syncpkg.ErrRunInProgress):
+		// The same answer as a second full-scan press: not queued, not an
+		// error — the storage is being walked right now.
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"ok":     true,
+			"status": "running",
+			"note":   "a scan is already running for this storage; no folder rescan was started — ask again once it has finished",
+		})
+	case errors.Is(err, syncpkg.ErrFolderNotCatalogued):
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": err.Error() + "; rescan the folder above it, or run a full scan",
+		})
+	case errors.Is(err, syncpkg.ErrNotAFolder), errors.Is(err, syncpkg.ErrScopeInvalid):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		body["error"] = fmt.Sprintf("the rescan did not finish within %s: the rows it reached are updated and nothing was removed; rescan a smaller folder, or run a full scan", ScopedRescanTimeout)
+		writeJSON(w, http.StatusGatewayTimeout, body)
+	default:
+		slog.Warn("storages: folder rescan failed",
+			slog.Int64("storage", id), slog.String("path", dir), slog.String("err", err.Error()))
+		body["error"] = err.Error()
+		writeJSON(w, http.StatusInternalServerError, body)
+	}
 }

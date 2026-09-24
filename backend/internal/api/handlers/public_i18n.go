@@ -12,224 +12,87 @@ the language comes from the request itself: an explicit ?lang= (useful for
 testing and for sending a link to somebody whose browser is set to neither),
 then Accept-Language, then the server's own default. Resolved ONCE per request
 and handed to the template, so every string on a page comes from the same
-table. */
+table.
+
+The strings are the server catalogue's `server.public.*` keys
+(internal/srvtext): English and Turkish built in, and any language a
+language pack adds — a Spanish browser opening a drop link reads Spanish when
+a Spanish pack is installed (it read "Send files" until v0.43.0, because
+this file knew two languages and nothing else). */
 
 import (
 	"html/template"
 	"net/http"
 	"strings"
+
+	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
 
-// publicLocales are the languages the public pages ship. Anything else falls
-// back to English rather than rendering half-translated.
-var publicLocales = map[string]bool{"tr": true, "en": true}
-
-// publicLocale picks the language for one public request.
+// publicLocale picks the language for one public request: ?lang=, then the
+// browser's Accept-Language, then the server default — each only when the
+// server catalogue speaks it (a pack's language counts) — then English.
 func publicLocale(r *http.Request, serverDefault string) string {
 	if r != nil {
-		if v := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("lang"))); publicLocales[v] {
+		if v := srvtext.Resolve(r.URL.Query().Get("lang")); v != "" {
 			return v
 		}
-		// Accept-Language: take the first tag we actually ship. Deliberately
-		// ignores q-values — browsers list their preference first, and a
-		// weighted parse buys nothing for a two-language table.
-		for _, part := range strings.Split(r.Header.Get("Accept-Language"), ",") {
-			tag := strings.ToLower(strings.TrimSpace(part))
-			if i := strings.IndexByte(tag, ';'); i >= 0 {
-				tag = strings.TrimSpace(tag[:i])
-			}
-			if i := strings.IndexByte(tag, '-'); i >= 0 {
-				tag = tag[:i]
-			}
-			if publicLocales[tag] {
-				return tag
-			}
+		if v := srvtext.FromAcceptLanguage(r.Header.Get("Accept-Language")); v != "" {
+			return v
 		}
 	}
-	if d := strings.ToLower(strings.TrimSpace(serverDefault)); publicLocales[d] {
-		return d
-	}
-	return "en"
+	return srvtext.Pick(serverDefault)
 }
 
-// publicText is every user-visible string on the public pages, per language.
-// Keys are grouped by the page that uses them.
-var publicText = map[string]map[string]string{
-	"tr": {
-		// PIN gate
-		"pin_title":    "PIN girin",
-		"pin_heading":  "Bu paylaşım PIN korumalı",
-		"pin_sub":      "Erişmek için PIN'i girin.",
-		"pin_submit":   "Kilidi aç",
-		"pin_aria":     "PIN",
-		"pin_wrong":    "PIN yanlış — tekrar deneyin.",
-		"pin_required": "PIN gerekli.",
+// publicLocaleList is the languages filex ships (en, tr), sorted so the
+// answer is stable across restarts. The languages packs add are appended by
+// the caller from the registry (public_api.go Branding).
+func publicLocaleList() []string {
+	return srvtext.BuiltinLanguages()
+}
 
-		// PIN accepted → download starts
-		"unlocked_title":   "PIN doğru",
-		"unlocked_heading": "PIN doğru",
-		"unlocked_sub":     "İndirme birazdan başlayacak…",
+// userLang is the signed-in caller's account language, "" when there is no
+// caller or it never picked one.
+func userLang(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if u := auth.UserFrom(r.Context()); u != nil {
+		return strings.TrimSpace(u.Locale)
+	}
+	return ""
+}
 
-		// ZIP being prepared
-		"zip_title":   "Dosya hazırlanıyor…",
-		"zip_heading": "Dosya hazırlanıyor…",
-		"zip_sub":     "%s — klasör ZIP arşivi olarak paketleniyor.",
-		"zip_hint_a":  "İndirme hazır olduğunda otomatik başlayacak. Başlamazsa ",
-		"zip_hint_b":  "buraya tıklayın",
-		"zip_hint_c":  ".",
+// requestLang is the language server-written text for THIS request's reader
+// is in: the flow's own candidates first (an explicit choice the request
+// carries), then the caller's account language, then the browser's
+// Accept-Language, then the instance default, then English.
+//
+// ⚠ The same order langOf uses for a plugin call (account, then
+// Accept-Language) — lesson #214: a person who never picked a language in
+// their profile must not get English text out of a flow whose screen spoke
+// to them in Turkish. The difference is that this one keeps a pack's language
+// instead of narrowing to en/tr.
+func requestLang(r *http.Request, first ...string) string {
+	cands := append(append([]string{}, first...), userLang(r))
+	if r != nil {
+		cands = append(cands, srvtext.FromAcceptLanguage(r.Header.Get("Accept-Language")))
+	}
+	return srvtext.Pick(cands...)
+}
 
-		// Prepared local copy for a big file on slow storage (filecache)
-		"cache_title":   "İndirme hazırlanıyor…",
-		"cache_heading": "İndirme hazırlanıyor…",
-		"cache_sub":     "%s — bu dosya yavaş bir depoda; yerel bir kopyası hazırlanıyor.",
-		"cache_hint":    "Kopya hazır olduğunda indirme kendiliğinden başlar. Bu sayfayı açık bırakabilirsiniz.",
-
-		// Shared folder listing
-		"folder_title_suffix": "paylaşılan klasör",
-		"folder_counts":       "%d klasör · %d dosya",
-		"folder_up":           "← Üst klasör",
-		"folder_zip":          "Tümünü indir (ZIP)",
-		"folder_empty":        "Bu klasör boş.",
-
-		// Errors
-		"err_expired_title":     "Bağlantının süresi doldu",
-		"err_expired_body":      "Bu bağlantının süresi dolmuş ya da indirme limitine ulaşılmış.",
-		"err_notfound_title":    "Bulunamadı",
-		"err_notfound_body":     "Bu bağlantı geçersiz, süresi dolmuş ya da kaldırılmış.",
-		"err_folder_title":      "Klasör bulunamadı",
-		"err_folder_body":       "Bu klasör paylaşımda yok.",
-		"err_unavailable_title": "Dosya kullanılamıyor",
-		"err_unavailable_body":  "Paylaşılan öğe okunamadı. Bağlantıyı paylaşan kişiye bildirin.",
-		"err_limit_title":       "İndirme limiti doldu",
-		"err_limit_body":        "Bu bağlantı izin verilen sayıda indirildi.",
-
-		// File-drop (public upload link) — the inverse of a download share.
-		"drop_title":        "Dosya gönder",
-		"drop_heading":      "Dosya gönder",
-		"drop_sub":          "Aşağıya dosyaları sürükleyin veya seçin. Yalnızca yükleyebilirsiniz; klasördeki dosyalar size görünmez.",
-		"drop_zone_big":     "Dosyaları buraya bırakın",
-		"drop_zone_hint":    "veya seçmek için tıklayın",
-		"drop_zone_aria":    "Dosya seçin veya sürükleyip bırakın",
-		"drop_name_label":   "Adınız (isteğe bağlı)",
-		"drop_name_ph":      "Örn. Ahmet Yılmaz",
-		"drop_note_label":   "Not (isteğe bağlı)",
-		"drop_note_ph":      "Kısa bir mesaj ekleyebilirsiniz",
-		"drop_send":         "Gönder",
-		"drop_sending":      "Gönderiliyor…",
-		"drop_remove_aria":  "Kaldır: %s",
-		"drop_limit_files":  "En fazla %s dosya",
-		"drop_limit_size":   "dosya başına %s MB",
-		"drop_limit_ext":    "izinli türler: %s",
-		"drop_done_heading": "Teşekkürler!",
-		"drop_done_sub":     "%s dosya başarıyla gönderildi.",
-
-		// Drop failures the visitor sees. `drop_err_storage` is the one that
-		// matters most: the link is fine and the files are fine — the backing
-		// storage is unreachable — so the message says so instead of leaving
-		// somebody retrying a link they think is broken.
-		"drop_err_too_many":  "En fazla %s dosya gönderebilirsiniz.",
-		"drop_err_too_large": "%s çok büyük (en fazla %s MB).",
-		"drop_err_ext":       "%s için izin verilmeyen dosya türü.",
-		"drop_err_ext_any":   "İzin verilmeyen dosya türü.",
-		"drop_err_large_any": "Bir dosya izin verilen boyuttan büyük (en fazla %s MB).",
-		"drop_err_bad_pin":   "Yanlış PIN.",
-		"drop_err_expired":   "Bağlantının süresi dolmuş.",
-		"drop_err_rate":      "Çok fazla deneme — biraz sonra tekrar deneyin.",
-		"drop_err_no_files":  "Dosya seçilmedi.",
-		"drop_err_storage":   "Dosya deposuna şu an ulaşılamıyor, gönderiminiz kaydedilemedi. Biraz sonra tekrar deneyin — bağlantınız geçerli kalmaya devam ediyor.",
-		"drop_err_quota":     "Bu bağlantının klasöründe yeterli yer kalmamış. Bağlantıyı paylaşan kişiye bildirin.",
-		"drop_err_generic":   "Gönderilemedi, lütfen tekrar deneyin.",
-
-		// Drop error pages (link resolution — before any upload)
-		"err_drop_notfound_title": "Bulunamadı",
-		"err_drop_notfound_body":  "Bu bağlantı mevcut değil veya kaldırılmış.",
-		"err_drop_notdrop_title":  "Bulunamadı",
-		"err_drop_notdrop_body":   "Bu bağlantı bir dosya yükleme bağlantısı değil.",
-		"err_drop_expired_title":  "Süresi doldu",
-		"err_drop_expired_body":   "Bu yükleme bağlantısının süresi dolmuş veya limiti dolmuş.",
-	},
-	"en": {
-		"pin_title":    "Enter PIN",
-		"pin_heading":  "This share is PIN-protected",
-		"pin_sub":      "Enter the PIN to access it.",
-		"pin_submit":   "Unlock",
-		"pin_aria":     "PIN",
-		"pin_wrong":    "Wrong PIN — try again.",
-		"pin_required": "PIN required.",
-
-		"unlocked_title":   "PIN accepted",
-		"unlocked_heading": "PIN accepted",
-		"unlocked_sub":     "Your download will start in a moment…",
-
-		"zip_title":   "Preparing your download…",
-		"zip_heading": "Preparing your download…",
-		"zip_sub":     "%s — packing the folder into a ZIP archive.",
-		"zip_hint_a":  "The download starts on its own when it is ready. If it does not, ",
-		"zip_hint_b":  "click here",
-		"zip_hint_c":  ".",
-
-		// Prepared local copy for a big file on slow storage (filecache)
-		"cache_title":   "Preparing your download…",
-		"cache_heading": "Preparing your download…",
-		"cache_sub":     "%s — this file lives on slow storage, so a local copy is being prepared.",
-		"cache_hint":    "The download starts on its own once the copy is ready. You can leave this page open.",
-
-		"folder_title_suffix": "shared folder",
-		"folder_counts":       "%d folders · %d files",
-		"folder_up":           "← Up one level",
-		"folder_zip":          "Download all (ZIP)",
-		"folder_empty":        "This folder is empty.",
-
-		"err_expired_title":     "Link expired",
-		"err_expired_body":      "This link has expired or reached its download limit.",
-		"err_notfound_title":    "Not found",
-		"err_notfound_body":     "This link is invalid, expired or has been removed.",
-		"err_folder_title":      "Folder not found",
-		"err_folder_body":       "This folder does not exist in the share.",
-		"err_unavailable_title": "File unavailable",
-		"err_unavailable_body":  "The shared item could not be read. Let whoever sent you the link know.",
-		"err_limit_title":       "Download limit reached",
-		"err_limit_body":        "This link has been downloaded the maximum number of times.",
-
-		"drop_title":        "Send files",
-		"drop_heading":      "Send files",
-		"drop_sub":          "Drag files below or pick them. You can only upload; the folder's contents stay hidden from you.",
-		"drop_zone_big":     "Drop your files here",
-		"drop_zone_hint":    "or click to choose",
-		"drop_zone_aria":    "Choose files or drag and drop them",
-		"drop_name_label":   "Your name (optional)",
-		"drop_name_ph":      "e.g. Alex Smith",
-		"drop_note_label":   "Note (optional)",
-		"drop_note_ph":      "You can add a short message",
-		"drop_send":         "Send",
-		"drop_sending":      "Sending…",
-		"drop_remove_aria":  "Remove: %s",
-		"drop_limit_files":  "Up to %s files",
-		"drop_limit_size":   "%s MB per file",
-		"drop_limit_ext":    "allowed types: %s",
-		"drop_done_heading": "Thank you!",
-		"drop_done_sub":     "%s file(s) sent successfully.",
-
-		"drop_err_too_many":  "You can send at most %s files.",
-		"drop_err_too_large": "%s is too big (max %s MB).",
-		"drop_err_ext":       "%s has a file type that is not allowed.",
-		"drop_err_ext_any":   "That file type is not allowed.",
-		"drop_err_large_any": "One of the files is over the size limit (max %s MB).",
-		"drop_err_bad_pin":   "Wrong PIN.",
-		"drop_err_expired":   "This link has expired.",
-		"drop_err_rate":      "Too many attempts — try again shortly.",
-		"drop_err_no_files":  "No file selected.",
-		"drop_err_storage":   "The file storage is unreachable right now, so your upload could not be saved. Try again shortly — your link stays valid.",
-		"drop_err_quota":     "The folder behind this link is out of space. Let whoever sent you the link know.",
-		"drop_err_generic":   "Could not send, please try again.",
-
-		"err_drop_notfound_title": "Not found",
-		"err_drop_notfound_body":  "This link does not exist or has been removed.",
-		"err_drop_notdrop_title":  "Not found",
-		"err_drop_notdrop_body":   "This link is not a file-upload link.",
-		"err_drop_expired_title":  "Expired",
-		"err_drop_expired_body":   "This upload link has expired or reached its limit.",
-	},
+// pageDir is the `dir` a server-rendered page carries on <html>, derived from
+// the same `lang` it carries (feat/043-rtl): "rtl" for a right-to-left
+// language — a pack's Arabic or Hebrew now reaches these pages through the
+// server catalogue (feat/043-srvtext) — "ltr" for everything else. ⚠ The one
+// list is wire.IsRTL, as for the explorer and the admin panel; a page that
+// set `lang="ar"` without `dir` drew Arabic words in a left-to-right layout.
+func pageDir(lang string) string {
+	if wire.IsRTL(lang) {
+		return "rtl"
+	}
+	return "ltr"
 }
 
 // publicPageLang resolves everything a public page needs to render in ONE
@@ -244,18 +107,62 @@ var publicText = map[string]map[string]string{
 // that renders its own strings is a surface that can silently lose them.
 func publicPageLang(br *BrandingSource, r *http.Request, defaultLocale string) (string, map[string]string, publicChrome, template.HTML) {
 	lang := publicLocale(r, defaultLocale)
-	t := publicT(lang)
 	c := publicChromeFor(br, r)
-	if lang == "tr" {
-		return lang, t, c, c.FooterTR
-	}
-	return lang, t, c, c.FooterEN
+	return lang, publicT(lang), c, c.Footer(lang)
 }
 
-// publicT returns the string table for a language, always non-nil.
+// publicT returns the string table for a language, always non-nil and always
+// complete: every `server.public.*` key, the language's own where it has one
+// and English where it does not. Keys are the short names the templates use
+// (`pin_title`); values keep their `{placeholders}` for the caller to fill.
 func publicT(lang string) map[string]string {
-	if t, ok := publicText[lang]; ok {
-		return t
+	return srvtext.Table(lang, srvtext.Prefix+"public.")
+}
+
+// publicLinkSentence is ONE page sentence whose `{link}` is an anchor.
+//
+// ⚠⚠ Not three keys around an <a>. The ZIP wait page used to say
+// `zip_hint_a` + `zip_hint_b` (the link's words) + `zip_hint_c` (a full
+// stop), which is a sentence a translator cannot reorder, cannot punctuate
+// and cannot even see whole — the same anti-pattern `access.ui.create_then_send`
+// was fixed for in v0.43.0. The sentence is one message with a placeholder;
+// only the words INSIDE the link are a second key, because they are a label.
+//
+// Everything from the catalogue is HTML-escaped: a language pack is installed
+// by an administrator, and a pack is not markup.
+func publicLinkSentence(t map[string]string, key, linkKey, id, href string) template.HTML {
+	esc := template.HTMLEscapeString
+	anchor := `<a id="` + esc(id) + `" href="` + esc(href) + `">` + esc(t[linkKey]) + `</a>`
+	parts := strings.SplitN(esc(t[key]), "{link}", 2)
+	if len(parts) != 2 {
+		// srvtext.fits refuses a translation that drops a placeholder, so this
+		// is the built-in English going missing — say the link anyway.
+		return template.HTML(esc(t[key]) + " " + anchor)
 	}
-	return publicText["en"]
+	return template.HTML(parts[0] + anchor + parts[1])
+}
+
+// publicFill is one public-page string with its placeholders filled.
+func publicFill(t map[string]string, key string, vars map[string]string) string {
+	return srvtext.Fill(t[key], vars)
+}
+
+// publicCount is a count-bearing public string ("3 files" / "1 file") in
+// lang: the form of n's plural category (srvtext.Plural).
+func publicCount(lang, key string, n int) string {
+	return srvtext.Plural(lang, srvtext.Prefix+"public."+key, n, nil)
+}
+
+// publicFooterLine is the "Shared with filex" line in lang, as HTML.
+//
+// ⚠ The ONE place a translation meets markup: the sentence is the catalogue's
+// (`server.public.footer`, "Shared with {filex}") and the brand link is not.
+// The translation is HTML-ESCAPED FIRST and the link is put in afterwards, so
+// a pack cannot inject markup into a page strangers open — the worst it can do
+// is misplace the word "filex".
+func publicFooterLine(lang string) string {
+	const brandLink = `<a href="https://filex.sh" target="_blank" rel="noopener">filex</a>`
+	line := template.HTMLEscapeString(srvtext.Template(lang, srvtext.Prefix+"public.footer"))
+	line = strings.Replace(line, "{filex}", brandLink, 1)
+	return `<footer class="brand">` + publicBrandMark + `<span>` + line + `</span></footer>`
 }
