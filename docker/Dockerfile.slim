@@ -58,6 +58,14 @@ RUN pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
 # Copy sources after install for max cache hit.
 COPY packages/ ./packages/
 COPY web/ ./web/
+# ⚠ The build configs reach outside their packages, and a path missing here
+# fails the image with "Could not resolve" long after every test passed (the
+# v0.43.0 release): packages/core and packages/webcomponent import the font
+# inliner from scripts/, and web's catalogue plugin (dist/i18n/, which the
+# binary embeds) reads scripts/lib/ and the server's own string table.
+COPY scripts/vite-fonts-as-files.mjs ./scripts/
+COPY scripts/lib/ ./scripts/lib/
+COPY backend/internal/srvtext/locales/ ./backend/internal/srvtext/locales/
 
 # Build npm packages first (web depends on them transitively for type imports
 # and the webcomponent dist gets embedded into the Go binary).
