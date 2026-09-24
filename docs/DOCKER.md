@@ -322,6 +322,15 @@ the shape of "I upload a file and it shows up ten minutes later". The MCP
 stream at `/api/ai/mcp` needs the same. See
 [Realtime](REALTIME.md) and [Deployment](DEPLOYMENT.md).
 
+⚠ **Keep cache rules off filex's host.** Every `/api/` answer carries
+`Cache-Control: no-store` (handlers with a policy of their own, such as thumbnails,
+file content, share downloads and branding, set theirs), and Cloudflare honours it
+by default. A rule whose edge TTL *ignores* origin headers does not. A zone-wide
+"cache everything" rule written for a website on the same domain once kept
+`/api/auth/me` for two hours and showed one user's identity to everyone who
+asked. Scope such rules to the website's own hosts, e.g.
+`http.host in {"example.com" "www.example.com"}`.
+
 ---
 
 ## TLS termination

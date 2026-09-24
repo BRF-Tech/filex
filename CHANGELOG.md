@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **API answers are no longer stored by shared caches.** Every `/api/` response
+  now carries `Cache-Control: no-store` unless its handler sets a policy of its
+  own. Thumbnails, file content, share downloads and branding keep theirs. JSON
+  answers used to carry no Cache-Control at all, and a CDN rule that caches
+  everything took that as permission. Measured behind Cloudflare: a zone rule
+  written for the tenant's website, with no host condition, kept
+  `GET /api/auth/me` for two hours and served one administrator's identity
+  (email, role) to everyone who asked, anonymous requests included. Signing out
+  and in as another account still showed the administrator, because the identity
+  request never reached filex. See [docs/DOCKER.md](docs/DOCKER.md#cloudflare-tunnel)
+  for scoping such rules.
+
 ## [0.42.2] - 2026-09-19
 
 A fix release for the issue 32 follow-up and three things that were wrong on

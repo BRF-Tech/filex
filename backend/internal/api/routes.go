@@ -267,6 +267,9 @@ func BuildRouter(d *Deps) http.Handler {
 	// see demo_guard.go for what is refused and why. No-op unless Demo.Mode.
 	r.Use(DemoGuard(d.Cfg.Demo.Mode))
 
+	// Per-user answers stay out of shared caches — see APINoStore.
+	r.Use(APINoStore)
+
 	// Existing user-facing handlers.
 	mh := handlers.NewManager(d.Store, d.StorageResolver)
 	mh.AttachACL(d.ACL)
