@@ -582,12 +582,12 @@ func aiTagFilter(ctx context.Context, ops *aiOps, storageName string, parsed sea
 // the same question differently depending on which door an agent came
 // through.
 //
-// aiOps.Search wraps its argument in its own %…%, so it gets the anchor
-// WORD and the remaining words are re-checked here: the same two-step
-// the index-less HTTP path uses.
+// aiOps.Search fetches the plan's candidate rows — every word of the query
+// is a condition in the database query — and the whole query is re-checked
+// here by the scorer: the same two steps the index-less HTTP path takes.
 func aiNameSearch(ctx context.Context, ops *aiOps, p string, parsed search.Parsed, tags aiTagFilterSet) ([]aiEntry, error) {
 	plan := search.PlanFallback(parsed.Text)
-	entries, err := ops.Search(ctx, p, plan.Anchor)
+	entries, err := ops.Search(ctx, p, plan)
 	if err != nil {
 		return nil, err
 	}

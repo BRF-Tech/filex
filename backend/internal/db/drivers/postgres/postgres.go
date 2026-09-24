@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -855,6 +856,46 @@ func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, l
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT `+nodeColumns()+` FROM nodes WHERE storage_id=$1 AND name ILIKE $2 AND deleted_at IS NULL ORDER BY name LIMIT $3`, storageID, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// SearchNodesAll mirrors the SQLite store's: one AND-ed group of ILIKEs on
+// the name per term, in the order given.
+func (s *Store) SearchNodesAll(ctx context.Context, storageID int64, terms [][]string, limit int) ([]*model.Node, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	args := []any{storageID}
+	var where strings.Builder
+	where.WriteString(`storage_id=$1 AND deleted_at IS NULL`)
+	for _, term := range terms {
+		if len(term) == 0 {
+			continue
+		}
+		ors := make([]string, 0, len(term))
+		for _, p := range term {
+			args = append(args, p)
+			ors = append(ors, `name ILIKE $`+strconv.Itoa(len(args)))
+		}
+		where.WriteString(` AND (` + strings.Join(ors, ` OR `) + `)`)
+	}
+	if len(args) == 1 {
+		return nil, nil
+	}
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+nodeColumns()+` FROM nodes WHERE `+where.String()+` ORDER BY name LIMIT $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
 		return nil, err
 	}

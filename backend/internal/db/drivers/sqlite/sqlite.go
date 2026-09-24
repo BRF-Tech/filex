@@ -1000,6 +1000,53 @@ func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, l
 	return out, rows.Err()
 }
 
+// SearchNodesAll — see db.Store. Every condition is on the name, which
+// idx_nodes_storage_parent_name holds: SQLite rejects a row from the index
+// without reading it from the table, the way SearchNodes' single LIKE
+// always has. A condition on the path would read every candidate row.
+func (s *Store) SearchNodesAll(ctx context.Context, storageID int64, terms [][]string, limit int) ([]*model.Node, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	// The same explicit collation as SearchNodes: since migration 00041
+	// MySQL compares names byte for byte.
+	nameMatch := `name LIKE ?`
+	if s.mysql {
+		nameMatch = `name COLLATE utf8mb4_0900_ai_ci LIKE ?`
+	}
+	var where strings.Builder
+	where.WriteString(`storage_id=? AND deleted_at IS NULL`)
+	args := []any{storageID}
+	for _, term := range terms {
+		if len(term) == 0 {
+			continue
+		}
+		ors := make([]string, 0, len(term))
+		for _, p := range term {
+			ors = append(ors, nameMatch)
+			args = append(args, p)
+		}
+		where.WriteString(` AND (` + strings.Join(ors, ` OR `) + `)`)
+	}
+	if len(args) == 1 {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+` FROM nodes WHERE `+where.String()+` ORDER BY name LIMIT ?`, append(args, limit)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 // ─────────────────── Users ───────────────────
 
 func (s *Store) CreateUser(ctx context.Context, email, passwordHash, role, locale, tz string) (*model.User, error) {

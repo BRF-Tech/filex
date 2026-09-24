@@ -971,7 +971,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 			storages, err := h.Store.ListEnabledStorages(r.Context())
 			if err == nil {
 				for _, st := range storages {
-					rows, err := h.Store.SearchNodes(r.Context(), st.ID, plan.Like, 100*search.FallbackOverFetch)
+					rows, err := plan.Candidates(r.Context(), h.Store, st.ID, 100*search.FallbackOverFetch)
 					if err != nil {
 						continue
 					}
@@ -979,7 +979,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 				}
 			}
 		} else {
-			fallback, err := h.Store.SearchNodes(r.Context(), s.ID, plan.Like, 250*search.FallbackOverFetch)
+			fallback, err := plan.Candidates(r.Context(), h.Store, s.ID, 250*search.FallbackOverFetch)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return

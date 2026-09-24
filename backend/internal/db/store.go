@@ -106,6 +106,14 @@ type Store interface {
 	// the SPA looping every node row.
 	StorageStats(ctx context.Context, storageID int64) (fileCount int64, totalBytes int64, err error)
 	SearchNodes(ctx context.Context, storageID int64, like string, limit int) ([]*model.Node, error)
+	// SearchNodesAll is the multi-word search: a live node is returned when
+	// its name matches one LIKE pattern of EVERY term (a term is the
+	// patterns for the spellings of one word). Every word being a condition
+	// is what makes the LIMIT count rows that answer the whole query. The
+	// terms are checked in the order given, so the caller puts the cheap
+	// ones first. Ordered by name and ASCII case-insensitive, like
+	// SearchNodes; no terms, no rows.
+	SearchNodesAll(ctx context.Context, storageID int64, terms [][]string, limit int) ([]*model.Node, error)
 
 	// Users
 	CreateUser(ctx context.Context, email, passwordHash, role, locale, tz string) (*model.User, error)

@@ -371,7 +371,7 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	// documented in docs/SEARCH.md and left alone here.
 	if len(results) == 0 && req.StorageID != 0 && parsed.Text != "" && sc != search.ScopeContent {
 		plan := search.PlanFallback(parsed.Text)
-		fallback, err := h.Store.SearchNodes(r.Context(), req.StorageID, plan.Like, req.Limit*search.FallbackOverFetch)
+		fallback, err := plan.Candidates(r.Context(), h.Store, req.StorageID, req.Limit*search.FallbackOverFetch)
 		if err == nil {
 			for _, n := range fallback {
 				/* wiring:e2 — the marker file stays hidden in name search too */

@@ -3,6 +3,8 @@ package db_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"path"
 	"sort"
 	"testing"
 	"time"
@@ -191,6 +193,77 @@ func TestNamesDifferingOnlyByCaseOrAccentOnEveryEngine(t *testing.T) {
 			require.Len(t, grants, 2, "two grants on two different folders")
 		})
 	}
+}
+
+// TestSearchNodesAllOnEveryEngine: a multi-word search puts every word in the
+// query, so its LIMIT counts rows that can answer the whole query.
+//
+// The index-less search used to send the database one word, take the first
+// rows by name that held it, and check the other words afterwards. A file
+// that answered everything but sorted after those rows was never seen —
+// measured in production on 2026-09-24 with the one word in 64 483 names and
+// the file at row 33 623. A term is the spellings of one word (composed,
+// decomposed, cased); a row's name needs one of them for every term.
+func TestSearchNodesAllOnEveryEngine(t *testing.T) {
+	for _, e := range engines() {
+		t.Run(e.name, func(t *testing.T) {
+			sqlDB, drv := openMigrated(t, e)
+			store := drv.NewStore(sqlDB)
+			ctx := context.Background()
+			st := createEngineStorage(t, store)
+
+			add := func(p string) int64 {
+				t.Helper()
+				n, err := store.CreateNode(ctx, &model.Node{
+					StorageID: st.ID, Name: path.Base(p), Path: p,
+					PathHash: pathkey.Hash(st.ID, p), Type: model.NodeTypeFile,
+				})
+				require.NoError(t, err, "catalogue %q", p)
+				return n.ID
+			}
+			// Rows that hold one of the words and sort before the file.
+			for i := 0; i < 300; i++ {
+				add(fmt.Sprintf("/2026/Plan - Aa%03d - Yeni.pdf", i))
+			}
+			// What a Mac uploads: ş and ü decomposed into a letter and a mark.
+			decomposed := add("/2026/Plan - Ays\u0327e Gu\u0308rel - Yeni.pdf")
+			upper := add("/2026/PLAN - AYŞE GÜREL - ESKİ.pdf")
+			// The words are matched against the name: a folder does not count.
+			add("/Gürel/plan.pdf")
+			deleted := add("/2026/Plan - Gürel - silindi.pdf")
+			require.NoError(t, store.SoftDeleteNode(ctx, deleted))
+
+			gurel := []string{"%gürel%", "%GÜREL%", "%gu\u0308rel%"}
+			want := []int64{decomposed, upper}
+			rows, err := store.SearchNodesAll(ctx, st.ID, [][]string{gurel, {"%plan%"}}, 50)
+			require.NoError(t, err)
+			require.ElementsMatch(t, want, nodeIDs(rows))
+
+			// The order of the terms is not a condition.
+			rows, err = store.SearchNodesAll(ctx, st.ID, [][]string{{"%plan%"}, gurel}, 50)
+			require.NoError(t, err)
+			require.ElementsMatch(t, want, nodeIDs(rows))
+
+			// The LIMIT counts answers, not rows that hold one word: the
+			// first rows by name holding `plan` are the 300 above.
+			rows, err = store.SearchNodesAll(ctx, st.ID, [][]string{{"%plan%"}, gurel}, 1)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			require.Subset(t, want, nodeIDs(rows))
+
+			rows, err = store.SearchNodesAll(ctx, st.ID, nil, 50)
+			require.NoError(t, err)
+			require.Empty(t, rows, "no terms, no rows")
+		})
+	}
+}
+
+func nodeIDs(rows []*model.Node) []int64 {
+	out := make([]int64, 0, len(rows))
+	for _, n := range rows {
+		out = append(out, n.ID)
+	}
+	return out
 }
 
 func createEngineStorage(t *testing.T, store interface {

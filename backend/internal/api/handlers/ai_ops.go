@@ -836,9 +836,11 @@ func (a *aiOps) Mkdir(ctx context.Context, p string) (*aiEntry, error) {
 	}, nil
 }
 
-// Search runs a name/content search scoped to one storage (or all when the
-// path has no adapter and multiple storages exist).
-func (a *aiOps) Search(ctx context.Context, p, query string) ([]aiEntry, error) {
+// Search runs the index-less name search of one storage (or all when the
+// path has no adapter and multiple storages exist): the plan's candidate
+// rows, confined to what the token and the user may see. The rest of the
+// query is re-checked by the caller (aiNameSearch).
+func (a *aiOps) Search(ctx context.Context, p string, plan search.Fallback) ([]aiEntry, error) {
 	s, _, err := a.resolveStorage(ctx, p)
 	if err != nil {
 		return nil, err
@@ -848,7 +850,7 @@ func (a *aiOps) Search(ctx context.Context, p, query string) ([]aiEntry, error) 
 	if a.acl != nil {
 		set, _ = a.acl.LoadSet(ctx, auth.UserFrom(ctx), s)
 	}
-	rows, err := a.store.SearchNodes(ctx, s.ID, "%"+query+"%", 200)
+	rows, err := plan.Candidates(ctx, a.store, s.ID, 200)
 	if err != nil {
 		return nil, err
 	}
