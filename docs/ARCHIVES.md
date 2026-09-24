@@ -64,6 +64,19 @@ archive:
   work_dir: /var/lib/filex/archive-work
 ```
 
+### Workspace performance
+
+Place `archive.work_dir` on fast local storage. During extraction, filex walks
+this private workspace to enforce the live expanded-byte and entry limits. A
+filesystem with slow metadata operations, especially network storage, can make
+those scans dominate extraction time and delay detection of a limit breach.
+
+Archives whose declared totals exceed policy are rejected before extraction,
+so the live scans primarily defend against malformed or dishonest metadata. On
+a very slow workspace, both extraction and monitoring become less practical;
+keep the configured storage destination remote if needed, but use a local
+workspace for archive processing.
+
 ## Safety model
 
 - Commands are executed directly without a shell and have a fixed argument
@@ -71,7 +84,8 @@ archive:
 - Input archives and source files are copied into a private workspace first.
 - Member paths are validated before and after extraction; absolute paths,
   traversal, links and special files are rejected.
-- Declared and actual expanded sizes and entry counts are bounded by policy.
+- Declared sizes and entry counts are checked before extraction; live budgets
+  stop the provider if its actual output crosses either limit.
 - Extraction writes through the same ACL, overwrite/versioning and catalogue
   hooks as ordinary file operations.
 - Provider commands inherit request cancellation and have a configurable hard

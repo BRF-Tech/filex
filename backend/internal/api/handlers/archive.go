@@ -374,6 +374,9 @@ func (a *Archive) inspectArchive(ctx context.Context, archivePath string, req ar
 				return archiveExtractPlan{}, fmt.Errorf("%w: archive contains a link entry", archivecli.ErrUnsupported)
 			}
 			if !entry.IsDir {
+				if entry.Size < 0 || entry.Size > policy.MaxExpandedBytes-expanded {
+					return archiveExtractPlan{}, fmt.Errorf("%w: extraction limit exceeded", archivecli.ErrLimits)
+				}
 				expanded += entry.Size
 			}
 			if count(entry.Name, entry.IsDir) {
@@ -409,6 +412,9 @@ func (a *Archive) inspectArchive(ctx context.Context, archivePath string, req ar
 		mode := file.Mode()
 		if mode&os.ModeSymlink != 0 || (!mode.IsRegular() && !mode.IsDir()) {
 			return archiveExtractPlan{}, fmt.Errorf("%w: archive contains a link or special entry", archivecli.ErrUnsupported)
+		}
+		if file.UncompressedSize64 > ^uint64(0)-expanded {
+			return archiveExtractPlan{}, fmt.Errorf("%w: extraction limit exceeded", archivecli.ErrLimits)
 		}
 		expanded += file.UncompressedSize64
 		if count(file.Name, strings.HasSuffix(file.Name, "/")) {

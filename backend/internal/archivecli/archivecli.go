@@ -486,9 +486,87 @@ func (s *Service) Test(ctx context.Context, archivePath, password string) error 
 	return classifyPassword(string(out), password, runErr)
 }
 
-// Extract expands an archive into an empty private workspace. Validation of
-// the produced filesystem tree belongs to the caller before any file is
-// copied into a storage driver.
+const (
+	minimumExtractionBudgetDelay = 100 * time.Millisecond
+	maximumExtractionBudgetDelay = 2 * time.Second
+	extractionBudgetBackoff      = 4
+)
+
+func nextExtractionBudgetDelay(scanDuration time.Duration) time.Duration {
+	delay := scanDuration * extractionBudgetBackoff
+	if delay < minimumExtractionBudgetDelay {
+		return minimumExtractionBudgetDelay
+	}
+	if delay > maximumExtractionBudgetDelay {
+		return maximumExtractionBudgetDelay
+	}
+	return delay
+}
+
+func extractionLimitError() error {
+	return fmt.Errorf("%w: extraction limit exceeded", ErrLimits)
+}
+
+func checkExtractionBudget(root string, maxEntries int, maxBytes int64) error {
+	entries := 0
+	var expanded int64
+	err := filepath.WalkDir(root, func(name string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if errors.Is(walkErr, os.ErrNotExist) {
+				return nil
+			}
+			return walkErr
+		}
+		if name == root {
+			return nil
+		}
+		entries++
+		if entries > maxEntries {
+			return extractionLimitError()
+		}
+		info, err := entry.Info()
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if info.Mode().IsRegular() {
+			if info.Size() > maxBytes-expanded {
+				return extractionLimitError()
+			}
+			expanded += info.Size()
+		}
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+func monitorExtractionBudget(ctx context.Context, root string, maxEntries int, maxBytes int64, stop <-chan struct{}) error {
+	timer := time.NewTimer(minimumExtractionBudgetDelay)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-stop:
+			return nil
+		case <-timer.C:
+			scanStarted := time.Now()
+			if err := checkExtractionBudget(root, maxEntries, maxBytes); err != nil {
+				return err
+			}
+			timer.Reset(nextExtractionBudgetDelay(time.Since(scanStarted)))
+		}
+	}
+}
+
+// Extract expands an archive into an empty private workspace while enforcing
+// the live archive policy. The caller still validates paths and file types
+// before copying anything into a storage driver.
 func (s *Service) Extract(ctx context.Context, archivePath, destDir, password string, members []string) error {
 	bin, err := s.sevenZipPath()
 	if err != nil {
@@ -502,7 +580,28 @@ func (s *Service) Extract(ctx context.Context, archivePath, destDir, password st
 	args = append(args, members...)
 	cctx, cancel := s.timeoutContext(ctx)
 	defer cancel()
-	out, runErr := exec.CommandContext(cctx, bin, args...).CombinedOutput()
+	runCtx, stopProcess := context.WithCancel(cctx)
+	defer stopProcess()
+
+	policy := s.Policy(ctx)
+	stopMonitor := make(chan struct{})
+	monitorDone := make(chan error, 1)
+	go func() {
+		err := monitorExtractionBudget(runCtx, destDir, policy.MaxEntries, policy.MaxExpandedBytes, stopMonitor)
+		if err != nil {
+			stopProcess()
+		}
+		monitorDone <- err
+	}()
+
+	out, runErr := exec.CommandContext(runCtx, bin, args...).CombinedOutput()
+	close(stopMonitor)
+	if err := <-monitorDone; err != nil {
+		return err
+	}
+	if err := checkExtractionBudget(destDir, policy.MaxEntries, policy.MaxExpandedBytes); err != nil {
+		return err
+	}
 	if err := cctx.Err(); err != nil {
 		return err
 	}

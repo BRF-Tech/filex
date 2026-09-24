@@ -8,22 +8,65 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-const testSevenZipVersionEnv = "FILEX_TEST_7ZIP_VERSION"
+const (
+	testSevenZipVersionEnv      = "FILEX_TEST_7ZIP_VERSION"
+	testSevenZipExtractBytesEnv = "FILEX_TEST_7ZIP_EXTRACT_BYTES"
+)
 
 func TestMain(m *testing.M) {
-	if version := os.Getenv(testSevenZipVersionEnv); version != "" {
+	version := os.Getenv(testSevenZipVersionEnv)
+	if version == "" {
+		os.Exit(m.Run())
+	}
+	if len(os.Args) > 1 && os.Args[1] == "i" {
 		_, _ = os.Stdout.WriteString("7-Zip (z) " + version + " (test helper)\n")
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	if raw := os.Getenv(testSevenZipExtractBytesEnv); raw != "" {
+		total, err := strconv.Atoi(raw)
+		if err != nil {
+			os.Exit(2)
+		}
+		dest := ""
+		for _, arg := range os.Args[1:] {
+			if strings.HasPrefix(arg, "-o") {
+				dest = strings.TrimPrefix(arg, "-o")
+			}
+		}
+		if dest == "" || os.MkdirAll(dest, 0o700) != nil {
+			os.Exit(2)
+		}
+		file, err := os.Create(filepath.Join(dest, "payload.bin"))
+		if err != nil {
+			os.Exit(2)
+		}
+		chunk := bytes.Repeat([]byte("x"), 4096)
+		for written := 0; written < total; written += len(chunk) {
+			remaining := total - written
+			if remaining < len(chunk) {
+				chunk = chunk[:remaining]
+			}
+			if _, err := file.Write(chunk); err != nil {
+				_ = file.Close()
+				os.Exit(2)
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+		_ = file.Close()
+		os.Exit(0)
+	}
+	_, _ = os.Stdout.WriteString("7-Zip (z) " + version + " (test helper)\n")
+	os.Exit(0)
 }
 
 type memorySettings map[string]string
@@ -139,6 +182,61 @@ func TestSevenZipPathRejectsOutdatedBinary(t *testing.T) {
 	resolved, err := New(memorySettings{}, Config{SevenZipBin: bin}).sevenZipPath()
 	require.NoError(t, err)
 	assert.Equal(t, bin, resolved)
+}
+
+func TestExtractionBudgetDelayAdaptsToScanCost(t *testing.T) {
+	assert.Equal(t, 100*time.Millisecond, nextExtractionBudgetDelay(time.Millisecond))
+	assert.Equal(t, 400*time.Millisecond, nextExtractionBudgetDelay(100*time.Millisecond))
+	assert.Equal(t, 2*time.Second, nextExtractionBudgetDelay(time.Second))
+}
+
+func TestExtractionBudgetCountsEntriesAndBytes(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "folder"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "folder", "file.txt"), []byte("ab"), 0o600))
+
+	assert.ErrorIs(t, checkExtractionBudget(root, 1, 2), ErrLimits)
+	assert.ErrorIs(t, checkExtractionBudget(root, 2, 1), ErrLimits)
+	assert.NoError(t, checkExtractionBudget(root, 2, 2))
+}
+
+func TestExtractStopsWhenRunningBudgetIsExceeded(t *testing.T) {
+	bin, err := os.Executable()
+	require.NoError(t, err)
+	t.Setenv(testSevenZipVersionEnv, "24.09")
+	const generatedBytes = 4 << 20
+	t.Setenv(testSevenZipExtractBytesEnv, strconv.Itoa(generatedBytes))
+	root := t.TempDir()
+	svc := New(memorySettings{
+		SettingMaxEntries:       "10",
+		SettingMaxExpandedBytes: "1024",
+		SettingTimeoutSeconds:   "10",
+	}, Config{SevenZipBin: bin})
+
+	err = svc.Extract(context.Background(), "archive.7z", root, "", nil)
+	assert.ErrorIs(t, err, ErrLimits)
+	info, statErr := os.Stat(filepath.Join(root, "payload.bin"))
+	require.NoError(t, statErr)
+	assert.Less(t, info.Size(), int64(generatedBytes), "provider must be stopped before it writes the whole payload")
+}
+
+func BenchmarkCheckExtractionBudget(b *testing.B) {
+	for _, entries := range []int{100, 1_000, 10_000, 20_000} {
+		b.Run(strconv.Itoa(entries), func(b *testing.B) {
+			root := b.TempDir()
+			for i := 0; i < entries; i++ {
+				if err := os.WriteFile(filepath.Join(root, strconv.Itoa(i)), []byte("x"), 0o600); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if err := checkExtractionBudget(root, entries, int64(entries)); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
 
 func TestProviderErrorsAreClassified(t *testing.T) {

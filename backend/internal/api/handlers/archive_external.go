@@ -98,6 +98,9 @@ func (a *Archive) extractExternal(ctx context.Context, req archiveRequest, drv s
 			return nil, fmt.Errorf("%w: archive contains a link entry", archivecli.ErrUnsupported)
 		}
 		if !entry.IsDir {
+			if entry.Size < 0 || entry.Size > policy.MaxExpandedBytes-declared {
+				return nil, fmt.Errorf("%w: extraction limit exceeded", archivecli.ErrLimits)
+			}
 			declared += entry.Size
 		}
 	}
