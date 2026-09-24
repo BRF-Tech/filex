@@ -83,6 +83,7 @@ type Entry struct {
 	Mtime     time.Time `json:"mtime"`
 	IsDir     bool      `json:"is_dir"`
 	Encrypted bool      `json:"encrypted,omitempty"`
+	IsLink    bool      `json:"is_link,omitempty"`
 }
 
 // ProviderStatus describes an archive provider without exposing host paths.
@@ -393,6 +394,7 @@ func parseTechnicalList(out, archivePath string) []Entry {
 			Name: name, Size: size, Mtime: mt,
 			IsDir:     strings.HasPrefix(attrs, "D") || strings.HasSuffix(name, "/"),
 			Encrypted: strings.TrimSpace(cur["Encrypted"]) == "+",
+			IsLink:    cur["Symbolic Link"] != "" || cur["Hard Link"] != "",
 		})
 		cur = map[string]string{}
 	}

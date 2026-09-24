@@ -74,15 +74,30 @@ Size = 42
 Modified = 2026-09-22 10:12:13
 Attributes = A....
 Encrypted = +
+
+Path = folder/latest.txt
+Size = 0
+Modified = 2026-09-22 10:13:14
+Attributes = A....
+Symbolic Link = report.txt
+
+Path = folder/copy.txt
+Size = 42
+Modified = 2026-09-22 10:14:15
+Attributes = A....
+Hard Link = folder/report.txt
 `
 	entries := parseTechnicalList(out, "/tmp/example.7z")
-	require.Len(t, entries, 2)
+	require.Len(t, entries, 4)
 	assert.Equal(t, "folder", entries[0].Name)
 	assert.True(t, entries[0].IsDir)
 	assert.Equal(t, "folder/report.txt", entries[1].Name)
 	assert.EqualValues(t, 42, entries[1].Size)
 	assert.False(t, entries[1].Mtime.IsZero())
 	assert.True(t, entries[1].Encrypted)
+	assert.False(t, entries[1].IsLink)
+	assert.True(t, entries[2].IsLink)
+	assert.True(t, entries[3].IsLink)
 }
 
 func TestProviderErrorsAreClassified(t *testing.T) {

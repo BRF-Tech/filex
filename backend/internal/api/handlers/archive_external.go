@@ -94,6 +94,9 @@ func (a *Archive) extractExternal(ctx context.Context, req archiveRequest, drv s
 		if _, err := sanitizeZipPath(entry.Name); err != nil {
 			return nil, errors.New("archive contains an unsafe member path")
 		}
+		if entry.IsLink {
+			return nil, fmt.Errorf("%w: archive contains a link entry", archivecli.ErrUnsupported)
+		}
 		if !entry.IsDir {
 			declared += entry.Size
 		}

@@ -370,6 +370,9 @@ func (a *Archive) inspectArchive(ctx context.Context, archivePath string, req ar
 			if _, err := sanitizeZipPath(entry.Name); err != nil {
 				return archiveExtractPlan{}, fmt.Errorf("%w: archive contains an unsafe member path", archivecli.ErrUnsupported)
 			}
+			if entry.IsLink {
+				return archiveExtractPlan{}, fmt.Errorf("%w: archive contains a link entry", archivecli.ErrUnsupported)
+			}
 			if !entry.IsDir {
 				expanded += entry.Size
 			}
@@ -402,6 +405,10 @@ func (a *Archive) inspectArchive(ctx context.Context, archivePath string, req ar
 	for _, file := range zr.File {
 		if _, err := sanitizeZipPath(file.Name); err != nil {
 			return archiveExtractPlan{}, fmt.Errorf("%w: archive contains an unsafe member path", archivecli.ErrUnsupported)
+		}
+		mode := file.Mode()
+		if mode&os.ModeSymlink != 0 || (!mode.IsRegular() && !mode.IsDir()) {
+			return archiveExtractPlan{}, fmt.Errorf("%w: archive contains a link or special entry", archivecli.ErrUnsupported)
 		}
 		expanded += file.UncompressedSize64
 		if count(file.Name, strings.HasSuffix(file.Name, "/")) {

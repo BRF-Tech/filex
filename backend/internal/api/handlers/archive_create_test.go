@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -217,6 +218,39 @@ func TestArchiveExtractRejectsUnsafeZipBeforeQueueing(t *testing.T) {
 		code, _ := aiDownload(t, client, srv.URL, tok, target)
 		assert.Equal(t, http.StatusNotFound, code, "%s must not have been written", target)
 	}
+}
+
+func TestArchiveExtractRejectsZipLinkBeforeQueueing(t *testing.T) {
+	srv, client, _, tok, _ := aiFixtureWithOps(t)
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	header := &zip.FileHeader{Name: "outside.txt", Method: zip.Store}
+	header.SetMode(os.ModeSymlink | 0o777)
+	entry, err := zw.CreateHeader(header)
+	require.NoError(t, err)
+	_, err = entry.Write([]byte("../private/secret.txt"))
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+
+	resp := aiReq(t, client, http.MethodPost, srv.URL+"/api/ai/upload", tok, map[string]any{
+		"path":           "main://archives/link.zip",
+		"content_base64": base64.StdEncoding.EncodeToString(buf.Bytes()),
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	resp = aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/extract", tok, map[string]any{
+		"path": "main://archives/link.zip",
+		"dest": "main://restored",
+	})
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	resp.Body.Close()
+	assert.Equal(t, "UNSUPPORTED_FORMAT", body["code"])
+
+	code, _ := aiDownload(t, client, srv.URL, tok, "main://restored/outside.txt")
+	assert.Equal(t, http.StatusNotFound, code)
 }
 
 func TestArchiveExtractEnforcesPolicyBeforeQueueing(t *testing.T) {
