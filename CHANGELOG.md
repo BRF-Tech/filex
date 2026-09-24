@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   storage the caller could reach; so were a negative day count, a storage id
   that was not a number and a misspelt field. Each is now 400 and nothing is
   purged, and the page no longer sends the empty string.
+- **Purging a node no longer reads the whole nodes table.** `nodes.parent_id`
+  cascades on delete and nothing indexed it on SQLite or PostgreSQL, so every
+  hard delete scanned the table for children: 300 ms a row on a
+  231,074-node install. On SQLite, where the store runs one connection, a
+  large purge therefore held that connection for hours and every other request
+  queued behind it (p50 19 ms before, 333 ms during). Migration 00044 adds
+  `idx_nodes_parent_id`: 85 ms a row, p50 46 ms during the same purge, four
+  times the purge rate. MySQL already had the index (InnoDB creates one for a
+  foreign key). ⚠ Numbered 00044: 00042 and 00043 belong to open changes.
 - **A purge that is cut short says so.** A run whose context ended used to
   fail every remaining row of its batch on the dead context, log each one as a
   failed purge, and then report success.
