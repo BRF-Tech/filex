@@ -397,6 +397,10 @@ type Store interface {
 	// share its second — and a trash emptied in one burst shares very few
 	// seconds between tens of thousands of rows.
 	ListTrashedExpired(ctx context.Context, before time.Time, afterID int64, limit int) ([]*model.Node, error)
+	// CountTrashedExpired tallies, per storage, the rows ListTrashedExpired
+	// walks for the same `before`: how many, and the bytes their files hold
+	// (a folder's size is a cached total of its files, so it is not added).
+	CountTrashedExpired(ctx context.Context, before time.Time) (map[int64]TrashTally, error)
 	// ListTrashed returns soft-deleted nodes (paginated). storage filter optional.
 	ListTrashed(ctx context.Context, storageID *int64, limit, offset int) ([]*model.Node, int, error)
 	RestoreNode(ctx context.Context, id int64) error
@@ -526,6 +530,12 @@ type Store interface {
 	// (default) nothing touches these methods.
 	SetProviderPlan(ctx context.Context, providerID int64, plan, limitsJSON, billingRef string) error
 	GetProviderPlan(ctx context.Context, providerID int64) (plan, limitsJSON, billingRef string, err error)
+}
+
+// TrashTally is one storage's share of the trash a purge sweep will walk.
+type TrashTally struct {
+	Count int
+	Bytes int64
 }
 
 // ExternalService is the DB row representation. Lives in the db package so

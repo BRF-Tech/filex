@@ -17,6 +17,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -71,6 +72,19 @@ type Service struct {
 	// JPEG, any staging directory still holding this node's bytes). See
 	// OnPurge. Nil is a no-op, which is what the unit tests use.
 	Reclaim OnPurge
+
+	// sweep admits one purge sweep at a time — the nightly retention run,
+	// EmptyOlderThan and every StartEmpty take it. Two sweeps over the same
+	// rows each read a row, each delete it and each release its bytes from
+	// the owner's quota (quotastore.HardDeleteNode reads before it deletes
+	// and does not ask whether the delete found anything), so the second one
+	// is not merely wasted work: it bills the owner back for bytes twice.
+	sweep sync.Mutex
+
+	runsMu sync.Mutex
+	// runs is the latest StartEmpty per tenant key (see runKey), running or
+	// finished, so a page opened later can still say how it went.
+	runs map[string]*EmptyRun
 }
 
 // New constructs a Service.
@@ -104,11 +118,19 @@ type PurgeResult struct {
 
 // PurgeExpired hard-deletes nodes whose deleted_at is older than the
 // configured retention window.
+//
+// It waits its turn behind a running StartEmpty rather than sweeping the same
+// rows beside it (see Service.sweep).
 func (s *Service) PurgeExpired(ctx context.Context) (PurgeResult, error) {
+	if s == nil || s.Store == nil {
+		return PurgeResult{}, errors.New("trash: service not initialised")
+	}
+	s.sweep.Lock()
+	defer s.sweep.Unlock()
 	days := s.RetentionDays(ctx)
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 	// 0 = every storage: the nightly retention sweep is not narrowed.
-	return s.purgeOlderThan(ctx, cutoff, 0)
+	return s.purgeOlderThan(ctx, cutoff, 0, nil)
 }
 
 // EmptyOlderThan ignores the configured retention and purges anything older
@@ -124,15 +146,26 @@ func (s *Service) PurgeExpired(ctx context.Context) (PurgeResult, error) {
 // storage, only that one is affected." An admin who narrowed the operation to
 // one storage and confirmed it permanently destroyed the trash of EVERY
 // storage — irreversibly, with the dialog telling them the opposite.
+//
+// It runs in the caller's goroutine and ends with the caller's context. The
+// admin endpoint does not use it for that reason — see StartEmpty.
 func (s *Service) EmptyOlderThan(ctx context.Context, olderThanDays int, storageID int64) (PurgeResult, error) {
-	cutoff := time.Now()
-	if olderThanDays > 0 {
-		cutoff = cutoff.Add(-time.Duration(olderThanDays) * 24 * time.Hour)
-	} else {
-		// 0 days = purge everything currently in the trash.
-		cutoff = cutoff.Add(24 * time.Hour) // future cutoff matches everything in past
+	if s == nil || s.Store == nil {
+		return PurgeResult{}, errors.New("trash: service not initialised")
 	}
-	return s.purgeOlderThan(ctx, cutoff, storageID)
+	s.sweep.Lock()
+	defer s.sweep.Unlock()
+	return s.purgeOlderThan(ctx, emptyCutoff(olderThanDays), storageID, nil)
+}
+
+// emptyCutoff is the deleted_at bound an "empty the trash" purges below.
+func emptyCutoff(olderThanDays int) time.Time {
+	if olderThanDays > 0 {
+		return time.Now().Add(-time.Duration(olderThanDays) * 24 * time.Hour)
+	}
+	// 0 days = purge everything currently in the trash: a future cutoff
+	// matches everything in the past.
+	return time.Now().Add(24 * time.Hour)
 }
 
 // ConflictError reports that a restore's original path is occupied. Nothing
@@ -395,7 +428,10 @@ func (s *Service) RunDailyLoop(ctx context.Context, interval time.Duration) {
 // instance where any other tenant had 500 older deleted files spun until the
 // proxy gave up; the nightly worker, which has no deadline, would never have
 // stopped.
-func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, storageID int64) (PurgeResult, error) {
+//
+// progress, when set, is told the running totals after every row it purged or
+// failed to purge (StartEmpty's status).
+func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, storageID int64, progress func(PurgeResult)) (PurgeResult, error) {
 	if s == nil || s.Store == nil {
 		return PurgeResult{}, errors.New("trash: service not initialised")
 	}
@@ -419,29 +455,7 @@ func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, storageI
 			if err := ctx.Err(); err != nil {
 				return res, err
 			}
-			// The storage the caller narrowed to, if any. Filtered here for
-			// the same reason tenancy is: the service walks the whole trash in
-			// batches, so the handler has no list it could filter instead.
-			if storageID != 0 && n.StorageID != storageID {
-				continue
-			}
-			// ⚠⚠ Tenancy, and it has to be inside the sweep rather than at the
-			// handler, because the handler has no list to filter — the service
-			// walks the whole trash itself in batches.
-			//
-			// POST /api/admin/trash/empty is a legitimate tenant feature
-			// ("empty my trash"), so it is scoped rather than gated. Unscoped
-			// it was permanent, irreversible destruction of EVERY tenant's
-			// deleted files by an admin of any one of them — the most damaging
-			// single request in the admin surface, and it answers 200.
-			//
-			// The context is the whole mechanism: a request carries the
-			// caller's scope, the nightly retention worker carries none, and
-			// "no scope" means unscoped — so the worker still sweeps every
-			// tenant exactly as before and single-tenant installs are
-			// untouched.
-			if scope, ok := tenant.FromContext(ctx); ok && scope != nil &&
-				!scope.IsSupertenant && !scope.CanAccessStorage(n.StorageID) {
+			if !reaches(ctx, storageID, n.StorageID) {
 				continue
 			}
 			res.Scanned++
@@ -450,15 +464,51 @@ func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, storageI
 					slog.Int64("node_id", n.ID),
 					slog.String("err", err.Error()))
 				res.Failed++
-				continue
+			} else {
+				res.Deleted++
+				res.Bytes += n.Size
 			}
-			res.Deleted++
-			res.Bytes += n.Size
+			if progress != nil {
+				progress(res)
+			}
 		}
 		if len(batch) < batchSize {
 			return res, nil
 		}
 	}
+}
+
+// reaches reports whether a sweep for ctx, narrowed to storageID (0 = every
+// storage), may purge a trashed row of storage sid. The sweep and the total
+// StartEmpty reports both ask it, so what is counted is what is purged.
+func reaches(ctx context.Context, storageID, sid int64) bool {
+	// The storage the caller narrowed to, if any. Filtered in the sweep for
+	// the same reason tenancy is: the service walks the whole trash in
+	// batches, so the handler has no list it could filter instead.
+	if storageID != 0 && sid != storageID {
+		return false
+	}
+	// ⚠⚠ Tenancy, and it has to be inside the sweep rather than at the
+	// handler, because the handler has no list to filter — the service walks
+	// the whole trash itself in batches.
+	//
+	// POST /api/admin/trash/empty is a legitimate tenant feature ("empty my
+	// trash"), so it is scoped rather than gated. Unscoped it was permanent,
+	// irreversible destruction of EVERY tenant's deleted files by an admin of
+	// any one of them — the most damaging single request in the admin
+	// surface, and it answers 200.
+	//
+	// The context is the whole mechanism: a request carries the caller's
+	// scope, the nightly retention worker carries none, and "no scope" means
+	// unscoped — so the worker still sweeps every tenant exactly as before and
+	// single-tenant installs are untouched. (StartEmpty detaches the run from
+	// the request's cancellation, never from its values, so the scope rides
+	// along into the background.)
+	if scope, ok := tenant.FromContext(ctx); ok && scope != nil &&
+		!scope.IsSupertenant && !scope.CanAccessStorage(sid) {
+		return false
+	}
+	return true
 }
 
 // purgeOne deletes the storage object (best effort), decrements quota, and

@@ -2991,6 +2991,29 @@ func (s *Store) ListTrashedExpired(ctx context.Context, before time.Time, afterI
 	return out, rows.Err()
 }
 
+// CountTrashedExpired tallies per storage what ListTrashedExpired walks for
+// the same cutoff. One grouped read over the partial deleted_at index.
+func (s *Store) CountTrashedExpired(ctx context.Context, before time.Time) (map[int64]db.TrashTally, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT storage_id, COUNT(*), COALESCE(SUM(CASE WHEN type='file' THEN size ELSE 0 END), 0)
+		  FROM nodes WHERE deleted_at IS NOT NULL AND deleted_at < ?
+		 GROUP BY storage_id`, before)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]db.TrashTally{}
+	for rows.Next() {
+		var sid int64
+		var t db.TrashTally
+		if err := rows.Scan(&sid, &t.Count, &t.Bytes); err != nil {
+			return nil, err
+		}
+		out[sid] = t
+	}
+	return out, rows.Err()
+}
+
 // RestoreNode flips deleted_at back to NULL.
 func (s *Store) RestoreNode(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET deleted_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
