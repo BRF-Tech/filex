@@ -12,16 +12,17 @@ on:
   # 2026-09-06: CI had been red since v0.31.0 and FOUR tags shipped over it,
   # the last of them a locale regression that showed a Turkish user an English
   # admin panel. The suite is the same one either way; only the trigger differs.
+  #
+  # ⚠⚠ The gate BUILDS THE IMAGES too, and it cannot be told not to. v0.43.0
+  # (run 36026548054) was released with this job switched off by the release
+  # (`skip_docker: true`, "the release's own docker job builds the same image"):
+  # the images failed deterministically - the frontend stage did not copy two
+  # files its vite configs import - but `binaries` and `npm` run beside
+  # `docker`, not after it, so npm 0.43.0 and the GitHub Release were already
+  # public when the image build broke. A tag must not publish anything until the
+  # images are known to build. The input is gone on purpose: a switch that
+  # exists gets used again, and re-adding one should be a decision, not a flag.
   workflow_call:
-    inputs:
-      skip_docker:
-        description: >-
-          Skip the image build. The release workflow builds and PUSHES the same
-          image in its own job, so repeating it here would only make the gate
-          slower -- and a gate people resent is a gate someone eventually
-          removes.
-        type: boolean
-        default: false
 
 # Cancel superseded runs on the same ref.
 concurrency:
@@ -202,11 +203,16 @@ jobs:
     name: Docker image builds
     runs-on: ubuntu-latest
     needs: [backend, frontend]
-    if: ${{ !inputs.skip_docker }}
+    # ⚠ No `if:`. On a push, on a PR and when the release calls this workflow
+    # as its gate, the images are built - see workflow_call above for why.
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      # Build the full image end-to-end (frontend + backend + embed) to catch
-      # multi-stage regressions. No push — release publishing is separate.
-      - name: Build image
+      # BOTH images end to end (frontend + backend + embed), the two the release
+      # publishes, to catch multi-stage regressions before anything is pushed.
+      # amd64 is enough to prove a Dockerfile: a missing COPY fails on every
+      # architecture alike. No push - publishing is release.yml's docker job.
+      - name: Build the full image
         run: docker build -f docker/Dockerfile -t filex:ci .
+      - name: Build the slim image
+        run: docker build -f docker/Dockerfile.slim -t filex:ci-slim .

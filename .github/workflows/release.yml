@@ -56,9 +56,11 @@ jobs:
   test:
     name: Test suite
     uses: ./.github/workflows/ci.yml
-    with:
-      # The release's own docker job builds and pushes the same image.
-      skip_docker: true
+    # ⚠⚠ No `with: skip_docker`. The gate builds both images before
+    # `binaries`, `docker` and `npm` may start: v0.43.0 skipped that build here,
+    # its images failed, and the npm packages and the GitHub Release were already
+    # out (run 36026548054). The build this adds to the gate is the price of
+    # never publishing half a release again.
 
   # ── Binaries (linux/macOS/windows × amd64/arm64) → GitHub Release ───────
   # Creates the Release. Everything that uploads to it depends on this job
