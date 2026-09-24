@@ -9529,6 +9529,13 @@ filex-explorer {
 .fe-trashbar__action {
   flex: 0 0 auto;
 }
+/* A purge that goes on in the background, counted as it goes. */
+.fe-trashbar__progress {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--fe-text);
+  font-variant-numeric: tabular-nums;
+}
 
 /* tablo:t1 — the row's real thumbnail. Exactly the type tile's box (24px), so
    turning a glyph into a picture does not move a single row. */

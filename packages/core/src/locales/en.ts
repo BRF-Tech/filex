@@ -1438,6 +1438,11 @@ export const en: Record<string, string> = {
   'trash.empty_confirm_body_nosize_one': 'This permanently deletes 1 item. It cannot be undone.',
   'trash.empty_confirm_body_nosize': 'This permanently deletes {count} items. It cannot be undone.',
   'trash.emptied': 'Trash emptied',
+  'trash.emptying': 'Emptying the trash… {done} of {total}',
+  'trash.empty_busy': 'The trash is already being emptied.',
+  'trash.emptied_partly': 'Trash emptied, but {count} items could not be purged — see the server log.',
+  'trash.emptied_partly_one': 'Trash emptied, but 1 item could not be purged — see the server log.',
+  'trash.empty_stopped': 'Emptying the trash stopped: {error}',
   'empty.trash.hint': 'Files you delete land here first, so you can put them back.',
 
   /* tasi:m1 — the destination picker (modals/DestinationPickerModal.vue) and

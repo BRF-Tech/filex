@@ -32,7 +32,7 @@ import {
 } from './composables/useUploadChunked';
 import { useSelection } from './composables/useSelection';
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
-import { useLocale } from './composables/useLocale';
+import { useLocale, localeTag } from './composables/useLocale';
 import { usePendingOps, type PendingOp } from './composables/usePendingOps';
 import { useRealtime } from './composables/useRealtime';
 import { useThumbs } from './composables/useThumbs';
@@ -165,6 +165,7 @@ import { nodeRowToFileNode as nodeRowToFileNodePure } from './lib/nodeRow'; /* R
 import { iconFamilyFor, isStorageRow } from './lib/fileIcons'; /* pane:p1 — the storage-row predicate's one home */
 import { actionIconSvg } from './lib/actionIcons'; /* inceleme:r1 — the drop overlay's mark, off the emoji font */
 import { setNodeStarred } from './lib/star';
+import { emptyTrashAndFollow, TrashEmptyBusy, type TrashEmptyStatus } from './lib/trashEmpty';
 import { fetchAllTags, fetchTaggedRows, invalidateTagCache } from './lib/tags';
 import { resolveTransfer, type TransferIntent } from './lib/transfer';
 import { downloadArchive } from './lib/downloadSelection'; /* tasi:m1 */
@@ -2523,6 +2524,14 @@ const trashRetentionDays = ref<number | null>(null);
 const trashCanEmpty = ref(false);
 const trashEmptying = ref(false);
 const showTrashConfirm = ref(false);
+/** The purge being followed, while the server reports it as running. */
+const trashEmptyRun = ref<TrashEmptyStatus | null>(null);
+/* Set when the explorer is taken down: it stops the following — the purge
+ * is the server's and carries on. */
+let trashEmptyUnwatched = false;
+onBeforeUnmount(() => {
+  trashEmptyUnwatched = true;
+});
 
 async function probeTrashPolicy() {
   trashRetentionDays.value = null;
@@ -2571,24 +2580,55 @@ const trashConfirmKey = computed(() =>
   trashSizeKnown.value ? 'trash.empty_confirm_body' : 'trash.empty_confirm_body_nosize',
 );
 
+/** "Emptying the trash… 120 of 61,844" while a purge is followed. */
+const trashEmptyProgress = computed(() => {
+  const run = trashEmptyRun.value;
+  if (!run?.running) return '';
+  const nf = new Intl.NumberFormat(localeTag(locale.value));
+  return t('trash.emptying', { done: nf.format(run.scanned ?? 0), total: nf.format(run.total ?? 0) });
+});
+
+/* ⚠⚠ A 2xx is not "emptied" any more. The endpoint used to purge inside the
+ * request, so a large trash never answered — nginx's 504 at sixty seconds
+ * became a toast reading "504". It now answers within seconds: the final
+ * counts, or 202 while the purge goes on in the background, which
+ * lib/trashEmpty follows on GET until the run ends. */
 async function emptyTrash() {
   showTrashConfirm.value = false;
   if (!trashCanEmpty.value || trashEmptying.value) return;
   trashEmptying.value = true;
+  const url = `${props.config.apiBase ?? ''}/api/admin/trash/empty`;
   try {
-    const res = await fetch(`${props.config.apiBase ?? ''}/api/admin/trash/empty`, {
-      method: 'POST',
-      headers: await buildAuthHeaders(),
-      credentials: api.credentialsMode(),
+    const end = await emptyTrashAndFollow({
+      start: async () =>
+        fetch(url, { method: 'POST', headers: await buildAuthHeaders(), credentials: api.credentialsMode() }),
+      status: async () => fetch(url, { headers: await buildAuthHeaders(), credentials: api.credentialsMode() }),
+      onProgress: (run) => {
+        trashEmptyRun.value = run;
+      },
+      onBusy: () => flashToast(t('trash.empty_busy')),
+      stopped: () => trashEmptyUnwatched,
     });
-    if (!res.ok) throw new Error(String(res.status));
-    await loadTrash();
-    flashToast(t('trash.emptied'));
+    if (end === null) return;
+    if (end.error) throw new Error(t('trash.empty_stopped', { error: end.error }));
+    /* Only the view that is still showing the trash is redrawn: somebody who
+     * went on to a folder while it ran is not pulled back into the trash. */
+    if (trashMode.value) await loadTrash();
+    /* `{running: false}` with no start is a run the server no longer knows —
+     * it restarted under it. The listing just reloaded says what is left, and
+     * nothing is claimed about the rest. */
+    if (!end.started_at) return;
+    flashToast(end.failed ? t('trash.emptied_partly', { count: end.failed }) : t('trash.emptied'));
   } catch (err) {
+    if (err instanceof TrashEmptyBusy) {
+      flashToast(t('trash.empty_busy'));
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     emit('error', { message: msg, context: { op: 'trash:empty' } });
     flashToast(msg);
   } finally {
+    trashEmptyRun.value = null;
     trashEmptying.value = false;
   }
 }
@@ -6650,6 +6690,9 @@ function closeRecoveryKey() {
          view rather than of the rows. -->
     <div v-if="trashMode && !loading" class="fe-trashbar">
       <p class="fe-trashbar__text">{{ trashBannerText }}</p>
+      <p v-if="trashEmptyProgress" class="fe-trashbar__progress" role="status" aria-live="polite">
+        {{ trashEmptyProgress }}
+      </p>
       <!-- Offered only when the SERVER has said this caller may purge. The
            backend refuses regardless of what we draw; this is so nobody is
            handed a button that always fails. -->

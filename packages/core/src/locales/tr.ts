@@ -1430,6 +1430,11 @@ export const tr: Record<string, string> = {
   'trash.empty_confirm_body_nosize_one': 'Bu işlem 1 öğeyi kalıcı olarak siler. Geri alınamaz.',
   'trash.empty_confirm_body_nosize': 'Bu işlem {count} öğeyi kalıcı olarak siler. Geri alınamaz.',
   'trash.emptied': 'Çöp kutusu boşaltıldı',
+  'trash.emptying': 'Çöp kutusu boşaltılıyor… {done} / {total}',
+  'trash.empty_busy': 'Çöp kutusu zaten boşaltılıyor.',
+  'trash.emptied_partly': 'Çöp kutusu boşaltıldı, ama {count} öğe silinemedi — sunucu günlüğüne bakın.',
+  'trash.emptied_partly_one': 'Çöp kutusu boşaltıldı, ama 1 öğe silinemedi — sunucu günlüğüne bakın.',
+  'trash.empty_stopped': 'Çöp kutusunu boşaltma durdu: {error}',
   'empty.trash.hint': 'Sildiğiniz dosyalar önce buraya düşer, böylece geri alabilirsiniz.',
 
   /* tasi:m1 — hedef klasör seçici (modals/DestinationPickerModal.vue) ve
