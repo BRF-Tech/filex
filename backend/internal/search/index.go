@@ -258,13 +258,19 @@ func (i *Index) indexNode(ctx context.Context, n *model.Node, allowHook bool) er
 }
 
 // docFor renders the indexable document for a node.
+//
+// Name and Path are indexed composed (see canonical) — the form every query
+// is put in — so the legacy match and wildcard sub-queries compare like with
+// like too. The node row keeps the bytes the storage has; results are always
+// read back from it, never from the index.
 func docFor(n *model.Node) doc {
+	name, path := canonical(n.Name), canonical(n.Path)
 	return doc{
 		StorageID: n.StorageID,
-		Name:      n.Name,
-		Path:      n.Path,
-		NameNorm:  Normalize(n.Name),
-		PathNorm:  Normalize(n.Path),
+		Name:      name,
+		Path:      path,
+		NameNorm:  Normalize(name),
+		PathNorm:  Normalize(path),
 		Mime:      n.Mime,
 		Type:      string(n.Type),
 	}
@@ -488,6 +494,9 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 	if fetch < limit {
 		fetch = limit
 	}
+	// The documents are composed (docFor); so is the query, whichever form
+	// it was typed or pasted in.
+	q = canonical(q)
 
 	out := make([]ranked, 0, fetch)
 	seen := map[string]int{} // doc id → position in out

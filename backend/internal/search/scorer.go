@@ -112,6 +112,9 @@ func (q PreparedQuery) Empty() bool { return len(q.pieces) == 0 }
 // good tag search would return nothing. Asserted by
 // TestPrepareQuery_RawTagTokenWouldDropEverything.
 func PrepareQuery(raw string) PreparedQuery {
+	// Composed, like every candidate ScoreName compares it with: a name
+	// pasted from a Finder window arrives decomposed. See canonical.
+	raw = canonical(raw)
 	q := PreparedQuery{raw: raw}
 	unified := strings.Map(func(r rune) rune {
 		switch r {
@@ -179,6 +182,11 @@ func (q PreparedQuery) ScoreName(name, path string) NameScore {
 		// been reindexed yet must lose ranking quality, never results.
 		return NameScore{OK: true, Tier: TierName}
 	}
+	// A decomposed `ü` is two runes, and neither of them is the `ü` in the
+	// query, so an uncomposed name fails every piece that has one. The
+	// fallback hands in database rows, which hold the name as it was
+	// uploaded. Free for a name that is already composed.
+	name, path = canonical(name), canonical(path)
 
 	rel := strings.TrimPrefix(path, "/")
 	if rel == "" {

@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // indexSchemaVersion is the document schema this build writes. It is
@@ -32,10 +34,38 @@ import (
 // separator-blind half of a query cannot match them.
 //
 // v1 -> v2 (issue #15): added name_norm + path_norm.
-const indexSchemaVersion = "2"
+// v2 -> v3: names are indexed composed (see canonical), and a combining
+// mark no longer splits a word. A v2 document holds a decomposed name's
+// words in pieces — `Gürel` as `gu rel` — which no query word can match.
+const indexSchemaVersion = "3"
 
 // indexVersionKey is the Bleve internal-KV key holding the above.
 const indexVersionKey = "filex:index_schema"
+
+// canonical returns s in Unicode normalisation form C, the form a keyboard
+// types and a browser sends.
+//
+// A name is not guaranteed to arrive that way. macOS clients hand filenames
+// over DECOMPOSED — `u` followed by U+0308 COMBINING DIAERESIS where the
+// user typed `ü` — and filex stores the name it is given, which the storage
+// needs byte for byte. Measured on a production catalogue on 2026-09-24:
+// 71 388 of 169 471 names were decomposed, about nine in ten of the names
+// with a Turkish letter in them, and every search word containing ü, ö, ç,
+// ş, ğ or İ found none of them. So both sides of every comparison go
+// through here; the stored name itself is never changed.
+//
+// Names that are already composed — ASCII among them — are returned as
+// they are, without allocating: this runs on every candidate of every
+// search. ⚠ QuickSpanString, not IsNormalString: the latter allocates on
+// every call, fast path included, because the closure on its slow path
+// captures its arguments — measured as two allocations per candidate in
+// BenchmarkScorerPerCandidate, which had been flat zero.
+func canonical(s string) string {
+	if norm.NFC.QuickSpanString(s) == len(s) {
+		return s
+	}
+	return norm.NFC.String(s)
+}
 
 // Normalize maps a filename — or a raw user query — onto the
 // separator-blind form both sides of a search are compared in:
@@ -55,13 +85,21 @@ const indexVersionKey = "filex:index_schema"
 // Letters and digits are kept by Unicode class, not by ASCII range, so
 // `rapor-şubat.txt` normalises to `rapor şubat txt` instead of losing its
 // Turkish characters.
+//
+// The input is composed first (see canonical), and a combining mark is
+// kept as part of its word. Before, a decomposed `Gürel` — `Gu`, U+0308,
+// `rel` — normalised to the two words `gu rel`, because a mark is neither a
+// letter nor a digit. Composition removes most marks; the ones that survive
+// it have no precomposed form (every Devanagari vowel sign is one) and
+// belong to the letter before them just the same.
 func Normalize(s string) string {
+	s = canonical(s)
 	var b strings.Builder
 	b.Grow(len(s))
 	pendingSpace := false
 	wrote := false
 	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r) {
 			if pendingSpace && wrote {
 				b.WriteByte(' ')
 			}
