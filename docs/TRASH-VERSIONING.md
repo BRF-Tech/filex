@@ -126,9 +126,14 @@ retention window and, for each one:
 3. hard‑deletes the DB row.
 
 The first tick fires **one interval after startup**, not immediately, so a
-restart‑looping server doesn't hammer the backend. The purge is batched (500
-rows at a time) and reports a summary (`scanned` / `deleted` / `failed` /
-`bytes`).
+restart‑looping server doesn't hammer the backend. The purge walks the trash in
+batches of 500 rows, **by id**, so every row is met once per run — a row it may
+not touch (another storage, another tenant) or cannot purge is passed over, not
+read again — and reports a summary (`scanned` / `deleted` / `failed` /
+`bytes`). **One purge sweep runs at a time:** the daily loop waits for an admin
+"empty trash" that is running, and an "empty trash" asked for while a sweep runs
+is refused (see below). Two sweeps over the same rows would each release the
+owner's quota for them.
 
 ### Trash endpoints
 
@@ -154,10 +159,32 @@ answer to whoever holds a grant on `.filex-trash/`.
 
 | Method & path | Body / query | Notes |
 |---|---|---|
-| `POST /api/admin/trash/empty` | `?older_than_days=N` **or** JSON `{ "older_than_days": N, "storage_id": … }` | Immediate purge of everything older than `N` days. **`0` or missing wipes everything currently in trash.** Returns `{ ok, purged, failed, scanned, bytes }`. |
+| `POST /api/admin/trash/empty` | `?older_than_days=N&storage_id=…` **or** JSON `{ "older_than_days": N, "storage_id": … }` | Starts a purge of everything older than `N` days, in one storage or every storage the caller can reach. **`0` or missing days wipes everything currently in trash.** Waits up to two seconds: **200** with the final counts when the purge is done by then, otherwise **202** with its progress so far while it carries on in the background — see the run fields below. **409** `{ "code": "BUSY" }` while another purge holds the trash (with `job`, the caller's own running run, when it is one). **400** for anything it cannot read — a non‑integer or negative day count, a storage id that is not a number, an unknown field — and nothing is purged. |
+| `GET /api/admin/trash/empty` | — | The latest purge the caller's tenant started, running or finished. `{ "running": false }` alone when it has started none since the server did. |
 | `DELETE /api/admin/trash/{id}` | — | Immediately hard‑delete one trashed node (storage object + quota + row). |
 
+A run reports `{ ok, running, storage_id, older_than_days, total, total_bytes,
+scanned, purged, failed, bytes, started_at, finished_at, error }`. `total` /
+`total_bytes` are the rows in its scope when it started and the bytes their files
+hold; `running: false` is the end — `purged` can finish below `total`, because a
+folder takes the rows inside it along. A run belongs to the tenant that started
+it: another tenant's admin neither sees it nor its counts.
+
+> ⚠ Up to v0.42.2 the purge ran **inside** the request and answered only
+> when it was done, so a large trash could not be emptied from the UI at all:
+> tens of thousands of files take many minutes, and the first proxy timeout in
+> front of filex (nginx: 60 s; the admin page's own client: 30 s) cut the request
+> — and the purge with it. A script that reads `purged` from any 2xx should now
+> check `running` too: a 202 carries the counts so far, not the final ones.
+
 ### Trash — failure modes & troubleshooting
+
+**"Empty trash" seemed to do nothing, or answered 504.**
+Up to v0.42.2 the purge ran inside the request and the first proxy timeout cut
+it short; update. A large trash now shows its progress on the admin Trash page
+(and in the explorer's trash banner) and carries on if you leave the page. A purge still
+running when the server restarts stops there: what it purged is gone, the rest
+is still in the trash — press **Empty trash** again.
 
 **A restored file reappeared at the storage root, not its old folder.**
 Its original parent directory was itself deleted in the meantime. filex prefers

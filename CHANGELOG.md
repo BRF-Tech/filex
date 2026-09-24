@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Empty trash" empties a large trash, and says so while it does.** The
+  purge ran inside the request, so a trash of tens of thousands of files —
+  61,844 after one sync incident — could not be emptied at all: nginx answered
+  504 at sixty seconds, the request's context was cancelled mid-batch, and the
+  admin page, whose own HTTP client had given up at thirty, showed nothing. So
+  the admin pressed the button again, and three purges raced over the same
+  rows. `POST /api/admin/trash/empty` now starts the purge in the background
+  and answers within two seconds: 200 with the final counts when it is done
+  (an ordinary trash, and every existing caller), otherwise 202 with its
+  progress. `GET /api/admin/trash/empty` reports the run until it ends, to the
+  tenant that started it and nobody else. The admin Trash page shows a
+  progress strip and follows the run, and picks it up again when reopened; the
+  explorer's trash banner counts it; a second press answers 409 `BUSY` instead
+  of starting another purge. New MCP tool `admin_trash_empty_status`. ⚠ A
+  script that reads `purged` from any 2xx should also check `running`.
+- **The purge sweep no longer loops forever on rows it may not touch.** It
+  re-read "the oldest 500 expired rows" on every pass, so a full batch of rows
+  it skipped (another storage, another tenant) or failed to purge stalled it
+  for good: a tenant admin on a shared instance whose neighbours had 500 older
+  deleted files spun until the proxy gave up, and the nightly retention worker
+  would never have stopped. It walks the trash by id now and meets each row
+  once per run. One purge sweep runs at a time — admin empties and the nightly
+  retention take turns — because two over the same rows released the owner's
+  quota twice.
+- **A narrowing the server cannot read no longer widens the purge.**
+  `{"storage_id":2,"older_than_days":""}` — what the admin page sent once its
+  days box had been typed in and cleared — was ignored whole and emptied every
+  storage the caller could reach; so were a negative day count, a storage id
+  that was not a number and a misspelt field. Each is now 400 and nothing is
+  purged, and the page no longer sends the empty string.
+- **A purge that is cut short says so.** A run whose context ended used to
+  fail every remaining row of its batch on the dead context, log each one as a
+  failed purge, and then report success.
+
 ## [0.42.2] - 2026-09-19
 
 A fix release for the issue 32 follow-up and three things that were wrong on
