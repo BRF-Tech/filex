@@ -25,6 +25,7 @@ package handlers_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -65,7 +66,7 @@ func (f *mtFix) waitNotification(t *testing.T, needle string) *model.Notificatio
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		rows, _, err := f.Notif.List(context.Background(), nil, false, 500, 0)
+		rows, _, err := f.Notif.List(context.Background(), nil, notify.AdminBell, false, 500, 0)
 		require.NoError(t, err)
 		for _, n := range rows {
 			if strings.Contains(n.Body, needle) {
@@ -143,7 +144,7 @@ func TestNotifications_StagedCommitIsAttributedToTheUploader(t *testing.T) {
 	var row *model.Notification
 	deadline := time.Now().Add(5 * time.Second)
 	for row == nil && time.Now().Before(deadline) {
-		rows, _, err := notif.List(context.Background(), nil, false, 50, 0)
+		rows, _, err := notif.List(context.Background(), nil, notify.AdminBell, false, 50, 0)
 		require.NoError(t, err)
 		for _, n := range rows {
 			if n.Event == string(notify.EventFileUploaded) && strings.Contains(n.Body, "rapor.pdf") {
@@ -155,4 +156,169 @@ func TestNotifications_StagedCommitIsAttributedToTheUploader(t *testing.T) {
 	require.NotNil(t, row, "the commit never announced the upload")
 	require.NotNil(t, row.UserID, "a staged upload was recorded as a broadcast")
 	require.Equal(t, f.userID, *row.UserID)
+}
+
+// TestNotifications_WorkerAlertReachesOnlyMembersWhoCanSeeTheFile — a real
+// broadcast (the antivirus scanner has no actor to attribute to, by nature) is
+// still for the members who can see the file it names, and only for them.
+//
+// RED PROOF (unfixed code): writer's bell listed `/muhasebe/virus.exe` with a
+// badge of 2.
+func TestNotifications_WorkerAlertReachesOnlyMembersWhoCanSeeTheFile(t *testing.T) {
+	f := newMTFix(t, true)
+	writer, _ := f.rbacAlpha(t)
+	f.emitWorkerAV(t, f.StA.ID, "/muhasebe/virus.exe")
+	f.emitWorkerAV(t, f.StA.ID, "/blog/ek.exe")
+
+	_, list := mtGet(t, writer, f.URL+"/api/notifications")
+	require.NotContains(t, list, "/muhasebe/virus.exe", "%s", list)
+	require.Contains(t, list, "/blog/ek.exe",
+		"an alert about a file they CAN see is still theirs: %s", list)
+	_, count := mtGet(t, writer, f.URL+"/api/notifications/unread-count")
+	require.Contains(t, count, `"count":1`, "the badge must agree with the list: %s", count)
+
+	_, member := mtGet(t, f.A, f.URL+"/api/notifications")
+	require.Contains(t, member, "/muhasebe/virus.exe", "%s", member)
+	require.NotContains(t, member, "/blog/ek.exe", "%s", member)
+
+	_, admin := mtGet(t, f.AdminA, f.URL+"/api/notifications")
+	require.Contains(t, admin, "/muhasebe/virus.exe", "a tenant admin sees every file of the tenant: %s", admin)
+	require.Contains(t, admin, "/blog/ek.exe", "%s", admin)
+}
+
+// TestNotifications_LinkNoticesDoNotReachMembers — a drop notice falls back to
+// a broadcast when its link has no creator on record (handlers/drop.go), and it
+// carries the link: `meta.share.token` is a bearer token that lets whoever
+// holds it write into the folder. Being able to SEE a folder — as a viewer, or
+// only as a folder one walks through to reach a grant — is not a reason to be
+// handed that. Members receive only the broadcast kinds in
+// notify.MemberMayReceive; the admins of the tenant still get the notice.
+//
+// RED PROOF (unfixed code): writer's bell listed the drop notice, token
+// included.
+func TestNotifications_LinkNoticesDoNotReachMembers(t *testing.T) {
+	f := newMTFix(t, true)
+	writer, _ := f.rbacAlpha(t)
+	_, err := f.Notif.Send(context.Background(), notify.Event{
+		Event:    notify.EventDropReceived,
+		Severity: notify.SeverityInfo,
+		Title:    "New upload",
+		Body:     "3 files arrived in gelen",
+		Meta:     map[string]any{"folder": "gelen", "count": 3},
+		Node:     &notify.NodeRef{StorageID: f.StA.ID, Path: "/blog/gelen", Name: "gelen"},
+		Share:    &notify.ShareRef{Token: "drop-bearer-token", Path: "/blog/gelen"},
+	})
+	require.NoError(t, err)
+
+	_, list := mtGet(t, writer, f.URL+"/api/notifications")
+	require.NotContains(t, list, "drop-bearer-token", "%s", list)
+	_, count := mtGet(t, writer, f.URL+"/api/notifications/unread-count")
+	require.Contains(t, count, `"count":0`, "%s", count)
+
+	_, admin := mtGet(t, f.AdminA, f.URL+"/api/notifications")
+	require.Contains(t, admin, "drop-bearer-token", "the tenant's admins still get it: %s", admin)
+}
+
+// TestNotifications_LegacyWorkerFileActivityStaysOutOfTheBell — the rows the
+// queue wrote before the fix are still in the table (tens of thousands on a
+// busy instance). Routine file activity is only ever addressed to the person
+// who did it, so such a row is an audit record whose actor was lost, not a
+// message for anybody. They must not be listed, and — the part a post-filter
+// cannot get right — they must not push the reader's own rows off the page.
+//
+// RED PROOF (unfixed code): the first page held 50 of the 60 legacy rows and
+// not writer's own upload.
+func TestNotifications_LegacyWorkerFileActivityStaysOutOfTheBell(t *testing.T) {
+	f := newMTFix(t, true)
+	writer, writerID := f.rbacAlpha(t)
+	ctx := context.Background()
+
+	_, err := f.Notif.Send(ctx, notify.Event{
+		Event:    notify.EventFileUploaded,
+		Severity: notify.SeverityInfo,
+		Body:     "/blog/kendi-yazim.md",
+		Node:     &notify.NodeRef{StorageID: f.StA.ID, Path: "/blog/kendi-yazim.md", Name: "kendi-yazim.md"},
+		UserID:   &writerID,
+	})
+	require.NoError(t, err)
+	for i := 0; i < 60; i++ {
+		// Exactly what the queue wrote: no user, no actor, origin "ops". Half of
+		// them are in the one folder writer may see — that does not make them
+		// writer's.
+		dir := "muhasebe"
+		if i%2 == 0 {
+			dir = "blog"
+		}
+		p := fmt.Sprintf("/%s/eski-%02d.xlsx", dir, i)
+		_, err := f.Notif.Send(ctx, notify.Event{
+			Event:    notify.EventFileTrashed,
+			Severity: notify.SeverityInfo,
+			Body:     p,
+			Meta:     map[string]any{"origin": "ops"},
+			Node:     &notify.NodeRef{StorageID: f.StA.ID, Path: p, Name: "eski.xlsx"},
+		})
+		require.NoError(t, err)
+	}
+
+	_, list := mtGet(t, writer, f.URL+"/api/notifications?limit=50")
+	require.Contains(t, list, "kendi-yazim.md", "their own row was buried under rows that are not theirs: %s", list)
+	require.NotContains(t, list, "eski-", "%s", list)
+	_, count := mtGet(t, writer, f.URL+"/api/notifications/unread-count")
+	require.Contains(t, count, `"count":1`, "%s", count)
+
+	_, admin := mtGet(t, f.AdminA, f.URL+"/api/notifications")
+	require.NotContains(t, admin, "eski-",
+		"an admin's bell is a bell too; the audit of everything is the admin notification list: %s", admin)
+}
+
+// TestNotifications_OperatorEventsAreForAdmins — a broadcast that cannot be
+// placed in a storage (the replica reports carry bare paths from every storage)
+// cannot be checked against anybody's grants, so it goes to the people it was
+// written for: the schema says it plainly, "user_id IS NULL → admin-visible"
+// (migrations/*/00007_notifications.sql). Single-tenant mode, because in
+// multi-tenant mode such rows already reach nobody but the supertenant.
+//
+// RED PROOF (unfixed code): the plain member's bell listed the replica
+// report's `failed_paths`.
+func TestNotifications_OperatorEventsAreForAdmins(t *testing.T) {
+	f := newMTFix(t, false)
+	f.emitWorkerReplica(t, "/bravo/muhasebe/2026-yevmiye.xlsx")
+
+	_, member := mtGet(t, f.A, f.URL+"/api/notifications")
+	require.NotContains(t, member, "2026-yevmiye.xlsx", "%s", member)
+	_, count := mtGet(t, f.A, f.URL+"/api/notifications/unread-count")
+	require.Contains(t, count, `"count":0`, "%s", count)
+
+	_, admin := mtGet(t, f.AdminA, f.URL+"/api/notifications")
+	require.Contains(t, admin, "2026-yevmiye.xlsx", "the operator keeps the alert: %s", admin)
+}
+
+// TestNotifications_OperatorEventsDoNotCrowdAMembersBell — the operator's
+// alarms are not only hidden from a member, they are not READ for one: a
+// replica report a day for two months is a page of rows a member may not see,
+// and filtering them after the page was cut left the member's own row on page
+// two behind an empty page one, under a badge of 1.
+//
+// RED PROOF (the per-row filter alone): `{"items":[],"total":0}` with
+// `{"count":1}`.
+func TestNotifications_OperatorEventsDoNotCrowdAMembersBell(t *testing.T) {
+	f := newMTFix(t, false)
+	ctx := context.Background()
+	uid := f.UserA
+	_, err := f.Notif.Send(ctx, notify.Event{
+		Event:    notify.EventFileUploaded,
+		Severity: notify.SeverityInfo,
+		Body:     "/kendi.txt",
+		Node:     &notify.NodeRef{StorageID: f.StA.ID, Path: "/kendi.txt", Name: "kendi.txt"},
+		UserID:   &uid,
+	})
+	require.NoError(t, err)
+	for i := 0; i < 60; i++ {
+		f.emitWorkerReplica(t, fmt.Sprintf("/bravo/rapor-%02d.xlsx", i))
+	}
+
+	_, list := mtGet(t, f.A, f.URL+"/api/notifications?limit=50")
+	require.Contains(t, list, "/kendi.txt", "%s", list)
+	_, count := mtGet(t, f.A, f.URL+"/api/notifications/unread-count")
+	require.Contains(t, count, `"count":1`, "%s", count)
 }

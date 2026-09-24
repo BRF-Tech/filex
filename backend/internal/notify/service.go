@@ -35,9 +35,10 @@ type Service interface {
 
 	// List + Mark + Settings just delegate to the store; they're on
 	// the Service interface so handlers don't have to know about the
-	// store. Pass userID nil for admin-global views.
-	List(ctx context.Context, userID *int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error)
-	UnreadCount(ctx context.Context, userID *int64) (int64, error)
+	// store. Pass userID nil for admin-global views; bell (which
+	// broadcasts a per-user read takes) is ignored there.
+	List(ctx context.Context, userID *int64, bell Bell, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error)
+	UnreadCount(ctx context.Context, userID *int64, bell Bell) (int64, error)
 	MarkRead(ctx context.Context, id int64, userID *int64) error
 	MarkAllRead(ctx context.Context, userID *int64) error
 	GetSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error)
@@ -539,13 +540,15 @@ func (s *service) bellPrefs(ctx context.Context, userID *int64) (muted []string,
 // ⚠⚠ The preferences gate the READ, not the write. Send still records every
 // event, so muting one neither erases it from the audit nor touches webhook
 // delivery — that is global and configured in Admin → Webhooks. Muting
-// changes what a user sees, not what the system keeps.
-func (s *service) List(ctx context.Context, userID *int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error) {
+// changes what a user sees, not what the system keeps. The same holds for
+// bell: a broadcast a bell does not take stays in the table and in the
+// admin-global list.
+func (s *service) List(ctx context.Context, userID *int64, bell Bell, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error) {
 	muted, silenced := s.bellPrefs(ctx, userID)
 	if silenced {
 		return nil, 0, nil
 	}
-	rows, total, err := s.store.ListNotifications(ctx, userID, onlyUnread, muted, limit, offset)
+	rows, total, err := s.store.ListNotifications(ctx, userID, onlyUnread, muted, bellFilter(userID, bell), limit, offset)
 	// One hydrate for every reader: the user bell and the admin-global list
 	// both come through here, so `target` cannot be present on one surface
 	// and missing on the other.
@@ -555,12 +558,12 @@ func (s *service) List(ctx context.Context, userID *int64, onlyUnread bool, limi
 	return rows, total, err
 }
 
-func (s *service) UnreadCount(ctx context.Context, userID *int64) (int64, error) {
+func (s *service) UnreadCount(ctx context.Context, userID *int64, bell Bell) (int64, error) {
 	muted, silenced := s.bellPrefs(ctx, userID)
 	if silenced {
 		return 0, nil
 	}
-	return s.store.UnreadNotificationCount(ctx, userID, muted)
+	return s.store.UnreadNotificationCount(ctx, userID, muted, bellFilter(userID, bell))
 }
 
 func (s *service) MarkRead(ctx context.Context, id int64, userID *int64) error {

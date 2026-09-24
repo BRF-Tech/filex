@@ -109,6 +109,19 @@ type NotificationInput struct {
 	UserID   *int64
 }
 
+// BroadcastFilter narrows the broadcast half — rows with no user_id — of a
+// per-user notification read. The zero value reads every broadcast.
+//
+// It is applied IN SQL, like the mute list, so that a bell's page is filled
+// with rows its reader can be shown, not with rows a filter throws away after
+// the page was cut.
+type BroadcastFilter struct {
+	// Only admits just the broadcasts of these events. Wins over Except.
+	Only []string
+	// Except leaves out the broadcasts of these events.
+	Except []string
+}
+
 // NotificationSettings captures per-user notification preferences. Stored
 // in the notification_settings table. Default-on for a fresh user — a
 // missing row is treated as InAppEnabled=true with no muted events.

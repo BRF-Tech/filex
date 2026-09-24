@@ -51,7 +51,7 @@ func TestTarget_FileCarriesStorageName(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	rows, _, err := svc.List(context.Background(), nil, false, 10, 0)
+	rows, _, err := svc.List(context.Background(), nil, notify.AdminBell, false, 10, 0)
 	require.NoError(t, err)
 	var row *model.Notification
 	for _, r := range rows {

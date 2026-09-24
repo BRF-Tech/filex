@@ -481,7 +481,7 @@ func BuildRouter(d *Deps) http.Handler {
 	usersAdmH := handlers.NewUsersAdmin(d.Store)
 	searchAdmH := handlers.NewSearchAdmin(d.Index, d.Store)
 	queueH := handlers.NewQueue(d.Queue)
-	notifH := handlers.NewNotifications(d.Notify)
+	notifH := handlers.NewNotifications(d.Notify, d.Store, d.ACL)
 	replicaH := handlers.NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader)
 	trashH := handlers.NewTrash(d.Trash, d.Store)
 	trashH.AttachSearchIndex(d.Index)

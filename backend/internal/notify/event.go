@@ -269,8 +269,9 @@ type Event struct {
 	Target *Target `json:"target,omitempty"`
 
 	// UserID, when non-nil, scopes the in-app notification to a single
-	// user. Otherwise the row is broadcast (admin-visible to everyone
-	// with role=admin). The webhook delivery is unaffected.
+	// user. Otherwise the row is broadcast: admins read it, and a member
+	// reads it only when it names a file the member can see (see
+	// handlers/notifications.go). The webhook delivery is unaffected.
 	UserID *int64 `json:"-"`
 }
 

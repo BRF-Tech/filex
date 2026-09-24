@@ -8,7 +8,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 )
@@ -16,11 +18,17 @@ import (
 // Notifications wraps the notify.Service for the HTTP layer.
 type Notifications struct {
 	Service notify.Service
+	// Store and ACL answer "may this member see the file a broadcast names" —
+	// with the same grants the explorer filters its listings by. With either
+	// one nil there is nothing to prove it with, and no such row reaches a
+	// member.
+	Store db.Store
+	ACL   *acl.Resolver
 }
 
 // NewNotifications constructs the handler.
-func NewNotifications(svc notify.Service) *Notifications {
-	return &Notifications{Service: svc}
+func NewNotifications(svc notify.Service, store db.Store, r *acl.Resolver) *Notifications {
+	return &Notifications{Service: svc, Store: store, ACL: r}
 }
 
 // List paginates the current user's bell history (broadcasts +
@@ -42,16 +50,17 @@ func (h *Notifications) List(w http.ResponseWriter, r *http.Request) {
 	onlyUnread := r.URL.Query().Get("unread") == "true"
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	rows, total, err := h.Service.List(r.Context(), &uid, onlyUnread, limit, offset)
+	bell := bellFor(r.Context(), user)
+	rows, total, err := h.Service.List(r.Context(), &uid, bell, onlyUnread, limit, offset)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if kept, confined := confineNotifications(r.Context(), rows); confined {
+	if kept, filtered := h.visibleTo(r.Context(), user, bell, rows); filtered {
 		// `total` is recomputed rather than carried through, for the same
 		// reason the trash listing recomputes it: a count that still describes
 		// the rows we just removed tells the caller how much is happening
-		// elsewhere on the platform.
+		// where they cannot look.
 		rows, total = kept, int64(len(kept))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -62,41 +71,76 @@ func (h *Notifications) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// confineNotifications drops rows a confined tenant may not see, and reports
-// whether it did anything (false = unscoped or supertenant, list untouched).
+// bellFor picks which broadcasts the caller's bell takes from the store
+// (notify.Bell): every kind for an admin nobody confines — the admin of a
+// single-tenant install, or the supertenant's — the kinds that name a file for
+// a tenant admin, and the member kinds for everybody else. Only the first reads
+// the broadcasts as stored; the others get the per-row pass in visibleTo.
+func bellFor(ctx context.Context, user *model.User) notify.Bell {
+	_, confined := confinedScope(ctx)
+	switch {
+	case !user.IsAdmin():
+		return notify.MemberBell
+	case confined:
+		return notify.TenantAdminBell
+	default:
+		return notify.AdminBell
+	}
+}
+
+// visibleTo drops the broadcast rows the caller may not see, and reports
+// whether it looked at all (false = the caller reads every row as stored).
 //
-// # Why the fix is here and not on the write side
+// A row addressed to a user is left alone: the store returns no one else's,
+// so it is the caller's own. The question is only ever about BROADCASTS
+// (`user_id = NULL`), which the store hands to every bell, and it is asked in
+// two layers.
 //
-// Everything a WORKER emits carries `user_id = NULL`, because a worker has no
-// request and therefore no user — the antivirus scanner, the replica failure
-// recorder, the replica reconciler. The store's per-user predicate is
-// `(user_id IS NULL OR user_id = ?)`, so every such row was visible to every
-// user of every tenant, carrying infected-file paths and `failed_paths` dumps.
+// # The tenant
 //
-// The row already carries what is needed to place MOST of them: `marshalMeta`
-// folds the event's NodeRef into `meta_json` as `node.storage_id`, so an
-// antivirus alert can be attributed to a storage and therefore to a tenant. No
-// migration, no new column, and — the part that matters operationally — no
-// change to what the workers write, which is what would have had to be
-// backfilled for the rows already in the table.
+// Everything a worker emits without a person behind it carries `user_id =
+// NULL` — the antivirus scanner, the replica failure recorder, the replica
+// reconciler — so every such row was visible to every user of every tenant,
+// carrying infected-file paths and `failed_paths` dumps. The row carries what
+// is needed to place most of them: `marshalMeta` folds the event's NodeRef into
+// `meta_json` as `node.storage_id`, so an alert can be attributed to a storage
+// and therefore to a tenant. No migration, no new column, and no change to
+// what the workers write — which is what would have had to be backfilled for
+// the rows already in the table.
 //
-// ⚠ The replica events genuinely cannot be placed: they carry a path and
-// nothing else (`internal/replica/recorder.go`, `reconcile.go`), and a bare
-// path does not name a storage. Rather than guess, an unattributable broadcast
-// is treated as what it is — an instance-wide OPERATOR event — and hidden from
-// confined tenants while staying visible to the supertenant and to every
-// single-tenant install. Guessing would be worse in both directions: matching
-// on path prefix would show one tenant another's alert whenever two storages
-// share a folder name, and showing it unconditionally is the leak we are here
-// to close.
+// # The person
 //
-// A row addressed to a specific user is left alone: it is already scoped to
-// that user, and the caller is asking about themselves.
-func confineNotifications(ctx context.Context, rows []*model.Notification) ([]*model.Notification, bool) {
-	scope, confined := confinedScope(ctx)
-	if !confined {
+// A tenant is not a person. Placing the row in the caller's tenant said
+// nothing about whether the caller may open the FOLDER it names, and on an
+// RBAC storage most members may not open most folders: members were reading
+// the names of files deleted from folders they have no grant on. So a member
+// gets a broadcast only when it is a kind a member may receive at all
+// (notify.MemberMayReceive — never a link's bearer token, never an alarm meant
+// for the operator) and the explorer would list what it names:
+// acl.Set.CanSee, the predicate the listing itself uses, including the ancestor
+// folders a member walks through to reach a grant. An admin is not asked:
+// admins bypass RBAC in the listing too.
+//
+// # A row that cannot be placed
+//
+// The replica events carry a bare path and nothing else
+// (`internal/replica/recorder.go`, `reconcile.go`), and a bare path does not
+// name a storage. Rather than guess, such a row is treated as what it is — an
+// instance-wide OPERATOR event, "user_id IS NULL → admin-visible" in the
+// schema's own words — and reaches only an AdminBell. Guessing would be worse
+// in both directions: matching on path prefix would show one storage's alert
+// to the readers of another whenever two storages share a folder name, and
+// showing it unconditionally is the leak.
+//
+// The SQL read (notify.Bell) already leaves out the broadcast kinds a bell
+// never shows, so what arrives here is mostly the caller's own rows; the checks
+// below still make this function a complete answer on its own.
+func (h *Notifications) visibleTo(ctx context.Context, user *model.User, bell notify.Bell, rows []*model.Notification) ([]*model.Notification, bool) {
+	if bell == notify.AdminBell {
 		return rows, false
 	}
+	scope, confined := confinedScope(ctx)
+	sets := map[int64]*acl.Set{}
 	kept := make([]*model.Notification, 0, len(rows))
 	for _, n := range rows {
 		if n == nil {
@@ -106,38 +150,82 @@ func confineNotifications(ctx context.Context, rows []*model.Notification) ([]*m
 			kept = append(kept, n)
 			continue
 		}
-		if sid, ok := notificationStorageID(n); ok && scope.CanAccessStorage(sid) {
+		if !user.IsAdmin() && !notify.MemberMayReceive(n.Event) {
+			continue
+		}
+		sid, rel, ok := notificationPlace(n)
+		if !ok {
+			continue
+		}
+		if confined && !scope.CanAccessStorage(sid) {
+			continue
+		}
+		if user.IsAdmin() || h.memberCanSee(ctx, user, sid, rel, sets) {
 			kept = append(kept, n)
 		}
 	}
 	return kept, true
 }
 
-// notificationStorageID pulls the storage a broadcast row is about out of its
-// meta blob. `meta.node.storage_id` is the shape notify.marshalMeta writes for
-// every event carrying a NodeRef; `meta.storage_id` is accepted too so an
-// emitter that only has the id (no full node) can place its row without going
-// through a NodeRef it would have to invent.
-func notificationStorageID(n *model.Notification) (int64, bool) {
+// memberCanSee answers acl.Set.CanSee for one storage, loading the caller's
+// grants for it once per request (sets caches them, a failed load as nil).
+//
+// ⚠ Fails CLOSED: an unwired resolver, a storage that no longer resolves, a
+// disabled storage (it is in nobody's drive list) or a grant query that errors
+// all hide the row. Showing it would be answering "may they see this" with "we
+// could not check".
+func (h *Notifications) memberCanSee(ctx context.Context, user *model.User, storageID int64, rel string, sets map[int64]*acl.Set) bool {
+	set, loaded := sets[storageID]
+	if !loaded {
+		set = h.loadACLSet(ctx, user, storageID)
+		sets[storageID] = set
+	}
+	return set != nil && set.CanSee(rel)
+}
+
+func (h *Notifications) loadACLSet(ctx context.Context, user *model.User, storageID int64) *acl.Set {
+	if h.Store == nil || h.ACL == nil {
+		return nil
+	}
+	st, err := h.Store.GetStorage(ctx, storageID)
+	if err != nil || st == nil || !st.Enabled {
+		return nil
+	}
+	set, err := h.ACL.LoadSet(ctx, user, st)
+	if err != nil {
+		return nil
+	}
+	return set
+}
+
+// notificationPlace pulls the storage and the storage-relative path a
+// broadcast row is about out of its meta blob. `meta.node` is the shape
+// notify.marshalMeta writes for every event carrying a NodeRef;
+// `meta.storage_id` is accepted too so an emitter that only has the id (no
+// full node) can place its row without going through a NodeRef it would have
+// to invent. Such a row names no path, and "" asks about the storage root —
+// which a member can see exactly when the storage is in their drive list.
+func notificationPlace(n *model.Notification) (storageID int64, rel string, ok bool) {
 	if len(n.MetaJSON) == 0 {
-		return 0, false
+		return 0, "", false
 	}
 	var meta struct {
 		Node *struct {
-			StorageID int64 `json:"storage_id"`
+			StorageID int64  `json:"storage_id"`
+			Path      string `json:"path"`
 		} `json:"node"`
 		StorageID *int64 `json:"storage_id"`
 	}
 	if err := json.Unmarshal(n.MetaJSON, &meta); err != nil {
-		return 0, false
+		return 0, "", false
 	}
 	if meta.Node != nil && meta.Node.StorageID != 0 {
-		return meta.Node.StorageID, true
+		return meta.Node.StorageID, meta.Node.Path, true
 	}
 	if meta.StorageID != nil && *meta.StorageID != 0 {
-		return *meta.StorageID, true
+		return *meta.StorageID, "", true
 	}
-	return 0, false
+	return 0, "", false
 }
 
 // UnreadCount returns the bell badge number for the current user.
@@ -154,29 +242,32 @@ func (h *Notifications) UnreadCount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := user.ID
-	if _, confined := confinedScope(r.Context()); confined {
+	bell := bellFor(r.Context(), user)
+	if bell != notify.AdminBell {
 		// The badge has to agree with the list, and the SQL COUNT cannot: it
-		// has no way to look inside meta_json. Counting the rows the list would
-		// actually show is the only answer that is not a lie — a badge saying 3
-		// over a list of 1 is both a hint at how much is happening elsewhere on
-		// the platform and a number the user can never clear, because they
-		// cannot mark read what they cannot see.
+		// has no way to look inside meta_json, let alone at the caller's
+		// grants. Counting the rows the list would actually show is the only
+		// answer that is not a lie — a badge saying 3 over a list of 1 is both
+		// a hint at how much is happening where the caller cannot look and a
+		// number they can never clear, because they cannot mark read what they
+		// cannot see.
 		//
 		// ⚠ Bounded on purpose. notificationBadgeMax rows are enough for a
 		// badge (every UI that draws one caps the display long before this),
 		// and an unbounded walk of the notifications table on every poll of the
 		// bell is not a trade worth making for a number nobody reads past two
-		// digits.
-		rows, _, err := h.Service.List(r.Context(), &uid, true, notificationBadgeMax, 0)
+		// digits. The rows walked are the caller's own and the few broadcast
+		// kinds their bell takes at all (notify.Bell).
+		rows, _, err := h.Service.List(r.Context(), &uid, bell, true, notificationBadgeMax, 0)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		kept, _ := confineNotifications(r.Context(), rows)
+		kept, _ := h.visibleTo(r.Context(), user, bell, rows)
 		writeJSON(w, http.StatusOK, map[string]any{"count": int64(len(kept))})
 		return
 	}
-	n, err := h.Service.UnreadCount(r.Context(), &uid)
+	n, err := h.Service.UnreadCount(r.Context(), &uid, bell)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -184,7 +275,7 @@ func (h *Notifications) UnreadCount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"count": n})
 }
 
-// notificationBadgeMax caps the multi-tenant badge walk. It is the store's own
+// notificationBadgeMax caps the filtered badge walk. It is the store's own
 // per-page ceiling (ListNotifications clamps limit to 500), so asking for more
 // would silently come back as 50.
 const notificationBadgeMax = 500
@@ -312,7 +403,7 @@ func (h *Notifications) AdminList(w http.ResponseWriter, r *http.Request) {
 	onlyUnread := r.URL.Query().Get("unread") == "true"
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	rows, total, err := h.Service.List(r.Context(), nil, onlyUnread, limit, offset)
+	rows, total, err := h.Service.List(r.Context(), nil, notify.AdminBell, onlyUnread, limit, offset)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

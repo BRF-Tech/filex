@@ -124,7 +124,7 @@ func NewAIAdmin(d AIAdminDeps) *AIAdmin {
 		replica:     NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader),
 		repTargets:  NewReplicationTargets(d.Store),
 		queue:       NewQueue(d.Queue),
-		notif:       NewNotifications(d.Notify),
+		notif:       NewNotifications(d.Notify, d.Store, acl.New(d.Store)),
 		audit:       newDemoAwareAudit(d),
 		grants:      NewGrants(d.Store, acl.New(d.Store)),
 	}

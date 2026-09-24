@@ -3379,12 +3379,35 @@ func mutedEventsClause(muted []string) (string, []any) {
 	return "event NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(muted)), ",") + ")", args
 }
 
+// bellClause builds the per-user predicate: the reader's own rows, plus the
+// broadcasts (user_id NULL) the filter admits. The zero filter admits every
+// broadcast — the predicate this read always had.
+//
+// ⚠ Placeholders, never literals, for the same reason as mutedEventsClause.
+func bellClause(userID int64, f model.BroadcastFilter) (string, []any) {
+	events, op := f.Only, "IN"
+	if len(events) == 0 {
+		events, op = f.Except, "NOT IN"
+	}
+	if len(events) == 0 {
+		return "(user_id IS NULL OR user_id = ?)", []any{userID}
+	}
+	args := make([]any, 0, len(events)+1)
+	args = append(args, userID)
+	for _, e := range events {
+		args = append(args, e)
+	}
+	return "(user_id = ? OR (user_id IS NULL AND event " + op + " (" +
+		strings.TrimSuffix(strings.Repeat("?,", len(events)), ",") + ")))", args
+}
+
 // ListNotifications paginates either a user's view (broadcasts +
 // user-scoped) or admin/global view (userID == nil).
 //
 // onlyUnread filters read_at IS NULL. mutedEvents drops the event ids the
-// user has muted; empty means no mute filter.
-func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, mutedEvents []string, limit, offset int) ([]*model.Notification, int64, error) {
+// user has muted; empty means no mute filter. broadcasts decides which
+// broadcasts the bell takes at all (see db.Store).
+func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, mutedEvents []string, broadcasts model.BroadcastFilter, limit, offset int) ([]*model.Notification, int64, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
@@ -3396,8 +3419,9 @@ func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread
 		whereC []string
 	)
 	if userID != nil {
-		whereC = append(whereC, "(user_id IS NULL OR user_id = ?)")
-		args = append(args, *userID)
+		clause, bellArgs := bellClause(*userID, broadcasts)
+		whereC = append(whereC, clause)
+		args = append(args, bellArgs...)
 	}
 	if onlyUnread {
 		whereC = append(whereC, "read_at IS NULL")
@@ -3471,12 +3495,13 @@ func (s *Store) MarkAllNotificationsRead(ctx context.Context, userID *int64) err
 
 // UnreadNotificationCount returns the bell badge number for a user.
 // Pass nil for the global unread count (admin dashboard).
-func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents []string) (int64, error) {
+func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents []string, broadcasts model.BroadcastFilter) (int64, error) {
 	q := `SELECT COUNT(*) FROM notifications WHERE read_at IS NULL`
 	var args []any
 	if userID != nil {
-		q += ` AND (user_id IS NULL OR user_id = ?)`
-		args = append(args, *userID)
+		clause, bellArgs := bellClause(*userID, broadcasts)
+		q += ` AND ` + clause
+		args = append(args, bellArgs...)
 	}
 	if clause, muteArgs := mutedEventsClause(mutedEvents); clause != "" {
 		q += ` AND ` + clause

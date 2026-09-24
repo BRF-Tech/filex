@@ -117,10 +117,39 @@ func TestNotifications_SupertenantStillSeesEveryWorkerRow(t *testing.T) {
 	require.Contains(t, body, "2026-yevmiye.xlsx")
 }
 
-// TestNotifications_SingleTenantInstallUnaffected — mode off: the bell keeps
-// showing every worker broadcast, which on a single-tenant install is the
-// operator's own alert feed. Passes on `main`.
-func TestNotifications_SingleTenantInstallUnaffected(t *testing.T) {
+// TestNotifications_TenantAdminStaysInsideItsTenant — being an admin buys a
+// tenant admin every file of THEIR tenant (admins bypass RBAC), and nothing of
+// anybody else's. The admin bypass sits right beside the tenant check, so the
+// order of the two is load-bearing: the admin short-cut placed before the
+// tenant check, or an unconfined-admin test that forgets the tenant, hands
+// every tenant admin every other tenant's alerts.
+func TestNotifications_TenantAdminStaysInsideItsTenant(t *testing.T) {
+	f := newMTFix(t, true)
+	f.emitWorkerAV(t, f.StA.ID, "/alpha-gizli/virus.exe")
+	f.emitWorkerAV(t, f.StB.ID, "/bravo-gizli/virus.exe")
+	f.emitWorkerReplica(t, "/bravo/muhasebe/2026-yevmiye.xlsx")
+
+	status, body := mtGet(t, f.AdminA, f.URL+"/api/notifications")
+	require.Equal(t, http.StatusOK, status)
+	require.Contains(t, body, "/alpha-gizli/virus.exe", "%s", body)
+	require.NotContains(t, body, "/bravo-gizli/virus.exe", "%s", body)
+	require.NotContains(t, body, "2026-yevmiye.xlsx", "%s", body)
+
+	status, body = mtGet(t, f.AdminA, f.URL+"/api/notifications/unread-count")
+	require.Equal(t, http.StatusOK, status)
+	require.Contains(t, body, `"count":1`, "%s", body)
+}
+
+// TestNotifications_TenantRuleIsInertOnASingleTenantInstall — mode off: the
+// TENANT rule is inert, so a worker alert about a storage the member can see
+// (RBAC off: all of it) stays in the bell. Passes on `main`.
+//
+// ⚠ The replica report is in no plain member's bell, and that is the per-user
+// rule, not the tenant one: a broadcast that names no storage cannot be checked
+// against anybody's grants, so it goes to admins only
+// (TestNotifications_OperatorEventsAreForAdmins). The count below leaves it out
+// for that reason.
+func TestNotifications_TenantRuleIsInertOnASingleTenantInstall(t *testing.T) {
 	f := newMTFix(t, false)
 	f.emitWorkerAV(t, f.StB.ID, "/bravo-gizli/virus.exe")
 	f.emitWorkerReplica(t, "/bravo/muhasebe/2026-yevmiye.xlsx")
@@ -128,9 +157,8 @@ func TestNotifications_SingleTenantInstallUnaffected(t *testing.T) {
 	status, body := mtGet(t, f.A, f.URL+"/api/notifications")
 	require.Equal(t, http.StatusOK, status)
 	require.Contains(t, body, "/bravo-gizli/virus.exe", "%s", body)
-	require.Contains(t, body, "2026-yevmiye.xlsx")
 
 	status, body = mtGet(t, f.A, f.URL+"/api/notifications/unread-count")
 	require.Equal(t, http.StatusOK, status)
-	require.Contains(t, body, `"count":2`, "%s", body)
+	require.Contains(t, body, `"count":1`, "%s", body)
 }

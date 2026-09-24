@@ -61,14 +61,14 @@ func TestBell_MutedEventIsHidden(t *testing.T) {
 	_, svc, uid := bellFixture(t)
 	ctx := context.Background()
 
-	items, total, err := svc.List(ctx, &uid, false, 50, 0)
+	items, total, err := svc.List(ctx, &uid, notify.AdminBell, false, 50, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 3, "baseline: nothing muted yet")
 	require.EqualValues(t, 3, total)
 
 	setBellPrefs(t, svc, uid, true, `["replica_fail"]`)
 
-	items, total, err = svc.List(ctx, &uid, false, 50, 0)
+	items, total, err = svc.List(ctx, &uid, notify.AdminBell, false, 50, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 1, "the two replica_fail rows are muted")
 	require.Equal(t, string(notify.EventFileInfected), items[0].Event)
@@ -77,7 +77,7 @@ func TestBell_MutedEventIsHidden(t *testing.T) {
 	// the UI render pagination for rows it will never show.
 	require.EqualValues(t, 1, total)
 
-	n, err := svc.UnreadCount(ctx, &uid)
+	n, err := svc.UnreadCount(ctx, &uid, notify.AdminBell)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n, "the badge must agree with the list")
 }
@@ -90,12 +90,12 @@ func TestBell_MutedRowsAreStillRecorded(t *testing.T) {
 
 	setBellPrefs(t, svc, uid, false, `["replica_fail","file.infected"]`)
 
-	items, total, err := svc.List(ctx, nil, false, 50, 0)
+	items, total, err := svc.List(ctx, nil, notify.AdminBell, false, 50, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 3, "admin/global view is never filtered by one user's prefs")
 	require.EqualValues(t, 3, total)
 
-	n, err := svc.UnreadCount(ctx, nil)
+	n, err := svc.UnreadCount(ctx, nil, notify.AdminBell)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, n)
 }
@@ -107,18 +107,18 @@ func TestBell_InAppDisabledSilencesTheBell(t *testing.T) {
 
 	setBellPrefs(t, svc, uid, false, `[]`)
 
-	items, total, err := svc.List(ctx, &uid, false, 50, 0)
+	items, total, err := svc.List(ctx, &uid, notify.AdminBell, false, 50, 0)
 	require.NoError(t, err)
 	require.Empty(t, items)
 	require.EqualValues(t, 0, total)
 
-	n, err := svc.UnreadCount(ctx, &uid)
+	n, err := svc.UnreadCount(ctx, &uid, notify.AdminBell)
 	require.NoError(t, err)
 	require.EqualValues(t, 0, n)
 
 	// Turning it back on restores the history — nothing was destroyed.
 	setBellPrefs(t, svc, uid, true, `[]`)
-	items, total, err = svc.List(ctx, &uid, false, 50, 0)
+	items, total, err = svc.List(ctx, &uid, notify.AdminBell, false, 50, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 3)
 	require.EqualValues(t, 3, total)
@@ -148,7 +148,7 @@ func TestBell_MutedPageIsNotShort(t *testing.T) {
 	}
 	setBellPrefs(t, svc, uid, true, `["replica_fail"]`)
 
-	items, total, err := svc.List(ctx, &uid, false, 2, 0)
+	items, total, err := svc.List(ctx, &uid, notify.AdminBell, false, 2, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 2, "a filtered page must be full, not short")
 	require.EqualValues(t, 3, total, "3 file.infected rows survive the mute")
@@ -165,7 +165,7 @@ func TestBell_UnreadableSettingsFailOpen(t *testing.T) {
 
 	setBellPrefs(t, svc, uid, true, `not json at all`)
 
-	items, total, err := svc.List(ctx, &uid, false, 50, 0)
+	items, total, err := svc.List(ctx, &uid, notify.AdminBell, false, 50, 0)
 	require.NoError(t, err)
 	require.Len(t, items, 3)
 	require.EqualValues(t, 3, total)

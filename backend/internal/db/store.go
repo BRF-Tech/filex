@@ -433,10 +433,14 @@ type Store interface {
 	// back short and its total still counts the rows the caller then hides.
 	// Nil/empty means "no mute filter", which is what the admin/global view
 	// (userID == nil) always passes.
-	ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, mutedEvents []string, limit, offset int) ([]*model.Notification, int64, error)
+	//
+	// broadcasts narrows the BROADCAST half of a per-user read — which rows
+	// with no user this bell takes at all (see notify.Bell). It is in SQL for
+	// the same reason as the mute list. Ignored when userID is nil.
+	ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, mutedEvents []string, broadcasts model.BroadcastFilter, limit, offset int) ([]*model.Notification, int64, error)
 	MarkNotificationRead(ctx context.Context, id int64, userID *int64) error
 	MarkAllNotificationsRead(ctx context.Context, userID *int64) error
-	UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents []string) (int64, error)
+	UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents []string, broadcasts model.BroadcastFilter) (int64, error)
 	UpdateWebhookStatus(ctx context.Context, id int64, status, errMsg string) error
 	GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error)
 	UpsertNotificationSettings(ctx context.Context, s *model.NotificationSettings) error
