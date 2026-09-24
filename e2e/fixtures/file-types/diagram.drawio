@@ -5,34 +5,34 @@
       <root>
         <mxCell id="0"/>
         <mxCell id="1" parent="0"/>
-        <mxCell id="cf" value="Cloudflare Tunnel" style="shape=ellipse;fillColor=#f59e0b;fontColor=#fff;" vertex="1" parent="1">
+        <mxCell id="cf" value="Reverse proxy" style="shape=ellipse;fillColor=#f59e0b;fontColor=#fff;" vertex="1" parent="1">
           <mxGeometry x="40" y="40" width="160" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="hetz" value="Hetzner main\n167.235.143.222" style="rounded=1;fillColor=#dae8fc;" vertex="1" parent="1">
+        <mxCell id="app" value="App server\n192.0.2.10" style="rounded=1;fillColor=#dae8fc;" vertex="1" parent="1">
           <mxGeometry x="320" y="40" width="200" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="fm" value="fm.example.com\n(filex prod)" style="rounded=1;fillColor=#d5e8d4;" vertex="1" parent="1">
+        <mxCell id="fm" value="files.example.org\n(filex)" style="rounded=1;fillColor=#d5e8d4;" vertex="1" parent="1">
           <mxGeometry x="320" y="180" width="200" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="demo" value="demo-fm.example.com\n(filex demo)" style="rounded=1;fillColor=#d5e8d4;" vertex="1" parent="1">
+        <mxCell id="demo" value="demo.example.org\n(filex demo)" style="rounded=1;fillColor=#d5e8d4;" vertex="1" parent="1">
           <mxGeometry x="320" y="260" width="200" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="s3" value="Hetzner Object Storage\nnbg1.your-objectstorage.com" style="rounded=1;fillColor=#fff2cc;" vertex="1" parent="1">
+        <mxCell id="s3" value="Object storage\ns3.example.org" style="rounded=1;fillColor=#fff2cc;" vertex="1" parent="1">
           <mxGeometry x="600" y="180" width="240" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="docs" value="docs.example.com\n(OnlyOffice)" style="rounded=1;fillColor=#e1d5e7;" vertex="1" parent="1">
+        <mxCell id="docs" value="office.example.org\n(ONLYOFFICE)" style="rounded=1;fillColor=#e1d5e7;" vertex="1" parent="1">
           <mxGeometry x="600" y="40" width="200" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="brkip" value="brkip mirror\n88.228.71.208" style="rounded=1;fillColor=#f8cecc;" vertex="1" parent="1">
+        <mxCell id="mirror" value="Mirror\n198.51.100.20" style="rounded=1;fillColor=#f8cecc;" vertex="1" parent="1">
           <mxGeometry x="320" y="360" width="200" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="e1" style="endArrow=classic;" edge="1" parent="1" source="cf" target="hetz">
+        <mxCell id="e1" style="endArrow=classic;" edge="1" parent="1" source="cf" target="app">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="e2" style="endArrow=classic;" edge="1" parent="1" source="hetz" target="fm">
+        <mxCell id="e2" style="endArrow=classic;" edge="1" parent="1" source="app" target="fm">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="e3" style="endArrow=classic;" edge="1" parent="1" source="hetz" target="demo">
+        <mxCell id="e3" style="endArrow=classic;" edge="1" parent="1" source="app" target="demo">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
         <mxCell id="e4" style="endArrow=classic;" edge="1" parent="1" source="fm" target="s3">
@@ -41,7 +41,7 @@
         <mxCell id="e5" style="endArrow=classic;dashed=1;" edge="1" parent="1" source="fm" target="docs">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="e6" style="endArrow=classic;dashed=1;" edge="1" parent="1" source="fm" target="brkip">
+        <mxCell id="e6" style="endArrow=classic;dashed=1;" edge="1" parent="1" source="fm" target="mirror">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
       </root>

@@ -1,4 +1,4 @@
-import { shell } from 'electron';
+import { net, shell } from 'electron';
 import crypto from 'node:crypto';
 
 // Desktop half of the browser authorization flow.
@@ -79,7 +79,13 @@ export async function exchangeCode(
     // stale or someone else's; completing it would bind the wrong account.
     throw new Error('authorization does not match the pending request');
   }
-  const res = await fetch(`${pending.serverUrl}/api/auth/desktop/exchange`, {
+  // ⚠⚠ `net.fetch`, never the global `fetch`. The global one is Node's own
+  // HTTP client: it ignores the system's certificate store and proxy, so a
+  // server behind a company or home CA — trusted by the browser that just
+  // signed in — failed here with a bare "fetch failed", and the one-time code
+  // was spent (issue #36, v0.43.0). `net.fetch` is Chromium's stack, the same
+  // one every other request in this process already uses.
+  const res = await net.fetch(`${pending.serverUrl}/api/auth/desktop/exchange`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ state, code, verifier: pending.verifier }),

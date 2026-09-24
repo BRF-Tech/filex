@@ -7,6 +7,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-09-24
+
+A fix-forward release for 0.43.0, and **the one to deploy. v0.43.0's
+container images were never published.** Its npm packages and its GitHub
+Release went out, but the image build failed on every attempt, so
+`ghcr.io/brf-tech/filex` has no `v0.43.0` or `slim-v0.43.0` tag and `latest`
+stayed on v0.42.2 until this release. The Helm chart and the CasaOS, Umbrel
+and Runtipi manifests at 0.43.0 name that missing image, so installing or
+upgrading from them fails to pull; at 0.43.1 they name one that exists.
+Everything the 0.43.0 notes below describe is in 0.43.1 — **including its
+security fixes, which an install that runs the image gets only now** — and two
+more fixes: from Berk Başarır, a big folder no longer re-renders itself for
+every thumbnail that arrives, and the desktop app signs in to a server behind a
+private CA.
+
+### Security
+
+- **Container, Helm and app-store installs get 0.43.0's security fixes only
+  with this release — upgrade promptly.** With no v0.43.0 image, every install
+  that runs `ghcr.io/brf-tech/filex` is still on v0.42.2 or older, without
+  anything 0.43.0 closed: an unsigned ONLYOFFICE save callback that lets
+  anybody who can reach the server overwrite a file, a narrow API token that
+  could mint a full-rights one, API answers a caching proxy could hand to
+  every visitor, and a notification bell that named files its reader could
+  not open. Read 0.43.0's ⚠⚠ notes before upgrading: a Document Server running
+  with `JWT_ENABLED` off stops saving, and desktop sync needs the new desktop
+  app as well as the server.
+- **The public repository no longer carries a storage credential.**
+  `scripts/seed-example-fixtures.sh`, which seeds the project's own demo
+  server, held an object-storage access key and secret as the fallback values
+  of `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, and it was published with
+  every release from the first one through v0.43.0. The key has been revoked
+  and replaced. The script now takes both from the machine it runs on and is
+  no longer published. No filex install used it — it only ever wrote demo
+  files to the project's own bucket.
+- **A test fixture no longer names the project's own servers.**
+  `e2e/fixtures/file-types/diagram.drawio` labelled two boxes with the public
+  addresses of the project's main server and its mirror. They are RFC 5737
+  documentation addresses (`192.0.2.10`, `198.51.100.20`) with neutral labels
+  now.
+- **The export that builds the public tree refuses both.** It now stops on any
+  of the project's own server addresses and on any credential written as a
+  shell default (`…SECRET…=${VAR:-literal}`), in whatever file it turns up.
+
+### Fixed
+
+- **The container images build again, and a release can no longer publish
+  without them.** The frontend stage of `docker/Dockerfile` and
+  `docker/Dockerfile.slim` copied the workspace manifests, `packages/` and
+  `web/`, but the build reaches outside them: its configs import two files
+  from `scripts/` (`vite-fonts-as-files.mjs` and `lib/i18n-catalogue.mjs`,
+  whose type declaration the admin build's type-check reads too), and the
+  translator's catalogue is built from the server's string tables in
+  `backend/internal/srvtext/locales/`. Both images copy all of it now. Nothing had built an image before the tag: the release ran the CI
+  workflow as its gate with the image build switched off, then published the
+  npm packages and the Release beside the image job rather than after it. The
+  gate now builds both images, with no switch to turn that off, before
+  anything is published, and the release checklist builds both locally before
+  a tag is made. Two tests keep it that way: one follows what the frontend
+  build reaches outside `packages/` and `web/` — imports, their type
+  declarations and the paths they read — and fails if either image does not
+  copy it; the other fails if the release skips the image build or publishes
+  before its gate.
+- **A big folder no longer re-renders itself once per thumbnail.** Each
+  thumbnail that arrived re-rendered the whole grid, gallery or table: a
+  folder of 344 files, about 240 of them with thumbnails, ran a Chrome tab on
+  a Windows PC out of memory and froze Edge for about 30 seconds. Every
+  thumbnail is drawn by a tile of its own now, so an arrival re-renders that
+  tile and nothing else. A thumbnail is also fetched only when its tile comes
+  near the screen, not fetched again because its signed link was renewed on
+  the hour (a new version of the file still is), and past the cache's 500
+  pictures, dropping the oldest no longer sets off an endless round of
+  re-fetches. Found and fixed by Berk Başarır
+  ([#50](https://github.com/BRF-Tech/filex/pull/50)).
+- **The docs site's release page no longer fails to build when a release note
+  wraps a code span across lines.** v0.43.0's notes wrapped the command
+  `filex sync confirm <pair>` so that its second line opened with the
+  placeholder, which the site read as an unclosed component, and every hourly
+  refresh of the site failed. The span is joined back onto one line now.
+- **Desktop: signing in to a server whose certificate comes from a private CA
+  no longer fails with "fetch failed".** The request that trades the browser's
+  one-time code for the app's token was the only one in the app's main process
+  that went through Node's own HTTP client, which ignores the operating
+  system's certificate store and proxy settings. A server behind a company or
+  home CA — trusted by the browser, so the browser half worked — failed there
+  after the server had already spent the code. It goes through Electron's
+  network stack now, like every other request the app makes, and a test fails
+  if anything in the main process uses the other client again
+  ([#36](https://github.com/BRF-Tech/filex/issues/36)).
+
+### Tests
+
+- **"Empty trash" leaves what is deleted while it runs — now proven on a run
+  longer than one batch, and on one that waits its turn.** v0.43.0 already
+  bounds an empty by the moment it was asked for: the ops row's `created_at`,
+  on the database's clock, which a restart does not lose. Berk Başarır's field
+  report — on the pull request's earlier runner, a 1 h 48 min run purged
+  61,845 rows of a total of 61,844, the extra one a file a member deleted six
+  minutes before the end — came with a test that deletes a file while a run of
+  more than one batch is under way. It now runs against the job at both the
+  trash and the ops level, beside a new one for a run queued behind another
+  tenant's ([#47](https://github.com/BRF-Tech/filex/pull/47)).
+- **The viewer audit opens draw.io and ONLYOFFICE when they answer.** e2e 100
+  waited for a capability state of `reachable`, which the server has never
+  sent (it says `ok`), so both rich viewers were skipped on every run, even
+  with the services configured.
+
 ## [0.43.0] - 2026-09-24
 
 The release that makes filex extensible. **Apps** are a second kind of

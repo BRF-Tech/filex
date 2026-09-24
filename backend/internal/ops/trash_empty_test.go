@@ -280,6 +280,88 @@ func TestTrashEmpty_ResumesAfterARestart(t *testing.T) {
 	assert.Equal(t, 1, f.trashed(t, f.sid))
 }
 
+// deletedAt moves a trashed row's deleted_at, in the column's own UTC text.
+func (f *trashFix) deletedAt(t *testing.T, id int64, at time.Time) {
+	t.Helper()
+	_, err := f.conn.Exec(`UPDATE nodes SET deleted_at = ? WHERE id = ?`,
+		at.UTC().Format("2006-01-02 15:04:05"), id)
+	require.NoError(t, err)
+}
+
+// A file deleted WHILE a run is under way stays in the trash, even when the
+// sweep has yet to read the batch it lands in.
+//
+// ⚠⚠ Berk Başarır's field report (PR #47, 979309b): on a live instance a
+// 1 h 48 min empty reported 61,845 purged of a total of 61,844 — the extra row
+// a file a member deleted six minutes before the end, purged at once instead
+// of waiting its thirty days. The sweep walks up by id and reads its next
+// batch as it goes, so a cutoff that is not the moment of asking meets a
+// newly deleted row in a later batch. The trash here is one row more than a
+// batch for that reason, and the run is held after its first purge while the
+// file is deleted.
+func TestTrashEmpty_LeavesWhatIsTrashedWhileItRuns(t *testing.T) {
+	f := newTrashFix(t, 1)
+	const batchPlusOne = 501
+	for i := 0; i < batchPlusOne; i++ {
+		id := f.trash(t, f.sid, fmt.Sprintf("old-%d.txt", i))
+		f.deletedAt(t, id, time.Now().Add(-time.Hour))
+	}
+	op, err := f.svc.SubmitTrashEmpty(context.Background(), ops.TrashEmptyRequest{})
+	require.NoError(t, err)
+	require.Equal(t, batchPlusOne, op.Total)
+	waitClosed(t, f.held.reached, "the run to be under way")
+
+	// A member deletes a file while the empty is still going.
+	late := f.trash(t, f.sid, "deleted-meanwhile.txt")
+	f.deletedAt(t, late, time.Now().Add(2*time.Second))
+	f.held.let()
+
+	end := waitDone(t, f.svc, op.ID)
+	assert.Equal(t, ops.StatusOK, end.Status, end.Error)
+	assert.Equal(t, batchPlusOne, end.Done, "the rows that were in the trash when it was asked for")
+	n, err := f.store.GetNode(context.Background(), late)
+	require.NoError(t, err, "the file deleted during the run was purged with it")
+	assert.NotNil(t, n.DeletedAt, "it waits in the trash like any other")
+	assert.Equal(t, 1, f.trashed(t, f.sid))
+}
+
+// A run that waits its turn behind another sweep is bounded by the moment it
+// was ASKED for, not the moment it gets to run: the confirmation counted the
+// trash as it was when the admin pressed the button, and whatever is deleted
+// while the run waits is not in that count.
+func TestTrashEmpty_AQueuedRunIsBoundedByItsAsk(t *testing.T) {
+	f := newTrashFix(t, 0)
+	other := f.otherStorage(t)
+	f.trash(t, f.sid, "ours.txt")
+	f.trash(t, other, "theirs.txt")
+
+	first, err := f.svc.SubmitTrashEmpty(context.Background(), ops.TrashEmptyRequest{Reach: []int64{f.sid}, Tenant: "tenant:7"})
+	require.NoError(t, err)
+	waitClosed(t, f.held.reached, "the first purge")
+	queued, err := f.svc.SubmitTrashEmpty(context.Background(), ops.TrashEmptyRequest{Reach: []int64{other}, Tenant: "tenant:8"})
+	require.NoError(t, err)
+	require.Equal(t, 1, queued.Total)
+
+	// While it waits, tenant 8 deletes another file. The column has
+	// one-second resolution on SQLite: step past the ask's second, and past
+	// the deletion's before the run gets its turn.
+	time.Sleep(1100 * time.Millisecond)
+	late := f.trash(t, other, "deleted-while-it-waited.txt")
+	time.Sleep(1100 * time.Millisecond)
+	cur, err := f.svc.Get(context.Background(), queued.ID)
+	require.NoError(t, err)
+	require.Equal(t, ops.StatusPending, cur.Status, "it is still waiting its turn")
+	f.held.let()
+
+	assert.Equal(t, ops.StatusOK, waitDone(t, f.svc, first.ID).Status)
+	q := waitDone(t, f.svc, queued.ID)
+	assert.Equal(t, ops.StatusOK, q.Status, q.Error)
+	assert.Equal(t, 1, q.Done, "what was in the trash when it was asked for")
+	n, err := f.store.GetNode(context.Background(), late)
+	require.NoError(t, err, "a file deleted while the run waited was purged by it")
+	assert.NotNil(t, n.DeletedAt)
+}
+
 // A trash empty is its tenant's: on the list, on its own and for a cancel.
 // Another tenant does not see it, even when both name no storage in common.
 func TestTrashEmpty_IsItsTenantsOwn(t *testing.T) {

@@ -144,17 +144,22 @@ test.describe('Viewer audit — per-extension UI mount', () => {
     for (const f of FIXTURES) {
       await uploadFixture(request, f.name);
     }
-    // Probe capabilities — drives per-extension skip logic. State
-    // strings: "disabled" (env unset), "reachable" (probe ok),
-    // anything else = consider unreachable.
+    // Probe capabilities — drives per-extension skip logic. The server's
+    // states are "ok" (probe answered), "unreachable", "unconfigured" and
+    // "disabled" (capability/service.go); only "ok" opens the rich viewer.
+    //
+    // ⚠ This compared with "reachable", a state the server has never sent, so
+    // the drawio and ONLYOFFICE cases were skipped on every run since the spec
+    // was written — even with both services configured and answering. Found
+    // 2026-09-24 when a run with FILEX_DRAWIO_URL set still skipped drawio.
     const res = await request.get('/api/files/capabilities');
     if (res.ok()) {
       const caps = (await res.json()) as {
         external?: Record<string, { state?: string; enabled?: boolean }>;
       };
       CAPS = {
-        onlyofficeReachable: caps.external?.onlyoffice?.state === 'reachable',
-        drawioReachable: caps.external?.drawio?.state === 'reachable',
+        onlyofficeReachable: caps.external?.onlyoffice?.state === 'ok',
+        drawioReachable: caps.external?.drawio?.state === 'ok',
       };
     }
   });

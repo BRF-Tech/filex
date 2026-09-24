@@ -321,6 +321,15 @@ function normalise(raw) {
  * So `<` is still left alone inside a span — entities there would publish a
  * literal `&lt;` — while `{{` is escaped everywhere. `&#123;` decodes back to
  * `{` in the browser, so the reader sees what the release body wrote.
+ *
+ * ⚠⚠ …but only while no line of the span STARTS with `<`. A span the body
+ * wrapped across lines is joined back onto one line: VitePress treats a line
+ * that opens with `<word>` as a Vue component block even in the middle of a
+ * paragraph, before the span is ever seen. v0.43.0 wrapped
+ * `` `filex sync confirm `` / `` <pair>` `` that way, the page got an
+ * unclosed `<pair>` element and every hourly refresh failed with "Element is
+ * missing end tag" (2026-09-24). Markdown renders a line break inside a span
+ * as a space anyway, so the reader sees the same text.
  */
 function esc(text) {
   return relativeLinks(
@@ -328,7 +337,7 @@ function esc(text) {
       .split(/(`[^`]*`)/)
       .map((part, i) =>
         i % 2 === 1
-          ? part.replace(/\{\{/g, '&#123;&#123;')
+          ? part.replace(/[ \t]*\r?\n[ \t]*/g, ' ').replace(/\{\{/g, '&#123;&#123;')
           : part.replace(/</g, '&lt;').replace(/\{\{/g, '&#123;&#123;')
       )
       .join('')

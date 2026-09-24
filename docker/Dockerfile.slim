@@ -59,6 +59,32 @@ RUN pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
 COPY packages/ ./packages/
 COPY web/ ./web/
 
+# ⚠⚠ The build configs import two files from scripts/, and without them
+# the image does not build: packages/core and packages/webcomponent's
+# vite.config.ts import ../../scripts/vite-fonts-as-files.mjs, and
+# web/vite.config.ts imports ../scripts/lib/i18n-catalogue.mjs. This stage
+# copied only package.json, the workspace, the lockfile, packages/ and web/, so
+# v0.43.0's images failed at `vite build` and were never published — the npm
+# packages and the GitHub Release went out without them. Exactly these two,
+# at the paths the imports expect (both use Node built-ins only), plus the
+# catalogue's type declaration: the admin build runs `vue-tsc --noEmit` over
+# web/vite.config.ts, which needs i18n-catalogue.d.mts beside the .mjs (without
+# it: TS7016, measured on the first real image build of 0.43.1). The rest of
+# scripts/ is release tooling the image has no use for.
+# ⚠ And the server's string tables: the catalogue plugin in web/vite.config.ts
+# READS backend/internal/srvtext/locales/{en,tr,context}.json while it builds
+# (the translator's catalogue shipped in the binary carries the server's text),
+# so `vite build` stopped with ENOENT on en.json — the second thing the real
+# image build of 0.43.1 found. Only that directory; the backend itself is
+# copied by the backend-build stage below.
+# web/tests/deploy/dockerFrontendInputs.test.ts traces every file the build
+# configs reach outside packages/ and web/ — imports, each one's .d.mts/.d.ts,
+# and the `path.join(root, '…')` paths those modules read — and fails if one is
+# not copied here.
+COPY scripts/vite-fonts-as-files.mjs ./scripts/
+COPY scripts/lib/i18n-catalogue.mjs scripts/lib/i18n-catalogue.d.mts ./scripts/lib/
+COPY backend/internal/srvtext/locales/ ./backend/internal/srvtext/locales/
+
 # Build npm packages first (web depends on them transitively for type imports
 # and the webcomponent dist gets embedded into the Go binary).
 RUN pnpm -r --filter='./packages/*' build

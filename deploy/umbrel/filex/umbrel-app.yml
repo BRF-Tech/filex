@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.43.0"
+version: "0.43.1"
 releaseNotes: |-
-  filex v0.43.0 — 2026-09-24
-  • Apps (app plugins) — a sandboxed plugin that adds things to do with files.
-  • Language packs — filex can be translated without a release.
-  • Right-to-left layout.
-  • Appearance: the instance can wear your colours.
-  • Desktop sync is live: an edit on either side arrives in about a second.
+  filex v0.43.1 — 2026-09-24
+  • Container, Helm and app-store installs get 0.43.0's security fixes only with this release — upgrade promptly.
+  • The public repository no longer carries a storage credential.
+  • A test fixture no longer names the project's own servers.
+  • The export that builds the public tree refuses both.
+  • The container images build again, and a release can no longer publish without them.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

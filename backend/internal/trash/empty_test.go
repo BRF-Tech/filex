@@ -267,6 +267,49 @@ func TestRunEmpty_LeavesWhatWasDeletedAfterItWasAskedFor(t *testing.T) {
 	assert.NotNil(t, n.DeletedAt)
 }
 
+// A file deleted WHILE a run is under way stays in the trash, even when the
+// sweep has yet to read the batch it lands in.
+//
+// ⚠⚠ Berk Başarır's field report (PR #47, 979309b): on a live instance a
+// 1 h 48 min empty reported 61,845 purged of a total of 61,844 — the extra row
+// a file a member deleted six minutes before the end, purged at once instead
+// of waiting its thirty days. The sweep walks up by id and reads its next
+// batch as it goes, so a moving cutoff meets a newly deleted row in a later
+// batch. The trash here is more than one batch for that reason, and the run is
+// held after its first purge while the file is deleted.
+func TestRunEmpty_LeavesWhatIsTrashedWhileItRuns(t *testing.T) {
+	conn, store, sid := sweepFixture(t)
+	for i := 0; i < fullBatch; i++ {
+		trashedAgo(t, conn, store, sid, fmt.Sprintf("old-%d.txt", i), time.Hour)
+	}
+	g := newGate(store, 1)
+	asked := time.Now()
+
+	var res trash.PurgeResult
+	var runErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		res, runErr = trash.New(g, nil, nil).RunEmpty(context.Background(),
+			trash.EmptyJob{Before: trash.EmptyCutoff(asked, 0)}, nil, nil)
+	}()
+	waitFor(t, g.reached, "the run to be under way")
+
+	// A member deletes a file while the empty is still going.
+	late := trashed(t, store, sid, "deleted-meanwhile.txt")
+	_, err := conn.Exec(`UPDATE nodes SET deleted_at = ? WHERE id = ?`,
+		time.Now().UTC().Add(2*time.Second).Format("2006-01-02 15:04:05"), late)
+	require.NoError(t, err)
+
+	close(g.release)
+	waitFor(t, done, "the run")
+	require.NoError(t, runErr)
+	assert.Equal(t, fullBatch, res.Deleted, "the rows that were in the trash when it was asked for")
+	n, err := store.GetNode(context.Background(), late)
+	require.NoError(t, err, "the file deleted during the run was purged with it")
+	assert.NotNil(t, n.DeletedAt, "it waits in the trash like any other")
+}
+
 // Reach is the request's tenant, or nil for everybody who may reach every
 // storage — and never nil for a tenant with no storage.
 func TestReach(t *testing.T) {

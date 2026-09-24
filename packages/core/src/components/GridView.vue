@@ -38,6 +38,7 @@ import {
 } from '../lib/dateGroups'; /* gruplama */
 import { useSortStore, type ListingOrder } from '../lib/sortOrder'; /* gruplama */
 import StarButton from './StarButton.vue';
+import ThumbTile from './ThumbTile.vue';
 import { snippetSegments } from '../lib/snippet'; /* bul:s3 */
 import { applyDragGhost } from '../lib/dragGhost'; /* wiring:c4 */
 import { contentDir } from '../lib/direction';
@@ -229,7 +230,8 @@ function headingBefore(n: FileNode): string | null {
 
 
 // Prefer the authenticated resolver when the host wired one; otherwise fall
-// back to the raw URL (legacy same-origin behavior).
+// back to the raw URL (legacy same-origin behavior). ⚠ Called by ThumbTile,
+// not by this template — see the note on the tile in the markup.
 function thumbOf(n: FileNode): string | null {
   return props.thumbSrc ? props.thumbSrc(n) : (n.thumb_url ?? null);
 }
@@ -512,48 +514,43 @@ function snippetTitle(snippet: string): string {
             v-html="fileIconTile(n)"
           ></span>
         </template>
-        <!--
-          draggable="false" — HTML5 image drag dataTransfer adds 'Files'
-          MIME, which trips the parent's upload handler; without this
-          the user dragging an item with a thumbnail re-uploads it.
-          Parent card stays draggable=true so internal move works.
-        -->
-        <img
-          v-else-if="thumbOf(n)"
-          :src="thumbOf(n)!"
+        <!-- ⚠⚠ The thumbnail is read inside ThumbTile, never here: read in
+             this template, each thumbnail that arrived re-rendered every card
+             of the folder (see ThumbTile). The tile draws the <img> once there
+             is a picture — draggable="false", because an image drag puts a
+             'Files' MIME on the dataTransfer and the parent's upload handler
+             re-uploads the file being moved — and its slot until then.
+             gorunum:v1-preview — the play badge goes over a real video frame
+             only: a video that fell back to its type tile already says what
+             it is. -->
+        <ThumbTile
+          v-else
+          :node="n"
+          :src-of="thumbOf"
+          :video-badge="drawsAsVideo(n)"
           :alt="n.basename"
           :class="{ 'fe-thumb--page': drawsAsPage(n) /* gorunum:v1-preview — crop a page from its TOP */ }"
-          loading="lazy"
-          draggable="false"
-        />
-        <!-- ikon:emoji — an encrypted folder is still a FOLDER, so it keeps the
-             folder's own shape and colour with the padlock cut out of it; the
-             🔒 it replaces said "locked" and nothing else. One definition,
-             in lib/fileIcons, for all three views. -->
-        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
-        <span
-          v-else-if="isEncryptedFolder(n)"
-          class="fe-grid__icon fe-grid__icon--svg"
-          role="img"
-          :aria-label="t('e2e.badge')"
-          v-html="encryptedFolderTile()"
-        ></span>
-        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
-        <span v-else class="fe-grid__icon fe-grid__icon--svg" v-html="fileIconTile(n)"></span>
+        >
+          <!-- ikon:emoji — an encrypted folder is still a FOLDER, so it keeps the
+               folder's own shape and colour with the padlock cut out of it; the
+               🔒 it replaces said "locked" and nothing else. One definition,
+               in lib/fileIcons, for all three views. -->
+          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
+          <span
+            v-if="isEncryptedFolder(n)"
+            class="fe-grid__icon fe-grid__icon--svg"
+            role="img"
+            :aria-label="t('e2e.badge')"
+            v-html="encryptedFolderTile()"
+          ></span>
+          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
+          <span v-else class="fe-grid__icon fe-grid__icon--svg" v-html="fileIconTile(n)"></span>
+        </ThumbTile>
         <!-- Star, ON the tile. A hover-only affordance would be invisible to
              the person looking for what they starred, so the chip is always
              painted once the file IS starred and only appears on hover/focus
              otherwise (see .fe-grid__star in styles/base.css). @click.stop so
              starring never doubles as opening the card. -->
-        <!-- gorunum:v1-preview — a frame lifted out of a video is, on a card,
-             indistinguishable from a photograph. The badge is the difference,
-             and it is drawn only over a real frame: a video that fell back to
-             its type tile already says what it is. -->
-        <span
-          v-if="!previewKind(n) && thumbOf(n) && drawsAsVideo(n)"
-          class="fe-thumb__play"
-          aria-hidden="true"
-        ></span>
         <div v-if="canStar(n)" class="fe-grid__star" @click.stop @dblclick.stop>
           <StarButton
             :starred="!!starredIds?.has(n.id!)"

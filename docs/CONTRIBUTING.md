@@ -773,16 +773,31 @@ Maintainer-only. Reproducible, automated by CI.
    `web/tests/deploy/deployVersions.test.ts` now fails the build if any of the
    seven pins drifts, and `--check` reports them without writing.
 6. Commit: `chore(release): vX.Y.Z`.
-   ⚠⚠ **Not with `git add -A`, and not before two checks.** The release commit
-   is the one commit in the project that is allowed to touch everything, which
-   is exactly why it must not be written blind:
+   ⚠⚠ **Not with `git add -A`, and not before these checks.** The release
+   commit is the one commit in the project that is allowed to touch
+   everything, which is exactly why it must not be written blind:
 
    ```bash
    git status --porcelain | grep '^??' && echo "untracked files — commit them or move them to their branch"
    pnpm -s --filter ./web build      # vue-tsc + vite, the gate nothing else runs
+   (cd web && npx vitest run)        # the unit suite on your clock…
+   (cd web && TZ=UTC npx vitest run) # …and on CI's, which is UTC
+   docker build --platform linux/amd64 -f docker/Dockerfile      -t filex:release-check .
+   docker build --platform linux/amd64 -f docker/Dockerfile.slim -t filex:release-check-slim .
    node e2e/run.mjs cypress          # the suite release.yml waits for, run BEFORE the tag is public
    node e2e/run.mjs local            # Playwright — the journeys Cypress does not walk
    ```
+
+   Measured 2026-09-24, on v0.43.0: **the npm packages and the GitHub Release
+   were published, and the container images were not.** The Dockerfiles'
+   frontend stage copied `packages/` and `web/`, but the build configs import
+   two files from `scripts/`; `vite build` failed on every attempt, and
+   nothing local had ever built an image. `web/tests/deploy/dockerFrontendInputs.test.ts`
+   now fails if the build reaches a file the images do not copy, but only a
+   real `docker build` proves the rest of the recipe — so both images are built
+   here, before the tag. v0.43.0's CI also failed a unit test that passed on
+   the UTC+3 machine it was cut on; the suite runs under `TZ=UTC` here too, so
+   the clock of whoever cuts the release cannot hide one again.
 
    Measured 2026-09-14, on v0.41.0: the explorer had been rebuilt and every
    account now landed on Home instead of the dashboard. Nothing local had run
@@ -813,6 +828,15 @@ Maintainer-only. Reproducible, automated by CI.
    Turkish saw an English admin panel on any second device) and none of the
    steps above would ever have caught it — they check README, screenshots,
    links, anchors and version manifests, and never run a test.
+   ⚠⚠ **The gate builds both images, and cannot be told not to.** Until
+   v0.43.1 the release called `ci.yml` with `skip_docker: true` ("the release's
+   own docker job builds the same image") — but `binaries`, `docker` and `npm`
+   start *beside* one another once the gate passes, so when v0.43.0's images
+   failed, npm and the Release were already public. The input is gone, the
+   image job has no `if:`, and `web/tests/deploy/releaseGatesImages.test.ts`
+   fails if either comes back or a publishing job stops waiting for the gate.
+   (It reads `.github/workflows`; in a checkout without them, point
+   `FILEX_WORKFLOWS_DIR` at the published ones.)
 
 7. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"` — **signed**, and `git tag -v vX.Y.Z`
    must answer `Good signature` before you push. Releases up to and including
@@ -831,14 +855,16 @@ Maintainer-only. Reproducible, automated by CI.
    > is produced by `scripts/export-public.sh`, and the signed tag is made
    > there, on the commit that is actually published.
 
-CI does the rest (GitHub Actions `release.yml`, five jobs):
-- `binaries` — goreleaser: multi-arch binaries → the GitHub Release. It is
-  what *creates* the Release, so `desktop` below depends on it.
-- `docker` — a **matrix**, one native runner per architecture (amd64 on
-  `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), each pushing by digest.
-  ⚠ It has **no `needs:`** — it builds its own binary and never wanted the
-  release. arm64 used to run under QEMU behind `needs: binaries` and took
-  20-30 minutes; on a native runner the whole critical path is about seven.
+CI does the rest (GitHub Actions `release.yml`: the `test` gate above, then
+five jobs):
+- `binaries` (needs `test`) — goreleaser: multi-arch binaries → the GitHub
+  Release. It is what *creates* the Release, so `desktop` below depends on it.
+- `docker` (needs `test`, nothing else) — a **matrix**, one native runner per
+  architecture (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), each
+  pushing by digest. ⚠ It does **not** wait for `binaries` — it builds its own
+  binary and never wanted the release. arm64 used to run under QEMU behind
+  `needs: binaries` and took 20-30 minutes; on a native runner the whole
+  critical path is about seven.
 - `docker-manifest` (needs `docker`) — joins the two digests into the tags
   people pull: `:vX.Y.Z`, `:slim-vX.Y.Z`, `:full-vX.Y.Z`, `:latest`, `:slim`,
   `:full`.
@@ -855,8 +881,8 @@ CI does the rest (GitHub Actions `release.yml`, five jobs):
   *Settings → Updates* **Download** button points into it. Put
   `filex-desktop-portable-x64.exe` there with the installer, or that button
   leads to a file that is not on the server.
-- `npm` (independent) — publishes `@brftech/filex-core`, `@brftech/filex`,
-  `@brftech/filex-react`.
+- `npm` (needs `test`, nothing else) — publishes `@brftech/filex-core`,
+  `@brftech/filex`, `@brftech/filex-react`.
 
 9. **Publish the two update feeds, then prove they moved.** CI attaches every
    artifact to the GitHub Release; it publishes **neither feed**, and a feed is
