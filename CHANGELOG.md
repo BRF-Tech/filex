@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A file's name, typed as it is shown, finds the file.** Two defects, and
+  either one emptied the list:
+  - **Names a Mac uploaded were stored decomposed.** macOS clients hand a
+    filename over in Unicode form D — `ü` as `u` + U+0308 — and filex keeps
+    the name as uploaded, while a search box sends the composed `ü`. Nothing
+    normalised either side, so every query word with `ü`, `ö`, `ç`, `ş`, `ğ`
+    or `İ` in it missed every such name — 71 388 of 169 471 on the instance
+    that reported it — and the index's separator-blind copy cut such a word
+    in two at its mark (`gu rel`). Both search paths now compare names
+    composed (NFC); the stored name is not touched. The index document
+    schema goes to 3, so an existing index is rebuilt automatically, in the
+    background, on the first start.
+  - **Without the index, only the longest word reached the database.** The
+    fallback took the first 1000 rows by name holding that one word and
+    checked the others afterwards; when it was a word most files share, the
+    file being looked for was past row 1000, so the more of a name you
+    typed, the less you found — the name pasted byte for byte found nothing.
+    Every word is now a condition in the query (`Store.SearchNodesAll`), in
+    each spelling a name can be stored under (composed and decomposed;
+    lower, upper and title case, with the Turkish `İ`), so the limit counts
+    real answers. The toolbar search, `/api/files/search` and the AI/MCP name
+    search all go through it. The conditions are on the indexed name column:
+    0.11–0.2 s on the same 169k-file catalogue, as before the change, against
+    1.06 s when the words were matched against the path.
+
+### Changed
+
+- **Without the index, every word of a search has to be in the file's own
+  name.** A word that appears only in a folder name used to answer through
+  the path when the longest word of the query happened to be in the file
+  name; it is now found with the index only. See `docs/SEARCH.md`.
+
 ## [0.42.2] - 2026-09-19
 
 A fix release for the issue 32 follow-up and three things that were wrong on

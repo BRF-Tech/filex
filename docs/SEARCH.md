@@ -45,9 +45,9 @@ Each indexed document is one filesystem node, keyed by the node's database ID:
 | Field | Source | Used for |
 |---|---|---|
 | `storage_id` | mount the node lives on | scoping results to one storage |
-| `name` | filename, verbatim | the primary match target |
-| `path` | full path within the mount | substring matches on folders |
-| `name_norm` | the filename lower-cased, with every run of non-alphanumeric characters collapsed to one space (`invoice_2026.pdf` becomes `invoice 2026 pdf`) | separator-blind and typo-tolerant matching |
+| `name` | filename, composed ([NFC](#names-written-decomposed)) | the primary match target |
+| `path` | full path within the mount, composed | substring matches on folders |
+| `name_norm` | the composed filename lower-cased, with every run of characters that are not letters, digits or combining marks collapsed to one space (`invoice_2026.pdf` becomes `invoice 2026 pdf`) | separator-blind and typo-tolerant matching |
 | `path_norm` | the same treatment applied to the path | separator-blind folder matches |
 | `mime` | detected mime type | stored, available to queries |
 | `type` | `file` / `dir` | stored |
@@ -107,6 +107,28 @@ The term is lower-cased for the wildcard sides (Bleve stores tokens lower-cased
 but does **not** analyse wildcard queries, so an upper-case term would otherwise
 miss every row).
 
+### Names written decomposed
+
+The same letter can be stored two ways. `ü` is one character when a keyboard
+types it (Unicode normalisation form C, **NFC**), and two — `u` followed by
+U+0308 COMBINING DIAERESIS — when a macOS client hands a filename over
+(form D, **NFD**). filex keeps a file's name exactly as it was uploaded, because
+the storage needs those bytes, so one catalogue routinely holds both: measured
+on a production catalogue of 169 471 files, 71 388 names were decomposed —
+about nine in ten of the names with a Turkish letter in them.
+
+Search compares names **composed**: the query, the indexed `name`/`path` and
+their normalised copies, and every row the fallback reads back are put in NFC
+before they are compared, so `Gürel` typed on a keyboard finds a `Gürel` a Mac
+uploaded, and a name pasted from a Finder window finds one uploaded from
+Windows. The stored name is never changed. A combining mark that survives
+composition (every Devanagari vowel sign is one) is part of its word, not a
+separator.
+
+Before this, every query word with `ü`, `ö`, `ç`, `ş`, `ğ` or `İ` in it matched
+only the composed names, and the normaliser cut each decomposed word in two at
+its mark (`gu rel`) — so a file's own name, typed as it is shown, found nothing.
+
 **Typo tolerance.** If that pass comes back with fewer **surviving** hits than
 the requested `limit`, a second, **fuzzy** pass runs: one edit-distance query per
 word, all required. Words of 3 characters or fewer must match exactly (one edit
@@ -155,17 +177,38 @@ at the 500 cap — against the 7.8 ms the wildcard scans cost to produce it.
 **SQL LIKE fallback.** If the Bleve index is disabled or returns **zero** hits
 *and* the request is scoped to a specific storage, filex falls back to the
 `nodes.name` column. The fallback is a different code path, not a different
-product, so it is separator-blind too: the most selective word of the query goes
-to the database as `LIKE '%word%'`, and every row that comes back is re-checked
+product, so it is separator-blind too: **every word** of the query goes to the
+database as a condition on the name, and every row that comes back is re-checked
 in Go by the **same scorer** the index path uses, and ranked into the same tiers.
 `invoice 2026` finds `invoice_2026.pdf` with the index switched off, and `Code
 main` drops the `Code` folder there exactly as it does with the index on.
 
+A database compares the bytes it holds, so each word is sent in every spelling a
+name can be stored under — [composed and decomposed](#names-written-decomposed),
+lower, upper and title case (cased the Turkish way, so `i` also becomes `İ`;
+SQLite's `LIKE` folds ASCII letters only). A word with several spellings also
+sends the run of letters they all share (`arch` for `archive`), and the
+one-pattern conditions go first, so the database turns most rows away with a
+single comparison. The conditions are all on the name, which is in an index:
+SQLite rejects a row without reading it from the table. A query sends at most
+32 conditions — a pasted paragraph would otherwise run into SQLite's limit on
+placeholders — and the words past them are still required by the scorer.
+
+⚠ The fallback used to send only the **longest** word to the database, and
+checked the others afterwards over the first 1000 rows by name. When that word
+was one most files share, the file being looked for was simply past row 1000:
+measured on a production catalogue, a name's longest word was the prefix on
+64 483 of 169 471 files, and the two files being looked for sat at rows 4 128
+and 33 623. The more of a name somebody typed, the less they found. With every
+word a condition, the limit counts rows that answer the whole query; on the
+same catalogue an eleven-word query answers in 0.13 s, one word in 0.11–0.2 s.
+
 Two things the fallback does not do. **Typo tolerance** — edit distance is not
 something a `LIKE` can express, and faking it with more patterns would turn one
-scan into many. And the LIKE itself runs against the **name** column only, so a
-query whose words appear solely in a folder name will not be *retrieved* this
-way — though once a row is retrieved, its folders are scored like anywhere else.
+scan into many. And **every word has to be in the file's own name**: a word that
+appears only in a folder name is found with the index, not without it. Matching
+the words against the path instead reads every candidate row from the table —
+1.06 s for the eleven-word query above.
 
 **RBAC filtering.** Whichever path produced the hits, results are filtered
 through the caller's [RBAC](RBAC.md) grants before they're returned — a user
@@ -604,7 +647,10 @@ Both actions are also exposed to admin tokens as the MCP tools
 ## Upgrading an existing index
 
 The forgiving name matching added two indexed fields, `name_norm` and
-`path_norm`. Documents written by an older filex do not have them.
+`path_norm`. Documents written by an older filex do not have them. Schema 3
+indexes names [composed](#names-written-decomposed): a schema-2 document holds a
+decomposed name's words in pieces, which the typed word cannot match, so a
+schema-2 index is rebuilt the same way — automatically, in the background.
 
 **An upgrade needs no action, and search does not get worse.** The
 pre-existing sub-queries are still part of every query, precisely so that a
@@ -687,15 +733,23 @@ persistently missing, run a [storage sync](STORAGE.md#sync) or a
 You're on the **SQL LIKE fallback**. That happens when `FILEX_SEARCH_ENABLED` is
 off, or the Bleve index failed to open at startup (check the logs for
 `search index open failed; falling back to SQL LIKE`). The fallback is
-separator-blind and handles multi-word queries, but it scans the `name` column
-only and cannot do typo tolerance. Fix the index (see next) to get the fast,
-multi-field, fuzzy path back.
+separator-blind and handles multi-word queries, but every word has to be in the
+file's name and it cannot do typo tolerance. Fix the index (see next) to get the
+fast, multi-field, fuzzy path back.
 
 ### `search index open failed` in the logs
 The Bleve directory is unreadable, corrupt, or **locked** by another process.
 Confirm only one filex instance points at that `index_path`, that filex can
 write it, then either restart, or delete the `search.bleve` directory and run a
 **rebuild** to recreate it cleanly.
+
+### A name with Turkish (or other accented) letters is not found
+Typing the name exactly as it is shown used to find nothing when the file was
+uploaded from a Mac, which writes such names decomposed — see
+[Names written decomposed](#names-written-decomposed). Both paths compare
+composed names now. With the index on, the documents already in it are fixed by
+the automatic rebuild (`needs_rebuild` on the stats endpoint says whether it has
+run); without the index there is nothing to rebuild.
 
 ### Substring, separator or typo searches miss rows
 Substring and case are handled by the wildcard sub-queries, separators by the
