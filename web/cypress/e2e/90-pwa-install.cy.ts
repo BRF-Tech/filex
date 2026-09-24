@@ -142,9 +142,17 @@ describe('PWA install surface', () => {
     );
   });
 
+  // ⚠ On the sign-in page the card is shown open only where it FITS without
+  //   standing on the form or the version line (checkFit, keepClear); where it
+  //   does not, it becomes a chip that opens on click. Whether 1440x900 fits
+  //   depends on the machine's fonts: it fitted on the Windows dev box and did
+  //   not on the release CI's Linux runner (v0.43.0, 2026-09-24), so this spec
+  //   used to pass here and fail there. Both states are now pinned by size.
   it('a PC visitor is offered the DESKTOP APP, not a browser install', () => {
+    cy.viewport(1440, 1400);
     cy.visit('/admin/login', { onBeforeLoad: desktopEnv });
     cy.get('[data-testid="pwa-install-banner"]').should('be.visible');
+    cy.get('[data-testid="pwa-install-toggle"]').should('not.exist');
     cy.get('[data-testid="desktop-download-button"]').should('be.visible');
     // ⚠ Even after the browser offers a native install, the PC path must stay
     // on the desktop app — `canPromptInstall` is explicitly false when a
@@ -153,6 +161,16 @@ describe('PWA install surface', () => {
     cy.window().then((win) => fireBeforeInstallPrompt(win));
     cy.get('[data-testid="pwa-install-button"]').should('not.exist');
     cy.get('[data-testid="pwa-ios-instructions"]').should('not.exist');
+  });
+
+  it('where the card does not fit, a PC visitor still gets the desktop app from the chip', () => {
+    cy.viewport(1440, 560);
+    cy.visit('/admin/login', { onBeforeLoad: desktopEnv });
+    cy.get('[data-testid="pwa-install-banner"]').should('be.visible');
+    cy.get('[data-testid="desktop-download-button"]').should('not.exist');
+    cy.get('[data-testid="pwa-install-toggle"]').click();
+    cy.get('[data-testid="desktop-download-button"]').should('be.visible');
+    cy.get('[data-testid="pwa-install-button"]').should('not.exist');
   });
 
   it('shows the native install button after beforeinstallprompt (Android Chrome)', () => {
