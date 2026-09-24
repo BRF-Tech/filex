@@ -226,3 +226,41 @@ func TestStartEmpty_TotalIsTheRunsOwnScope(t *testing.T) {
 	assert.Equal(t, 2, tenants.Status().Total, "a tenant's total is its own storages")
 	assert.Equal(t, 2, tenants.Status().Purged)
 }
+
+// "Empty the trash now" empties the trash that was there when it was pressed.
+//
+// ⚠⚠ It also purged whatever reached the trash while it ran: the cutoff was
+// "now plus a day", and the sweep walks up by id, so a file deleted during the
+// run was purged within minutes instead of waiting its thirty days. On the
+// instance that reported the bug the run took 1 h 48 min, and a file a member
+// deleted six minutes before the end was purged with the rest — 61,845 purged
+// of a total of 61,844 (a misplaced copy, as it happened; the next one may not
+// be).
+//
+// The trash is more than one batch on purpose: the sweep reads its next batch
+// after the file is deleted, which is when a large run met it.
+func TestStartEmpty_LeavesWhatIsTrashedAfterItStarted(t *testing.T) {
+	conn, store, sid := sweepFixture(t)
+	for i := 0; i < fullBatch; i++ {
+		trashedAgo(t, conn, store, sid, fmt.Sprintf("old-%d.txt", i), time.Hour)
+	}
+	g := newGate(store, 1)
+
+	run, err := trash.New(g, nil, nil).StartEmpty(context.Background(), 0, 0)
+	require.NoError(t, err)
+	waitFor(t, g.reached, "the run to be under way")
+
+	// A member deletes a file while the empty is still going.
+	late := trashed(t, store, sid, "deleted-meanwhile.txt")
+	_, err = conn.Exec(`UPDATE nodes SET deleted_at = ? WHERE id = ?`,
+		time.Now().UTC().Add(2*time.Second).Format("2006-01-02 15:04:05"), late)
+	require.NoError(t, err)
+
+	close(g.release)
+	waitFor(t, run.Done(), "the run")
+
+	assert.Equal(t, fullBatch, run.Status().Purged, "the rows that were in the trash when it was pressed")
+	n, err := store.GetNode(context.Background(), late)
+	require.NoError(t, err, "the file deleted during the run was purged with it")
+	assert.NotNil(t, n.DeletedAt, "it waits in the trash like any other")
+}

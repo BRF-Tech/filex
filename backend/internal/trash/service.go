@@ -155,17 +155,29 @@ func (s *Service) EmptyOlderThan(ctx context.Context, olderThanDays int, storage
 	}
 	s.sweep.Lock()
 	defer s.sweep.Unlock()
-	return s.purgeOlderThan(ctx, emptyCutoff(olderThanDays), storageID, nil)
+	return s.purgeOlderThan(ctx, emptyCutoff(time.Now(), olderThanDays), storageID, nil)
 }
 
-// emptyCutoff is the deleted_at bound an "empty the trash" purges below.
-func emptyCutoff(olderThanDays int) time.Time {
+// emptyCutoff is the deleted_at bound an "empty the trash" asked for at `now`
+// purges below: that moment, less olderThanDays. 0 days is everything that was
+// in the trash then.
+//
+// ⚠⚠ It was "now plus a day" for 0 days, so whatever reached the trash while
+// a run went on was purged with it: the sweep walks up by id and meets a newly
+// deleted row in a later batch. A run is hours on a large trash — 1 h 48 min
+// for 61,844 rows on the instance that reported the bug, where a file a member
+// deleted six minutes before the end was purged at once instead of waiting its
+// thirty days.
+//
+// UTC because SQLite keeps deleted_at as UTC text and compares the parameter
+// as text: the driver writes a time.Time with its zone offset, so a local-time
+// bound would land hours off.
+func emptyCutoff(now time.Time, olderThanDays int) time.Time {
+	now = now.UTC()
 	if olderThanDays > 0 {
-		return time.Now().Add(-time.Duration(olderThanDays) * 24 * time.Hour)
+		return now.Add(-time.Duration(olderThanDays) * 24 * time.Hour)
 	}
-	// 0 days = purge everything currently in the trash: a future cutoff
-	// matches everything in the past.
-	return time.Now().Add(24 * time.Hour)
+	return now
 }
 
 // ConflictError reports that a restore's original path is occupied. Nothing

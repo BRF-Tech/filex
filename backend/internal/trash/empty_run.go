@@ -96,7 +96,8 @@ func (s *Service) StartEmpty(ctx context.Context, olderThanDays int, storageID i
 	if !s.sweep.TryLock() {
 		return nil, ErrBusy
 	}
-	cutoff := emptyCutoff(olderThanDays)
+	started := time.Now().UTC()
+	cutoff := emptyCutoff(started, olderThanDays)
 	total, totalBytes, err := s.tally(ctx, cutoff, storageID)
 	if err != nil {
 		s.sweep.Unlock()
@@ -108,7 +109,7 @@ func (s *Service) StartEmpty(ctx context.Context, olderThanDays int, storageID i
 		Running:       true,
 		Total:         total,
 		TotalBytes:    totalBytes,
-		StartedAt:     time.Now().UTC(),
+		StartedAt:     started,
 	}}
 	s.runsMu.Lock()
 	if s.runs == nil {

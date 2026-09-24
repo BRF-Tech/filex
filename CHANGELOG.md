@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   storage the caller could reach; so were a negative day count, a storage id
   that was not a number and a misspelt field. Each is now 400 and nothing is
   purged, and the page no longer sends the empty string.
+- **"Empty trash" empties the trash that was there when it was pressed.** The
+  cutoff was "now plus a day", and the sweep walks up by id, so whatever was
+  deleted while a run went on was purged with it instead of waiting its
+  retention. On the instance that reported the bug a 1 h 48 min run purged a
+  file a member deleted six minutes before the end (61,845 purged of a total
+  of 61,844). The cutoff is now the moment the empty was asked for, in UTC.
 - **Purging a node no longer reads the whole nodes table.** `nodes.parent_id`
   cascades on delete and nothing indexed it on SQLite or PostgreSQL, so every
   hard delete scanned the table for children: 300 ms a row on a
