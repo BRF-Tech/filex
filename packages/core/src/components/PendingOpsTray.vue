@@ -56,8 +56,8 @@ const emit = defineEmits<{
 
 function mapStatus(op: PendingOp): OperationStatus {
   if (op.status === 'done') return 'done';
-  if (op.status === 'error') return 'error';
   if (op.status === 'cancelled') return 'aborted';
+  if (op.status === 'error') return 'error';
   return 'running'; // pending | running
 }
 
@@ -79,6 +79,7 @@ function isPluginJob(op: PendingOp): boolean {
  *  starts — for an administrator. */
 function mayCancel(op: PendingOp): boolean {
   if (op.status !== 'pending' && op.status !== 'running') return false;
+  if (op.op_type === 'archive-create' || op.op_type === 'archive-extract') return op.cancellable;
   if (isPluginJob(op)) return true;
   return op.op_type === 'trash-empty' && props.callerAdmin === true;
 }
@@ -103,6 +104,7 @@ watch(
           error: op.status === 'error' ? failureOf(op).text : null,
           errorDetail: op.status === 'error' ? (failureOf(op).detail ?? null) : null,
           queued: op.status === 'pending',
+          cancelling: op.status === 'cancelling',
           doneCount: op.progress_done,
           totalCount: op.progress_total,
           cancellable: mayCancel(op),
@@ -112,8 +114,8 @@ watch(
           outputMode: (isPluginJob(op) ? props.outputModeOf?.(op) : undefined) ?? null,
         },
         actions: {
-          dismiss: () => emit('dismiss', op.id),
           cancel: () => emit('cancel', op.id),
+          dismiss: () => emit('dismiss', op.id),
           open: (path: string) => emit('open', op.id, path),
         },
       })),

@@ -205,7 +205,8 @@ func TestInternalDirs_PeopleCannotWriteThere(t *testing.T) {
 	status, body = fxPost(t, f.URL+"/api/files/archive/extract", tok, map[string]any{"storage_id": f.StA.ID, "path": "Documents/bundle.zip", "dest": ".filex-open"})
 	assertReserved(t, "extracting into the work area", status, body)
 	status, body = fxPost(t, f.URL+"/api/files/archive/extract", tok, map[string]any{"storage_id": f.StA.ID, "path": "Documents/bundle.zip", "dest": "Unpacked"})
-	require.Equal(t, http.StatusOK, status, "an ordinary extraction: %s", body)
+	require.Equal(t, http.StatusAccepted, status, "an ordinary extraction: %s", body)
+	f.drainOps(t)
 	assert.FileExists(t, filepath.Join(f.RootA, "Unpacked", "ok.txt"), "the ordinary member was not extracted")
 	for _, planted := range []string{".versions/evil.txt", "sub/.keepdir", ".filex-open/a1b2c3d4e5f6-x.docx"} {
 		assert.NoFileExists(t, filepath.Join(f.RootA, "Unpacked", filepath.FromSlash(planted)), "extraction wrote %s", planted)

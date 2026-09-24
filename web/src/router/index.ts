@@ -437,6 +437,12 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.protection' },
       },
       {
+        path: 'archives',
+        name: 'archives',
+        component: () => import('@/views/Archives.vue'),
+        meta: { breadcrumb: 'nav.archives' },
+      },
+      {
         path: 'search',
         name: 'search',
         component: () => import('@/views/SearchTest.vue'),

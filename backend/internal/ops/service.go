@@ -34,6 +34,14 @@ const (
 	OpCopy   = "copy"
 	OpMove   = "move"
 	OpDelete = "delete"
+	// OpArchiveCreate materializes and compresses an archive through a handler-
+	// supplied in-memory job. The persisted row intentionally contains only
+	// safe metadata; archive passwords must never be written to pending_ops.
+	OpArchiveCreate = "archive-create"
+	// OpArchiveExtract expands an archive through a handler-supplied in-memory
+	// job. As with creation, credentials stay in the closure and are never
+	// persisted in pending_ops.
+	OpArchiveExtract = "archive-extract"
 	// OpUploadCommit streams a staged upload from filex's staging area into the
 	// storage driver. Its single "source" is the staged upload id, not a path —
 	// the work is done by the injected UploadCommitter, because the DB mirror,
@@ -50,11 +58,12 @@ const (
 
 // Status values.
 const (
-	StatusPending = "pending"
-	StatusRunning = "running"
-	StatusOK      = "ok"
-	StatusFailed  = "failed"
-	StatusPartial = "partial"
+	StatusPending    = "pending"
+	StatusRunning    = "running"
+	StatusOK         = "ok"
+	StatusFailed     = "failed"
+	StatusPartial    = "partial"
+	StatusCancelling = "cancelling"
 	// StatusCancelled is a row Cancel ended: a pending row that never ran,
 	// or a running one whose context was cancelled.
 	StatusCancelled = "cancelled"
@@ -107,6 +116,8 @@ type Op struct {
 	// the queue row to carry them (migration 00038). nil is SYSTEM — a row
 	// queued before the column existed, or by something that is not a person.
 	ActorID *int64 `json:"actor_id,omitempty"`
+	// Cancellable is advertised rather than inferred from the operation kind.
+	Cancellable bool `json:"cancellable"`
 
 	// An OpTrashEmpty row's request (trash_empty.go): kept out of the
 	// answers, which carry its counts only.
@@ -150,6 +161,8 @@ type Service struct {
 
 	// cancels holds the cancel handle of every running op (Cancel).
 	cancels sync.Map
+	jobsMu  sync.Mutex
+	jobs    map[int64]queuedJob
 
 	// live holds the byte counters of running cross-storage ops (progress.go).
 	live sync.Map
@@ -174,6 +187,16 @@ type Service struct {
 	stopMu sync.Mutex
 	stop   chan struct{}
 	stopWg sync.WaitGroup
+}
+
+// Job is handler-owned background work. progress reports completed units;
+// callers choose the units when submitting (archive creation uses one per
+// staged member plus one for compression and the destination write).
+type Job func(ctx context.Context, progress func(done int)) error
+
+type queuedJob struct {
+	run     Job
+	cleanup func()
 }
 
 // DBSync mirrors a completed filesystem operation into the DB node index.
@@ -276,6 +299,13 @@ func (s *Service) Cancel(ctx context.Context, id int64) (bool, error) {
 		if v, ok := s.cancels.Load(id); ok {
 			v.(*cancelHandle).cancel()
 		}
+		s.jobsMu.Lock()
+		queued := s.jobs[id]
+		delete(s.jobs, id)
+		s.jobsMu.Unlock()
+		if queued.cleanup != nil {
+			queued.cleanup()
+		}
 		return true, nil
 	}
 	if v, ok := s.cancels.Load(id); ok {
@@ -361,6 +391,9 @@ func (s *Service) Migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `UPDATE pending_ops SET status='pending', started_at=NULL WHERE status='running'`); err != nil {
 		return fmt.Errorf("ops: requeue stale running rows: %w", err)
 	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE pending_ops SET status='cancelled', finished_at=CURRENT_TIMESTAMP WHERE status='cancelling'`); err != nil {
+		return fmt.Errorf("ops: finish stale cancelling rows: %w", err)
+	}
 	return nil
 }
 
@@ -371,6 +404,54 @@ func (s *Service) Migrate(ctx context.Context) error {
 // destination storage. It delegates to SubmitTo with dest == source.
 func (s *Service) Submit(ctx context.Context, kind string, storageID int64, sources []string, dest string) (*Op, error) {
 	return s.SubmitTo(ctx, kind, storageID, storageID, sources, dest)
+}
+
+// SubmitJob queues handler-owned work without persisting its executable
+// payload. This is important for encrypted archives: sources and destination
+// are useful durable operation metadata, but the password stays exclusively
+// in the closure and therefore in process memory.
+func (s *Service) SubmitJob(ctx context.Context, kind string, storageID int64, sources []string, dest string, total int, job Job) (*Op, error) {
+	return s.SubmitJobWithCleanup(ctx, kind, storageID, sources, dest, total, job, nil)
+}
+
+// SubmitJobWithCleanup is SubmitJob with an idempotent cleanup callback. The
+// callback is also invoked when a still-pending job is cancelled, which is
+// essential for request-prepared temporary inputs that the job never gets a
+// chance to defer-remove itself.
+func (s *Service) SubmitJobWithCleanup(ctx context.Context, kind string, storageID int64, sources []string, dest string, total int, job Job, cleanup func()) (*Op, error) {
+	if kind != OpArchiveCreate && kind != OpArchiveExtract {
+		return nil, fmt.Errorf("ops: unsupported job kind %q", kind)
+	}
+	if storageID == 0 {
+		return nil, errors.New("ops: missing storage_id")
+	}
+	if len(sources) == 0 {
+		return nil, errors.New("ops: no sources")
+	}
+	if dest == "" {
+		return nil, errors.New("ops: dest required")
+	}
+	if total <= 0 || job == nil {
+		return nil, errors.New("ops: invalid job")
+	}
+	srcJSON, _ := json.Marshal(sources)
+
+	// Hold the same lock the worker uses to take the closure. That closes the
+	// small timer-driven race between INSERT and registering the in-memory job.
+	s.jobsMu.Lock()
+	id, err := s.insertOp(ctx, kind, storageID, storageID, string(srcJSON), dest, total)
+	if err == nil {
+		if s.jobs == nil {
+			s.jobs = make(map[int64]queuedJob)
+		}
+		s.jobs[id] = queuedJob{run: job, cleanup: cleanup}
+	}
+	s.jobsMu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("ops: insert job: %w", err)
+	}
+	s.poke()
+	return s.Get(ctx, id)
 }
 
 // SubmitTo enqueues an op whose destination may live in ANOTHER storage.
@@ -464,6 +545,7 @@ func (s *Service) Get(ctx context.Context, id int64) (*Op, error) {
 		if s.decorator != nil {
 			s.decorator(ctx, []*Op{op})
 		}
+		op.Cancellable = op.Status == StatusPending || op.Status == StatusRunning
 	}
 	return op, err
 }
@@ -551,6 +633,7 @@ func (s *Service) ListFor(ctx context.Context, status string, v Viewer) ([]*Op, 
 		_ = json.Unmarshal([]byte(srcJSON), &op.Sources)
 		shape(op)
 		s.attachLive(op)
+		op.Cancellable = op.Status == StatusPending || op.Status == StatusRunning
 		out = append(out, op)
 	}
 	if err := rows.Err(); err != nil {
@@ -684,6 +767,16 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		ctx = quotastore.WithOwner(ctx, *op.ActorID)
 		ctx = quotastore.WithActor(ctx, *op.ActorID)
 	}
+	if op.Kind == OpArchiveCreate || op.Kind == OpArchiveExtract {
+		ctx, cancelOp := context.WithCancel(ctx)
+		defer cancelOp()
+		ch := &cancelHandle{}
+		ch.cancel = func() { ch.cancelled.Store(true); cancelOp() }
+		s.cancels.Store(op.ID, ch)
+		defer s.cancels.Delete(op.ID)
+		s.executeJob(ctx, op)
+		return
+	}
 	if s.storageResolver == nil {
 		s.fail(ctx, op, "no storage resolver")
 		return
@@ -783,6 +876,8 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 	case op.Failed == 0 && left != nil:
 		status = StatusPartial
 		errMsg = left.Error()
+	case errors.Is(ctx.Err(), context.Canceled):
+		status = StatusCancelled
 	case op.Failed == 0:
 		status = StatusOK
 	case op.Done == 0:
@@ -797,7 +892,7 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 	}
 	// The counters ride along: a delete job writes its progress at most once
 	// a second, so the last item's count may not be on the row yet.
-	_, _ = s.db.ExecContext(ctx, s.q(
+	_, _ = s.db.ExecContext(context.WithoutCancel(ctx), s.q(
 		`UPDATE pending_ops SET status=?, error=?, done=?, failed=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`),
 		status, errMsg, op.Done, op.Failed, op.ID)
 }
@@ -836,6 +931,47 @@ func (s *Service) executePlugin(ctx, parent context.Context, op *Op, ch *cancelH
 			`UPDATE pending_ops SET status=?, error=?, failed=total, finished_at=CURRENT_TIMESTAMP WHERE id=?`),
 			StatusFailed, errMessage(err), op.ID)
 	}
+}
+
+func (s *Service) executeJob(ctx context.Context, op *Op) {
+	s.jobsMu.Lock()
+	queued := s.jobs[op.ID]
+	delete(s.jobs, op.ID)
+	s.jobsMu.Unlock()
+	if queued.run == nil {
+		s.fail(ctx, op, "archive job was interrupted by a server restart; create the archive again")
+		return
+	}
+	if queued.cleanup != nil {
+		defer queued.cleanup()
+	}
+	progress := func(done int) {
+		if done < 0 {
+			done = 0
+		}
+		if done > op.Total {
+			done = op.Total
+		}
+		op.Done = done
+		_, _ = s.db.ExecContext(ctx, s.q(`UPDATE pending_ops SET done=? WHERE id=?`), done, op.ID)
+	}
+	if err := queued.run(ctx, progress); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			_, _ = s.db.ExecContext(context.WithoutCancel(ctx), s.q(
+				`UPDATE pending_ops SET status=?, error='', finished_at=CURRENT_TIMESTAMP WHERE id=?`),
+				StatusCancelled, op.ID)
+			return
+		}
+		op.Failed = 1
+		_, _ = s.db.ExecContext(ctx, s.q(
+			`UPDATE pending_ops SET status=?, error=?, failed=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`),
+			StatusFailed, err.Error(), op.Failed, op.ID)
+		return
+	}
+	progress(op.Total)
+	_, _ = s.db.ExecContext(ctx, s.q(
+		`UPDATE pending_ops SET status=?, error='', finished_at=CURRENT_TIMESTAMP WHERE id=?`),
+		StatusOK, op.ID)
 }
 
 func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op, src string) error {

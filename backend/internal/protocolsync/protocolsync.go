@@ -188,7 +188,14 @@ func ParentOf(rel string) string {
 // It reports whether a row was actually written, so a caller with its own
 // eventing (the AI surface) can tell a bookkeeping miss from a success.
 func (s *Syncer) Write(ctx context.Context, st *model.Storage, rel string, size int64, mime string) bool {
-	return s.write(ctx, st, rel, size, mime, false)
+	return s.write(ctx, st, rel, size, mime, false, true)
+}
+
+// WriteWithoutNotification performs every write side effect except the
+// per-file event. Composite operations call it for their component files and
+// emit one meaningful completion event after the whole operation succeeds.
+func (s *Syncer) WriteWithoutNotification(ctx context.Context, st *model.Storage, rel string, size int64, mime string) bool {
+	return s.write(ctx, st, rel, size, mime, false, false)
 }
 
 // WriteSaved is Write for a write that is one save inside an ONGOING editing
@@ -201,10 +208,10 @@ func (s *Syncer) Write(ctx context.Context, st *model.Storage, rel string, size 
 // a burst of saves into one pass, and that trade only pays when more saves are
 // genuinely coming. A surface that writes a whole file once must call Write.
 func (s *Syncer) WriteSaved(ctx context.Context, st *model.Storage, rel string, size int64, mime string) bool {
-	return s.write(ctx, st, rel, size, mime, true)
+	return s.write(ctx, st, rel, size, mime, true, true)
 }
 
-func (s *Syncer) write(ctx context.Context, st *model.Storage, rel string, size int64, mime string, saved bool) bool {
+func (s *Syncer) write(ctx context.Context, st *model.Storage, rel string, size int64, mime string, saved, announce bool) bool {
 	defer s.recoverSync("write", st, rel)
 	clean := NormalizePath(rel)
 	// ⚠ Deferred so it fires on every path below, including the ones that give
@@ -217,6 +224,10 @@ func (s *Syncer) write(ctx context.Context, st *model.Storage, rel string, size 
 	node, kind, ok := s.WriteRows(ctx, st, rel, size, mime)
 	if !ok {
 		return false
+	}
+	if !announce {
+		writehook.OnFileWrittenWithoutNotification(ctx, node)
+		return true
 	}
 	if saved {
 		writehook.OnFileSaved(ctx, st.ID, node, s.Origin, kind)

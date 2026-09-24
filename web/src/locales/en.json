@@ -139,6 +139,7 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "protection": "Protection",
+    "archives": "Archives",
     "branding": "Branding",
     "updates": "Updates",
     "connections": "Connections",
@@ -804,6 +805,7 @@
     "verb": {
       "action": "changed",
       "archive_add": "added to archive",
+      "archive_create": "archive created",
       "archive_extract": "archive extracted",
       "create": "created",
       "delete": "deleted",
@@ -1421,16 +1423,21 @@
       "copy": "Copying",
       "move": "Moving",
       "delete": "Deleting",
-      "trash": "Emptying the trash"
+      "trash": "Emptying the trash",
+      "archive": "Archive",
+      "archiveCreate": "Creating archive",
+      "archiveExtract": "Extracting archive"
     },
     "progress": "{done} / {total} files · {percent}%",
+    "progressPercent": "{percent}%",
     "progressBytes": "{done} of {total} · {percent}%",
     "progressBytesOpen": "{done} moved",
     "working": "Working…",
     "failed": "Operation failed",
     "retry": "Retry",
     "dismiss": "Dismiss",
-    "hide": "Hide"
+    "hide": "Hide",
+    "cancel": "Cancel"
   },
   "duplicates": {
     "title": "Duplicate files",
@@ -1467,6 +1474,8 @@
       "file_deleted": "File deleted permanently",
       "file_trashed": "File moved to the trash",
       "file_moved": "File moved or renamed",
+      "archive_created": "Archive creation completed",
+      "archive_extracted": "Archive extraction completed",
       "share_created": "Share link created",
       "drop_received": "File received through a public request link",
       "comment_added": "Comment added to a file or folder",
@@ -2048,6 +2057,24 @@
       "title": "Daily"
     }
   },
+  "archivesAdmin": {
+    "title": "Archives",
+    "subtitle": "Configure archive creation, extraction, encryption and safety limits.",
+    "enabled": "Enable external archive providers",
+    "enabledHint": "Plain ZIP remains built in; encrypted and additional formats use a configured command-line provider.",
+    "formats": "Creation formats",
+    "defaultFormat": "Default format",
+    "maxEntries": "Maximum entries",
+    "maxSize": "Maximum expanded size (MiB)",
+    "timeout": "Command timeout (seconds)",
+    "providers": "Providers",
+    "providersHint": "Availability is detected on this server.",
+    "binaryHint": "Executable paths are security-sensitive and are configured with FILEX_ARCHIVE_7Z_BIN, not through the browser.",
+    "test": "Test encryption",
+    "testOk": "Encrypted archive round trip succeeded",
+    "testFailed": "Archive provider test failed",
+    "saved": "Archive settings saved"
+  },
   "userSettings": {
     "title": "Settings",
     "open": "User settings",
@@ -2128,6 +2155,8 @@
         "file_deleted": "A file is deleted for good",
         "file_trashed": "A file goes to the trash",
         "file_moved": "A file is moved or renamed",
+        "archive_created": "An archive finishes being created",
+        "archive_extracted": "An archive finishes extracting",
         "share_created": "Someone creates a share link",
         "drop_received": "A file arrives through a request link",
         "comment_added": "Someone comments on a file",

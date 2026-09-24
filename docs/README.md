@@ -124,6 +124,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Protection & antivirus](PROTECTION.md) — ClamAV scanning, through a local
   binary or a clamd daemon over TCP or a unix socket, plus the trash and version
   retention windows and the share-link life ceiling, behind one admin screen
+- [Archives](ARCHIVES.md) — ZIP/7z/TAR creation, multi-format extraction and encryption providers
 - [End‑to‑end encryption](E2E-ENCRYPTION.md) — client‑side WebCrypto folders;
   the server stores ciphertext and never receives a key. Recovery keys, optional
   operator key escrow, and exactly what each one can and cannot open

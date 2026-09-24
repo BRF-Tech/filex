@@ -156,6 +156,7 @@ func shouldAudit(r *http.Request) bool {
 			strings.HasPrefix(p, "/api/files/upload/abort"),
 			strings.HasPrefix(p, "/api/files/versions"),
 			strings.HasPrefix(p, "/api/files/archive/extract"),
+			strings.HasPrefix(p, "/api/files/archive/create"),
 			strings.HasPrefix(p, "/api/files/archive/add"):
 			return true
 		}
@@ -268,6 +269,8 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 		return "file.upload_abort", "upload", ""
 	case method == http.MethodPost && p == "/api/files/archive/extract":
 		return "file.archive_extract", "node", ""
+	case method == http.MethodPost && p == "/api/files/archive/create":
+		return "file.archive_create", "node", ""
 	case method == http.MethodPost && p == "/api/files/archive/add":
 		return "file.archive_add", "node", ""
 	case method == http.MethodPost && strings.HasPrefix(p, "/api/files/manager/tags"):

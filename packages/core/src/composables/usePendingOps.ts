@@ -33,7 +33,7 @@ export interface PendingOp {
   id: number;
   op_type: PendingOpType;
   /** `cancelled` — somebody stopped it (POST /ops/{id}/cancel). */
-  status: 'pending' | 'running' | 'done' | 'error' | 'cancelled';
+  status: 'pending' | 'running' | 'cancelling' | 'done' | 'error' | 'cancelled';
   progress_total: number;
   progress_done: number;
   /** Running cross-storage transfer's bytes (issue #27); absent otherwise. */
@@ -48,6 +48,7 @@ export interface PendingOp {
   error_code?: string;
   /** The engine a job needed and the server lacks (`error_code: engine_missing`). */
   error_engine?: string;
+  cancellable: boolean;
   started_at: string | null;
   finished_at: string | null;
   created_at: string | null;
@@ -94,9 +95,11 @@ export function normalizeOp(raw: Record<string, unknown>): PendingOp {
         ? 'error'
         : rawStatus === 'cancelled'
           ? 'cancelled'
-          : rawStatus === 'running'
-            ? 'running'
-            : 'pending';
+          : rawStatus === 'cancelling'
+            ? 'cancelling'
+            : rawStatus === 'running'
+              ? 'running'
+              : 'pending';
   const sources = Array.isArray(raw.sources) ? raw.sources : [];
   // ⚠ Unknown kinds pass through. This used to fold everything that was not
   // copy/move into `delete`, which drew a bin beside a plugin job and read
@@ -124,6 +127,7 @@ export function normalizeOp(raw: Record<string, unknown>): PendingOp {
     error_message: str(raw.error_message, raw.error),
     error_code: str(raw.error_code) ?? undefined,
     error_engine: str(raw.error_engine) ?? undefined,
+    cancellable: raw.cancellable === true,
     started_at: str(raw.started_at),
     finished_at: str(raw.finished_at),
     created_at: str(raw.created_at),
@@ -155,7 +159,7 @@ export function usePendingOps(
   let firstPollDone = false;
 
   const hasActive = computed(() =>
-    ops.value.some((o) => o.status === 'pending' || o.status === 'running'),
+    ops.value.some((o) => o.status === 'pending' || o.status === 'running' || o.status === 'cancelling'),
   );
 
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -197,7 +201,7 @@ export function usePendingOps(
       // is currently seeing them in the local tray.
       const localIds = new Set(ops.value.map((o) => o.id));
       const visibleIncoming = incoming.filter((op) => {
-        if (op.status === 'pending' || op.status === 'running') return true;
+        if (op.status === 'pending' || op.status === 'running' || op.status === 'cancelling') return true;
         if (!firstPollDone) return false;
         return localIds.has(op.id);
       });
@@ -211,7 +215,7 @@ export function usePendingOps(
       // Sweep: drop terminal ops past RETAIN_MS.
       const now = Date.now();
       const after = merged.filter((o) => {
-        if (o.status === 'pending' || o.status === 'running') return true;
+        if (o.status === 'pending' || o.status === 'running' || o.status === 'cancelling') return true;
         const at = settledAt.get(o.id);
         return at !== undefined && now - at < RETAIN_MS;
       });

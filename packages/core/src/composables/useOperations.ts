@@ -27,7 +27,9 @@ import { computed, getCurrentScope, onScopeDispose, ref } from 'vue';
 
 /** `plugin` — an app-plugin job (docs/APP-PLUGINS-API.md); also what any
  *  queue kind this package has no drawing for is shown as. */
-export type OperationKind = 'upload' | 'copy' | 'move' | 'delete' | 'convert' | 'archive' | 'plugin' | 'trash';
+export type OperationKind =
+  | 'upload' | 'copy' | 'move' | 'delete' | 'convert'
+  | 'archive' | 'archive-create' | 'archive-extract' | 'plugin' | 'trash';
 export type OperationStatus = 'running' | 'done' | 'error' | 'aborted';
 
 /** What a publisher hands to `sync()` for one row. */
@@ -47,6 +49,8 @@ export interface OperationInput {
   errorDetail?: string | null;
   /** Queue op accepted but not started yet ("Queued"). */
   queued?: boolean;
+  /** Cancellation was accepted and the worker is stopping/cleaning up. */
+  cancelling?: boolean;
   /** Progress counters for queue ops (3/5 items). */
   doneCount?: number;
   totalCount?: number;
@@ -90,6 +94,7 @@ export interface Operation {
   error: string | null;
   errorDetail: string | null;
   queued: boolean;
+  cancelling: boolean;
   doneCount: number | null;
   totalCount: number | null;
   uploadedBytes: number | null;
@@ -117,6 +122,7 @@ function toOperation(key: string, input: OperationInput, prev?: Operation): Oper
     error: input.error ?? null,
     errorDetail: input.errorDetail ?? null,
     queued: input.queued ?? false,
+    cancelling: input.cancelling ?? false,
     doneCount: input.doneCount ?? null,
     totalCount: input.totalCount ?? null,
     uploadedBytes: input.uploadedBytes ?? null,

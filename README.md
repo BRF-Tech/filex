@@ -634,6 +634,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 **Data & features** — [Sharing & file requests](docs/SHARING.md) ·
 [ShareX](docs/SHAREX.md) ·
 [Trash & versioning](docs/TRASH-VERSIONING.md) · [Protection](docs/PROTECTION.md) ·
+[Archives](docs/ARCHIVES.md) ·
 [E2E encryption](docs/E2E-ENCRYPTION.md) · [Search](docs/SEARCH.md) ·
 [Realtime & presence](docs/REALTIME.md) ·
 [Notifications](docs/NOTIFICATIONS.md) · [Thumbnails](docs/thumbnails.md) ·

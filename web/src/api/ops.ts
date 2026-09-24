@@ -1,95 +1,13 @@
 import { api } from './client';
+import { normalizeOp, type PendingOp } from '@brftech/filex-core';
 
-/**
- * PendingOp — async file operation row.
- *
- * Shape mirrors the SFC's `PendingOp` (`packages/core/src/composables/usePendingOps.ts`).
- * The backend currently emits its raw `ops.Op` shape from POST endpoints
- * (`kind` / `total` / `done`); the GET list endpoint that the SFC's
- * `useFileApi` polls is expected to translate to this shape — see
- * `internal/api/handlers/ops.go` for where that wiring belongs.
- *
- * If the list endpoint is missing, `list()` resolves to an empty array
- * (404 swallowed) so the tray stays silently empty.
- */
-export interface PendingOp {
-  id: number;
-  op_type: 'copy' | 'move' | 'delete' | 'trash-empty';
-  status: 'pending' | 'running' | 'done' | 'error';
-  progress_total: number;
-  progress_done: number;
-  /** Running cross-storage transfer's bytes (issue #27); absent otherwise. */
-  bytes_total?: number;
-  bytes_done?: number;
-  target_path: string | null;
-  source_dir: string | null;
-  source_count: number;
-  error_message: string | null;
-  started_at: string | null;
-  finished_at: string | null;
-  created_at: string | null;
-}
+export type { PendingOp } from '@brftech/filex-core';
+
 
 export interface OpsListResponse {
   ops: PendingOp[];
 }
 
-/**
- * Translate the backend's raw `ops.Op` shape into the SFC's `PendingOp`
- * shape. Used as a fallback when the endpoint emits the raw shape.
- */
-export function normalizeOp(raw: Record<string, unknown>): PendingOp {
-  const r = raw as {
-    id?: number;
-    kind?: PendingOp['op_type'];
-    op_type?: PendingOp['op_type'];
-    status?: string;
-    total?: number;
-    progress_total?: number;
-    done?: number;
-    progress_done?: number;
-    bytes_total?: number;
-    bytes_done?: number;
-    failed?: number;
-    dest?: string;
-    target_path?: string;
-    sources?: string[];
-    source_dir?: string;
-    source_count?: number;
-    error?: string;
-    error_message?: string;
-    started_at?: string | null;
-    finished_at?: string | null;
-    created_at?: string | null;
-  };
-  // Backend uses 'ok' / 'failed' / 'partial' for terminal status; the SFC
-  // uses 'done' / 'error'. Normalise.
-  const status: PendingOp['status'] = (() => {
-    const s = r.status;
-    if (s === 'pending' || s === 'running') return s;
-    if (s === 'ok') return 'done';
-    if (s === 'failed' || s === 'partial') return 'error';
-    if (s === 'done' || s === 'error') return s;
-    return 'pending';
-  })();
-  const sources = r.sources;
-  return {
-    id: Number(r.id ?? 0),
-    op_type: (r.op_type ?? r.kind ?? 'copy') as PendingOp['op_type'],
-    status,
-    progress_total: Number(r.progress_total ?? r.total ?? sources?.length ?? 0),
-    progress_done: Number(r.progress_done ?? r.done ?? 0),
-    bytes_total: Number(r.bytes_total ?? 0),
-    bytes_done: Number(r.bytes_done ?? 0),
-    target_path: r.target_path ?? r.dest ?? null,
-    source_dir: r.source_dir ?? null,
-    source_count: Number(r.source_count ?? sources?.length ?? 0),
-    error_message: r.error_message ?? r.error ?? null,
-    started_at: r.started_at ?? null,
-    finished_at: r.finished_at ?? null,
-    created_at: r.created_at ?? null,
-  };
-}
 
 export const opsApi = {
   /**
@@ -97,7 +15,7 @@ export const opsApi = {
    * shape. Returns an empty array when the endpoint is missing
    * (404 swallowed) so callers don't spam errors.
    */
-  async list(params: { status?: 'running' | 'pending' | 'done' | 'error' } = {}): Promise<PendingOp[]> {
+  async list(params: { status?: 'running' | 'pending' | 'cancelling' | 'done' | 'error' | 'cancelled' } = {}): Promise<PendingOp[]> {
     try {
       const res = await api.get<OpsListResponse | { ops: Array<Record<string, unknown>> }>(
         '/files/ops',
@@ -128,5 +46,11 @@ export const opsApi = {
       if (status === 404) return null;
       throw e;
     }
+  },
+
+  /** Request cooperative cancellation and return the updated operation. */
+  async cancel(id: number): Promise<PendingOp> {
+    const res = await api.post<{ op: Record<string, unknown> }>(`/files/ops/${id}/cancel`);
+    return normalizeOp(res.data.op);
   },
 };

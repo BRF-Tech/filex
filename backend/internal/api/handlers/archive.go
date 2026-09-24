@@ -15,9 +15,12 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/archivecli"
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -46,6 +49,12 @@ type Archive struct {
 	// authorizations (archive_download.go). Nil disables that endpoint pair
 	// rather than crashing it.
 	Tickets *archiveTicketStore
+	// Engine supplies optional 7-Zip/RAR processing and the live archive
+	// policy. Nil keeps the historical built-in ZIP-only behaviour.
+	Engine *archivecli.Service
+	// Ops moves expensive archive creation out of the request. Nil retains the
+	// synchronous path for lightweight embedders and focused handler tests.
+	Ops *ops.Service
 }
 
 // AttachSearchIndex / AttachThumbs wire the two optional halves of the
@@ -85,6 +94,12 @@ func (a *Archive) storageRow(ctx context.Context, id int64) *model.Storage {
 // transferred can be zipped/extracted like any other.
 func (a *Archive) AttachBody(b *filebody.Resolver) { a.Body = b }
 
+// AttachArchiveEngine wires optional external archive providers.
+func (a *Archive) AttachArchiveEngine(engine *archivecli.Service) { a.Engine = engine }
+
+// AttachOps wires the shared long-running file-operation queue.
+func (a *Archive) AttachOps(service *ops.Service) { a.Ops = service }
+
 // NewArchive constructs an Archive handler.
 func NewArchive(store db.Store, resolver func(int64) (storage.Driver, error)) *Archive {
 	return &Archive{Store: store, StorageResolver: resolver}
@@ -101,6 +116,7 @@ type archiveRequest struct {
 	Members   []string   `json:"members,omitempty"`
 	DestDir   string     `json:"dest,omitempty"`
 	Files     []addEntry `json:"files,omitempty"`
+	Password  string     `json:"password,omitempty"`
 }
 
 // addEntry is one source for /archive/add.
@@ -148,6 +164,38 @@ func (a *Archive) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer os.Remove(tmp)
+	if a.Engine != nil && (archivecli.FormatFromPath(req.Path) != "zip" || req.Password != "") {
+		entries, err := a.Engine.ListAs(r.Context(), tmp, req.Path, req.Password)
+		if err != nil {
+			writeArchiveProviderError(w, err)
+			return
+		}
+		if req.Password == "" && archiveEntriesEncrypted(entries) {
+			writeArchiveProviderError(w, archivecli.ErrPasswordRequired)
+			return
+		}
+		if req.Password != "" {
+			if err := a.Engine.Test(r.Context(), tmp, req.Password); err != nil {
+				writeArchiveProviderError(w, err)
+				return
+			}
+		}
+		policy := a.Engine.Policy(r.Context())
+		if len(entries) > policy.MaxEntries {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "archive contains too many entries", "max": policy.MaxEntries})
+			return
+		}
+		var total int64
+		for _, entry := range entries {
+			total += entry.Size
+		}
+		if total > policy.MaxExpandedBytes {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "archive expands beyond the configured limit", "max_bytes": policy.MaxExpandedBytes})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+		return
+	}
 
 	zr, err := zip.OpenReader(tmp)
 	if err != nil {
@@ -155,6 +203,10 @@ func (a *Archive) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer zr.Close()
+	if zipHasEncryptedMembers(zr.File) {
+		writeArchiveProviderError(w, archivecli.ErrPasswordRequired)
+		return
+	}
 
 	out := make([]archiveListEntry, 0, len(zr.File))
 	for _, f := range zr.File {
@@ -189,6 +241,14 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 	}
 	req.StorageID = storageID
 	req.Path = rel
+	if req.DestDir != "" {
+		destStorageID, destRel, err := a.resolveStorage(r.Context(), storageID, req.DestDir)
+		if err != nil || destStorageID != storageID {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "archive destination must be on the same storage"})
+			return
+		}
+		req.DestDir = destRel
+	}
 	drv, err := a.StorageResolver(req.StorageID)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad storage"})
@@ -199,69 +259,211 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "storage not writable"})
 		return
 	}
-
-	tmp, err := a.fetchToTemp(r, req.StorageID, req.Path)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer os.Remove(tmp)
-
-	zr, err := zip.OpenReader(tmp)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a zip: " + err.Error()})
-		return
-	}
-	defer zr.Close()
-
-	wanted := map[string]bool{}
-	for _, m := range req.Members {
-		wanted[m] = true
-	}
 	dest := req.DestDir
 	if dest == "" {
 		dest = path.Dir(req.Path)
 	}
 	dest = "/" + strings.TrimLeft(path.Clean("/"+dest), "/")
+	req.DestDir = dest
 
 	// The archive is read and the destination gains files: both named, not
 	// changed. Each member is judged where it lands, below.
 	if gate(w, r, a.ACL, req.StorageID, writegate.Names(req.Path), writegate.Names(dest)) {
 		return
 	}
-	// RBAC: reading the archive needs ≥viewer; extracting writes into dest → ≥editor.
+	// Authorization stays at submission time. The worker restores the actor on
+	// its context for catalogue/audit side effects but must not make a fresh
+	// authorization decision after the request has gone away.
 	if !aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(req.Path, "/"), acl.LevelViewer) ||
 		!aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(dest, "/"), acl.LevelEditor) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		return
 	}
 
+	tmp, err := a.fetchToTemp(r, req.StorageID, req.Path)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	plan, err := a.inspectArchive(r.Context(), tmp, req)
+	if err != nil {
+		_ = os.Remove(tmp)
+		writeArchiveProviderError(w, err)
+		return
+	}
+
+	if a.Ops != nil {
+		jobReq := req
+		jobTmp := tmp
+		var actor *model.User
+		if current := auth.UserFrom(r.Context()); current != nil {
+			copy := *current
+			actor = &copy
+		}
+		op, err := a.Ops.SubmitJobWithCleanup(r.Context(), ops.OpArchiveExtract, req.StorageID,
+			[]string{req.Path}, dest, max(1, plan.files),
+			func(ctx context.Context, progress func(done int)) error {
+				if actor != nil {
+					ctx = auth.WithUser(ctx, actor)
+				}
+				_, err := a.extractArchive(ctx, jobReq, drv, writer, jobTmp, plan.external, progress)
+				return err
+			}, func() { _ = os.Remove(jobTmp) })
+		if err != nil {
+			_ = os.Remove(tmp)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"op": op})
+		return
+	}
+
+	defer os.Remove(tmp)
+	result, err := a.extractArchive(r.Context(), req, drv, writer, tmp, plan.external, func(int) {})
+	if err != nil {
+		writeArchiveProviderError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+type archiveExtractPlan struct {
+	external bool
+	files    int
+}
+
+// inspectArchive deliberately runs before an extraction job is accepted. It
+// provides the total for honest progress and, crucially, reports encrypted
+// archives while the initiating request is still alive so the client can ask
+// for a password and retry instead of queuing a doomed background operation.
+func (a *Archive) inspectArchive(ctx context.Context, archivePath string, req archiveRequest) (archiveExtractPlan, error) {
+	wanted := make(map[string]bool, len(req.Members))
+	for _, member := range req.Members {
+		wanted[member] = true
+	}
+	count := func(name string, isDir bool) bool {
+		if isDir {
+			return false
+		}
+		return len(wanted) == 0 || wanted[name] || wanted[strings.TrimSuffix(name, "/")]
+	}
+	checkExternal := func() (archiveExtractPlan, error) {
+		if a.Engine == nil {
+			return archiveExtractPlan{}, archivecli.ErrUnavailable
+		}
+		entries, err := a.Engine.ListAs(ctx, archivePath, req.Path, req.Password)
+		if err != nil {
+			return archiveExtractPlan{}, err
+		}
+		if req.Password == "" && archiveEntriesEncrypted(entries) {
+			return archiveExtractPlan{}, archivecli.ErrPasswordRequired
+		}
+		if req.Password != "" {
+			if err := a.Engine.Test(ctx, archivePath, req.Password); err != nil {
+				return archiveExtractPlan{}, err
+			}
+		}
+		policy := a.Engine.Policy(ctx)
+		var expanded int64
+		files := 0
+		for _, entry := range entries {
+			if _, err := sanitizeZipPath(entry.Name); err != nil {
+				return archiveExtractPlan{}, fmt.Errorf("%w: archive contains an unsafe member path", archivecli.ErrUnsupported)
+			}
+			if !entry.IsDir {
+				expanded += entry.Size
+			}
+			if count(entry.Name, entry.IsDir) {
+				files++
+			}
+		}
+		if len(entries) > policy.MaxEntries || expanded > policy.MaxExpandedBytes {
+			return archiveExtractPlan{}, fmt.Errorf("%w: extraction limit exceeded", archivecli.ErrLimits)
+		}
+		return archiveExtractPlan{external: true, files: files}, nil
+	}
+
+	if archivecli.FormatFromPath(req.Path) != "zip" || req.Password != "" {
+		return checkExternal()
+	}
+	zr, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return archiveExtractPlan{}, fmt.Errorf("%w: not a zip: %v", archivecli.ErrUnsupported, err)
+	}
+	defer zr.Close()
+	if zipHasEncryptedMembers(zr.File) {
+		if req.Password == "" {
+			return archiveExtractPlan{}, archivecli.ErrPasswordRequired
+		}
+		return checkExternal()
+	}
+	var expanded uint64
+	files := 0
+	for _, file := range zr.File {
+		if _, err := sanitizeZipPath(file.Name); err != nil {
+			return archiveExtractPlan{}, fmt.Errorf("%w: archive contains an unsafe member path", archivecli.ErrUnsupported)
+		}
+		expanded += file.UncompressedSize64
+		if count(file.Name, strings.HasSuffix(file.Name, "/")) {
+			files++
+		}
+	}
+	if a.Engine != nil {
+		policy := a.Engine.Policy(ctx)
+		if len(zr.File) > policy.MaxEntries || expanded > uint64(policy.MaxExpandedBytes) {
+			return archiveExtractPlan{}, fmt.Errorf("%w: extraction limit exceeded", archivecli.ErrLimits)
+		}
+	}
+	return archiveExtractPlan{files: files}, nil
+}
+
+func archiveEntriesEncrypted(entries []archivecli.Entry) bool {
+	for _, entry := range entries {
+		if entry.Encrypted {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Archive) extractArchive(ctx context.Context, req archiveRequest, drv storage.Driver, writer storage.Writer, archivePath string, external bool, progress func(int)) (map[string]any, error) {
+	if external {
+		return a.extractExternal(ctx, req, drv, writer, archivePath, progress)
+	}
+	zr, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return nil, fmt.Errorf("not a zip: %w", err)
+	}
+	defer zr.Close()
+	wanted := map[string]bool{}
+	for _, member := range req.Members {
+		wanted[member] = true
+	}
 	mkdirer, _ := drv.(storage.Mkdirer)
-	st := a.storageRow(r.Context(), req.StorageID)
-	locks := liveLocks(r, a.ACL, req.StorageID)
+	st := a.storageRow(ctx, req.StorageID)
+	var locks writegate.Locks
+	if a.ACL != nil {
+		locks = a.ACL.Locks(ctx, req.StorageID)
+	}
 	// locked counts members that would have landed on a document an app has
 	// frozen (writegate) — skipped, and said, rather than written over it.
 	locked := 0
 	sy := a.sync()
 	keys := make([]string, 0)
-	// refused counts members the pre-write snapshot guard turned away, kept
-	// distinct from every other `continue` in this loop. The other skips are
-	// permanent and user-caused -- a zip-slip entry, a kind conflict -- and
-	// retrying changes nothing. A guard refusal is transient and
-	// system-caused (the object store is unreachable, say). Folding the two
-	// together would answer 200 {"count":0,"keys":[]} for a wholesale outage,
-	// with nothing telling the caller anything had gone wrong at all.
 	refused := 0
-	for _, f := range zr.File {
-		if len(wanted) > 0 && !wanted[f.Name] && !wanted[strings.TrimSuffix(f.Name, "/")] {
+	for _, file := range zr.File {
+		if err := ctx.Err(); err != nil {
+			return map[string]any{"keys": keys, "count": len(keys), "refused": refused}, err
+		}
+		if len(wanted) > 0 && !wanted[file.Name] && !wanted[strings.TrimSuffix(file.Name, "/")] {
 			continue
 		}
-		safeRel, err := sanitizeZipPath(f.Name)
+		safeRel, err := sanitizeZipPath(file.Name)
 		if err != nil {
-			slog.Warn("archive: skipped zip-slip entry", slog.String("name", f.Name), slog.String("err", err.Error()))
+			slog.Warn("archive: skipped zip-slip entry", slog.String("name", file.Name), slog.String("err", err.Error()))
 			continue
 		}
-		target := path.Join(dest, safeRel)
+		target := path.Join(req.DestDir, safeRel)
 		// A member under one of filex's own names (`.versions/…`, `.thumbs/`,
 		// a `.keepdir`) is skipped like a zip-slip entry: the destination is
 		// fine, this one member is not — and extracting it would put files
@@ -270,81 +472,90 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 		// holding `Sozlesmeler/NDA.docx` replaced the document under
 		// signature).
 		if gerr := writegate.Check(locks, 0, writegate.Writes(target)); gerr != nil {
-			slog.Warn("archive: skipped member", slog.String("name", f.Name), slog.String("why", gerr.Error()))
+			slog.Warn("archive: skipped member", slog.String("name", file.Name), slog.String("why", gerr.Error()))
 			if errors.Is(gerr, writegate.ErrLocked) {
 				locked++
 			}
 			continue
 		}
 		// Defense in depth: ensure the joined target stays under dest.
-		if !strings.HasPrefix(target+"/", strings.TrimRight(dest, "/")+"/") {
+		if !strings.HasPrefix(target+"/", strings.TrimRight(req.DestDir, "/")+"/") {
 			slog.Warn("archive: target escapes dest after join", slog.String("target", target))
+
 			continue
 		}
-		if strings.HasSuffix(f.Name, "/") {
-			if mkdirer != nil {
-				if kerr := storage.EnsureDirTarget(r.Context(), drv, target); kerr != nil {
-					slog.Warn("archive: skipped folder colliding with a file",
-						slog.String("target", target), slog.String("err", kerr.Error()))
-					continue
-				}
-				_ = mkdirer.Mkdir(r.Context(), target)
+		if strings.HasSuffix(file.Name, "/") {
+			if mkdirer != nil && storage.EnsureDirTarget(ctx, drv, target) == nil {
+				_ = mkdirer.Mkdir(ctx, target)
 				if st != nil {
-					sy.Mkdir(r.Context(), st, target)
+					sy.Mkdir(ctx, st, target)
 				}
 			}
 			continue
 		}
-		// An archive carrying both `X` and `X/y` would recreate the collision
-		// this guard exists to stop — skip the member, extract the rest.
-		if kerr := storage.EnsureFileTarget(r.Context(), drv, target); kerr != nil {
-			slog.Warn("archive: skipped member colliding with a folder",
-				slog.String("target", target), slog.String("err", kerr.Error()))
+		if err := storage.EnsureFileTarget(ctx, drv, target); err != nil {
 			continue
 		}
-		// The last moment at which the bytes this member is about to replace
-		// still exist -- see writehook/overwrite.go. Counted in `refused`, not
-		// folded into the permanent skips above.
-		if kerr := writehook.BeforeOverwrite(r.Context(), req.StorageID, target); kerr != nil {
-			slog.Warn("archive: skipped member refused: snapshot",
-				slog.String("target", target), slog.String("err", kerr.Error()))
+		existed := storage.Exists(ctx, drv, target)
+		if err := writehook.BeforeOverwrite(ctx, req.StorageID, target); err != nil {
 			refused++
 			continue
 		}
-		rc, err := f.Open()
+		rc, err := file.Open()
 		if err != nil {
-			slog.Warn("archive: zip member open", slog.String("name", f.Name), slog.String("err", err.Error()))
 			continue
 		}
-		err = writer.Write(r.Context(), target, rc, int64(f.UncompressedSize64))
+		err = writer.Write(ctx, target, &contextReader{ctx: ctx, reader: rc}, int64(file.UncompressedSize64))
 		_ = rc.Close()
 		if err != nil {
+			if ctx.Err() != nil {
+				removeIncomplete(ctx, drv, target, existed)
+				return map[string]any{"keys": keys, "count": len(keys), "refused": refused}, ctx.Err()
+			}
 			slog.Warn("archive: extract write", slog.String("target", target), slog.String("err", err.Error()))
 			continue
 		}
 		if st != nil {
-			sy.Write(r.Context(), st, target, int64(f.UncompressedSize64), mimeByExt(target))
+			sy.WriteWithoutNotification(ctx, st, target, int64(file.UncompressedSize64), mimeByExt(target))
 		}
 		keys = append(keys, target)
+		progress(len(keys))
 	}
 	if len(keys) == 0 && refused > 0 {
-		// Fail-closed at the batch level, mirroring every single-write guard
-		// site: nothing landed, and it was refused rather than merely absent
-		// from the archive. A 200 here would read as "there was nothing to
-		// extract" when the truth is "the write layer refused everything".
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-			"error":   "could not preserve one or more existing files; nothing was written",
-			"code":    "SNAPSHOT_FAILED",
-			"refused": refused,
-		})
+		return nil, errors.New("could not preserve one or more existing files; nothing was written")
+	}
+	a.emitArchiveExtracted(ctx, req.StorageID, req.Path, req.DestDir, len(keys))
+	return map[string]any{"keys": keys, "count": len(keys), "refused": refused, "locked": locked}, nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
+}
+
+func removeIncomplete(ctx context.Context, drv storage.Driver, target string, existed bool) {
+	if existed {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"keys":    keys,
-		"count":   len(keys),
-		"refused": refused,
-		"locked":  locked,
-	})
+	if deleter, ok := drv.(storage.Deleter); ok {
+		_ = deleter.Delete(context.WithoutCancel(ctx), target)
+	}
+}
+
+func zipHasEncryptedMembers(files []*zip.File) bool {
+	for _, file := range files {
+		if file.Flags&0x1 != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // Add packs members into a (new or existing) zip archive on the same storage.

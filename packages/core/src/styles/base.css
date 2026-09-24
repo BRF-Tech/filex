@@ -1163,7 +1163,7 @@ filex-explorer {
   border-radius: 0;
   box-shadow: none;
 }
-.fe-modal__card--chromeless .fe-modal__body {
+.fe-modal__card--chromeless > .fe-modal__body {
   flex: 1 1 auto;
   min-height: 0;
   padding: 0;
@@ -6568,7 +6568,7 @@ filex-explorer {
   border-radius: 0;
   box-shadow: none;
 }
-.fe-modal__card--fullbleed .fe-modal__body {
+.fe-modal__card--fullbleed > .fe-modal__body {
   flex: 1 1 auto;
   min-height: 0;
   padding: 0;
@@ -11365,6 +11365,16 @@ filex-explorer {
   font-size: var(--fe-text-sm);
   font-weight: 500;
   color: var(--fe-text-muted);
+}
+.fe-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.fe-checkbox input[type='checkbox'] {
+  flex: 0 0 auto;
+  margin: 0;
 }
 /* === /agent-fix2 === */
 

@@ -27,6 +27,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -39,9 +40,18 @@ import (
 // tmp-dir local storage named "main", and returns the test server plus a
 // full-access token bound to a fresh admin user.
 func aiFixture(t *testing.T) (*httptest.Server, *http.Client, db.Store, string) {
+	srv, client, store, tok, _ := aiFixtureConfigured(t, false)
+	return srv, client, store, tok
+}
+
+func aiFixtureWithOps(t *testing.T) (*httptest.Server, *http.Client, db.Store, string, *ops.Service) {
+	return aiFixtureConfigured(t, true)
+}
+
+func aiFixtureConfigured(t *testing.T, withOps bool) (*httptest.Server, *http.Client, db.Store, string, *ops.Service) {
 	t.Helper()
 
-	_, store := testutil.NewTestDB(t)
+	sqlDB, store := testutil.NewTestDB(t)
 	dir := t.TempDir()
 
 	drv := &local.Driver{}
@@ -70,6 +80,11 @@ func aiFixture(t *testing.T) (*httptest.Server, *http.Client, db.Store, string) 
 	cfg := config.Default()
 	cfg.PublicURL = "http://test.local"
 	cfg.CORS.AllowedOrigins = []string{"*"}
+	var opsSvc *ops.Service
+	if withOps {
+		opsSvc = ops.New(sqlDB, resolver)
+		require.NoError(t, opsSvc.Migrate(context.Background()))
+	}
 
 	deps := &api.Deps{
 		Cfg:             cfg,
@@ -77,18 +92,27 @@ func aiFixture(t *testing.T) (*httptest.Server, *http.Client, db.Store, string) 
 		Worker:          syncpkg.New(store),
 		Caps:            capability.New(store),
 		Share:           share.NewService(store),
+		Ops:             opsSvc,
 		StorageResolver: resolver,
 		LocalAuth:       localDrv,
 	}
 	srv := httptest.NewServer(api.BuildRouter(deps))
 	t.Cleanup(srv.Close)
+	if opsSvc != nil {
+		workerCtx, cancel := context.WithCancel(context.Background())
+		go opsSvc.Run(workerCtx)
+		t.Cleanup(func() {
+			cancel()
+			opsSvc.Stop()
+		})
+	}
 
 	uid, _ := testutil.SeedAdminUser(t, store)
 	// Every scope, named: an empty list grants NOTHING since v0.43.0
 	// (model.APIToken.HasScope fails closed; apitoken.ParseIssued).
 	tok := issueToken(t, store, uid, fullScopes, nil)
 
-	return srv, &http.Client{}, store, tok
+	return srv, &http.Client{}, store, tok, opsSvc
 }
 
 // aiReq issues an authenticated request to the AI namespace.

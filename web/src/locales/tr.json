@@ -140,6 +140,7 @@
     "themeDark": "Karanlık",
     "protection": "Koruma",
     "branding": "Kurumsal kimlik",
+    "archives": "Arşivler",
     "updates": "Güncellemeler",
     "connections": "Bağlantılar",
     "plugins": "Eklentiler",
@@ -804,6 +805,7 @@
     "verb": {
       "action": "değiştirildi",
       "archive_add": "arşive eklendi",
+      "archive_create": "arşiv oluşturuldu",
       "archive_extract": "arşiv açıldı",
       "create": "oluşturuldu",
       "delete": "silindi",
@@ -1421,16 +1423,21 @@
       "copy": "Kopyalanıyor",
       "move": "Taşınıyor",
       "delete": "Siliniyor",
-      "trash": "Çöp kutusu boşaltılıyor"
+      "trash": "Çöp kutusu boşaltılıyor",
+      "archive": "Arşiv",
+      "archiveCreate": "Arşiv oluşturuluyor",
+      "archiveExtract": "Arşiv çıkarılıyor"
     },
     "progress": "{done} / {total} dosya · {'%'}{percent}",
+    "progressPercent": "{'%'}{percent}",
     "progressBytes": "{done} / {total} · {'%'}{percent}",
     "progressBytesOpen": "{done} taşındı",
     "working": "Sürüyor…",
     "failed": "İşlem başarısız",
     "retry": "Yeniden dene",
     "dismiss": "Kapat",
-    "hide": "Gizle"
+    "hide": "Gizle",
+    "cancel": "İptal et"
   },
   "duplicates": {
     "title": "Yinelenen dosyalar",
@@ -1467,6 +1474,8 @@
       "file_deleted": "Dosya kalıcı olarak silindi",
       "file_trashed": "Dosya çöpe taşındı",
       "file_moved": "Dosya taşındı veya yeniden adlandırıldı",
+      "archive_created": "Arşiv oluşturma tamamlandı",
+      "archive_extracted": "Arşiv çıkarma tamamlandı",
       "share_created": "Paylaşım bağlantısı oluşturuldu",
       "drop_received": "Herkese açık istek bağlantısından dosya alındı",
       "comment_added": "Bir dosyaya veya klasöre yorum eklendi",
@@ -2048,6 +2057,24 @@
       "title": "Günlük"
     }
   },
+  "archivesAdmin": {
+    "title": "Arşivler",
+    "subtitle": "Arşiv oluşturma, çıkarma, şifreleme ve güvenlik sınırlarını yapılandırın.",
+    "enabled": "Harici arşiv sağlayıcılarını etkinleştir",
+    "enabledHint": "ZIP yerleşik olarak kalır; şifreli ve ek biçimler yapılandırılmış bir komut satırı sağlayıcısı kullanır.",
+    "formats": "Oluşturma biçimleri",
+    "defaultFormat": "Varsayılan biçim",
+    "maxEntries": "En fazla girdi",
+    "maxSize": "En fazla açılmış boyut (MiB)",
+    "timeout": "Komut zaman aşımı (saniye)",
+    "providers": "Sağlayıcılar",
+    "providersHint": "Kullanılabilirlik bu sunucuda algılanır.",
+    "binaryHint": "Çalıştırılabilir dosya yolları güvenlik açısından hassastır ve tarayıcıdan değil FILEX_ARCHIVE_7Z_BIN ile yapılandırılır.",
+    "test": "Şifrelemeyi sına",
+    "testOk": "Şifreli arşiv döngüsü başarıyla tamamlandı",
+    "testFailed": "Arşiv sağlayıcısı sınaması başarısız",
+    "saved": "Arşiv ayarları kaydedildi"
+  },
   "userSettings": {
     "title": "Ayarlar",
     "open": "Kullanıcı ayarları",
@@ -2128,6 +2155,8 @@
         "file_deleted": "Bir dosya kalıcı olarak silindiğinde",
         "file_trashed": "Bir dosya çöp kutusuna taşındığında",
         "file_moved": "Bir dosya taşındığında ya da adı değiştiğinde",
+        "archive_created": "Bir arşiv oluşturulduğunda",
+        "archive_extracted": "Bir arşiv çıkarıldığında",
         "share_created": "Biri paylaşım bağlantısı oluşturduğunda",
         "drop_received": "İstek bağlantısıyla bir dosya geldiğinde",
         "comment_added": "Biri bir dosyaya yorum yaptığında",

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/brf-tech/filex/backend/internal/archivecli"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/multioidc"
 	"github.com/brf-tech/filex/backend/internal/capability"
@@ -48,6 +49,9 @@ type Capabilities struct {
 	// nothing, which is what every test that builds this handler by hand gets.
 	Tenants      tenanturl.Resolver
 	PublicURLSet bool
+	// Archive publishes the non-sensitive creation policy used by the explorer
+	// so the create dialog honours the operator's configured default.
+	Archive *archivecli.Service
 }
 
 // NewCapabilities constructs a Capabilities handler.
@@ -145,6 +149,14 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	// instead of letting someone pick "30 days" and get 7.
 	if h.Store != nil {
 		merged["share_max_ttl_days"] = share.NewService(h.Store).MaxTTLDays(r.Context())
+	}
+	if h.Archive != nil {
+		policy := h.Archive.Policy(r.Context())
+		merged["archive"] = map[string]any{
+			"enabled":         policy.Enabled,
+			"default_format":  policy.DefaultFormat,
+			"allowed_formats": policy.AllowedFormats,
+		}
 	}
 
 	// Who is asking — a person, or an integration (migration 00030)?

@@ -129,6 +129,7 @@ FROM alpine:3.20
 #   ca-certificates / tzdata / su-exec — base runtime niceties.
 #   tini                                — PID 1: reaps orphaned processes
 #                                         (see ENTRYPOINT below).
+#   7zip                                — encrypted ZIP/7z archive operations.
 #   ffmpeg                              — video thumbnails (1st keyframe).
 #   ghostscript + poppler-utils         — PDF → JPEG (page 1). gs preferred,
 #                                         pdftoppm as fallback (matches
@@ -149,6 +150,7 @@ RUN apk --no-cache add \
         tzdata \
         su-exec \
         tini \
+        7zip \
         ffmpeg \
         imagemagick \
         ghostscript \

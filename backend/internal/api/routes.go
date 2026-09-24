@@ -22,6 +22,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/api/handlers"
+	"github.com/brf-tech/filex/backend/internal/archivecli"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/capability"
@@ -368,6 +369,12 @@ func BuildRouter(d *Deps) http.Handler {
 	// this share one staging area, one transfer op and one set of hooks.
 	mh.AttachStaged(suh)
 	ah := handlers.NewArchive(d.Store, d.StorageResolver)
+	archiveEngine := archivecli.New(d.Store, archivecli.Config{
+		SevenZipBin: d.Cfg.Archive.SevenZipBin,
+		WorkDir:     d.Cfg.Archive.WorkDir,
+	})
+	ah.AttachArchiveEngine(archiveEngine)
+	ah.AttachOps(d.Ops)
 	ah.AttachACL(d.ACL)
 	ah.AttachBody(d.Body)
 	// ⚠ Without these two, Extract and Add put bytes on the storage and told
@@ -476,6 +483,7 @@ func BuildRouter(d *Deps) http.Handler {
 	th.AttachACL(d.ACL)
 	th.AttachSigner(thumbSigner)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
+	ch.Archive = archiveEngine
 	ch.E2EEscrow = d.E2EEscrow /* wiring:e2 */
 	// ⚠ Only a non-nil mailer: a nil *mailer.Service stored in the interface
 	// would make the field say "not ready" on a build that never had mail
@@ -1057,6 +1065,7 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Get("/views/{plugin}/{view}", apH.View)
 				r.Post("/views/{plugin}/{view}/event", apH.ViewEvent)
 			})
+			r.Delete("/ops/{id}", oh.Cancel)
 
 			// SFC's per-verb async endpoints — translate to ops.Submit.
 			r.Post("/copy", oh.SubmitCopy)
@@ -1081,6 +1090,7 @@ func BuildRouter(d *Deps) http.Handler {
 
 			r.Post("/archive/list", ah.List)
 			r.Post("/archive/extract", ah.Extract)
+			r.Post("/archive/create", ah.Create)
 			r.Post("/archive/add", ah.Add)
 			// Mint only. The bytes come back from the public /z/{ticket}
 			// below, because a download has to be a navigation and a
@@ -1354,6 +1364,11 @@ func BuildRouter(d *Deps) http.Handler {
 			protH := handlers.NewProtection(d.Store)
 			r.Get("/protection", protH.Get)
 			r.Patch("/protection", protH.Patch)
+
+			archiveAdminH := handlers.NewArchiveAdmin(d.Store, archiveEngine)
+			r.Get("/archives", archiveAdminH.Get)
+			r.Patch("/archives", archiveAdminH.Patch)
+			r.Post("/archives/test", archiveAdminH.Test)
 
 			// Tenant lifecycle (multi-tenancy). In multi-tenant mode only the
 			// supertenant's admins pass the handler's internal gate.

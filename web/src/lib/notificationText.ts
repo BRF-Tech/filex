@@ -110,6 +110,19 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
     en: { title: 'Moved: {name}', body: '{from} → {to}' },
     tr: { title: 'Taşındı: {name}', body: '{from} → {to}' },
   },
+  // archive handlers: meta.node for create; meta.{path,count} for extract
+  'archive.created': {
+    en: { title: 'Archive created: {name}', body: '{path}' },
+    tr: { title: 'Arşiv oluşturuldu: {name}', body: '{path}' },
+  },
+  'archive.extracted': {
+    en: {
+      title: 'Extraction completed',
+      body: '{count} files extracted to {path}',
+      one: { body: '1 file extracted to {path}' },
+    },
+    tr: { title: 'Arşiv çıkarma tamamlandı', body: '{count} dosya {path} konumuna çıkarıldı' },
+  },
   // ⚠ node is OPTIONAL here (share.go sets it only when the row resolved), so
   // the title must stand on its own with an empty body.
   'share.created': {

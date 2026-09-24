@@ -83,8 +83,8 @@ func TestLocks_EveryHTTPDoorHonoursAFreeze(t *testing.T) {
 	zipBytes := buildZip(t, map[string]string{"Sozlesmeler/NDA.docx": "replaced by an archive", "fresh.txt": "fine"})
 	fxUpload(t, f.URL, tok, "alpha://", "bundle.zip", string(zipBytes))
 	status, body := fxPost(t, f.URL+"/api/files/archive/extract", tok, map[string]any{"storage_id": f.StA.ID, "path": "bundle.zip", "dest": ""})
-	require.Equal(t, http.StatusOK, status, body)
-	assert.Contains(t, body, `"locked":1`, "the extraction did not say it skipped the frozen member: %s", body)
+	require.Equal(t, http.StatusAccepted, status, body)
+	f.drainOps(t)
 	assert.FileExists(t, filepath.Join(f.RootA, "fresh.txt"), "precondition: the other member was extracted")
 
 	// ── the operations queue ─────────────────────────────────────────────

@@ -23,6 +23,7 @@ are **file‑only** (noted below). Individual storages are **not** configured he
 - [Storage plugins](#storage-plugins)
 - [Storage sync](#storage-sync)
 - [Uploads (staged / resumable)](#uploads-staged--resumable)
+- [Archives](#archives)
 - [Antivirus (ClamAV)](#antivirus-clamav)
 - [Versioning on overwrite](#versioning-on-overwrite)
 - [Downloads from slow storage (prepared copies)](#downloads-from-slow-storage-prepared-copies)
@@ -564,6 +565,22 @@ An item inside another item of the same job (a file and its folder) is left to
 the folder, so the folder goes to the trash whole.
 
 ---
+## Archives
+
+Archive executable paths and the private workspace are process configuration;
+the live format and resource policy is managed under **Settings → Archives**.
+See [ARCHIVES.md](ARCHIVES.md) for the provider matrix and security model.
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_ARCHIVE_7Z_BIN` | `7zz` or `7z` on `PATH` | 7-Zip executable used for ZIP/7z/TAR creation, encryption and multi-format extraction. |
+| `FILEX_ARCHIVE_WORK_DIR` | `<data-dir>/archive-work` | Private local staging directory for provider input and output. |
+
+```yaml
+archive:
+  sevenzip_bin: /usr/local/bin/7zz
+  work_dir: /var/lib/filex/archive-work
+```
 
 ## Antivirus (ClamAV)
 

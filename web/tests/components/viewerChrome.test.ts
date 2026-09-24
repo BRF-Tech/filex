@@ -21,8 +21,15 @@
 // and archiveViewerEndpoint.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import PreviewModal from '@brftech/filex-core/src/modals/PreviewModal.vue';
 import type { FileNode } from '@brftech/filex-core/src/types/FileNode';
+
+const coreStyles = readFileSync(
+  path.resolve(__dirname, '../../../packages/core/src/styles/base.css'),
+  'utf8',
+).replace(/\r\n/g, '\n');
 
 function node(over: Partial<FileNode> = {}): FileNode {
   return {
@@ -64,6 +71,11 @@ describe('viewer overlay chrome', () => {
     // The old card chrome is gone: no dialog head, no Download/Close footer.
     expect(w.find('.fe-modal__head').exists()).toBe(false);
     expect(w.find('.fe-modal__actions').exists()).toBe(false);
+  });
+
+  it('scopes zero-padding to the preview body so nested dialogs keep standard padding', () => {
+    expect(coreStyles).toContain('.fe-modal__card--fullbleed > .fe-modal__body {');
+    expect(coreStyles).not.toContain('.fe-modal__card--fullbleed .fe-modal__body {');
   });
 
   it('prints size • date • counter when the host answered index and total', () => {

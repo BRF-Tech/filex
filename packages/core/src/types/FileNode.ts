@@ -139,6 +139,8 @@ export interface NewDocType {
   requires?: 'onlyoffice' | 'drawio';
 }
 
+export type ArchiveCreateFormat = 'zip' | '7z' | 'tar' | 'tar.gz' | 'tar.bz2' | 'tar.xz';
+
 export interface Capabilities {
   /** Document types this build can create. Absent on a server older than the
    *  "New document" feature — hosts must treat that as "offer nothing". */
@@ -154,6 +156,12 @@ export interface Capabilities {
   /** Longest life a new share link may be given, in days (0 = no ceiling).
    *  Read by the share dialogs so they offer only expiries the server keeps. */
   share_max_ttl_days?: number;
+  /** Archive creation policy. Absent on servers older than archive providers. */
+  archive?: {
+    enabled: boolean;
+    default_format: ArchiveCreateFormat;
+    allowed_formats: ArchiveCreateFormat[];
+  };
   /** Is the caller a person (`'user'` — a session OR their own API token) or an
    *  integration (`'app'` — a host proxy, a bot, an MCP client)? The explorer
    *  reads it to decide whether to draw the identity-bearing surfaces; see

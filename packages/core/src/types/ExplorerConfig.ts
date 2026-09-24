@@ -77,6 +77,7 @@ export interface EndpointMap {
   capabilities: string | null;
   archiveList: string | null;
   archiveExtract: string | null;
+  archiveCreate: string | null;
   archiveAdd: string | null;
   copy: string | null;
   moveAsync: string | null;
@@ -132,6 +133,7 @@ export interface ExplorerConfig {
 
   archiveList?: string;
   archiveExtract?: string;
+  archiveCreate?: string;
   archiveAdd?: string;
 
   /** Recursive S3-side copy with "-copy" collision suffix (async). */

@@ -152,6 +152,12 @@ const (
 	// node (v0.6 "Çalışma" (Work)). The payload carries the node (path/name),
 	// the actor, and meta {comment_id, body (first 200 chars)}.
 	EventCommentAdded EventType = "comment.added"
+	// Archive events describe the completed user operation rather than each
+	// low-level file write it performed. Extraction can create hundreds of
+	// files; one completion event is useful, hundreds of "new file" alerts are
+	// not.
+	EventArchiveCreated   EventType = "archive.created"
+	EventArchiveExtracted EventType = "archive.extracted"
 	// EventE2EEscrowUsed fires when an encrypted folder was opened with the
 	// operator's ESCROW key rather than its owner's passphrase. Not the
 	// recovery key — that one the owner holds; escrow means somebody else's

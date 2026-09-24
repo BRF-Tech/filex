@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import ArchiveViewer from '@brftech/filex-core/src/viewers/ArchiveViewer.vue';
+import { createArchivePreviewCache } from '@brftech/filex-core/src/lib/archivePreviewCache';
 
 const fetchMock = vi.fn();
 
@@ -45,6 +46,84 @@ describe('ArchiveViewer', () => {
     });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock.mock.calls[0][0]).toBe('/api/files/archive/list');
+  });
+
+  it('prompts for an encrypted archive, retries with the password, and keeps directory navigation', async () => {
+    const archivePreviewCache = createArchivePreviewCache();
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        json: async () => ({ code: 'PASSWORD_REQUIRED' }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        json: async () => ({ code: 'BAD_PASSWORD' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
+          entries: [
+            { name: 'folder/report.txt', size: 42 },
+            { name: 'root.txt', size: 7 },
+          ],
+        }),
+      });
+
+    const wrapper = mount(ArchiveViewer, {
+      props: { url: '/preview', filePath: 'main://protected.7z', ext: '7z', archivePreviewCache },
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await vi.waitFor(() => expect(wrapper.find('input[type="password"]').exists()).toBe(true));
+    let password = wrapper.find<HTMLInputElement>('input[type="password"]');
+    await password.setValue('wrong');
+    await wrapper.find('.fe-btn--primary').trigger('click');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(wrapper.text()).toMatch(/incorrect/i));
+
+    password = wrapper.find<HTMLInputElement>('input[type="password"]');
+    await password.setValue('correct');
+    await wrapper.find('.fe-btn--primary').trigger('click');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const request = JSON.parse(String(fetchMock.mock.calls[2][1]?.body));
+    expect(request).toEqual({ path: 'main://protected.7z', password: 'correct' });
+    await vi.waitFor(() => expect(wrapper.text()).toContain('folder'));
+
+    const folder = wrapper.findAll('.filex-viewer-archive__entry')
+      .find((entry) => entry.text().includes('folder'));
+    expect(folder).toBeDefined();
+    await folder!.trigger('click');
+    expect(wrapper.text()).toContain('report.txt');
+    expect(wrapper.text()).not.toContain('root.txt');
+
+    wrapper.unmount();
+    const reopened = mount(ArchiveViewer, {
+      props: { url: '/preview', filePath: 'main://protected.7z', ext: '7z', archivePreviewCache },
+    });
+    await vi.waitFor(() => expect(reopened.text()).toContain('folder'));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(reopened.find('input[type="password"]').exists()).toBe(false);
+    reopened.unmount();
+    archivePreviewCache.clear();
+  });
+
+  it('expires cached encrypted archive listings after two minutes', () => {
+    vi.useFakeTimers();
+    const archivePreviewCache = createArchivePreviewCache();
+    archivePreviewCache.remember('main://protected.7z', [{ name: 'report.txt', size: 42 }]);
+    expect(archivePreviewCache.recall('main://protected.7z')).toHaveLength(1);
+
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    expect(archivePreviewCache.recall('main://protected.7z')).toBeUndefined();
+    archivePreviewCache.clear();
+    vi.useRealTimers();
   });
 });
 

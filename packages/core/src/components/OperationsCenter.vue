@@ -70,6 +70,8 @@ const KIND_ICONS: Record<Operation['kind'], string> = {
   /* An app-plugin job — the puzzle piece its menu row wears (lib/actionIcons). */
   plugin:
     'M9.5 4.5a2 2 0 1 1 4 0h3a1.5 1.5 0 0 1 1.5 1.5v3a2 2 0 1 1 0 4v3a1.5 1.5 0 0 1-1.5 1.5h-3a2 2 0 1 1-4 0h-3A1.5 1.5 0 0 1 5 16v-3a2 2 0 1 1 0-4V6a1.5 1.5 0 0 1 1.5-1.5z',
+  'archive-create': 'M4 8V5h16v3zM5 8h14v12H5zM10 12h4',
+  'archive-extract': 'M4 8V5h16v3zM5 8h14v12H5zM10 12h4',
 };
 
 function kindLabel(o: Operation): string {
@@ -100,12 +102,16 @@ function outputModeTitle(o: Operation): string {
 
 function statusText(o: Operation): string {
   if (o.status === 'running') {
+    if (o.cancelling) return t('opc.cancelling');
     if (o.queued) return t('opc.queued');
     // A plugin job says what it is doing in its own words (`job_progress`
     // message); that beats a bare count.
     if (o.message) return o.message;
     if (o.totalBytes && o.totalBytes > 0) {
       return `${formatSize(o.uploadedBytes ?? 0)} / ${formatSize(o.totalBytes)}`;
+    }
+    if ((o.kind === 'archive-create' || o.kind === 'archive-extract') && o.percent !== null) {
+      return t('opc.percent', { n: o.percent });
     }
     if (o.totalCount && o.totalCount > 0) {
       return `${o.doneCount ?? 0}/${o.totalCount}`;
