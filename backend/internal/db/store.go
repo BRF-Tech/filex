@@ -434,12 +434,25 @@ type Store interface {
 	// Nil/empty means "no mute filter", which is what the admin/global view
 	// (userID == nil) always passes.
 	//
-	// broadcasts narrows the BROADCAST half of a per-user read — which rows
-	// with no user this bell takes at all (see notify.Bell). It is in SQL for
-	// the same reason as the mute list. Ignored when userID is nil.
+	// broadcasts decides how the read treats rows with no user: which of them
+	// a bell takes at all (see notify.Bell), and whose read state they carry.
+	// It is in SQL for the same reason as the mute list.
 	ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, mutedEvents []string, broadcasts model.BroadcastFilter, limit, offset int) ([]*model.Notification, int64, error)
+	// MarkNotificationRead and MarkAllNotificationsRead stamp rows ADDRESSED
+	// to userID and nothing else: a broadcast is many readers' row, and is
+	// marked per reader through MarkBroadcastsRead. nil userID stamps the
+	// rows' own column regardless of owner (an instance-wide sweep).
 	MarkNotificationRead(ctx context.Context, id int64, userID *int64) error
 	MarkAllNotificationsRead(ctx context.Context, userID *int64) error
+	// MarkBroadcastsRead records that readerID has read these broadcasts
+	// (migration 00043). Ids that are not broadcasts are ignored, and marking
+	// one twice is not an error. Whether the reader may see them is the
+	// caller's question — the store cannot answer it.
+	MarkBroadcastsRead(ctx context.Context, readerID int64, ids []int64) error
+	// MarkAllBroadcastsRead moves readerID's "mark all read" point to the
+	// newest notification: every broadcast up to it is read for that reader,
+	// and nobody else. One write however many broadcasts there are.
+	MarkAllBroadcastsRead(ctx context.Context, readerID int64) error
 	UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents []string, broadcasts model.BroadcastFilter) (int64, error)
 	UpdateWebhookStatus(ctx context.Context, id int64, status, errMsg string) error
 	GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error)

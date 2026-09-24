@@ -3125,8 +3125,19 @@ func (s *Store) GetNotification(ctx context.Context, id int64) (*model.Notificat
 	return scanNotificationPg(row)
 }
 
-// mutedEventsClause builds the `event NOT IN ($n,…)` fragment and its args for
-// a per-user mute list, starting numbering at idx. It returns the next free
+// pgPlaceholders is n numbered placeholders starting at idx, and the next free
+// index.
+func pgPlaceholders(n, idx int) (string, int) {
+	ph := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		ph = append(ph, fmt.Sprintf("$%d", idx))
+		idx++
+	}
+	return strings.Join(ph, ","), idx
+}
+
+// mutedEventsClause builds the `n.event NOT IN ($n,…)` fragment and its args
+// for a per-user mute list, starting numbering at idx. It returns the next free
 // placeholder index so the caller can keep numbering LIMIT/OFFSET after it.
 // Empty list ⇒ empty clause and idx unchanged.
 //
@@ -3136,47 +3147,118 @@ func mutedEventsClause(muted []string, idx int) (string, []any, int) {
 	if len(muted) == 0 {
 		return "", nil, idx
 	}
-	ph := make([]string, 0, len(muted))
 	args := make([]any, 0, len(muted))
 	for _, e := range muted {
-		ph = append(ph, fmt.Sprintf("$%d", idx))
 		args = append(args, e)
-		idx++
 	}
-	return "event NOT IN (" + strings.Join(ph, ",") + ")", args, idx
+	ph, next := pgPlaceholders(len(muted), idx)
+	return "n.event NOT IN (" + ph + ")", args, next
 }
 
-// bellClause builds the per-user predicate starting numbering at idx: the
-// reader's own rows, plus the broadcasts (user_id NULL) the filter admits. It
-// returns the next free placeholder index. The zero filter admits every
-// broadcast — the predicate this read always had.
+// bellClause builds the per-user predicate over `notifications n`, starting
+// numbering at idx: the reader's own rows, plus the broadcasts (user_id NULL)
+// the filter admits. It returns the next free placeholder index. The zero
+// filter admits every broadcast, the predicate this read always had.
+//
+// since > 0 keeps only the broadcasts after the reader's "mark all read" point
+// — an unread read passes it — inside the broadcast branch, where it is a range
+// on idx_notifications_unread_since rather than a filter over every broadcast
+// nobody stamped. See the SQLite driver.
 //
 // ⚠ Placeholders, never literals, for the same reason as mutedEventsClause.
-func bellClause(userID int64, f model.BroadcastFilter, idx int) (string, []any, int) {
+// ⚠ Every column is qualified: the per-reader join brings its own user_id.
+func bellClause(userID int64, f model.BroadcastFilter, since int64, idx int) (string, []any, int) {
 	events, op := f.Only, "IN"
 	if len(events) == 0 {
 		events, op = f.Except, "NOT IN"
 	}
-	if len(events) == 0 {
-		return fmt.Sprintf("(user_id IS NULL OR user_id = $%d)", idx), []any{userID}, idx + 1
-	}
 	self := idx
 	idx++
-	ph := make([]string, 0, len(events))
-	args := make([]any, 0, len(events)+1)
+	args := make([]any, 0, len(events)+2)
 	args = append(args, userID)
-	for _, e := range events {
-		ph = append(ph, fmt.Sprintf("$%d", idx))
-		args = append(args, e)
+	broadcast := "n.user_id IS NULL"
+	if since > 0 {
+		broadcast += fmt.Sprintf(" AND n.id > $%d", idx)
+		args = append(args, since)
 		idx++
 	}
-	return fmt.Sprintf("(user_id = $%d OR (user_id IS NULL AND event %s (%s)))",
-		self, op, strings.Join(ph, ",")), args, idx
+	if len(events) > 0 {
+		var ph string
+		ph, idx = pgPlaceholders(len(events), idx)
+		broadcast += " AND n.event " + op + " (" + ph + ")"
+		for _, e := range events {
+			args = append(args, e)
+		}
+	}
+	return fmt.Sprintf("(n.user_id = $%d OR (%s))", self, broadcast), args, idx
 }
 
-// ListNotifications paginates either user or admin views. mutedEvents drops
-// the event ids the user has muted; empty means no mute filter. broadcasts
-// decides which broadcasts the bell takes at all (see db.Store).
+// readThrough is a reader's "mark all read" point (migration 00043): every
+// broadcast up to `through` is read for them, as of `at`. Zero when they never
+// pressed it.
+type readThrough struct {
+	through int64
+	at      time.Time
+}
+
+func (s *Store) readThroughOf(ctx context.Context, readerID int64) (readThrough, error) {
+	var rt readThrough
+	if readerID <= 0 {
+		return rt, nil
+	}
+	err := s.db.QueryRowContext(ctx,
+		`SELECT through_id, read_at FROM notification_read_through WHERE user_id=$1`, readerID,
+	).Scan(&rt.through, &rt.at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return readThrough{}, nil
+	}
+	if err != nil {
+		return readThrough{}, fmt.Errorf("postgres: read-through: %w", err)
+	}
+	return rt, nil
+}
+
+// apply gives a broadcast at or below the reader's "mark all read" point the
+// time of that press, when nothing else marked it read.
+func (rt readThrough) apply(n *model.Notification) {
+	if n.UserID == nil && n.ReadAt == nil && rt.through > 0 && n.ID <= rt.through {
+		t := rt.at
+		n.ReadAt = &t
+	}
+}
+
+// readerJoin joins a reader's single marks on broadcasts, numbering from idx,
+// and names the select-list column that carries them. With no reader there is
+// no join and the column is a typed NULL, so the row shape is the same.
+func readerJoin(readerID int64, idx int) (join, col string, args []any, next int) {
+	if readerID <= 0 {
+		return "", "NULL::timestamptz", nil, idx
+	}
+	return fmt.Sprintf(" LEFT JOIN notification_reads r ON r.notification_id = n.id AND r.user_id = $%d", idx),
+		"r.read_at", []any{readerID}, idx + 1
+}
+
+// unreadClause is the unread predicate, numbering from idx. For a reader a
+// broadcast is unread when nobody stamped its own column, they have not marked
+// it on its own, and it is after their "mark all read" point; a row addressed
+// to a user has no marks and no point, its own read_at speaks. A per-user read
+// carries the point inside bellClause; only the admin-global read (history)
+// needs it here.
+func unreadClause(readerID int64, rt readThrough, history bool, idx int) (string, []any, int) {
+	if readerID <= 0 {
+		return "n.read_at IS NULL", nil, idx
+	}
+	if history && rt.through > 0 {
+		return fmt.Sprintf("n.read_at IS NULL AND r.read_at IS NULL AND (n.user_id IS NOT NULL OR n.id > $%d)", idx),
+			[]any{rt.through}, idx + 1
+	}
+	return "n.read_at IS NULL AND r.read_at IS NULL", nil, idx
+}
+
+// ListNotifications paginates either user or admin views. onlyUnread keeps the
+// rows still unread for the reader; mutedEvents drops the event ids the user
+// has muted, empty means no mute filter; broadcasts decides which broadcasts
+// the bell takes at all and whose read state they carry (see db.Store).
 func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, mutedEvents []string, broadcasts model.BroadcastFilter, limit, offset int) ([]*model.Notification, int64, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
@@ -3184,44 +3266,49 @@ func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread
 	if offset < 0 {
 		offset = 0
 	}
-	var (
-		args   []any
-		whereC []string
-		idx    = 1
-	)
+	rt, err := s.readThroughOf(ctx, broadcasts.ReaderID)
+	if err != nil {
+		return nil, 0, err
+	}
+	join, readCol, args, idx := readerJoin(broadcasts.ReaderID, 1)
+	var since int64
+	if onlyUnread {
+		since = rt.through
+	}
+	var whereC []string
 	if userID != nil {
-		clause, bellArgs, next := bellClause(*userID, broadcasts, idx)
+		clause, bellArgs, next := bellClause(*userID, broadcasts, since, idx)
 		whereC = append(whereC, clause)
 		args = append(args, bellArgs...)
 		idx = next
 	}
 	if onlyUnread {
-		whereC = append(whereC, "read_at IS NULL")
+		clause, unreadArgs, next := unreadClause(broadcasts.ReaderID, rt, userID == nil, idx)
+		whereC = append(whereC, clause)
+		args = append(args, unreadArgs...)
+		idx = next
 	}
 	if clause, muteArgs, next := mutedEventsClause(mutedEvents, idx); clause != "" {
 		whereC = append(whereC, clause)
 		args = append(args, muteArgs...)
 		idx = next
 	}
-	whereSQL := ""
+	from := " FROM notifications n" + join
 	if len(whereC) > 0 {
-		whereSQL = "WHERE " + strings.Join(whereC, " AND ")
+		from += " WHERE " + strings.Join(whereC, " AND ")
 	}
 
 	var total int64
-	if err := s.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM notifications "+whereSQL, args...,
-	).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*)"+from, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("postgres: count notifications: %w", err)
 	}
 
 	args = append(args, limit, offset)
 	q := fmt.Sprintf(
-		`SELECT id, event, severity, title, body, meta_json::text,
-		        user_id, read_at, webhook_status, COALESCE(webhook_error,''), created_at
-		 FROM notifications %s
-		 ORDER BY created_at DESC, id DESC
-		 LIMIT $%d OFFSET $%d`, whereSQL, idx, idx+1)
+		`SELECT n.id, n.event, n.severity, n.title, n.body, n.meta_json::text,
+		        n.user_id, n.read_at, n.webhook_status, COALESCE(n.webhook_error,''), n.created_at, %s%s
+		 ORDER BY n.created_at DESC, n.id DESC
+		 LIMIT $%d OFFSET $%d`, readCol, from, idx, idx+1)
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("postgres: list notifications: %w", err)
@@ -3229,22 +3316,25 @@ func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread
 	defer rows.Close()
 	var out []*model.Notification
 	for rows.Next() {
-		n, err := scanNotificationPg(rows)
+		n, err := scanNotificationForReaderPg(rows)
 		if err != nil {
 			return nil, 0, err
 		}
+		rt.apply(n)
 		out = append(out, n)
 	}
 	return out, total, rows.Err()
 }
 
-// MarkNotificationRead bumps read_at on a single row.
+// MarkNotificationRead bumps read_at on a single row. With a userID the row
+// must be ADDRESSED to that user: a broadcast is many readers' row and is
+// marked per reader by MarkBroadcastsRead.
 func (s *Store) MarkNotificationRead(ctx context.Context, id int64, userID *int64) error {
 	q := `UPDATE notifications SET read_at = NOW()
 	      WHERE id=$1 AND read_at IS NULL`
 	args := []any{id}
 	if userID != nil {
-		q += ` AND (user_id IS NULL OR user_id = $2)`
+		q += ` AND user_id = $2`
 		args = append(args, *userID)
 	}
 	_, err := s.db.ExecContext(ctx, q, args...)
@@ -3254,26 +3344,88 @@ func (s *Store) MarkNotificationRead(ctx context.Context, id int64, userID *int6
 	return nil
 }
 
-// MarkAllNotificationsRead bumps read_at for every unread row visible
-// to userID. Pass nil for the global "mark all" admin sweep.
+// MarkAllNotificationsRead bumps read_at for every unread row addressed to
+// userID — never a broadcast, see MarkNotificationRead. Pass nil for the
+// global "mark all" admin sweep.
 func (s *Store) MarkAllNotificationsRead(ctx context.Context, userID *int64) error {
 	q := `UPDATE notifications SET read_at = NOW() WHERE read_at IS NULL`
 	var args []any
 	if userID != nil {
-		q += ` AND (user_id IS NULL OR user_id = $1)`
+		q += ` AND user_id = $1`
 		args = append(args, *userID)
 	}
 	_, err := s.db.ExecContext(ctx, q, args...)
 	return err
 }
 
+// MarkAllBroadcastsRead moves readerID's "mark all read" point to the newest
+// notification — never backwards — and drops the single marks it overtook.
+func (s *Store) MarkAllBroadcastsRead(ctx context.Context, readerID int64) error {
+	if readerID <= 0 {
+		return nil
+	}
+	var through int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM notifications`).Scan(&through); err != nil {
+		return fmt.Errorf("postgres: newest notification: %w", err)
+	}
+	if through == 0 {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO notification_read_through AS t (user_id, through_id, read_at) VALUES ($1, $2, NOW())
+		 ON CONFLICT (user_id) DO UPDATE SET
+		   read_at = CASE WHEN EXCLUDED.through_id > t.through_id THEN EXCLUDED.read_at ELSE t.read_at END,
+		   through_id = GREATEST(t.through_id, EXCLUDED.through_id)`, readerID, through); err != nil {
+		return fmt.Errorf("postgres: mark all broadcasts read: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM notification_reads WHERE user_id = $1 AND notification_id <= $2`, readerID, through); err != nil {
+		return fmt.Errorf("postgres: drop overtaken marks: %w", err)
+	}
+	return nil
+}
+
+// markBroadcastsBatch bounds one statement's placeholders.
+const markBroadcastsBatch = 400
+
+// MarkBroadcastsRead records readerID's marks on the given broadcasts, in one
+// statement per batch: only ids that are broadcasts nobody stamped through the
+// shared column get a mark, and a mark that exists already is left alone.
+func (s *Store) MarkBroadcastsRead(ctx context.Context, readerID int64, ids []int64) error {
+	if readerID <= 0 {
+		return nil
+	}
+	for start := 0; start < len(ids); start += markBroadcastsBatch {
+		batch := ids[start:min(start+markBroadcastsBatch, len(ids))]
+		args := make([]any, 0, len(batch)+1)
+		args = append(args, readerID)
+		for _, id := range batch {
+			args = append(args, id)
+		}
+		ph, _ := pgPlaceholders(len(batch), 2)
+		if _, err := s.db.ExecContext(ctx,
+			`INSERT INTO notification_reads (notification_id, user_id)
+			 SELECT id, $1 FROM notifications
+			 WHERE user_id IS NULL AND read_at IS NULL AND id IN (`+ph+`)
+			 ON CONFLICT (notification_id, user_id) DO NOTHING`, args...); err != nil {
+			return fmt.Errorf("postgres: mark broadcasts read: %w", err)
+		}
+	}
+	return nil
+}
+
 // UnreadNotificationCount returns the bell badge number for a user.
 func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents []string, broadcasts model.BroadcastFilter) (int64, error) {
-	q := `SELECT COUNT(*) FROM notifications WHERE read_at IS NULL`
-	var args []any
-	idx := 1
+	rt, err := s.readThroughOf(ctx, broadcasts.ReaderID)
+	if err != nil {
+		return 0, err
+	}
+	join, _, args, idx := readerJoin(broadcasts.ReaderID, 1)
+	unread, unreadArgs, idx := unreadClause(broadcasts.ReaderID, rt, userID == nil, idx)
+	q := `SELECT COUNT(*) FROM notifications n` + join + ` WHERE ` + unread
+	args = append(args, unreadArgs...)
 	if userID != nil {
-		clause, bellArgs, next := bellClause(*userID, broadcasts, idx)
+		clause, bellArgs, next := bellClause(*userID, broadcasts, rt.through, idx)
 		q += ` AND ` + clause
 		args = append(args, bellArgs...)
 		idx = next
@@ -3737,8 +3889,49 @@ func validateReplicaRulePg(in *model.ReplicaRuleInput) error {
 	return nil
 }
 
+// scanNotificationForReaderPg scans a list row: the stored columns plus the
+// reader's mark on a broadcast (NULL when there is none, or no reader). The
+// mark wins over the row's own read_at — for the reader it is the answer.
+func scanNotificationForReaderPg(rs interface {
+	Scan(...any) error
+}) (*model.Notification, error) {
+	n := &model.Notification{}
+	var (
+		metaRaw  string
+		userID   sql.NullInt64
+		readAt   sql.NullTime
+		errMsg   string
+		readerAt sql.NullTime
+	)
+	if err := rs.Scan(
+		&n.ID, &n.Event, &n.Severity, &n.Title, &n.Body, &metaRaw,
+		&userID, &readAt, &n.WebhookStatus, &errMsg, &n.CreatedAt, &readerAt,
+	); err != nil {
+		return nil, err
+	}
+	if metaRaw == "" {
+		metaRaw = "{}"
+	}
+	n.MetaJSON = json.RawMessage(metaRaw)
+	if userID.Valid {
+		v := userID.Int64
+		n.UserID = &v
+	}
+	switch {
+	case readerAt.Valid:
+		t := readerAt.Time
+		n.ReadAt = &t
+	case readAt.Valid:
+		t := readAt.Time
+		n.ReadAt = &t
+	}
+	n.WebhookError = errMsg
+	return n, nil
+}
+
 // scanNotificationPg accepts both *sql.Row and *sql.Rows. Matches the
-// column list used by GetNotification + ListNotifications.
+// column list used by GetNotification; a list row carries one more column,
+// see scanNotificationForReaderPg.
 func scanNotificationPg(rs interface {
 	Scan(...any) error
 }) (*model.Notification, error) {

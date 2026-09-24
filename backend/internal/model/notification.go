@@ -109,17 +109,27 @@ type NotificationInput struct {
 	UserID   *int64
 }
 
-// BroadcastFilter narrows the broadcast half — rows with no user_id — of a
-// per-user notification read. The zero value reads every broadcast.
+// BroadcastFilter decides how a notification read treats broadcasts — rows
+// with no user_id. The zero value reads every broadcast, with the read state
+// stored on the row.
 //
 // It is applied IN SQL, like the mute list, so that a bell's page is filled
 // with rows its reader can be shown, not with rows a filter throws away after
 // the page was cut.
 type BroadcastFilter struct {
 	// Only admits just the broadcasts of these events. Wins over Except.
+	// Only and Except narrow a per-user read and are ignored by the
+	// admin-global one; ReaderID applies to both.
 	Only []string
 	// Except leaves out the broadcasts of these events.
 	Except []string
+	// ReaderID is whose read state a broadcast carries in this read
+	// (migration 00043). For that reader a broadcast is read when it is at or
+	// below their "mark all read" point, when they marked it on its own, or
+	// when the row's own read_at was stamped before per-reader state existed.
+	// 0 reads the row's own column only. A row addressed to a user always
+	// carries that column.
+	ReaderID int64
 }
 
 // NotificationSettings captures per-user notification preferences. Stored

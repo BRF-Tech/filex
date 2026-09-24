@@ -3362,7 +3362,12 @@ func (s *Store) GetNotification(ctx context.Context, id int64) (*model.Notificat
 	return scanNotification(row)
 }
 
-// mutedEventsClause builds the `event NOT IN (?,?,…)` fragment and its args
+// qmarks is n comma-separated placeholders.
+func qmarks(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}
+
+// mutedEventsClause builds the `n.event NOT IN (?,?,…)` fragment and its args
 // for a per-user mute list. Empty list ⇒ empty clause, so the caller appends
 // nothing and the query is byte-identical to the unfiltered one.
 //
@@ -3376,37 +3381,99 @@ func mutedEventsClause(muted []string) (string, []any) {
 	for _, e := range muted {
 		args = append(args, e)
 	}
-	return "event NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(muted)), ",") + ")", args
+	return "n.event NOT IN (" + qmarks(len(muted)) + ")", args
 }
 
-// bellClause builds the per-user predicate: the reader's own rows, plus the
-// broadcasts (user_id NULL) the filter admits. The zero filter admits every
-// broadcast — the predicate this read always had.
+// bellClause builds the per-user predicate over `notifications n`: the
+// reader's own rows, plus the broadcasts (user_id NULL) the filter admits. The
+// zero filter admits every broadcast, the predicate this read always had.
+//
+// since > 0 keeps only the broadcasts after the reader's "mark all read" point
+// — an unread read passes it. It sits INSIDE the broadcast branch on purpose:
+// SQLite splits the OR into one index search per branch, and only there does
+// `n.id > ?` become a range seek on idx_notifications_unread_since instead of a
+// filter over every broadcast nobody stamped.
 //
 // ⚠ Placeholders, never literals, for the same reason as mutedEventsClause.
-func bellClause(userID int64, f model.BroadcastFilter) (string, []any) {
+// ⚠ Every column is qualified: the per-reader join brings its own user_id.
+func bellClause(userID int64, f model.BroadcastFilter, since int64) (string, []any) {
 	events, op := f.Only, "IN"
 	if len(events) == 0 {
 		events, op = f.Except, "NOT IN"
 	}
-	if len(events) == 0 {
-		return "(user_id IS NULL OR user_id = ?)", []any{userID}
-	}
-	args := make([]any, 0, len(events)+1)
+	broadcast := "n.user_id IS NULL"
+	args := make([]any, 0, len(events)+2)
 	args = append(args, userID)
-	for _, e := range events {
-		args = append(args, e)
+	if since > 0 {
+		broadcast += " AND n.id > ?"
+		args = append(args, since)
 	}
-	return "(user_id = ? OR (user_id IS NULL AND event " + op + " (" +
-		strings.TrimSuffix(strings.Repeat("?,", len(events)), ",") + ")))", args
+	if len(events) > 0 {
+		broadcast += " AND n.event " + op + " (" + qmarks(len(events)) + ")"
+		for _, e := range events {
+			args = append(args, e)
+		}
+	}
+	return "(n.user_id = ? OR (" + broadcast + "))", args
+}
+
+// readThrough is a reader's "mark all read" point (migration 00043): every
+// broadcast up to `through` is read for them, as of `at`. Zero when they never
+// pressed it.
+type readThrough struct {
+	through int64
+	at      time.Time
+}
+
+func (s *Store) readThroughOf(ctx context.Context, readerID int64) (readThrough, error) {
+	var rt readThrough
+	if readerID <= 0 {
+		return rt, nil
+	}
+	err := s.db.QueryRowContext(ctx,
+		`SELECT through_id, read_at FROM notification_read_through WHERE user_id=?`, readerID,
+	).Scan(&rt.through, &rt.at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return readThrough{}, nil
+	}
+	if err != nil {
+		return readThrough{}, fmt.Errorf("sqlite: read-through: %w", err)
+	}
+	return rt, nil
+}
+
+// readerJoin joins a reader's single marks on broadcasts and names the
+// select-list column that carries them. With no reader there is no join: the
+// column is a NULL, so the row shape is the same either way.
+func readerJoin(readerID int64) (join, col string, args []any) {
+	if readerID <= 0 {
+		return "", "NULL", nil
+	}
+	return " LEFT JOIN notification_reads r ON r.notification_id = n.id AND r.user_id = ?", "r.read_at", []any{readerID}
+}
+
+// unreadClause is the unread predicate. For a reader a broadcast is unread when
+// nobody stamped its own column, they have not marked it on its own, and it is
+// after their "mark all read" point; a row addressed to a user has no marks and
+// no point, its own read_at speaks. A per-user read carries the point inside
+// bellClause (see there); only the admin-global read (history) needs it here.
+func unreadClause(readerID int64, rt readThrough, history bool) (string, []any) {
+	if readerID <= 0 {
+		return "n.read_at IS NULL", nil
+	}
+	if history && rt.through > 0 {
+		return "n.read_at IS NULL AND r.read_at IS NULL AND (n.user_id IS NOT NULL OR n.id > ?)", []any{rt.through}
+	}
+	return "n.read_at IS NULL AND r.read_at IS NULL", nil
 }
 
 // ListNotifications paginates either a user's view (broadcasts +
 // user-scoped) or admin/global view (userID == nil).
 //
-// onlyUnread filters read_at IS NULL. mutedEvents drops the event ids the
-// user has muted; empty means no mute filter. broadcasts decides which
-// broadcasts the bell takes at all (see db.Store).
+// onlyUnread keeps the rows still unread for the reader. mutedEvents drops the
+// event ids the user has muted; empty means no mute filter. broadcasts decides
+// which broadcasts the bell takes at all and whose read state they carry (see
+// db.Store).
 func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, mutedEvents []string, broadcasts model.BroadcastFilter, limit, offset int) ([]*model.Notification, int64, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
@@ -3414,39 +3481,44 @@ func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread
 	if offset < 0 {
 		offset = 0
 	}
-	var (
-		args   []any
-		whereC []string
-	)
+	rt, err := s.readThroughOf(ctx, broadcasts.ReaderID)
+	if err != nil {
+		return nil, 0, err
+	}
+	join, readCol, args := readerJoin(broadcasts.ReaderID)
+	var since int64
+	if onlyUnread {
+		since = rt.through
+	}
+	var whereC []string
 	if userID != nil {
-		clause, bellArgs := bellClause(*userID, broadcasts)
+		clause, bellArgs := bellClause(*userID, broadcasts, since)
 		whereC = append(whereC, clause)
 		args = append(args, bellArgs...)
 	}
 	if onlyUnread {
-		whereC = append(whereC, "read_at IS NULL")
+		unread, unreadArgs := unreadClause(broadcasts.ReaderID, rt, userID == nil)
+		whereC = append(whereC, unread)
+		args = append(args, unreadArgs...)
 	}
 	if clause, muteArgs := mutedEventsClause(mutedEvents); clause != "" {
 		whereC = append(whereC, clause)
 		args = append(args, muteArgs...)
 	}
-	whereSQL := ""
+	from := " FROM notifications n" + join
 	if len(whereC) > 0 {
-		whereSQL = "WHERE " + strings.Join(whereC, " AND ")
+		from += " WHERE " + strings.Join(whereC, " AND ")
 	}
 
 	var total int64
-	if err := s.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM notifications "+whereSQL, args...,
-	).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*)"+from, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("sqlite: count notifications: %w", err)
 	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, event, severity, title, body, meta_json,
-		        user_id, read_at, webhook_status, COALESCE(webhook_error,''), created_at
-		 FROM notifications `+whereSQL+`
-		 ORDER BY created_at DESC, id DESC
+		`SELECT n.id, n.event, n.severity, n.title, n.body, n.meta_json,
+		        n.user_id, n.read_at, n.webhook_status, COALESCE(n.webhook_error,''), n.created_at, `+readCol+from+`
+		 ORDER BY n.created_at DESC, n.id DESC
 		 LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("sqlite: list notifications: %w", err)
@@ -3454,23 +3526,34 @@ func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread
 	defer rows.Close()
 	var out []*model.Notification
 	for rows.Next() {
-		n, err := scanNotification(rows)
+		n, err := scanNotificationForReader(rows)
 		if err != nil {
 			return nil, 0, err
 		}
+		rt.apply(n)
 		out = append(out, n)
 	}
 	return out, total, rows.Err()
 }
 
-// MarkNotificationRead bumps read_at on a single row. When userID is
-// non-nil it must match the row (or the row must be a broadcast).
+// apply gives a broadcast at or below the reader's "mark all read" point the
+// time of that press, when nothing else marked it read.
+func (rt readThrough) apply(n *model.Notification) {
+	if n.UserID == nil && n.ReadAt == nil && rt.through > 0 && n.ID <= rt.through {
+		t := rt.at
+		n.ReadAt = &t
+	}
+}
+
+// MarkNotificationRead bumps read_at on a single row. With a userID the row
+// must be ADDRESSED to that user: a broadcast is many readers' row and is
+// marked per reader by MarkBroadcastsRead.
 func (s *Store) MarkNotificationRead(ctx context.Context, id int64, userID *int64) error {
 	q := `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
 	      WHERE id=? AND read_at IS NULL`
 	args := []any{id}
 	if userID != nil {
-		q += ` AND (user_id IS NULL OR user_id = ?)`
+		q += ` AND user_id = ?`
 		args = append(args, *userID)
 	}
 	_, err := s.db.ExecContext(ctx, q, args...)
@@ -3480,26 +3563,132 @@ func (s *Store) MarkNotificationRead(ctx context.Context, id int64, userID *int6
 	return nil
 }
 
-// MarkAllNotificationsRead bumps read_at for every unread row visible
-// to userID. Pass nil for the global "mark all" admin sweep.
+// MarkAllNotificationsRead bumps read_at for every unread row addressed to
+// userID — never a broadcast, see MarkNotificationRead. Pass nil for the
+// global "mark all" admin sweep.
 func (s *Store) MarkAllNotificationsRead(ctx context.Context, userID *int64) error {
 	q := `UPDATE notifications SET read_at = CURRENT_TIMESTAMP WHERE read_at IS NULL`
 	var args []any
 	if userID != nil {
-		q += ` AND (user_id IS NULL OR user_id = ?)`
+		q += ` AND user_id = ?`
 		args = append(args, *userID)
 	}
 	_, err := s.db.ExecContext(ctx, q, args...)
 	return err
 }
 
+// MarkAllBroadcastsRead moves readerID's "mark all read" point to the newest
+// notification and drops the single marks it has overtaken.
+//
+// ⚠ The point only moves forward: `read_at` is assigned FIRST and compares
+// against the old `through_id`. MySQL applies ON DUPLICATE KEY assignments left
+// to right, so in the other order it would already see the new value; SQLite
+// evaluates every assignment against the old row, so either order is right
+// there.
+func (s *Store) MarkAllBroadcastsRead(ctx context.Context, readerID int64) error {
+	if readerID <= 0 {
+		return nil
+	}
+	var through int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM notifications`).Scan(&through); err != nil {
+		return fmt.Errorf("sqlite: newest notification: %w", err)
+	}
+	if through == 0 {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, s.upsert(
+		`INSERT INTO notification_read_through (user_id, through_id, read_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(user_id) DO UPDATE SET
+		   read_at = CASE WHEN excluded.through_id > through_id THEN excluded.read_at ELSE read_at END,
+		   through_id = CASE WHEN excluded.through_id > through_id THEN excluded.through_id ELSE through_id END`),
+		readerID, through); err != nil {
+		return fmt.Errorf("sqlite: mark all broadcasts read: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM notification_reads WHERE user_id = ? AND notification_id <= ?`, readerID, through); err != nil {
+		return fmt.Errorf("sqlite: drop overtaken marks: %w", err)
+	}
+	return nil
+}
+
+// markBroadcastsBatch bounds one statement's placeholders well under every
+// engine's limit.
+const markBroadcastsBatch = 400
+
+// MarkBroadcastsRead records readerID's marks on the given broadcasts. Ids that
+// are not unread broadcasts are dropped first — a row addressed to a user keeps
+// its read state on the row, and a broadcast stamped through the shared column
+// before 00043 is already read for everyone.
+//
+// ⚠ Two statements, not INSERT … SELECT: MySQL resolves the no-op upsert's
+// column against the SELECT's tables too, and notifications has columns of the
+// same names. The select's rows are closed before the insert — SQLite runs on
+// one connection.
+func (s *Store) MarkBroadcastsRead(ctx context.Context, readerID int64, ids []int64) error {
+	if readerID <= 0 {
+		return nil
+	}
+	for start := 0; start < len(ids); start += markBroadcastsBatch {
+		batch := ids[start:min(start+markBroadcastsBatch, len(ids))]
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			args[i] = id
+		}
+		keep, err := s.unreadBroadcastIDs(ctx, args)
+		if err != nil {
+			return err
+		}
+		if len(keep) == 0 {
+			continue
+		}
+		vals := make([]any, 0, 2*len(keep))
+		for _, id := range keep {
+			vals = append(vals, id, readerID)
+		}
+		if _, err := s.db.ExecContext(ctx, s.upsert(
+			`INSERT INTO notification_reads (notification_id, user_id) VALUES `+
+				strings.TrimSuffix(strings.Repeat("(?,?),", len(keep)), ",")+`
+			 ON CONFLICT(notification_id, user_id) DO UPDATE SET notification_id=excluded.notification_id`),
+			vals...); err != nil {
+			return fmt.Errorf("sqlite: mark broadcasts read: %w", err)
+		}
+	}
+	return nil
+}
+
+// unreadBroadcastIDs keeps the ids that are broadcasts nobody stamped through
+// the shared column.
+func (s *Store) unreadBroadcastIDs(ctx context.Context, ids []any) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id FROM notifications WHERE user_id IS NULL AND read_at IS NULL AND id IN (`+qmarks(len(ids))+`)`, ids...)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: find broadcasts: %w", err)
+	}
+	defer rows.Close()
+	var keep []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		keep = append(keep, id)
+	}
+	return keep, rows.Err()
+}
+
 // UnreadNotificationCount returns the bell badge number for a user.
 // Pass nil for the global unread count (admin dashboard).
 func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents []string, broadcasts model.BroadcastFilter) (int64, error) {
-	q := `SELECT COUNT(*) FROM notifications WHERE read_at IS NULL`
-	var args []any
+	rt, err := s.readThroughOf(ctx, broadcasts.ReaderID)
+	if err != nil {
+		return 0, err
+	}
+	join, _, args := readerJoin(broadcasts.ReaderID)
+	unread, unreadArgs := unreadClause(broadcasts.ReaderID, rt, userID == nil)
+	q := `SELECT COUNT(*) FROM notifications n` + join + ` WHERE ` + unread
+	args = append(args, unreadArgs...)
 	if userID != nil {
-		clause, bellArgs := bellClause(*userID, broadcasts)
+		clause, bellArgs := bellClause(*userID, broadcasts, rt.through)
 		q += ` AND ` + clause
 		args = append(args, bellArgs...)
 	}
@@ -4026,6 +4215,46 @@ func scanNotification(rs interface {
 		n.UserID = &v
 	}
 	if readAt.Valid {
+		t := readAt.Time
+		n.ReadAt = &t
+	}
+	n.WebhookError = errMsg
+	return n, nil
+}
+
+// scanNotificationForReader scans a list row: the stored columns plus the
+// reader's mark on a broadcast (NULL when there is none, or no reader). The
+// mark wins over the row's own read_at — for the reader it is the answer.
+func scanNotificationForReader(rs interface {
+	Scan(...any) error
+}) (*model.Notification, error) {
+	n := &model.Notification{}
+	var (
+		metaRaw  string
+		userID   sql.NullInt64
+		readAt   sql.NullTime
+		errMsg   string
+		readerAt sql.NullTime
+	)
+	if err := rs.Scan(
+		&n.ID, &n.Event, &n.Severity, &n.Title, &n.Body, &metaRaw,
+		&userID, &readAt, &n.WebhookStatus, &errMsg, &n.CreatedAt, &readerAt,
+	); err != nil {
+		return nil, err
+	}
+	if metaRaw == "" {
+		metaRaw = "{}"
+	}
+	n.MetaJSON = json.RawMessage(metaRaw)
+	if userID.Valid {
+		v := userID.Int64
+		n.UserID = &v
+	}
+	switch {
+	case readerAt.Valid:
+		t := readerAt.Time
+		n.ReadAt = &t
+	case readAt.Valid:
 		t := readAt.Time
 		n.ReadAt = &t
 	}
