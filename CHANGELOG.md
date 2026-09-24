@@ -86,6 +86,12 @@ caller.
 ### Added
 
 - **Apps (app plugins) — a sandboxed plugin that adds things to *do* with
+- **Encrypted archive workflows.** Configure a 7-Zip provider to create and
+  extract ZIP, 7z, TAR, TAR.GZ, TAR.BZ2 and TAR.XZ archives, with password
+  protection, archive previews, Extract here, and asynchronous progress and
+  cancellation. RAR, GZ, BZ2 and XZ archives are available for extraction and
+  preview.
+
   files.** A WebAssembly module that adds actions to the file menu, screens
   filex draws for it, and public pages for outside participants. Install from a GitHub repository
   URL, a file upload or a URL, always through a permission review; the grant
