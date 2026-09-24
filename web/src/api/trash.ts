@@ -20,6 +20,29 @@ export interface TrashList {
   offset: number;
 }
 
+/**
+ * One "empty the trash" run, as `POST` and `GET /admin/trash/empty` report it.
+ * `running: false` is the end — `purged` can finish below `total`, because a
+ * folder takes the rows inside it along. `GET` answers `{ running: false }`
+ * alone when this tenant has not started a run since the server did.
+ */
+export interface TrashEmptyStatus {
+  ok?: boolean;
+  running: boolean;
+  storage_id?: number;
+  older_than_days?: number;
+  /** Rows in the run's scope when it started, and the bytes their files hold. */
+  total?: number;
+  total_bytes?: number;
+  scanned?: number;
+  purged?: number;
+  failed?: number;
+  bytes?: number;
+  error?: string;
+  started_at?: string;
+  finished_at?: string;
+}
+
 export const trashApi = {
   /** List soft-deleted nodes across storages. */
   async list(params: { storage_id?: number; limit?: number; offset?: number } = {}) {
@@ -39,9 +62,21 @@ export const trashApi = {
     return res.data;
   },
 
-  /** Empty trash for a storage (admin). `older_than_days` optional. */
-  async empty(opts: { storage_id?: number; older_than_days?: number } = {}) {
-    const res = await api.post('/admin/trash/empty', opts);
+  /**
+   * Start emptying the trash (admin). `storage_id` / `older_than_days`
+   * optional. The answer is the final count when the purge finished within a
+   * few seconds (`running: false`), otherwise its progress so far (`running:
+   * true`) while it goes on in the background — follow it with emptyStatus().
+   * 409 `BUSY` while another purge holds the trash.
+   */
+  async empty(opts: { storage_id?: number; older_than_days?: number } = {}): Promise<TrashEmptyStatus> {
+    const res = await api.post<TrashEmptyStatus>('/admin/trash/empty', opts);
+    return res.data;
+  },
+
+  /** The latest empty this tenant started: still running, or how it ended. */
+  async emptyStatus(): Promise<TrashEmptyStatus> {
+    const res = await api.get<TrashEmptyStatus>('/admin/trash/empty');
     return res.data;
   },
 };

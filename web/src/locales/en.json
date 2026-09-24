@@ -778,6 +778,14 @@
     "older_than_days": "Older than (days)",
     "all_ages": "any age (leave blank)",
     "empty_done": "{count} item purged | {count} items purged",
+    "older_than_days_invalid": "A whole number of days, or blank for any age.",
+    "emptying": "Emptying the trash…",
+    "emptying_progress": "{done} of {total}",
+    "emptying_freed": "{size} freed so far",
+    "emptying_note": "It carries on if you leave this page.",
+    "empty_busy": "The trash is already being emptied.",
+    "empty_failed": "{count} item could not be purged — see the server log | {count} items could not be purged — see the server log",
+    "empty_stopped": "Emptying the trash stopped: {error}",
     "total_count": "Total: {n}"
   },
   "home": {

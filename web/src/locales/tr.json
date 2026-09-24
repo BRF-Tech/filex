@@ -778,6 +778,14 @@
     "older_than_days": "Şundan eski (gün)",
     "all_ages": "tümü (boş bırak)",
     "empty_done": "{count} öğe silindi",
+    "older_than_days_invalid": "Tam bir gün sayısı yaz ya da her yaş için boş bırak.",
+    "emptying": "Çöp boşaltılıyor…",
+    "emptying_progress": "{done} / {total}",
+    "emptying_freed": "Şimdiye dek {size} boşaldı",
+    "emptying_note": "Bu sayfadan ayrılsan da sürer.",
+    "empty_busy": "Çöp zaten boşaltılıyor.",
+    "empty_failed": "{count} öğe silinemedi — sunucu günlüğüne bak",
+    "empty_stopped": "Çöp boşaltma durdu: {error}",
     "total_count": "Toplam: {n}"
   },
   "home": {

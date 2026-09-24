@@ -4,11 +4,11 @@
  * Actions: restore (clears deleted_at), purge (hard-delete one), empty
  * (purge all in a storage, optionally limited by age).
  */
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useToastStore } from '@/stores/toast';
 import { useStoragesStore } from '@/stores/storages';
-import { trashApi, type TrashEntry } from '@/api/trash';
+import { trashApi, type TrashEntry, type TrashEmptyStatus } from '@/api/trash';
 import Button from '@/components/ui/Button.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import Modal from '@/components/ui/Modal.vue';
@@ -28,7 +28,8 @@ const limit = ref(50);
 const offset = ref(0);
 
 const showEmptyDialog = ref(false);
-const olderThanDays = ref<number | undefined>(undefined);
+/** The days box: a number, or '' once it has been typed in and cleared. */
+const olderThanDays = ref<number | string | undefined>(undefined);
 
 async function load() {
   loading.value = true;
@@ -75,21 +76,134 @@ async function purge(entry: TrashEntry) {
   }
 }
 
+/* ── Empty trash ─────────────────────────────────────────────────────────
+ *
+ * ⚠⚠ This used to close the dialog, send one request and wait on it — and a
+ * large trash is not emptied inside any request. 61,844 files took the server
+ * the better part of an hour; this page's HTTP client gave up at thirty
+ * seconds, nginx at sixty, and the admin saw no change, no progress and at
+ * best an English timeout toast, so they pressed the button again. The server
+ * now answers within seconds — the final count if the purge is done, its
+ * progress if it is still going (`running: true`) — and the page follows a
+ * running purge until it ends, on GET /admin/trash/empty. */
+const emptyRun = ref<TrashEmptyStatus | null>(null);
+const emptyStarting = ref(false);
+const emptying = computed(() => emptyRun.value?.running === true);
+const EMPTY_POLL_MS = 1500;
+let emptyPoll: ReturnType<typeof setTimeout> | undefined;
+let alive = true;
+
+/** The days box as the server reads it: undefined is "any age", null is a
+ *  value that cannot be sent.
+ *
+ *  ⚠ `v-model.number` hands back '' once the box has been typed in and
+ *  cleared, and '' went out as `"older_than_days": ""` — a value the server
+ *  could not read, and then did not read the storage_id beside it either:
+ *  "empty this storage's trash" emptied every storage's. Cleared means any
+ *  age, so it is sent as nothing. A number that is not a whole count of days
+ *  is not quietly dropped, because dropped also means any age — the widest
+ *  purge there is, in answer to somebody asking for a narrower one. */
+const emptyDays = computed<number | undefined | null>(() => {
+  const v = olderThanDays.value;
+  if (v === undefined || v === null || v === '') return undefined;
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null;
+});
+const emptyDaysInvalid = computed(() => emptyDays.value === null);
+
 async function emptyTrash() {
-  showEmptyDialog.value = false;
+  if (emptyStarting.value || emptying.value || emptyDaysInvalid.value) return;
+  emptyStarting.value = true;
   try {
     const res = await trashApi.empty({
       storage_id: selectedStorage.value,
-      older_than_days: olderThanDays.value,
+      older_than_days: emptyDays.value ?? undefined,
     });
-    toast.success(t('trash.empty_done', { count: res.purged ?? '?' }, res.purged ?? 2));
-    await load();
+    showEmptyDialog.value = false;
+    await followEmpty(res);
   } catch (err: any) {
-    toast.error(err?.response?.data?.error ?? String(err));
+    showEmptyDialog.value = false;
+    const data = err?.response?.data;
+    // Another tab, or another admin of this tenant, already started one.
+    if (err?.response?.status === 409 && data?.code === 'BUSY') {
+      toast.error(t('trash.empty_busy'));
+      if (data.job?.running) await followEmpty(data.job);
+      return;
+    }
+    toast.error(data?.error ?? String(err));
+  } finally {
+    emptyStarting.value = false;
   }
 }
 
-const fmt = new Intl.NumberFormat();
+/** Takes a run's status — from the POST, the 409, or a poll — and either keeps
+ *  following it or says how it ended. */
+async function followEmpty(st: TrashEmptyStatus) {
+  if (st.running) {
+    emptyRun.value = st;
+    scheduleEmptyPoll();
+    return;
+  }
+  emptyRun.value = null;
+  // `{running: false}` with no start is a run the server no longer knows — it
+  // restarted under it. The reloaded list says what is left; nothing is
+  // claimed about the rest.
+  if (!st.started_at) {
+    await load();
+    return;
+  }
+  if (st.error) {
+    toast.error(t('trash.empty_stopped', { error: st.error }));
+  } else {
+    const n = st.purged ?? 0;
+    toast.success(t('trash.empty_done', { count: fmt.value.format(n) }, n));
+  }
+  if (st.failed) {
+    toast.warn(t('trash.empty_failed', { count: fmt.value.format(st.failed) }, st.failed));
+  }
+  await load();
+}
+
+function scheduleEmptyPoll() {
+  stopEmptyPoll();
+  if (alive) emptyPoll = setTimeout(pollEmpty, EMPTY_POLL_MS);
+}
+
+function stopEmptyPoll() {
+  if (emptyPoll !== undefined) clearTimeout(emptyPoll);
+  emptyPoll = undefined;
+}
+
+async function pollEmpty() {
+  emptyPoll = undefined;
+  try {
+    await followEmpty(await trashApi.emptyStatus());
+  } catch {
+    // One look that failed is not the end of the run: look again.
+    scheduleEmptyPoll();
+  }
+}
+
+/** On arrival, pick up a run that is still going — started in another tab, or
+ *  before the admin left and came back. One that has ended was reported to
+ *  whoever was watching it, and is not announced again. */
+async function resumeEmpty() {
+  try {
+    const st = await trashApi.emptyStatus();
+    if (st.running) await followEmpty(st);
+  } catch {
+    // The page works without it.
+  }
+}
+
+const emptyDone = computed(() => emptyRun.value?.scanned ?? 0);
+const emptyTotal = computed(() => emptyRun.value?.total ?? 0);
+const emptyPct = computed(() =>
+  emptyTotal.value > 0 ? Math.min(100, Math.floor((emptyDone.value / emptyTotal.value) * 100)) : 0,
+);
+
+/* Counts in the page's language, not the browser's — the same rule as the
+ * dates below. */
+const fmt = computed(() => new Intl.NumberFormat(locale.value));
 
 /* The size column goes through the app's one byte formatter, imported from
  * the same module as fmtDate below. There was a private copy here — a
@@ -110,7 +224,13 @@ const hasItems = computed(() => entries.value.length > 0);
 
 onMounted(async () => {
   await storages.fetch();
-  await load();
+  await Promise.all([load(), resumeEmpty()]);
+});
+
+onBeforeUnmount(() => {
+  // Leaving the page stops the watching, never the purge.
+  alive = false;
+  stopEmptyPoll();
 });
 </script>
 
@@ -131,11 +251,44 @@ onMounted(async () => {
           <option v-for="s in storages.items" :key="s.id" :value="s.id">{{ s.name }}</option>
         </select>
         <Button variant="ghost" @click="load" :disabled="loading">↻</Button>
-        <Button variant="danger" :disabled="!hasItems" @click="showEmptyDialog = true">
+        <Button
+          data-testid="trash-empty-open"
+          variant="danger"
+          :disabled="!hasItems || emptying"
+          @click="showEmptyDialog = true"
+        >
           <Trash2 :size="14" /> {{ t('trash.empty') }}
         </Button>
       </div>
     </header>
+
+    <div
+      v-if="emptyRun?.running"
+      data-testid="trash-emptying"
+      role="status"
+      aria-live="polite"
+      class="rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/60 dark:bg-rose-950/30 px-3 py-2"
+    >
+      <div class="flex items-center justify-between gap-3 text-sm">
+        <span class="font-medium">{{ t('trash.emptying') }}</span>
+        <span class="tabular-nums text-zinc-600 dark:text-zinc-400">
+          {{ t('trash.emptying_progress', { done: fmt.format(emptyDone), total: fmt.format(emptyTotal) }) }}
+        </span>
+      </div>
+      <div
+        class="mt-2 h-1.5 overflow-hidden rounded-full bg-rose-100 dark:bg-rose-950"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        :aria-valuenow="emptyPct"
+        :aria-label="t('trash.emptying')"
+      >
+        <div class="h-full rounded-full bg-rose-500 transition-[width] duration-500" :style="{ width: `${emptyPct}%` }" />
+      </div>
+      <p class="mt-1.5 text-xs text-zinc-500">
+        {{ t('trash.emptying_freed', { size: fmtBytes(emptyRun.bytes ?? 0) }) }} · {{ t('trash.emptying_note') }}
+      </p>
+    </div>
 
     <EmptyState
       v-if="!loading && !hasItems"
@@ -201,15 +354,28 @@ onMounted(async () => {
         {{ t('trash.older_than_days') }}
         <input
           v-model.number="olderThanDays"
+          data-testid="trash-empty-days"
           type="number"
           min="0"
+          step="1"
           class="mt-1 w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1"
+          :class="{ 'border-rose-500 dark:border-rose-500': emptyDaysInvalid }"
+          :aria-invalid="emptyDaysInvalid"
           :placeholder="t('trash.all_ages')"
         />
       </label>
+      <p v-if="emptyDaysInvalid" class="mt-1 text-xs text-rose-600">{{ t('trash.older_than_days_invalid') }}</p>
       <template #footer>
         <Button variant="ghost" @click="showEmptyDialog = false">{{ t('common.cancel') }}</Button>
-        <Button variant="danger" @click="emptyTrash">{{ t('trash.empty') }}</Button>
+        <Button
+          data-testid="trash-empty-confirm"
+          variant="danger"
+          :loading="emptyStarting"
+          :disabled="emptyDaysInvalid || emptyStarting"
+          @click="emptyTrash"
+        >
+          {{ t('trash.empty') }}
+        </Button>
       </template>
     </Modal>
   </section>
