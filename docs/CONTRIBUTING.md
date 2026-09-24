@@ -829,7 +829,7 @@ Maintainer-only. Reproducible, automated by CI.
    steps above would ever have caught it — they check README, screenshots,
    links, anchors and version manifests, and never run a test.
    ⚠⚠ **The gate builds both images, and cannot be told not to.** Until
-   v0.43.1 the release called `ci.yml` with `skip_docker: true` ("the release's
+   v0.43.2 the release called `ci.yml` with `skip_docker: true` ("the release's
    own docker job builds the same image") — but `binaries`, `docker` and `npm`
    start *beside* one another once the gate passes, so when v0.43.0's images
    failed, npm and the Release were already public. The input is gone, the

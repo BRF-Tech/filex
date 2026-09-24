@@ -2,9 +2,9 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.43.1"
+version: "0.43.2"
 releaseNotes: |-
-  filex v0.43.1 — 2026-09-24
+  filex v0.43.2 — 2026-09-24
   • Container, Helm and app-store installs get 0.43.0's security fixes only with this release — upgrade promptly.
   • The public repository no longer carries a storage credential.
   • A test fixture no longer names the project's own servers.

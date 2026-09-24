@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.43.1] - 2026-09-24
+## [0.43.2] - 2026-09-24
 
 A fix-forward release for 0.43.0, and **the one to deploy. v0.43.0's
-container images were never published.** Its npm packages and its GitHub
+container images were never published**, and neither was anything from
+v0.43.1: that tag's release gate stopped the run before a single package,
+image or page went out. 0.43.2 is 0.43.1 as it was meant to ship, plus the two
+fixes that gate asked for (below). Its npm packages and its GitHub
 Release went out, but the image build failed on every attempt, so
 `ghcr.io/brf-tech/filex` has no `v0.43.0` or `slim-v0.43.0` tag and `latest`
 stayed on v0.42.2 until this release. The Helm chart and the CasaOS, Umbrel
@@ -96,6 +99,10 @@ private CA.
   network stack now, like every other request the app makes, and a test fails
   if anything in the main process uses the other client again
   ([#36](https://github.com/BRF-Tech/filex/issues/36)).
+- **A release page that has to be shortened ends on a line break.** The
+  GitHub release body is capped, and when an entry's opening paragraph alone
+  ran past the cap the cut fell mid-word; it now falls back to the last line
+  break.
 
 ### Tests
 
@@ -113,6 +120,16 @@ private CA.
   waited for a capability state of `reachable`, which the server has never
   sent (it says `ok`), so both rich viewers were skipped on every run, even
   with the services configured.
+
+
+## [0.43.1] - 2026-09-24
+
+Tagged, never published. Its release gate failed before anything went out —
+no GitHub Release, no npm packages, no images — and every change it carried
+is in 0.43.2. The gate caught two things: the published workflows still let
+the release skip the image build (the change that removes that switch had not
+reached them), and the release-notes step cut a long opening paragraph
+mid-word.
 
 ## [0.43.0] - 2026-09-24
 

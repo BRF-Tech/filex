@@ -181,12 +181,18 @@ function clampSection(body, max) {
   // A `### ` boundary is the nicest cut — the page then ends on whole groups
   // (Upgrade notes, Security, Fixed) instead of halfway through one — but only
   // when it is not paying for that tidiness with a third of the text. Below
-  // that, the last top-level bullet; below that, a paragraph break.
+  // that, the last top-level bullet; below that, a paragraph break; below
+  // that, the last line break.
+  // ⚠ The line break is not optional. A section whose opening paragraph alone
+  // is longer than `max` has no bullet and no blank line in the window, and
+  // the old fallback, a raw `slice(0, max)`, cut it mid-word (v0.43.1's lead
+  // paragraph did exactly that under the test's 800-character cap, 2026-09-24).
   const group = window.lastIndexOf('\n### ');
-  const cut =
+  let cut =
     group > max * 0.6
       ? group
       : Math.max(window.lastIndexOf('\n- '), window.lastIndexOf('\n\n'));
+  if (cut <= 0) cut = window.lastIndexOf('\n');
   return { text: body.slice(0, cut > 0 ? cut : max).trimEnd(), truncated: true };
 }
 
