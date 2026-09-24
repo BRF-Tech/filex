@@ -453,16 +453,28 @@ Which broadcasts a bell takes is decided in SQL, so rows a reader may not see
 never fill their page. The badge (`unread-count`) counts exactly what the list
 would show.
 
-⚠ **Read state is shared.** A broadcast has one `read_at`: whoever marks it
-read (`read` or `read-all`) marks it read for every reader, including rows the
-marking user cannot see. Per-reader read state is not implemented.
+**Read state is per reader** (migration 00043). A row addressed to a user is
+read when that user marks it. A broadcast is read separately for each reader,
+and marking it changes the caller's bell and nobody else's:
+
+- `read-all` reads every notification up to that moment, for the caller: one
+  write, however many there are. Broadcasts the caller's bell does not show are
+  read for them too, which changes nothing anybody sees. What arrives afterwards
+  is unread again.
+- `read` on a single broadcast marks it for the caller when their bell shows it
+  (an admin nobody confines — single-tenant, or the supertenant — may mark any
+  broadcast: they read them all in the admin history). On any other id, or an id
+  that does not exist, it answers `204` and changes nothing, so the endpoint
+  does not tell anyone which ids exist.
+- A broadcast marked read before 00043, when read state was one shared column,
+  stays read for everyone; nothing is backfilled.
 
 | Method & path | Purpose |
 |---|---|
 | `GET /api/notifications?unread=&limit=&offset=` | Paginated history → `{items, total, limit, offset}`. `unread=true` returns only unread rows. |
 | `GET /api/notifications/unread-count` | Bell badge number → `{count}`. |
-| `POST /api/notifications/{id}/read` | Mark one notification read → `204`. |
-| `POST /api/notifications/read-all` | Mark all of the user's notifications read → `204`. Broadcasts are marked read for everyone (see above). |
+| `POST /api/notifications/{id}/read` | Mark one notification read for the caller → `204` (also for an id the caller's bell does not show; nothing changes then). |
+| `POST /api/notifications/read-all` | Mark everything up to now read, for the caller → `204`. |
 | `GET /api/notifications/settings` | Read [per-user settings](#per-user-settings). |
 | `PATCH /api/notifications/settings` | Update per-user settings. |
 
@@ -482,8 +494,8 @@ Each item in `items` looks like:
 }
 ```
 
-`read_at` is **absent** until the row is marked read (then it holds the
-timestamp); `user_id` is present only on user-scoped rows (absent on
+`read_at` is **absent** until the row is marked read — for a broadcast, until
+the CALLER marked it — and then holds the timestamp; `user_id` is present only on user-scoped rows (absent on
 broadcasts); `webhook_error` appears only when the webhook for that row
 failed; and `target` is **absent** when there is nothing to open — see
 [Click target](#click-target), where an absent target and `{"kind":"none"}`
@@ -504,7 +516,7 @@ tenant admin reads the tenant's own events in their bell, which is scoped.
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/admin/notifications?unread=&limit=&offset=` | Global history across every user + broadcasts. |
+| `GET /api/admin/notifications?unread=&limit=&offset=` | Global history across every user + broadcasts. A broadcast's `read_at` (and `unread=`) is the caller's own; a user's row carries that user's. |
 | `POST /api/admin/notifications/test` | Emit an `admin_test` event through **both** channels → `{id}`. Use it to verify the webhook is wired. |
 | `GET /api/admin/notifications/webhook-config` | Current config → `{url, token_set}`. |
 | `PATCH /api/admin/notifications/webhook-config` | Set the webhook URL/token at runtime → `{ok:true}`. |

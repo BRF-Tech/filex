@@ -28,6 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     addressed to nobody (the rows already in the table) and rows a reader may
     not see can no longer bury the reader's own rows. Those rows stay in the
     admin history.
+- **"Mark all read" marks YOUR bell read, not everybody's.** A broadcast — a
+  notification addressed to nobody, which many readers are shown — had one
+  `read_at`, and the read endpoints stamped it for whoever asked. One member's
+  "mark all read" marked every broadcast on the instance read for every
+  reader: another tenant's antivirus alerts, the operator's replica reports,
+  alerts about folders the member has no grant on; and `read` did the same to
+  any id anybody typed — the AI admin tool `admin_notifications_mark_read`
+  included, for any admin-scoped token. The admins those alerts were for found
+  them already read. Read state for broadcasts is now per reader (migration
+  00043): `read-all` reads everything up to that moment for the caller, in one
+  write, and `read` marks a broadcast for the caller only when their bell shows
+  it. A broadcast marked read before the upgrade stays read for everyone.
 - **Multi-tenant: `GET /api/admin/notifications` and
   `POST /api/admin/notifications/test` are supertenant-only.** The first
   returned every tenant's notifications — file paths included — to the admin
