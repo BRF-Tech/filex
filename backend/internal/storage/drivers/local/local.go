@@ -111,9 +111,14 @@ func (d *Driver) List(_ context.Context, p string) ([]storage.Object, error) {
 			obj.Kind = storage.KindDirectory
 		case info.Mode()&os.ModeSymlink != 0:
 			obj.Kind = storage.KindSymlink
-		default:
+		case info.Mode().IsRegular():
 			obj.Kind = storage.KindFile
 			obj.Mime = sniffMime(filepath.Join(abs, e.Name()))
+		default:
+			// FIFOs, sockets, and device nodes are not storage objects. In
+			// particular, opening a FIFO to sniff its MIME type blocks until a
+			// writer connects and can stall the entire storage sync indefinitely.
+			continue
 		}
 		out = append(out, obj)
 	}
