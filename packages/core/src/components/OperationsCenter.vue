@@ -123,7 +123,10 @@ function statusText(o: Operation): string {
     if ((o.kind === 'archive-create' || o.kind === 'archive-extract') && o.percent !== null) {
       return t('opc.percent', { n: o.percent });
     }
-    if (o.totalCount && o.totalCount > 0) {
+    // ⚠ Not "0/1": one selected folder is one source until it ends, and a
+    // count that cannot move reads as a job that died. It is running; the
+    // moving indicator beside it says so.
+    if (o.totalCount && o.totalCount > 1) {
       return `${o.doneCount ?? 0}/${o.totalCount}`;
     }
     return t('opc.status.running');

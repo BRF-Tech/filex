@@ -47,15 +47,18 @@ export const en: Record<string, string> = {
   'modal.delete.message': '{count} items will be moved to trash.',
   'modal.delete.message_one': '{count} item will be moved to trash.',
   'modal.delete.confirm': 'Move to Trash',
+  'modal.delete.working': 'Moving to Trash…',
   'modal.delete.cancel': 'Cancel',
 
   'modal.rename.title': 'Rename',
   'modal.rename.save': 'Save',
+  'modal.rename.saving': 'Renaming…',
   'modal.rename.cancel': 'Cancel',
 
   'modal.newfolder.title': 'New folder',
   'modal.newfolder.placeholder': 'Folder name',
   'modal.newfolder.create': 'Create',
+  'modal.newfolder.creating': 'Creating…',
   'modal.newfolder.cancel': 'Cancel',
 
   'modal.share.title': 'Share link',
@@ -123,6 +126,7 @@ export const en: Record<string, string> = {
   'upload.aborted': 'Aborted',
   'upload.cancel': 'Cancel',
   'upload.resuming': 'Resuming “{name}” from {percent}%',
+  'upload.saving': 'Saving to the storage…',
   'upload.committing': 'Finishing',
   'upload.transferring': 'Moving to storage',
 
@@ -319,6 +323,10 @@ export const en: Record<string, string> = {
   'toast.copy_ready': 'Copied — ready to paste',
   'toast.same_folder_cut': 'Cannot cut into the same folder',
   'toast.restored': '{n} items restored',
+  'toast.restoring': 'Restoring {n} items…',
+  'toast.restoring_one': 'Restoring {n} item…',
+  'toast.restore_partial': '{n} items restored, {failed} could not be: {reason}',
+  'toast.restore_partial_one': '{n} item restored, {failed} could not be: {reason}',
   'toast.restored_one': '{n} item restored',
   'toast.restore_taken': '{n} items were not restored: something already has their names. Rename what is there, then restore again.',
   'toast.restore_taken_one': '“{name}” was not restored: something already has that name. Rename what is there, then restore again.',
@@ -1863,7 +1871,7 @@ export const en: Record<string, string> = {
   'toast.archive.started': 'Downloading {name} ({count} files)',
   'toast.archive.started_one': 'Downloading {name} ({count} file)',
   'toast.archive.empty': 'Nothing to download — the selection contains no readable file.',
-  'toast.moved_to': 'Moved to {name}',
+  'toast.moved_to': 'Move to {name} queued',
   'toast.copied_to': 'Copy to {name} queued',
 
   /* ── dil:paket — strings that used to be inline `en ? … : …` pairs in
