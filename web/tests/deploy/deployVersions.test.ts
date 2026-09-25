@@ -163,8 +163,13 @@ describe('github release body', () => {
     // ⚠⚠ GoReleaser truncates a body over 125,000 characters SILENTLY, and
     // it truncates the END — which is where the footer's "Report a bug" link
     // is. v0.34.0's section alone is 57,408 characters, so the cap is real.
+    // ⚠ A section KNOWN to be over the cap, not the latest one: a short patch
+    // release at the top (v0.44.1) fits in 800 characters and the cap is never
+    // exercised — this test then failed for a reason that had nothing to do
+    // with the cap (2026-09-25).
+    const HUGE = '0.34.0';
     const { githubReleaseBody, changelogSection } = await load();
-    const body = (await githubReleaseBody(read('CHANGELOG.md'), released, { max: 800 }))!;
+    const body = (await githubReleaseBody(read('CHANGELOG.md'), HUGE, { max: 800 }))!;
     expect(body.length).toBeLessThan(1600);
     expect(body).toContain('more to it than fits on one page');
 
@@ -172,7 +177,7 @@ describe('github release body', () => {
     // what survives has to be a PREFIX of the real section that ends exactly on
     // one of its own line breaks. A cut anywhere else lands mid-word or inside
     // a link, and the release page shows half a sentence.
-    const section = changelogSection(read('CHANGELOG.md'), released)!.body.trim();
+    const section = changelogSection(read('CHANGELOG.md'), HUGE)!.body.trim();
     const prose = body.split('## What changed\n\n')[1]!.split('\n\n**This release has more')[0]!;
     expect(section.startsWith(prose)).toBe(true);
     expect(section[prose.length]).toBe('\n');

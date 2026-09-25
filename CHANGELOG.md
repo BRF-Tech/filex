@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.1] - 2026-09-25
+
+0.44.0 as it was meant to ship, and **the one to install the desktop app
+from**. v0.44.0's npm packages, container images and CLI binaries went out,
+but its release stopped at the winget step, so its desktop packages and every
+store and package-manager step behind it never ran. Everything 0.44.0
+describes below is in 0.44.1.
+
+### Fixed
+
+- **The release reaches the desktop packages and the stores again.** The
+  winget and Homebrew-tap sections of `.goreleaser.yml` guarded their tokens
+  with a template function the release's GoReleaser does not define
+  (`envOrDefault`); it was evaluated only when publishing, after the Release,
+  npm and the images were out. They use `{{ index .Env "NAME" }}` now, and a
+  test fails on any template function GoReleaser does not have.
+
 ## [0.44.0] - 2026-09-25
 
 Big storages open at once, archives come in every common format, and the

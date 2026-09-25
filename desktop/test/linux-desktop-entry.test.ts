@@ -93,10 +93,15 @@ test('the old `filex` desktop package is replaced on upgrade — and only the ol
   // unbounded Replaces would uninstall a future `filex` CLI package.
   for (const b of bounds) assert.ok(b, `every relation is version-bounded: ${JSON.stringify(bounds)}`);
   assert.equal(new Set(bounds).size, 1, 'deb and rpm bound the same version');
-  // Every desktop build that was still called `filex` sits below the bound,
-  // so it must be above the version of this tree (the last one before the
-  // first renamed release).
-  assert.ok(newer(bounds[0]!, PKG.version), `${bounds[0]} must be above package.json ${PKG.version}`);
+  // Every desktop build that was still called `filex` sits below the bound:
+  // the last one shipped as v0.43.2 (0.44.0 renamed it, and 0.44.0's desktop
+  // packages never published). And the bound may not pass this tree's version,
+  // or the CLI's own `filex` package of this release would be replaced too.
+  // (This used to compare against package.json alone, which only held while
+  // the tree was the last release before the rename — v0.44.1 broke it.)
+  const LAST_OLD_NAME = '0.43.2';
+  assert.ok(newer(bounds[0]!, LAST_OLD_NAME), `${bounds[0]} must be above ${LAST_OLD_NAME}, the last desktop package named filex`);
+  assert.ok(!newer(bounds[0]!, PKG.version), `${bounds[0]} must not pass package.json ${PKG.version}, or this release's CLI package would be replaced`);
 });
 
 test('every Linux package declares the scheme the sign-in hands back on', () => {

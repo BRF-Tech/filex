@@ -2,14 +2,10 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.44.0"
+version: "0.44.1"
 releaseNotes: |-
-  filex v0.44.0 — 2026-09-25
-  • The desktop app and the CLI in package managers.
-  • An .rpm for Fedora and openSUSE
-  • A Microsoft Store (MSIX) build of the desktop app
-  • A privacy page, filex.sh/privacy
-  • A third install mode, package: filex installed by Homebrew, winget or Snap leaves its binary to the package manager.
+  filex v0.44.1 — 2026-09-25
+  • The release reaches the desktop packages and the stores again.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

@@ -132,7 +132,7 @@ homebrew_casks:
     commit_author:
       name: filex release
       email: hello@brf.sh
-    skip_upload: '{{ if envOrDefault "HOMEBREW_TAP_DEPLOY_KEY" "" }}auto{{ else }}true{{ end }}'
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_DEPLOY_KEY" }}auto{{ else }}true{{ end }}'
     repository:
       owner: BRF-Tech
       name: homebrew-filex
@@ -143,7 +143,7 @@ homebrew_casks:
       # key pair, swap the deploy key and the secret.
       git:
         url: "git@github.com:BRF-Tech/homebrew-filex.git"
-        private_key: '{{ envOrDefault "HOMEBREW_TAP_DEPLOY_KEY" "" }}'
+        private_key: '{{ index .Env "HOMEBREW_TAP_DEPLOY_KEY" }}'
 
 winget:
   - name: filex                   # also the Moniker: `winget install filex`
@@ -184,12 +184,12 @@ winget:
     # Pinned, because release.yml's "Did the CLI reach winget" step looks the
     # pull request up by exactly this title.
     commit_msg_template: "New version: {{ .PackageIdentifier }} {{ .Version }}"
-    skip_upload: '{{ if envOrDefault "WINGET_TOKEN" "" }}auto{{ else }}true{{ end }}'
+    skip_upload: '{{ if index .Env "WINGET_TOKEN" }}auto{{ else }}true{{ end }}'
     repository:
       # The fork the pull request comes from: the account that owns WINGET_TOKEN.
       owner: brkfun
       name: winget-pkgs
-      token: '{{ envOrDefault "WINGET_TOKEN" "" }}'
+      token: '{{ index .Env "WINGET_TOKEN" }}'
       pull_request:
         enabled: true
         base:
