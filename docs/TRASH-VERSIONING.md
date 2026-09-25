@@ -243,6 +243,14 @@ A file or folder now holds the original path. filex refuses rather than
 overwrite it or pour one folder into another. Rename or move what is there,
 then restore again.
 
+**A folder restore answered 504, or the page gave up waiting.**
+The restore carries on to the end: it no longer depends on anybody waiting for
+the answer. List the folder again to see it back. Up to v0.45.1 the proxy's
+timeout stopped it between two objects, leaving the folder half in the trash
+and half back in place; a second restore then answered 409 `EXISTS`, because
+the half that had come back held the name. The rest of such a folder is still
+under its `.filex-trash/` key on the backend, to be moved back by hand.
+
 **Restore reports success but the file isn't back on disk.**
 The DB flag is cleared **best‑effort**: if the driver's move step fails, filex
 still un‑trashes the row and logs a warning (`trash restore move failed`). Find
