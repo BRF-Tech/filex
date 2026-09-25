@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Desktop: the window opens to the app again, not to an empty frame.** In
+  0.43.2 every desktop window stayed blank while sync kept running behind it.
+  A comment inside the Settings screen's template literal in
+  `desktop/ui/app.html` quoted `syncOverlays()` in backticks; the first one
+  closed the template, the page's whole module failed to parse
+  (`SyntaxError: Unexpected identifier 'syncOverlays'`), and nothing on the
+  page ever ran. The comment no longer uses backticks. A new test parses every
+  inline script in the desktop pages, and CI now runs the desktop unit tests,
+  which no workflow ran before (Node 22, no install). The release gate runs CI,
+  so a page that cannot load now stops the release instead of shipping.
+
 ## [0.43.2] - 2026-09-24
 
 A fix-forward release for 0.43.0, and **the one to deploy. v0.43.0's

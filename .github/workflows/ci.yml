@@ -126,6 +126,23 @@ jobs:
       - name: Unit tests
         run: pnpm --filter='./web' --filter='./packages/*' test
 
+  desktop:
+    name: Desktop unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # desktop/test runs its TypeScript through Node's type stripping (Node
+      # >= 22.6) and imports nothing from node_modules, so there is no install.
+      # Nothing ran it before; v0.43.2 then shipped a desktop page whose script
+      # did not parse, and every window opened blank. The release gate runs
+      # this workflow, so a page that cannot load now stops the release.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Unit tests
+        working-directory: desktop
+        run: node --experimental-strip-types --test test/*.test.ts
+
   browser:
     name: Browser E2E (Cypress)
     runs-on: ubuntu-latest
