@@ -517,8 +517,15 @@ jobs:
       # ⚠ Before anything leaves the runner: installed, launched through its
       # protocol, and asked over DevTools whether it knows it is a Store copy.
       # A package Partner Center accepts is not a package that works.
+      # STORE_E2E_STRICT: while no Store secret is set nothing is uploaded, and
+      # the three checks that need Windows to activate the package only warn
+      # on this runner (v0.44.2 lost its Store job to them; see
+      # desktop/scripts/lib/store-activation.mjs). With the secret set, a
+      # package that goes to Partner Center must pass all of them.
       - name: Install the Store package and check it as a Store copy
         if: matrix.label == 'store'
+        env:
+          STORE_E2E_STRICT: ${{ env.MSSTORE_CLIENT_ID != '' && '1' || '0' }}
         run: pnpm --filter ./desktop run e2e:store
       - name: Keep the Store package for Partner Center
         if: matrix.label == 'store'
