@@ -359,14 +359,26 @@ function esc(text) {
  * else relative — `backend/…`, `scripts/…`, a path with no counterpart here —
  * becomes an absolute link to the repository, because it names a file the site
  * does not publish and a dead link would take the build down again.
+ *
+ * ⚠⚠ "The same page on this site" only holds if this tree HAS the page. The
+ * hourly refresh reads new release bodies from GitHub the moment a tag
+ * publishes, but builds them against the docs tree it was last given, and a
+ * release that introduces a document links to it in its own notes. v0.44.2
+ * linked `docs/LAZY-CATALOGUE.md`, the server's tree was still v0.43.2's, and
+ * every refresh failed on the dead link until the tree was replaced
+ * (2026-09-25). So a page that is not in `docsDir` goes to the repository too.
  */
-function relativeLinks(text) {
+export function relativeLinks(text, docsRoot = docsDir) {
   const REPO = 'https://github.com/BRF-Tech/filex/blob/main/'
+  const published = (rel) => fs.existsSync(path.join(docsRoot, rel.replace(/#.*$/, '')))
   return String(text).replace(/\]\((?!https?:|\/|#|mailto:)([^)\s]+)\)/g, (_m, href) => {
     const docs = href.match(/^(?:\.\/)?docs\/(.+)$/)
-    if (docs) return `](./${docs[1]})`
+    if (docs) return published(docs[1]) ? `](./${docs[1]})` : `](${REPO}docs/${docs[1]})`
     // Already relative to this directory and pointing at a page we publish.
-    if (/^(?:\.\/)?[A-Za-z0-9._-]+\.md(?:#.*)?$/.test(href)) return `](${href.startsWith('./') ? href : './' + href})`
+    if (/^(?:\.\/)?[A-Za-z0-9._-]+\.md(?:#.*)?$/.test(href)) {
+      const page = href.replace(/^\.\//, '')
+      return published(page) ? `](./${page})` : `](${REPO}docs/${page})`
+    }
     return `](${REPO}${href.replace(/^\.\//, '')})`
   })
 }
@@ -672,7 +684,10 @@ async function main() {
   )
 }
 
-main().catch((err) => {
-  loud(['RELEASES: generator crashed.', `  ${err.stack || err.message}`])
-  process.exit(1)
-})
+// Only when run, not when a test imports relativeLinks.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    loud(['RELEASES: generator crashed.', `  ${err.stack || err.message}`])
+    process.exit(1)
+  })
+}

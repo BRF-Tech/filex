@@ -190,7 +190,11 @@ func TestLaunchedPluginDoesNotInheritFilexSecrets(t *testing.T) {
 	t.Setenv("SMTP_PASSWORD", "hunter2")
 	t.Setenv("LC_ALL", "C.UTF-8")
 	out := filepath.Join(t.TempDir(), "env.txt")
-	script := "#!/bin/sh\nenv > " + out + "\nexit 0\n"
+	// ⚠ Written to a temporary name and renamed: `env > out` creates `out`
+	// EMPTY before env runs, and on a slow runner the read below landed in that
+	// gap — every expected variable "missing" (v0.44.2's release gate,
+	// 2026-09-25). The rename makes the file appear only once it is whole.
+	script := "#!/bin/sh\nenv > " + out + ".tmp && mv " + out + ".tmp " + out + "\nexit 0\n"
 
 	m, _, _ := newManagerWith(t, nil)
 	if _, err := m.InstallBinary(context.Background(), "envdump", "envdump.sh", strings.NewReader(script), ""); err != nil {
