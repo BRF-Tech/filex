@@ -22,6 +22,7 @@
  */
 
 import type { StorageInfo } from '../lib/catalogCoverage';
+import type { MeasuredDrive } from '../lib/storageLine';
 import type { ExplorerConfig, AuthConfig, EndpointMap, SearchAccount } from '../types/ExplorerConfig';
 import { resolveLocale } from '../locales/resolve';
 import { listingAddress } from '../lib/internalPaths';
@@ -559,6 +560,26 @@ export function useFileApi(config: ExplorerConfig) {
     try {
       const q = await jsonFetch<QuotaSnapshot>(base);
       return q && typeof q.used_bytes === 'number' ? q : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * `GET /api/files/quota/storages` → `{storages: [{name, used_bytes,
+   * file_count, coverage?}]}` — how full each drive the caller can open is
+   * (handlers/quota_storages.go, RBAC-filtered server-side). The storage line
+   * asks for it when the host handed over no size for some drive — the
+   * desktop app hands over names only (lib/storageLine).
+   *
+   * ⚠ Null on ANY failure, for the reason `quotaMe()` is: a server without the
+   * route must leave the panel as it was.
+   */
+  async function storageUsage(): Promise<MeasuredDrive[] | null> {
+    const base = endpoints.manager.replace(/\/manager(\?.*)?$/, '/quota/storages');
+    try {
+      const body = await jsonFetch<{ storages?: unknown }>(base);
+      return Array.isArray(body?.storages) ? (body.storages as MeasuredDrive[]) : null;
     } catch {
       return null;
     }
@@ -1150,6 +1171,7 @@ export function useFileApi(config: ExplorerConfig) {
     search,
     globalSearch /* bul:s3 */,
     quotaMe /* surucu:d1 */,
+    storageUsage /* surucu:d1 */,
     subfolders,
     newFolder,
     newFile,

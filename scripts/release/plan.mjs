@@ -192,6 +192,17 @@ export default function plan({ repo, version, tag }) {
       // changes the module path and every example domain.
       goGate('export: go build + vet + test (public module path)', (c) => path.join(c.exportTarget, 'backend'), 'go build ./... && go vet ./... && go test ./...'),
       {
+        // ⚠⚠ The same for the web tests, run exactly as the release
+        // workflow's Frontend job runs them. v0.45.0 passed every pretag gate
+        // and published nothing: a new test read scripts/export-public.sh,
+        // which the public tree never has, and failed there with ENOENT — the
+        // private tree, where pretag ran it, has the file (2026-09-25).
+        name: 'export: the web and package unit tests pass in the public tree',
+        cwd: (c) => c.exportTarget,
+        env: { NODE_OPTIONS: '--max-old-space-size=4096' },
+        sh: "pnpm install --frozen-lockfile && pnpm -r --filter='./packages/*' build && pnpm --filter='./web' build && pnpm --filter='./web' --filter='./packages/*' test",
+      },
+      {
         // Lesson #510: check with the GoReleaser the release workflow gets.
         name: 'export: goreleaser check, with the GoReleaser CI uses',
         check: (c) => {

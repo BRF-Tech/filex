@@ -13,6 +13,17 @@ instead of a per-user sum wearing a drive's name. It is a property of the drive
 — item-level grants do not narrow it, and a drive you cannot open is not
 reported at all. Also in [Backend → Admin: quota](BACKEND.md#admin-quota).
 
+The storage line under the explorer's navigation (web and desktop app) and the
+storage chip in the admin top bar print one or the other by a single rule
+(`packages/core/src/lib/storageLine.ts`): a person **with** a quota sees their
+own usage against it, because that ceiling is what refuses their next upload;
+a person **without** one sees the size of the drives they can open, from
+`/api/files/quota/storages` (or the sizes the host already passed in
+`config.storages`, which the Home cards print), and "at least" while part of
+it could not be counted. Without a quota the per-user total is only what that
+person uploaded — a file a storage sync discovered has no owner — so on a drive
+filled by a sync it is a small fraction of the drive.
+
 This page is about the other half: **how `usage_bytes` gets its value**, which
 is the part that has to be exactly right or the ceiling is decoration.
 

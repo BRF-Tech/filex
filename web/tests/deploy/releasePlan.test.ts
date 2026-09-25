@@ -41,6 +41,7 @@ const REQUIRED: Record<string, Record<string, string>> = {
   },
   exportGates: {
     'go build + vet + test (public module path)': 'lesson #55 checklist: test IN the export',
+    'web and package unit tests pass in the public tree': 'v0.45.0: a test read a private-only file and failed the public gate',
     'goreleaser check, with the GoReleaser CI uses': 'lesson #510',
     'workflow guards ran against the workflows that will run': 'lessons #455, #461, #510',
   },

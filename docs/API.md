@@ -511,8 +511,15 @@ export interface ExplorerConfig {
     driver?: string;
     readOnly?: boolean;
     /** Bytes this storage holds, drawn as the caption on the Home storage
-     *  card. ⚠ It must be the same quantity for every caller who gets it. */
+     *  card, and summed into the storage line under the navigation for a
+     *  person without a quota (a storage left without it is measured by the
+     *  explorer itself, `GET /api/files/quota/storages`).
+     *  ⚠ It must be the same quantity for every caller who gets it. */
     usedBytes?: number;
+    /** `usedBytes` counts only part of the storage (the server's `coverage`
+     *  beside the figure is not complete). Drawn as a lower bound: "at least
+     *  1.2 GB used", on the card and in the storage line. */
+    usedPartial?: boolean;
   }>;
 
   /** Where to persist the current path across reloads. */

@@ -269,6 +269,15 @@ func TestSyncRun_TwoEnginesOnOnePair(t *testing.T) {
 	require.NotContains(t, bOut.String(), "pair-1: 1/", "engine B ran a pass of a pair it does not hold")
 
 	// ── …and takes it over when A is killed ──
+	// ⚠ Not the moment the file lands: A writes the file first and records the
+	// pass in its state after ("settling"). Killed between the two, it leaves
+	// a pass with no record, and B — rightly — keeps both versions instead of
+	// trusting either, which is not what this test is about. Under load that
+	// window was wide enough to hit (the v0.45.0 export run, 2026-09-25): A's
+	// log ended at "settling", B's at "1 kept as both versions".
+	waitUntil(t, 10*time.Second, "engine A to record its second pass", func() bool {
+		return strings.Count(aOut.String(), "pair-1: 1/1 done") >= 2
+	})
 	require.NoError(t, a.Process.Kill())
 	<-aDone
 	waitUntil(t, 10*time.Second, "engine B to take pair-1 over", func() bool {

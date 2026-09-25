@@ -416,6 +416,28 @@ describe.concurrent('pnpm release --dry-run', () => {
 });
 
 describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing the person\'s steps', () => {
+  // v0.45.0: a red export gate left the public checkout holding that export,
+  // and every --resume after the fix stopped on "nothing else pending",
+  // because the export's tree was recorded only when all its gates passed.
+  it('resumes past its own export after a red export gate, discarding that export and nothing else', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    const leak = ['git@gitlab', 'com:brftech/infrastack.git'].join('.');
+    commitAndPush(fx, fx.src, { 'docs/NOTES.md': `clone ${leak}\n` }, 'notes with an internal remote');
+    let r = await release(fx, [VERSION]);
+    expect(r.code).toBe(3);
+    r = await release(fx, [VERSION, '--resume', '--ack', 'audit']);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('FAILED  no private host or module path in the public tree');
+    expect(gitIn(fx, fx.exp, 'status', '--porcelain')).not.toBe('');
+
+    commitAndPush(fx, fx.src, { 'docs/NOTES.md': 'clone it from the forge\n' }, 'no internal remote');
+    r = await release(fx, [VERSION, '--resume']);
+    expect(r.out).toContain('discarded the export');
+    expect(r.out).not.toContain('FAILED  export checkout');
+    expect(r.code).toBe(3);
+    expect(r.out).toContain('WAITING at sign');
+  });
+
   it('stamps once, stops at every human step, refuses every wrong move, and verifies what was published', { timeout: TIMEOUT }, async () => {
     const fx = fixture();
     const git = (dir: string, ...args: string[]) => gitIn(fx, dir, ...args);

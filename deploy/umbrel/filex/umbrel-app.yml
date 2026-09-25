@@ -2,9 +2,9 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.45.0"
+version: "0.45.1"
 releaseNotes: |-
-  filex v0.45.0 — 2026-09-25
+  filex v0.45.1 — 2026-09-25
   • A token confined to one folder could reach files outside it through the app doors and the selection archive.
   • Drag a file out of the web admin onto the desktop (#71).
   • Desktop: Mount as a drive.

@@ -43,6 +43,17 @@ export {
   type CoverageReason,
   type StorageInfo,
 } from './lib/catalogCoverage';
+/* surucu:d1 — which number a storage line prints: the explorer panel's, and
+ * the admin top bar's chip, by one rule. */
+export {
+  hasCeiling,
+  needsMeasuredDrives,
+  storageLine,
+  type MeasuredDrive,
+  type PanelDrive,
+  type PersonUsage,
+  type StorageLine,
+} from './lib/storageLine';
 // tablo:t3 — the row's ONE action control ("Actions" / "Aksiyon"). DataTable
 // draws it for every table (`rowActions`); it stays exported for a host that
 // needs the same control outside a table. A second menu built beside

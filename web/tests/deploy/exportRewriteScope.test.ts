@@ -11,12 +11,17 @@
 // name that holds tracked files is not build output.
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
-const script = readFileSync(path.join(REPO, 'scripts', 'export-public.sh'), 'utf8');
+// ⚠⚠ The export script lives only in the private tree: the public one never
+// has it. Read unconditionally, this file failed the public release gate of
+// v0.45.0 with ENOENT, and v0.45.0 published nothing (2026-09-25). A test that
+// reads a private-only file skips where the file is not.
+const SCRIPT = path.join(REPO, 'scripts', 'export-public.sh');
+const script = existsSync(SCRIPT) ? readFileSync(SCRIPT, 'utf8') : '';
 
 function skippedNames(): string[] {
   const m = /dirs\[:\] = \[d for d in dirs\s+if d not in \(([^)]*)\)\]/.exec(script);
@@ -24,7 +29,7 @@ function skippedNames(): string[] {
   return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]!);
 }
 
-describe('export rewrite scope', () => {
+describe.skipIf(!script)('export rewrite scope', () => {
   it('skips no directory that holds a tracked file', () => {
     const skipped = new Set(skippedNames());
     expect(skipped.has('node_modules')).toBe(true);

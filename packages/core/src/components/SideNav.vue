@@ -172,16 +172,17 @@ const props = defineProps<{
    */
   canNewDocument?: boolean;
   /**
-   * The signed-in person's storage line, from `GET /api/files/quota/me`. Null
-   * (the default) renders nothing at all.
+   * The storage line, as `lib/storageLine` decided it. Null (the default)
+   * renders nothing at all.
    *
-   * ⚠ It is a PER-USER figure, not this storage's — `quota.Snapshot` sums
-   * `nodes.size WHERE owner_id = me`, and there is no per-provider quota
-   * (internal/quota/service.go). The mockup labels it with the drive's name;
-   * that would be a lie about which number this is, so the label says
-   * "Storage" and the drive name stays out of it.
+   * ⚠ Which number it is depends on the person, and the label covers both:
+   * with a quota, their own uploads against it ("X of Y"); without one, the
+   * size of the drives listed above — the figure Home's cards print, in the
+   * same sentence. `partial` makes that size a lower bound ("at least X").
+   * The mockup labels it with one drive's name; the line may sum several, so
+   * the label says "Storage" and the drive names stay out of it.
    */
-  quota?: { used: number; total: number; unlimited: boolean } | null;
+  quota?: { used: number; total: number; unlimited: boolean; partial?: boolean } | null;
   /** Resolved theme — the teleported New menu leaves the `.fe` variable scope. */
   theme?: ThemeMode;
   /**
@@ -454,9 +455,13 @@ const quotaPercent = computed(() => {
 const quotaText = computed(() => {
   const q = props.quota;
   if (!q) return '';
-  return q.unlimited || q.total <= 0
-    ? t('drive.storage.used_unlimited', { used: formatSize(q.used) })
-    : t('drive.storage.used', { used: formatSize(q.used), total: formatSize(q.total) });
+  if (q.unlimited || q.total <= 0) {
+    // The drives' size — said as Home's card says it (HomeView.storageCaption).
+    return q.partial
+      ? t('drive.storage.used_partial', { used: formatSize(q.used) })
+      : t('drive.storage.used_unlimited', { used: formatSize(q.used) });
+  }
+  return t('drive.storage.used', { used: formatSize(q.used), total: formatSize(q.total) });
 });
 
 /** Only the drawer draws this control now (see the template). */

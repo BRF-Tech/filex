@@ -670,11 +670,17 @@ export async function exportStage(R) {
     ...R.plan.exportGates,
   ];
   ok = await R.gates.all('export', specs, R.ctx());
-  if (!ok) return red();
+  // ⚠ Recorded red or green. The next --resume can only discard a checkout
+  // that is PROVABLY this export (the tree recorded here, staged, nothing
+  // else); recorded only on green, a red export gate left the public checkout
+  // holding an export the resume could not recognise, and every resume
+  // stopped on "nothing else pending" until a person cleared it by hand
+  // (v0.45.0, twice: a private-host gate, then a flaky test).
   if (!R.dry) {
     S.exportTree = indexTree(target);
     S.exportBase = base;
   }
+  if (!ok) return red();
   return done({ privateHead: h, exportBase: base });
 }
 

@@ -701,7 +701,9 @@ export interface ExplorerConfig {
     /**
      * gorunum:v3-shell — bytes this storage holds, when the host knows. Drawn
      * as the caption on the Home view's storage card; absent means the card
-     * names the kind of thing instead.
+     * names the kind of thing instead. For a person without a quota the
+     * storage line under the navigation sums these (lib/storageLine), and a
+     * storage left without one is measured by the explorer itself.
      *
      * ⚠ It must be the SAME quantity for every caller who gets it (in our own
      * app: `/api/admin/storages` for an operator, the RBAC-filtered

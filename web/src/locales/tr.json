@@ -1433,6 +1433,8 @@
     "unlimited": "Sınırsız",
     "tooltip": "{used} / {limit} kullanıldı ({percent})",
     "unlimitedTooltip": "{used} kullanıldı · sınırsız",
+    "unlimitedPartialTooltip": "en az {used} kullanıldı · sınırsız",
+    "atLeast": "≥ {used}",
     "usedIs": "Kullanılan: {used}",
     "usedOf": "Kullanılan: {used} / {quota} ({percent})"
   },

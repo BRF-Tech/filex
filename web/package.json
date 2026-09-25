@@ -1,7 +1,7 @@
 {
   "name": "@brftech/filex-admin",
   "private": true,
-  "version": "0.45.0",
+  "version": "0.45.1",
   "type": "module",
   "description": "filex web app — the Vue 3 SPA behind both /admin and the end-user /drive, embedded into the Go binary via go:embed",
   "scripts": {

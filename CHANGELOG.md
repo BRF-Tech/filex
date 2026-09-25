@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.45.0] - 2026-09-25
+## [0.45.1] - 2026-09-25
+
+0.45.0 as it was meant to ship. **v0.45.0 was tagged but never published**:
+one of its unit tests read a file only the maintainers' private repository has,
+the release workflow's test gate failed on it in the public tree, and nothing —
+no images, binaries, npm packages or desktop apps — went out. Everything
+0.45.0 carried is below, in this release, together with the fix and a new
+release gate that runs the web tests in the public tree before anything is
+tagged.
 
 ### Security
 
@@ -70,6 +78,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Storage line says how full the drives are, not how much you uploaded
+  (#54, Berk Başarır).** The line at the foot of the explorer's navigation
+  (web and desktop) and the storage chip in the admin top bar printed the
+  person's own upload counter under a label about the drive: on an S3 drive
+  holding 245.3 GB it read 523.5 MB, because files a sync discovered belong to
+  nobody. With a quota the line still shows the person's usage against it;
+  without one it shows the size of the drives the panel lists, the figure
+  Home's cards print, and "at least …" where a drive is not fully counted.
+  Refresh reads it again, and a failed poll keeps the last figure.
+- **The release checks the public tree the way the release workflow does.**
+  `pnpm release` built and tested the web code only in the private tree; it
+  now runs the Frontend job (packages, admin build, web and package unit
+  tests) in the exported tree as well, and `--resume` gets past its own
+  export after a red export gate instead of stopping until the checkout is
+  cleared by hand.
 - **Desktop app: the sidebar entries are left-aligned again (#53).** Home,
   Trash, each storage and *How to connect* sat centred in their rows on macOS
   and Windows. The explorer renders into the page that hosts it, and the
@@ -177,6 +200,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manager, and is now treated like a Homebrew, winget or Snap install: no
   self-replacement, upgrade with the package manager. A hand install in
   `/usr/local/bin`, where [docs/CLI.md](docs/CLI.md) puts it, is unchanged.
+
+## [0.45.0] - 2026-09-25
+
+Tagged, but its release workflow failed a unit test in the public tree
+before anything was published. Everything it carried shipped as 0.45.1.
 
 ## [0.44.2] - 2026-09-25
 

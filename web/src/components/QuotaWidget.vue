@@ -6,12 +6,16 @@
  *
  * Click toggles a dropdown with raw numbers + the formatted percentage.
  * The dropdown is intentionally lightweight for v1 — a future iteration
- * can break it down by storage / by category (the backend snapshot is
- * already per-user so storage breakdown will need a new endpoint).
+ * can break it down by storage / by category.
  *
- * Polls every 60s while mounted. Hidden entirely when the snapshot is
- * unloaded (cold-load → request still in-flight) so the bar doesn't
- * flash a wrong "0 / unlimited" while the auth round-trip resolves.
+ * ⚠ Without a quota the chip prints how full the drives the person can open
+ * are (`[● 245.3 GB]`), not their upload counter — the store's `line`, by the
+ * explorer panel's own rule (core `storageLine`).
+ *
+ * Polls every 60s while mounted. Hidden entirely while there is no figure
+ * (cold-load → request still in-flight, or no quota and no drive size the
+ * server would give) so the bar doesn't flash a wrong "0 / unlimited"
+ * while the auth round-trip resolves.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -74,6 +78,10 @@ const textTone = computed(() => {
 });
 
 const usedLabel = computed(() => formatBytes(quota.used, locale.value));
+/** The unlimited chip's figure: the drives' size, "≥" while it is a lower bound. */
+const figureLabel = computed(() =>
+  quota.partial ? t('quota.atLeast', { used: usedLabel.value }) : usedLabel.value,
+);
 const limitLabel = computed(() => formatBytes(quota.limit, locale.value));
 const percentLabel = computed(() => {
   if (quota.unlimited) return null;
@@ -83,7 +91,11 @@ const percentLabel = computed(() => {
 
 const tooltip = computed(() => {
   if (!quota.ready) return t('common.loading');
-  if (quota.unlimited) return t('quota.unlimitedTooltip', { used: usedLabel.value });
+  if (quota.unlimited) {
+    return t(quota.partial ? 'quota.unlimitedPartialTooltip' : 'quota.unlimitedTooltip', {
+      used: usedLabel.value,
+    });
+  }
   return t('quota.tooltip', {
     used: usedLabel.value,
     limit: limitLabel.value,
@@ -121,9 +133,12 @@ async function refresh() {
 
       <!-- Numbers — short form. `4.2 / 10 GB` if both have the same unit, else
         full pair. formatBytes is already locale-aware. -->
-      <span :class="['tabular-nums', textTone]">
+      <span
+        :class="['tabular-nums', textTone]"
+        data-testid="quota-widget-figure"
+      >
         <template v-if="quota.unlimited">
-          {{ usedLabel }}
+          {{ figureLabel }}
         </template>
         <template v-else>
           <!-- ⚠ RTL: a pair reads left to right — isolated, or "5 GB / 1 GB". -->
