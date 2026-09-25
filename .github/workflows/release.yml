@@ -613,6 +613,10 @@ jobs:
           if ($code -ne 0 -and $code -ne -1978335192) { exit 1 }
           if ($code -ne 0) { Write-Host "::warning title=winget::winget validate passed with warnings; see the log of this step." }
           "WINGET_DIR=$dir" >> $env:GITHUB_ENV
+          # ⚠⚠ GitHub ends a pwsh step with `exit $LASTEXITCODE`: without this
+          # line the tolerated warning code above still fails the step (v0.45.1,
+          # run 36182595696 — the desktop winget PR was never opened).
+          exit 0
       - name: Submit to winget
         if: matrix.label == 'windows' && env.WINGET_TOKEN != ''
         shell: pwsh
