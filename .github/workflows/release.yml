@@ -587,13 +587,24 @@ jobs:
             node desktop/scripts/pkg-manifests.mjs --version "$VER" \
               --mac desktop/release/filex-desktop-arm64.dmg --out pkg-out
           fi
+      # ⚠ `winget validate` exits non-zero for WARNINGS too. v0.44.2: the
+      # runner's winget did not know schema 1.12.0 yet and warned about the
+      # `$schema` header lines ("succeeded with warnings") — the same header
+      # goreleaser writes and microsoft/winget-pkgs accepts — and the step
+      # failed, so BRFTech.filex-app was never submitted. Warnings are shown
+      # as an annotation; only a failed validation stops the release.
       - name: Validate the winget manifests
         if: matrix.label == 'windows'
         shell: pwsh
         run: |
           $dir = (Get-ChildItem pkg-out/winget/manifests -Recurse -Filter '*.installer.yaml' | Select-Object -First 1).Directory.FullName
-          winget validate --manifest $dir
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $out = (winget validate --manifest $dir 2>&1 | Out-String)
+          $code = $LASTEXITCODE
+          Write-Host $out
+          # -1978335192 (0x8A150028) = "validation succeeded with warnings";
+          # -1978335191 is a failed validation. Measured with winget 1.29.
+          if ($code -ne 0 -and $code -ne -1978335192) { exit 1 }
+          if ($code -ne 0) { Write-Host "::warning title=winget::winget validate passed with warnings; see the log of this step." }
           "WINGET_DIR=$dir" >> $env:GITHUB_ENV
       - name: Submit to winget
         if: matrix.label == 'windows' && env.WINGET_TOKEN != ''
@@ -627,8 +638,10 @@ jobs:
         shell: bash
         run: |
           echo "::warning title=${{ matrix.label == 'windows' && 'winget' || 'Homebrew' }}::Not submitted — the ${{ matrix.label == 'windows' && 'WINGET_TOKEN' || 'HOMEBREW_TAP_DEPLOY_KEY' }} secret is not set. The manifests are in the pkg-${{ matrix.label }} artifact."
+      # always(): a failed validation or submission is exactly when the
+      # manifests are needed, to submit them by hand.
       - name: Keep the manifests
-        if: matrix.label == 'windows' || matrix.label == 'macos'
+        if: always() && (matrix.label == 'windows' || matrix.label == 'macos')
         uses: actions/upload-artifact@v4
         with:
           name: pkg-${{ matrix.label }}-${{ github.ref_name }}
