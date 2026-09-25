@@ -394,7 +394,14 @@ func (a *Archive) createArchive(ctx context.Context, req archiveCreateRequest, f
 	if err := os.Mkdir(sourceDir, 0o700); err != nil {
 		return nil, err
 	}
-	for i, member := range members {
+	// The job's units, phase by phase (archive_progress.go). A member counts its
+	// bytes and one unit of its own, so a folder of empty files moves the bar too.
+	bar := newArchiveProgress(progress)
+	var stageTotal, staged, stagedBytes int64
+	for _, member := range members {
+		stageTotal += member.Size + 1
+	}
+	for _, member := range members {
 		name, err := sanitizeZipPath(member.Name)
 		if err != nil {
 			return nil, fmt.Errorf("unsafe archive member name %q: %w", member.Name, err)
@@ -417,31 +424,39 @@ func (a *Archive) createArchive(ctx context.Context, req archiveCreateRequest, f
 		}
 		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
-			_, err = io.Copy(out, rc)
+			before := staged
+			var n int64
+			n, err = io.Copy(out, &progressReader{r: rc, tell: func(read int64) {
+				bar.span(0, archiveStagedAt, before+read, stageTotal)
+			}})
+			stagedBytes += n
 			_ = out.Close()
 		}
 		_ = rc.Close()
 		if err != nil {
 			return nil, err
 		}
-		progress((i + 1) * 10 / len(members))
+		staged += member.Size + 1
+		bar.span(0, archiveStagedAt, staged, stageTotal)
 	}
 	output := filepath.Join(root, "output."+format)
 	if format == "zip" && req.Password == "" {
-		err = createBuiltinZip(ctx, sourceDir, output)
+		err = createBuiltinZip(ctx, sourceDir, output, func(read int64) {
+			bar.span(archiveStagedAt, archiveCompressedAt, read, stagedBytes)
+		})
 	} else {
 		err = a.Engine.Create(ctx, sourceDir, output, archivecli.CreateOptions{
 			Format: format, Password: req.Password, EncryptNames: req.EncryptNames,
 			Compression: req.Compression, Solid: req.Solid, DictionarySizeMiB: req.DictionaryMB,
 			Progress: func(percent int) {
-				progress(10 + percent*80/100)
+				bar.span(archiveStagedAt, archiveCompressedAt, int64(percent), 100)
 			},
 		})
 	}
 	if err != nil {
 		return nil, err
 	}
-	progress(90)
+	bar.at(archiveCompressedAt)
 	writer, ok := destDriver.(storage.Writer)
 	if !ok {
 		return nil, errors.New("storage not writable")
@@ -467,7 +482,10 @@ func (a *Archive) createArchive(ctx context.Context, req archiveCreateRequest, f
 		return nil, err
 	}
 	stat, _ := f.Stat()
-	err = writer.Write(ctx, destRel, &contextReader{ctx: ctx, reader: f}, stat.Size())
+	sent := &progressReader{r: f, tell: func(n int64) {
+		bar.span(archiveCompressedAt, archiveWrittenAt, n, stat.Size())
+	}}
+	err = writer.Write(ctx, destRel, &contextReader{ctx: ctx, reader: sent}, stat.Size())
 	_ = f.Close()
 	if err != nil {
 		if ctx.Err() != nil {
@@ -486,7 +504,7 @@ func (a *Archive) createArchive(ctx context.Context, req archiveCreateRequest, f
 		Node:   &notify.NodeRef{StorageID: destStorageID, Path: destRel, Name: path.Base(destRel), Size: stat.Size()},
 		Target: notify.FileTarget(destRel),
 	})
-	progress(100)
+	bar.at(100)
 	return map[string]any{"path": destRel, "size": stat.Size(), "format": format}, nil
 }
 
@@ -494,12 +512,15 @@ func (a *Archive) createArchive(ctx context.Context, req archiveCreateRequest, f
 // still sharing the standard handler behaviour (unknown fields are ignored).
 func jsonNewDecoder(r *http.Request) *json.Decoder { return json.NewDecoder(r.Body) }
 
-func createBuiltinZip(ctx context.Context, sourceDir, output string) error {
+// createBuiltinZip packs sourceDir into output; read is told how many bytes of
+// the members it has compressed so far.
+func createBuiltinZip(ctx context.Context, sourceDir, output string, read func(n int64)) error {
 	f, err := os.OpenFile(output, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
 	zw := zip.NewWriter(f)
+	var done int64
 	walkErr := filepath.WalkDir(sourceDir, func(local string, d fs.DirEntry, err error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -519,7 +540,11 @@ func createBuiltinZip(ctx context.Context, sourceDir, output string) error {
 		if err != nil {
 			return err
 		}
-		_, copyErr := io.Copy(w, &contextReader{ctx: ctx, reader: r})
+		before := done
+		n, copyErr := io.Copy(w, &contextReader{ctx: ctx, reader: &progressReader{r: r, tell: func(got int64) {
+			read(before + got)
+		}}})
+		done += n
 		_ = r.Close()
 		return copyErr
 	})
