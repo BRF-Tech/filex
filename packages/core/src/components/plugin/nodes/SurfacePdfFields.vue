@@ -50,6 +50,7 @@ import type { FileRefResolver, PdfFieldsSource } from '../../../types/Plugins';
 import { useLocale } from '../../../composables/useLocale';
 import { fetchViewerArrayBuffer } from '../../../composables/useViewerFetch';
 import { labelOf } from '../../../lib/pluginLabel';
+import { inkOn } from '../../../composables/usePublicBranding';
 import { loadPdfjs } from '../../../lib/pdfjsLoader';
 import { actionIconSvg } from '../../../lib/actionIcons';
 import {
@@ -204,6 +205,20 @@ const byPage = computed(() => {
 
 function fieldColor(f: PdfField): string {
   return signerColor(signers.value, f.assignee);
+}
+
+/**
+ * A box card's colours: its signer's, and the ink that reads on THAT colour.
+ *
+ * ⚠ Not `--fe-text-on-primary`. A signer's colour is an identity colour, the
+ * same in every theme, so the ink on it must be the colour's own — the theme
+ * token is dark in dark mode and measured 3.5:1 on the first signer's blue
+ * (#57). A colour that is not hex (a plugin may name its own) keeps the token.
+ */
+function cardStyle(f: PdfField): Record<string, string> {
+  const color = fieldColor(f);
+  const ink = inkOn(color);
+  return ink ? { '--spdf-color': color, '--spdf-ink': ink } : { '--spdf-color': color };
 }
 
 function signerLabel(assignee: string | undefined): string {
@@ -1042,7 +1057,7 @@ const checkIcon = actionIconSvg('check');
         v-for="(f, i) in local"
         :key="f.id"
         class="fe-spdf__card"
-        :style="{ '--spdf-color': fieldColor(f) }"
+        :style="cardStyle(f)"
         :data-testid="`surface-pdf-card-${f.id}`"
       >
         <span class="fe-spdf__cardno" aria-hidden="true">{{ i + 1 }}</span>

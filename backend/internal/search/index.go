@@ -234,12 +234,24 @@ func ContentFingerprint(n *model.Node) string {
 // carried over (a rename/move must not wipe it); when the content
 // fingerprint drifted, the content hook fires so extraction is re-queued.
 func (i *Index) IndexNode(ctx context.Context, n *model.Node) error {
-	return i.indexNode(ctx, n, true)
+	return i.IndexNodes(ctx, []*model.Node{n})
 }
 
-func (i *Index) indexNode(ctx context.Context, n *model.Node, allowHook bool) error {
-	id := strconv.FormatInt(n.ID, 10)
-	d := docFor(n)
+// IndexNodes is IndexNode for many nodes in ONE index write (issue #70).
+//
+// ⚠ Why it exists: every Bleve write waits until its segment is on disk, so
+// the catalogue indexing a folder of a hundred new files one IndexNode at a
+// time waited for a hundred of them — measured on Windows, about 10 ms a file,
+// the largest single cost of cataloguing a tree. The sync walk and the lazy
+// catalogue hand a whole folder's rows over here instead. Each document is
+// built exactly as IndexNode builds it, and the content hook fires per node on
+// the same rule.
+func (i *Index) IndexNodes(ctx context.Context, nodes []*model.Node) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+	ids := make([]string, len(nodes))
+	docs := make([]doc, len(nodes))
 
 	// The read lock is held across the write, not just across reading the
 	// handles: a rebuild's swap takes the write lock and closes both
@@ -251,19 +263,43 @@ func (i *Index) indexNode(ctx context.Context, n *model.Node, allowHook bool) er
 		i.mu.RUnlock()
 		return nil
 	}
-	// Preserve content across metadata reindexes: Bleve replaces the whole
-	// document on Index(), so re-supply what the doc already holds.
-	d.Content, d.ContentSig = storedContent(bx, id)
-	err := bx.Index(id, d)
+	b := bx.NewBatch()
+	var err error
+	for k, n := range nodes {
+		ids[k] = strconv.FormatInt(n.ID, 10)
+		docs[k] = docFor(n)
+		// Preserve content across metadata reindexes: Bleve replaces the
+		// whole document on Index(), so re-supply what the doc already holds.
+		docs[k].Content, docs[k].ContentSig = storedContent(bx, ids[k])
+		if err = b.Index(ids[k], docs[k]); err != nil {
+			break
+		}
+	}
 	if err == nil {
-		i.dualWrite(id, pending, func() error { return pending.Index(id, d) })
+		err = bx.Batch(b)
+	}
+	if err == nil && pending != nil {
+		i.dualWrite(ids[0], pending, func() error {
+			pb := pending.NewBatch()
+			for k := range ids {
+				i.markDirty(ids[k])
+				if err := pb.Index(ids[k], docs[k]); err != nil {
+					return err
+				}
+			}
+			return pending.Batch(pb)
+		})
 	}
 	i.mu.RUnlock()
 	if err != nil {
 		return err
 	}
-	if allowHook && hook != nil && n.Type == model.NodeTypeFile && d.ContentSig != ContentFingerprint(n) {
-		hook(ctx, n)
+	if hook != nil {
+		for k, n := range nodes {
+			if n.Type == model.NodeTypeFile && docs[k].ContentSig != ContentFingerprint(n) {
+				hook(ctx, n)
+			}
+		}
 	}
 	return nil
 }

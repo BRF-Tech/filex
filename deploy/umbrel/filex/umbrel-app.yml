@@ -2,11 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.44.2"
+version: "0.45.0"
 releaseNotes: |-
-  filex v0.44.2 — 2026-09-25
-  • The release reaches the desktop packages and the stores.
-  • A desktop page that cannot load now stops the release.
+  filex v0.45.0 — 2026-09-25
+  • A token confined to one folder could reach files outside it through the app doors and the selection archive.
+  • Drag a file out of the web admin onto the desktop (#71).
+  • Desktop: Mount as a drive.
+  • ⌘K search results you can act on.
+  • Desktop: ⌘K searches every account on the rail.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

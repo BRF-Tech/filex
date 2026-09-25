@@ -13,6 +13,7 @@
 // wrong palette — and it is overwritten the moment the server answers.
 const KEY = 'filex.theme';
 
+import { readonly, ref, type Ref } from 'vue';
 import { hasSession, savePref } from '@brftech/filex-core';
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
@@ -85,11 +86,29 @@ function resolveMode(mode: ThemeMode): 'light' | 'dark' {
   return mode;
 }
 
+const painted = ref<'light' | 'dark'>('light');
+
+/**
+ * The mode this window is painted in RIGHT NOW, and every time it changes —
+ * the settings switch, the account's answer arriving, the operating system
+ * turning in `auto`.
+ *
+ * ⚠⚠ Hand a page THIS, never `computed(() => effectiveTheme())`. That
+ * computed reads localStorage and matchMedia, which Vue cannot track, so it
+ * is evaluated once and the page keeps the mode it was opened in: an app's
+ * screen stayed dark on a window that had turned light (#57, measured —
+ * `web/tests/lib/liveTheme.test.ts` refuses the pattern). It is written by
+ * `paint()` below, the one writer of `<html class="dark">`, so it cannot
+ * disagree with what is on the screen and needs no observer.
+ */
+export const liveTheme: Readonly<Ref<'light' | 'dark'>> = readonly(painted);
+
 /** Put a mode on the document. The one place `<html class="dark">` is written. */
 function paint(mode: ThemeMode): void {
   const dark = resolveMode(mode) === 'dark';
   document.documentElement.classList.toggle('dark', dark);
   document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+  painted.value = dark ? 'dark' : 'light';
 }
 
 export function effectiveTheme(): 'light' | 'dark' {
@@ -105,6 +124,15 @@ export function effectiveTheme(): 'light' | 'dark' {
  */
 export function applyStoredTheme(): void {
   paint(getStoredTheme());
+}
+
+// Until the first paint, what the first paint will be.
+if (typeof window !== 'undefined') {
+  try {
+    painted.value = effectiveTheme();
+  } catch {
+    /* no storage, no matchMedia: light, as above */
+  }
 }
 
 // React to OS changes when in 'auto' mode.

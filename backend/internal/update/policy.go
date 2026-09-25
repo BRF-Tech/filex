@@ -70,6 +70,105 @@ func DetectInstallMode() InstallMode { return DetectInstall().Mode }
 // CanSelfApply reports whether this install may replace its own binary.
 func (m InstallMode) CanSelfApply() bool { return m == ModeBinary }
 
+// Behavior is what an install does about new releases by itself: its saved
+// policy, as far as this install can carry it out. It is what the admin page's
+// policy badge says, so it is worked out HERE, once, from the same rules
+// Decide applies — a client renders it and never re-derives it from the mode
+// and the policy.
+type Behavior string
+
+const (
+	// BehaviorOff — nothing is checked, so nothing is announced.
+	BehaviorOff Behavior = "off"
+	// BehaviorAnnounce — new releases are checked for and announced; nothing
+	// is applied by itself.
+	BehaviorAnnounce Behavior = "announce"
+	// BehaviorPatch — patch releases are applied by themselves.
+	BehaviorPatch Behavior = "patch"
+	// BehaviorMinor — patch and minor releases are applied by themselves.
+	BehaviorMinor Behavior = "minor"
+)
+
+// Limit is why an install does less than its saved policy asks for. The
+// policy itself is kept as the operator set it: it takes effect again when the
+// reason goes (the install becomes a plain binary, checking is switched back
+// on, filex reaches 1.0), so the page says it is inert here instead of
+// pretending it was never set.
+type Limit string
+
+const (
+	// LimitNone — the saved policy is what the install does.
+	LimitNone Limit = ""
+	// LimitDisabled — checking is switched off (FILEX_UPDATE_CHECK=0).
+	LimitDisabled Limit = "disabled"
+	// LimitContainer — the image owns the binary (ModeDocker).
+	LimitContainer Limit = "container"
+	// LimitPackage — a package manager owns the binary (ModePackage).
+	LimitPackage Limit = "package"
+	// LimitZeroMajor — policy minor on a 0.x version, where a minor release
+	// is never automatic (Decide rule 6): patches only.
+	LimitZeroMajor Limit = "zero_major"
+)
+
+// Effective is a saved policy as one install carries it out.
+type Effective struct {
+	// Policy is the saved policy, unchanged.
+	Policy   Policy
+	Behavior Behavior
+	// Limit is why Behavior is less than Policy; LimitNone when it is not.
+	Limit Limit
+}
+
+// InForce reports whether the install does what its saved policy says.
+func (e Effective) InForce() bool { return e.Limit == LimitNone }
+
+// EffectiveOf is what an install does by itself, from its saved policy,
+// whether checking is on, who owns the binary and the running version. The
+// rules are Decide's, read without a release in hand:
+//
+//   - policy off is off, and that is the policy in force;
+//   - with checking switched off nothing happens, whatever the policy says;
+//   - a policy that would apply something, on an install that cannot replace
+//     its own binary (a container, a package manager's), only announces;
+//   - policy minor on 0.x applies patches only.
+func EffectiveOf(p Policy, checking bool, mode InstallMode, current Version) Effective {
+	e := Effective{Policy: p}
+	e.Behavior, e.Limit = reach(p, current)
+	switch {
+	case e.Behavior == BehaviorOff:
+	case !checking:
+		e.Behavior, e.Limit = BehaviorOff, LimitDisabled
+	case e.Behavior != BehaviorAnnounce && !mode.CanSelfApply():
+		e.Behavior, e.Limit = BehaviorAnnounce, LimitContainer
+		if mode == ModePackage {
+			e.Limit = LimitPackage
+		}
+	}
+	return e
+}
+
+// reach is how far a policy lets releases in by themselves on this version,
+// before the install's shape is considered. Decide asks it too (autoAllowed),
+// so the badge and the decision cannot drift apart. An unknown policy value
+// reaches no further than announcing: ParsePolicy never produces one, and an
+// unreadable setting must not grant more than was asked for.
+func reach(p Policy, current Version) (Behavior, Limit) {
+	switch p {
+	case PolicyOff:
+		return BehaviorOff, LimitNone
+	case PolicyPatch:
+		return BehaviorPatch, LimitNone
+	case PolicyMinor:
+		// While a project is on 0.x, semver gives a minor release no
+		// compatibility promise.
+		if current.Major == 0 {
+			return BehaviorPatch, LimitZeroMajor
+		}
+		return BehaviorMinor, LimitNone
+	}
+	return BehaviorAnnounce, LimitNone
+}
+
 // Action is what the install should do about an available release.
 type Action string
 
@@ -220,7 +319,8 @@ func cannotApply(in Input) why {
 // which is phrased for the operator either way.
 func autoAllowed(in Input, step Step, target Release, skipped []Release) (bool, why) {
 	pol := map[string]string{"policy": string(in.Policy)}
-	if in.Policy == PolicyOff || in.Policy == PolicyManual {
+	upTo, limit := reach(in.Policy, in.Current)
+	if upTo == BehaviorOff || upTo == BehaviorAnnounce {
 		return false, why{key: "announced_only", vars: pol, en: "policy is " + string(in.Policy) + " — updates are announced, not applied"}
 	}
 	if !target.AutoOK {
@@ -237,13 +337,13 @@ func autoAllowed(in Input, step Step, target Release, skipped []Release) (bool, 
 	case StepPatch:
 		return true, why{key: "patch_auto", vars: pol, en: "patch release under policy " + string(in.Policy)}
 	case StepMinor:
-		if in.Policy != PolicyMinor {
-			return false, why{key: "minor_needs_policy", vars: pol, en: "minor release — policy " + string(in.Policy) + " applies patches only"}
-		}
-		if in.Current.Major == 0 {
+		switch {
+		case upTo == BehaviorMinor:
+			return true, why{key: "minor_auto", en: "minor release under policy minor"}
+		case limit == LimitZeroMajor:
 			return false, why{key: "zero_minor", en: "0.x minor releases may break compatibility — confirm required"}
 		}
-		return true, why{key: "minor_auto", en: "minor release under policy minor"}
+		return false, why{key: "minor_needs_policy", vars: pol, en: "minor release — policy " + string(in.Policy) + " applies patches only"}
 	}
 	return false, why{key: "unhandled", en: "unhandled step"}
 }

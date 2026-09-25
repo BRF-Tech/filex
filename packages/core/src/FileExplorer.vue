@@ -15,7 +15,7 @@
  * the difference.
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, ref, watch, watchEffect } from 'vue';
-import type { ExplorerConfig, ThemeMode } from './types/ExplorerConfig';
+import type { ExplorerConfig, SearchAccount, ThemeMode } from './types/ExplorerConfig';
 import type {
   FileNode,
   ShareInfo,
@@ -34,6 +34,7 @@ import {
 import { useSelection } from './composables/useSelection';
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
 import { useLocale, localeTag } from './composables/useLocale';
+import { useSystemDark } from './composables/useSystemDark';
 import { usePendingOps, type PendingOp } from './composables/usePendingOps';
 import { usePluginActions } from './composables/usePluginActions'; /* App plugins — docs/APP-PLUGINS-API.md */
 import { useRealtime } from './composables/useRealtime';
@@ -187,12 +188,14 @@ import { setNodeStarred } from './lib/star';
 import { emptyTrashAndFollow, TrashEmptyBusy, type TrashEmptyStatus } from './lib/trashEmpty';
 import { fetchAllTags, fetchTaggedRows, onTagsChanged, type TagItem, type TagKind } from './lib/tags';
 import { resolveTransfer, type TransferIntent } from './lib/transfer';
-import { downloadArchive } from './lib/downloadSelection'; /* tasi:m1 */
+import { downloadArchive, requestFileLink } from './lib/downloadSelection'; /* tasi:m1, #71 */
+import { hitItem, hitRelPath, hitStorageName, hitToNode, type HitDriveContext } from './lib/searchHit'; /* #47 */
 import { labelOfWire } from './lib/destinationTree'; /* tasi:m1 */
 import {
   activeNativeDrag,
   beginNativeDrag,
   canDownloadUrlDrag,
+  createDragLinks,
   dragKey,
   downloadUrlPayload,
   endNativeDrag,
@@ -979,6 +982,8 @@ const pluginView = ref<{
   view: string;
   surface: PluginSurface;
   path?: string;
+  /** Every row the view was opened on — a menu action on a selection (#64). */
+  paths?: string[];
   /** A `home` view is drawn full-size whatever the surface says. */
   size?: 'xl';
 } | null>(null);
@@ -1153,11 +1158,14 @@ async function runPluginAction(action: PluginActionRow, targets: FileNode[]) {
   try {
     const res = await pluginActions.run(action, targets);
     if (res.surface) {
+      // ⚠ `paths` too: the screen's later events must name the same files the
+      // run did, or its second screen talks about targets[0] alone (#64).
       pluginView.value = {
         plugin: action.plugin,
         view: action.view || action.id,
         surface: res.surface,
         path: targets[0]?.path,
+        paths: targets.map((n) => n.path),
       };
       return;
     }
@@ -2110,53 +2118,14 @@ const advPathBase = ref('');
  * its owner) in `describeHits`, so there is nothing left to guess and the
  * scopes are offered everywhere. Kept as a computed rather than deleted: the
  * prop is public API, and an embedder pointed at an older backend still gets
- * hits with no `storage` — which `advHitToNode` falls back for, row by row.
+ * hits with no `storage` — which `hitToNode` (lib/searchHit) falls back for,
+ * row by row.
  */
 const advContentAvailable = computed(() => true);
 
 /** How many hits we ask the content endpoint for. The manager's search action
  *  uses 250 internally; matching it keeps the two scopes comparable. */
 const ADV_CONTENT_LIMIT = 250;
-
-/** Map one raw search hit onto the listing shape.
- *
- *  ⚠ The drive comes from the HIT (`describeHits` puts it there), not from the
- *  pane we happen to be standing in — a content search spans storages, so
- *  `adapter.value` is only the right answer by accident. It stays as the
- *  fallback for a backend older than that field. */
-function advHitToNode(h: GlobalSearchHit, storageName: string): FileNode {
-  const rel = String(h.path ?? '').replace(/^\/+/, '');
-  const drive = typeof h.storage === 'string' && h.storage ? h.storage : storageName;
-  const name = String(h.name ?? rel.split('/').pop() ?? '');
-  const dot = name.lastIndexOf('.');
-  const mtime = typeof h.backend_mtime === 'string' ? h.backend_mtime : h.updated_at;
-  const ms = typeof mtime === 'string' ? Date.parse(mtime) : NaN;
-  return {
-    id: typeof h.id === 'number' ? h.id : undefined,
-    path: drive ? `${drive}://${rel}` : rel,
-    basename: name,
-    relativePath: rel,
-    type: h.type === 'dir' ? 'dir' : 'file',
-    extension: dot > 0 ? name.slice(dot + 1).toLowerCase() : '',
-    size: typeof h.size === 'number' ? h.size : 0,
-    // ⚠ Left UNSET when the row carries no parseable timestamp rather than
-    // defaulted to 0 or to now: `matchesModified` treats a missing timestamp
-    // as "unknown" and drops the row from a date filter, which is the honest
-    // answer. Stamping it with `Date.now()` would file every such file under
-    // "Today".
-    last_modified: Number.isNaN(ms) ? undefined : ms,
-    mime_type: typeof h.mime === 'string' ? h.mime : '',
-    /* The content snippet the hit came with, so a content match can show why
-       it matched. Undefined on name-only hits, exactly as the backend sends. */
-    snippet: typeof h.snippet === 'string' && h.snippet ? h.snippet : undefined,
-    /* Owner, so the People filter and the Owner column mean the same thing in a
-       content result as they do in a folder listing. Undefined rather than
-       guessed when the backend does not send it. */
-    owner_id: typeof h.owner_id === 'number' ? h.owner_id : undefined,
-    owner_name: typeof h.owner_name === 'string' ? h.owner_name : undefined,
-    owner_self: h.owner_self === true ? true : undefined,
-  };
-}
 
 /** Run one advanced search and hand back the rows, unfiltered — and whether
  *  the answer was cut. The name scope has the server's own word for that
@@ -2177,7 +2146,7 @@ async function advFetchRows(
   const hits = await api.globalSearch(query, { limit: ADV_CONTENT_LIMIT, scope });
   const storageName = adapter.value || (props.config.storages ?? [])[0]?.name || '';
   return {
-    rows: filterListing(hits.map((h) => advHitToNode(h, storageName))),
+    rows: filterListing(hits.map((h) => hitToNode(h, storageName))),
     truncated: advSearchTruncated(hits.length, ADV_CONTENT_LIMIT),
   };
 }
@@ -3700,34 +3669,74 @@ const showShortcutsHelp = ref(false);
 
 /* bul:s3 — palette "everywhere" search + open-hit navigation */
 
-// Debounce/min-chars live in the palette; this is just the API call.
-function paletteGlobalSearch(q: string): Promise<GlobalSearchHit[]> {
-  return api.globalSearch(q, { limit: 8, scope: 'all' });
+/** What this mount knows about drives, for a hit that does not name its own. */
+function hitDrives(): HitDriveContext {
+  return { configured: (props.config.storages ?? []).map((s) => s.name), current: adapter.value };
+}
+
+/**
+ * #47 — the account a hit belongs to when it is NOT this mount's own, else
+ * null. Only a host that searches several accounts stamps hits at all.
+ */
+function foreignAccountOf(hit: GlobalSearchHit): SearchAccount | null {
+  const hook = props.config.accountSearch;
+  const acc = hit.account;
+  if (!hook || !acc || acc.id === hook.self.id) return null;
+  return acc;
+}
+
+/** #47 — the hit as an item. Another account's hit is addressed by what the
+ *  HIT says and nothing else: this mount's drives are not that server's. */
+function paletteHitItem(hit: GlobalSearchHit) {
+  return hitItem(hit, foreignAccountOf(hit) ? { configured: [], current: '' } : hitDrives());
+}
+
+// Debounce/min-chars live in the palette; this is the API call — and, when
+// the host holds several accounts (#47), one call per account through the
+// host's hook, each answer stamped with its account. One account failing
+// costs its own group, not the others'.
+async function paletteGlobalSearch(q: string): Promise<GlobalSearchHit[]> {
+  const own = api.globalSearch(q, { limit: 8, scope: 'all' });
+  const hook = props.config.accountSearch;
+  if (!hook) return own;
+  let others: SearchAccount[] = [];
+  try {
+    others = (await hook.others()) ?? [];
+  } catch {
+    others = [];
+  }
+  if (others.length === 0) return own;
+  const accounts = [hook.self, ...others];
+  const answers = await Promise.allSettled([
+    own,
+    ...others.map((a) => hook.search(a.id, q, { limit: 8, scope: 'all' })),
+  ]);
+  const out: GlobalSearchHit[] = [];
+  answers.forEach((r, i) => {
+    if (r.status !== 'fulfilled' || !Array.isArray(r.value)) return;
+    for (const h of r.value) out.push({ ...h, account: accounts[i] });
+  });
+  return out;
 }
 
 /**
  * Open a global-search hit: navigate to the file's folder, then select +
  * preview it through the existing openNode mechanics. Hits come back as raw
  * node rows (in-storage relative `path`, numeric `storage_id`), so the
- * storage segment for multi-storage mode is resolved best-effort: an
- * explicit name on the hit (future backends) > the only configured storage
- * > the storage currently open. A wrong guess lands on the existing
- * "folder not found" state, which is already a graceful dead-end.
+ * storage segment for multi-storage mode is resolved by `hitStorageName`
+ * (lib/searchHit): the name on the hit > the only configured storage > the
+ * storage currently open. A wrong guess lands on the existing "folder not
+ * found" state, which is already a graceful dead-end.
  */
 async function openSearchHit(hit: GlobalSearchHit) {
-  const rel = String(hit.path ?? '').replace(/^\/+|\/+$/g, '');
+  const rel = hitRelPath(hit);
   if (!rel) return;
   const isDir = hit.type === 'dir';
   const slash = rel.lastIndexOf('/');
   const targetRel = isDir ? rel : slash === -1 ? '' : rel.slice(0, slash);
   let target = targetRel;
   if (multiStorageRoot.value) {
-    const configured = props.config.storages ?? [];
-    const storageName =
-      (typeof hit.storage === 'string' && hit.storage) ||
-      (typeof hit.storage_name === 'string' && hit.storage_name) ||
-      (configured.length === 1 ? configured[0].name : '') ||
-      adapter.value;
+    const storageName = hitStorageName(hit, hitDrives());
     if (!storageName) return;
     target = targetRel ? `${storageName}/${targetRel}` : storageName;
   }
@@ -3739,6 +3748,97 @@ async function openSearchHit(hit: GlobalSearchHit) {
     selection.click(node.path);
     openNode(node);
   }
+}
+
+/* === #47 — the palette's hit verbs ====================================
+ *
+ * Open, download and drag out, each answered by what a LISTING row of the
+ * same file already uses: `openSearchHit` → openNode, `downloadSelection`,
+ * `handDragOut`. Another account's hit goes to the host's hook instead — the
+ * explorer holds no credential for that server.
+ */
+
+function reportHookFailure(op: string) {
+  return (err: unknown) => emit('error', { message: (err as Error)?.message ?? String(err), context: { op } });
+}
+
+function onPaletteOpenHit(hit: GlobalSearchHit) {
+  const acc = foreignAccountOf(hit);
+  const hook = props.config.accountSearch;
+  if (acc && hook) {
+    const item = paletteHitItem(hit);
+    if (item) void Promise.resolve(hook.open(acc.id, item)).catch(reportHookFailure('search-open'));
+    return;
+  }
+  void openSearchHit(hit);
+}
+
+/** Which verbs a hit row offers. Mirrors what a listing row of it would do. */
+function paletteHitCan(hit: GlobalSearchHit, action: 'download' | 'drag'): boolean {
+  const item = paletteHitItem(hit);
+  if (!item) return false;
+  if (foreignAccountOf(hit)) {
+    const hook = props.config.accountSearch;
+    return action === 'download' ? !!hook?.download : !!hook?.dragStart;
+  }
+  if (action === 'download') return true;
+  // The shell carries anything; the browser's own path carries ONE file — on
+  // the plain download URL where the session is a cookie, on a minted link
+  // where it is a bearer (#71, lib/dragOut createDragLinks), and not at all
+  // against a server too old to mint one.
+  return (
+    !!dragOut.value ||
+    (item.type === 'file' && (canDownloadUrlDrag(props.config.auth) || dragLinksSupported.value))
+  );
+}
+
+/** #71 — the pointer rests on / presses a hit: get its drag-out link ready. */
+function onPaletteWarmHit(hit: GlobalSearchHit) {
+  if (foreignAccountOf(hit)) return;
+  const item = paletteHitItem(hit);
+  if (item && item.type === 'file') warmDragLink(item.path);
+}
+
+function downloadSearchHit(hit: GlobalSearchHit) {
+  const item = paletteHitItem(hit);
+  if (!item) return;
+  const acc = foreignAccountOf(hit);
+  if (acc) {
+    const hook = props.config.accountSearch;
+    if (hook?.download) void Promise.resolve(hook.download(acc.id, item)).catch(reportHookFailure('search-download'));
+    return;
+  }
+  // The same row the advanced search draws for this hit, through the same
+  // download a selected listing row takes: a file is its own body, a folder
+  // one streaming archive.
+  void downloadSelection([hitToNode(hit, hitStorageName(hit, hitDrives()))]);
+}
+
+function onPaletteDragHit(hit: GlobalSearchHit, ev: DragEvent) {
+  const item = paletteHitItem(hit);
+  if (!item || !ev.dataTransfer) {
+    ev.preventDefault();
+    return;
+  }
+  ev.dataTransfer.effectAllowed = 'copy';
+  const acc = foreignAccountOf(hit);
+  if (acc) {
+    const hook = props.config.accountSearch;
+    // Always the OS drag: the browser's own path would fetch another
+    // server's file with THIS page's session.
+    ev.preventDefault();
+    if (hook?.dragStart) void Promise.resolve(hook.dragStart(acc.id, [item])).catch(reportHookFailure('drag-out'));
+    return;
+  }
+  // `null` origin: a hit is dragged OUT, never moved — the palette covers the
+  // listing, so there is no folder in this window for it to land on.
+  handDragOut(ev, [item], null, typeof hit.mime === 'string' ? hit.mime : undefined);
+}
+
+/** A hit drag let go inside the palette: the shell stops waiting for a drop. */
+function onPaletteDropInside() {
+  endNativeDrag();
+  cancelShellDrag();
 }
 /* /bul:s3 */
 
@@ -5721,6 +5821,19 @@ function onPaneItemDragStart(pane: 'main' | 'split', node: FileNode, ev: DragEve
     .map((n) => ({ path: n.path, basename: n.basename, type: n.type })); // qualified
   if (items.length === 0) return;
 
+  handDragOut(ev, items, dirWire, node.mime_type);
+}
+
+/**
+ * Hand a drag to whatever can carry it out of this window.
+ *
+ * #47 — ONE function for a listing row and a ⌘K search hit, so a hit drags
+ * out exactly the way the same file's row does. `origin` is the folder the
+ * rows came from: set, the drag is ALSO an internal one (dropped on a folder
+ * inside filex it is a move); null, it only goes out (a palette hit — the
+ * palette covers the listing, so there is nowhere inside to drop it).
+ */
+function handDragOut(ev: DragEvent, items: DragItem[], origin: string | null, mime?: string): void {
   /* wiring:f1 — drag-out (to the desktop / another application).
      When a shell is present the drag is ALWAYS an OS drag: folders and
      multi-selections land as REAL files, one by one, with NO SIZE LIMIT.
@@ -5732,7 +5845,7 @@ function onPaneItemDragStart(pane: 'main' | 'split', node: FileNode, ev: DragEve
      nothing. */
   if (dragOut.value) {
     ev.preventDefault();
-    beginNativeDrag(items, dirWire);
+    if (origin !== null) beginNativeDrag(items, origin);
     void Promise.resolve(dragOut.value.start(items)).catch((err) => {
       endNativeDrag();
       cancelShellDrag();
@@ -5742,16 +5855,66 @@ function onPaneItemDragStart(pane: 'main' | 'split', node: FileNode, ev: DragEve
     return;
   }
 
-  /* Single file + a cookie session: the browser's own download path
-     (DownloadURL) fetches the file onto the desktop at drop time; no
-     preparation is needed at all. In a bearer-token setup (the desktop app)
-     that path goes out unauthenticated, which is why the local path above
-     takes over there — see lib/dragOut.ts. */
-  if (items.length === 1 && items[0] && canDownloadUrlDrag(props.config.auth)) {
-    const payload = downloadUrlPayload(items[0], api.downloadUrl(items[0].path), node.mime_type);
+  /* Single file, no shell: the browser's own download path (DownloadURL)
+     fetches the file onto the desktop at drop time. Which URL depends on the
+     credential. A cookie session hands over the plain download URL — the
+     cookie travels with it, and it rides whatever route the embed already
+     proxies. A bearer session (the admin SPA) cannot: the download stack
+     sends no Authorization header, so it hands over the short-lived link
+     minted while the pointer rested on the row (#71). None ready yet — the
+     drag simply carries no download; it never waits (see lib/dragOut). */
+  if (items.length === 1 && items[0] && ev.dataTransfer) {
+    const one = items[0];
+    const url = canDownloadUrlDrag(props.config.auth) ? api.downloadUrl(one.path) : dragLinks.take(one.path);
+    const payload = url ? downloadUrlPayload(one, url, mime) : null;
     if (payload) ev.dataTransfer.setData('DownloadURL', payload);
   }
 }
+
+/* === #71 — a drag-out link for a session the browser cannot sign ========
+ *
+ * `dragstart` fills the dataTransfer synchronously, and the link is a server
+ * round trip, so it is asked for BEFORE the drag: when the pointer comes to
+ * rest on a file row and again on the press (lib/dragOut createDragLinks has
+ * the rules). One delegated listener pair on the root, the way the middle-
+ * click delegation below reads `[data-fe-path]` — every view (list, grid,
+ * gallery) and both panes, with nothing added to any of them; the palette's
+ * hits say so themselves (`warm-hit`), because they are not listing rows.
+ *
+ * Only where it is needed: no shell (the desktop app drags through the OS)
+ * and a credential the browser cannot carry (a cookie session has the plain
+ * URL). Nowhere else does a hover cost a request.
+ */
+const dragLinksSupported = ref(true);
+const dragLinks = createDragLinks((p) => requestFileLink(api, p), {
+  onUnsupported: () => {
+    dragLinksSupported.value = false;
+  },
+});
+const dragNeedsLink = computed(() => !dragOut.value && !canDownloadUrlDrag(props.config.auth));
+
+function warmDragLink(path: string | null | undefined) {
+  if (!path || !dragNeedsLink.value || trashActive.value) return;
+  dragLinks.warm(path);
+}
+
+function onRowPointerWarm(ev: PointerEvent) {
+  if (ev.pointerType === 'touch' || !dragNeedsLink.value) return;
+  const host = ev.target as Element | null;
+  const el = host && typeof host.closest === 'function' ? host.closest('[data-fe-path]') : null;
+  const p = el?.getAttribute('data-fe-path');
+  if (!p) return;
+  const node = files.value.find((f) => f.path === p) ?? splitDisplayOrder.value.find((f) => f.path === p);
+  if (node && node.type === 'file' && node.basename !== '.trash') warmDragLink(node.path);
+}
+onMounted(() => {
+  rootEl.value?.addEventListener('pointerover', onRowPointerWarm, { passive: true });
+  rootEl.value?.addEventListener('pointerdown', onRowPointerWarm, { capture: true, passive: true });
+});
+onBeforeUnmount(() => {
+  rootEl.value?.removeEventListener('pointerover', onRowPointerWarm);
+  rootEl.value?.removeEventListener('pointerdown', onRowPointerWarm, { capture: true });
+});
 
 /* === wiring:f1 — drag-out preparation ===
  *
@@ -5989,16 +6152,7 @@ provideTableEnv({ locale, theme: themeMode });
 // Resolved mode: an explicit choice wins, otherwise the OS preference — the
 // same logic variables.css encodes in CSS. The inline root variables beat every
 // stylesheet rule, so they must track this resolution at runtime.
-const themeMq =
-  typeof window !== 'undefined' && window.matchMedia
-    ? window.matchMedia('(prefers-color-scheme: dark)')
-    : undefined;
-const themeOsDark = ref(!!themeMq?.matches);
-function onThemeMqChange(e: MediaQueryListEvent) {
-  themeOsDark.value = e.matches;
-}
-onMounted(() => themeMq?.addEventListener?.('change', onThemeMqChange));
-onBeforeUnmount(() => themeMq?.removeEventListener?.('change', onThemeMqChange));
+const themeOsDark = useSystemDark();
 const themeResolvedDark = computed(
   () => themeMode.value === 'dark' || (themeMode.value !== 'light' && themeOsDark.value),
 );
@@ -8419,6 +8573,7 @@ function closeRecoveryKey() {
       :view="pluginView.view"
       :surface="pluginView.surface"
       :path="pluginView.path"
+      :paths="pluginView.paths"
       :size="pluginView.size"
       :storages="(props.config.storages ?? []).map((st) => st.name)"
       :start-at="qualify(paneIsActive ? (splitPaneRef?.getPath() ?? '') : currentPath)"
@@ -8557,8 +8712,13 @@ function closeRecoveryKey() {
       :can-write="canWriteHere && !atVirtualRoot && !trashActive"
       :can-go-up="canGoUp"
       :global-search="paletteGlobalSearch"
+      :hit-can="paletteHitCan /* #47 */"
       @close="showPalette = false"
-      @open-hit="openSearchHit"
+      @open-hit="onPaletteOpenHit /* #47 — another account's hit goes to the host */"
+      @download-hit="downloadSearchHit /* #47 */"
+      @drag-hit="onPaletteDragHit /* #47 */"
+      @warm-hit="onPaletteWarmHit /* #71 */"
+      @drop-inside="onPaletteDropInside /* #47 */"
       @open-node="openNode"
       @navigate="(p: string) => load(p)"
       @new-folder="showNewFolder = true"

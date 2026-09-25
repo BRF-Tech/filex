@@ -139,6 +139,15 @@ func UpsertForMySQL(q string) string {
 // Ping implements db.Store.
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 
+// conn is the handle a statement runs on: the transaction ctx carries on this
+// database (Store.WithTx), or the pool. Every statement in this driver asks.
+func (s *Store) conn(ctx context.Context) db.Querier { return db.Conn(ctx, s.db) }
+
+// WithTx implements db.Store (see internal/db/tx.go).
+func (s *Store) WithTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	return db.RunInTx(ctx, s.db, fn)
+}
+
 // Close implements db.Store.
 func (s *Store) Close() error { return s.db.Close() }
 
@@ -161,7 +170,7 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 	if st.UID == "" {
 		st.UID = model.NewStorageUID()
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO storages (name, driver, mount_path, config_json, sync_mode, sync_interval_s, enabled, read_only, rbac_enabled, uid)
 		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
 		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, btoi(st.Enabled), btoi(st.ReadOnly), btoi(st.RBACEnabled), st.UID)
@@ -182,12 +191,12 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 const storageCols = `id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled, COALESCE(uid,'')`
 
 func (s *Store) GetStorage(ctx context.Context, id int64) (*model.Storage, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+storageCols+` FROM storages WHERE id=?`, id)
+	row := s.conn(ctx).QueryRowContext(ctx, `SELECT `+storageCols+` FROM storages WHERE id=?`, id)
 	return scanStorage(row)
 }
 
 func (s *Store) GetStorageByName(ctx context.Context, name string) (*model.Storage, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+storageCols+` FROM storages WHERE name=?`, name)
+	row := s.conn(ctx).QueryRowContext(ctx, `SELECT `+storageCols+` FROM storages WHERE name=?`, name)
 	return scanStorage(row)
 }
 
@@ -198,12 +207,12 @@ func (s *Store) GetStorageByUID(ctx context.Context, uid string) (*model.Storage
 	if uid == "" {
 		return nil, sql.ErrNoRows
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT `+storageCols+` FROM storages WHERE uid=?`, uid)
+	row := s.conn(ctx).QueryRowContext(ctx, `SELECT `+storageCols+` FROM storages WHERE uid=?`, uid)
 	return scanStorage(row)
 }
 
 func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+storageCols+` FROM storages ORDER BY id`)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+storageCols+` FROM storages ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +229,7 @@ func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
 }
 
 func (s *Store) ListEnabledStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+storageCols+` FROM storages WHERE enabled=1 ORDER BY id`)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+storageCols+` FROM storages WHERE enabled=1 ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +252,7 @@ func (s *Store) UpdateStorage(ctx context.Context, st *model.Storage) error {
 	// cannot fix. Only a CHANGE to an unsupported mode is rejected.
 	if err := model.ValidateSyncMode(st.SyncMode); err != nil {
 		var prev string
-		_ = s.db.QueryRowContext(ctx, `SELECT sync_mode FROM storages WHERE id=?`, st.ID).Scan(&prev)
+		_ = s.conn(ctx).QueryRowContext(ctx, `SELECT sync_mode FROM storages WHERE id=?`, st.ID).Scan(&prev)
 		if model.SyncMode(prev) != st.SyncMode {
 			return err
 		}
@@ -260,7 +269,7 @@ func (s *Store) UpdateStorage(ctx context.Context, st *model.Storage) error {
 	if repMode == "" {
 		repMode = "async"
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE storages SET name=?, driver=?, mount_path=?, config_json=?, sync_mode=?, sync_interval_s=?, enabled=?, read_only=?, rbac_enabled=?, role=?, replica_of_id=?, replica_mode=?, replica_target_id=? WHERE id=?`,
 		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS,
 		btoi(st.Enabled), btoi(st.ReadOnly), btoi(st.RBACEnabled),
@@ -270,7 +279,7 @@ func (s *Store) UpdateStorage(ctx context.Context, st *model.Storage) error {
 }
 
 func (s *Store) UpdateStorageSyncCursor(ctx context.Context, id int64, at time.Time, token string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE storages SET last_sync_at=?, last_sync_token=? WHERE id=?`, at, token, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE storages SET last_sync_at=?, last_sync_token=? WHERE id=?`, at, token, id)
 	return err
 }
 
@@ -287,7 +296,7 @@ func scanReplicationTarget(r rowScanner) (*model.ReplicationTarget, error) {
 }
 
 func (s *Store) ListReplicationTargets(ctx context.Context) ([]*model.ReplicationTarget, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, name, driver, config_json, mode, enabled, created_at, updated_at
 		   FROM replication_targets ORDER BY id`)
 	if err != nil {
@@ -306,7 +315,7 @@ func (s *Store) ListReplicationTargets(ctx context.Context) ([]*model.Replicatio
 }
 
 func (s *Store) GetReplicationTarget(ctx context.Context, id int64) (*model.ReplicationTarget, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT id, name, driver, config_json, mode, enabled, created_at, updated_at
 		   FROM replication_targets WHERE id=?`, id)
 	return scanReplicationTarget(row)
@@ -321,7 +330,7 @@ func (s *Store) CreateReplicationTarget(ctx context.Context, rt *model.Replicati
 	if mode == "" {
 		mode = "async"
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO replication_targets (name, driver, config_json, mode, enabled)
 		 VALUES (?, ?, ?, ?, ?)`,
 		rt.Name, rt.Driver, string(cfg), mode, btoi(rt.Enabled),
@@ -342,7 +351,7 @@ func (s *Store) UpdateReplicationTarget(ctx context.Context, rt *model.Replicati
 	if mode == "" {
 		mode = "async"
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE replication_targets
 		    SET name=?, driver=?, config_json=?, mode=?, enabled=?, updated_at=CURRENT_TIMESTAMP
 		  WHERE id=?`,
@@ -353,15 +362,15 @@ func (s *Store) UpdateReplicationTarget(ctx context.Context, rt *model.Replicati
 func (s *Store) DeleteReplicationTarget(ctx context.Context, id int64) error {
 	// Clear FK on any primary that was pointing here so the orphan
 	// reference doesn't 404 on the UI later.
-	if _, err := s.db.ExecContext(ctx, `UPDATE storages SET replica_target_id=NULL WHERE replica_target_id=?`, id); err != nil {
+	if _, err := s.conn(ctx).ExecContext(ctx, `UPDATE storages SET replica_target_id=NULL WHERE replica_target_id=?`, id); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM replication_targets WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM replication_targets WHERE id=?`, id)
 	return err
 }
 
 func (s *Store) DeleteStorage(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM storages WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM storages WHERE id=?`, id)
 	return err
 }
 
@@ -382,7 +391,7 @@ func (s *Store) CreateNode(ctx context.Context, n *model.Node) (*model.Node, err
 	// desktop sync, a scanner walk — costs the same number of round trips it
 	// did before ownership existed. nil owner/actor is SYSTEM and is written
 	// as NULL on purpose (see migration 00038).
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO nodes (storage_id, parent_id, name, path, path_hash, storage_key, type, size, mime, etag, backend_mtime, sync_state, transfer_state, owner_id, last_actor_id, external_upload)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		n.StorageID, n.ParentID, n.Name, n.Path, n.PathHash, n.StorageKey, n.Type, n.Size, n.Mime, n.Etag, n.BackendMtime, n.SyncState, transferState, n.OwnerID, n.LastActorID, n.ExternalUpload)
@@ -394,12 +403,12 @@ func (s *Store) CreateNode(ctx context.Context, n *model.Node) (*model.Node, err
 }
 
 func (s *Store) GetNode(ctx context.Context, id int64) (*model.Node, error) {
-	row := s.db.QueryRowContext(ctx, nodeSelectColumns()+` FROM nodes WHERE id=?`, id)
+	row := s.conn(ctx).QueryRowContext(ctx, nodeSelectColumns()+` FROM nodes WHERE id=?`, id)
 	return scanNode(row)
 }
 
 func (s *Store) GetNodeByPath(ctx context.Context, storageID int64, hash string) (*model.Node, error) {
-	row := s.db.QueryRowContext(ctx, nodeSelectColumns()+` FROM nodes WHERE storage_id=? AND path_hash=? AND deleted_at IS NULL`, storageID, hash)
+	row := s.conn(ctx).QueryRowContext(ctx, nodeSelectColumns()+` FROM nodes WHERE storage_id=? AND path_hash=? AND deleted_at IS NULL`, storageID, hash)
 	return scanNode(row)
 }
 
@@ -411,7 +420,7 @@ func (s *Store) GetNodeByPath(ctx context.Context, storageID int64, hash string)
 // (0 before 1), and id DESC picks the most recent among the trashed. Without
 // it the sync worker's view of a path would depend on row order.
 func (s *Store) GetNodeByPathIncludingDeleted(ctx context.Context, storageID int64, hash string) (*model.Node, error) {
-	row := s.db.QueryRowContext(ctx, nodeSelectColumns()+
+	row := s.conn(ctx).QueryRowContext(ctx, nodeSelectColumns()+
 		` FROM nodes WHERE storage_id=? AND path_hash=?`+
 		` ORDER BY CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, id DESC LIMIT 1`,
 		storageID, hash)
@@ -426,7 +435,7 @@ func (s *Store) ListLiveNodesInTrash(ctx context.Context, storageID int64, trash
 		return nil, nil
 	}
 	slashed := "/" + bare
-	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+
+	rows, err := s.conn(ctx).QueryContext(ctx, nodeSelectColumns()+
 		` FROM nodes WHERE storage_id=? AND deleted_at IS NULL`+
 		` AND (path=? OR path=? OR path LIKE ? OR path LIKE ?) ORDER BY id`,
 		storageID, slashed, bare, slashed+"/%", bare+"/%")
@@ -483,7 +492,7 @@ func (s *Store) ListNodesUnder(ctx context.Context, storageID int64, dir string,
 		q += ` AND deleted_at IS NULL`
 	}
 	args := append([]any{storageID, slashed, bare}, belowArgs(slashed, bare)...)
-	rows, err := s.db.QueryContext(ctx, q+` ORDER BY id`, args...)
+	rows, err := s.conn(ctx).QueryContext(ctx, q+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -509,7 +518,7 @@ func (s *Store) ListNodesByParent(ctx context.Context, storageID int64, parentID
 		args = append(args, *parentID)
 	}
 	q += ` ORDER BY type DESC, name`
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.conn(ctx).QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -526,7 +535,7 @@ func (s *Store) ListNodesByParent(ctx context.Context, storageID int64, parentID
 }
 
 func (s *Store) AggNodes(ctx context.Context, storageID int64) ([]db.NodeAgg, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, parent_id, type, size, backend_mtime FROM nodes WHERE storage_id=? AND deleted_at IS NULL`,
 		storageID)
 	if err != nil {
@@ -547,13 +556,13 @@ func (s *Store) AggNodes(ctx context.Context, storageID int64) ([]db.NodeAgg, er
 }
 
 func (s *Store) SetNodeSize(ctx context.Context, id int64, size int64) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE nodes SET size=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, size, id)
 	return err
 }
 
 func (s *Store) SetNodeMtime(ctx context.Context, id int64, mtime *time.Time) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE nodes SET backend_mtime=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, mtime, id)
 	return err
 }
@@ -583,7 +592,7 @@ func (s *Store) CreateProvider(ctx context.Context, p *model.Provider) (*model.P
 	if at == "" {
 		at = model.AuthTypeOIDC
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO providers (slug, name, host, auth_type, oidc_issuer, oidc_client_id, oidc_client_secret, oidc_redirect_url, role_claim, admin_group, cookie_domain, is_supertenant, enabled)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.Slug, p.Name, p.Host, at, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret,
@@ -596,11 +605,11 @@ func (s *Store) CreateProvider(ctx context.Context, p *model.Provider) (*model.P
 }
 
 func (s *Store) GetProvider(ctx context.Context, id int64) (*model.Provider, error) {
-	return scanProvider(s.db.QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE id=?`, id))
+	return scanProvider(s.conn(ctx).QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE id=?`, id))
 }
 
 func (s *Store) GetProviderBySlug(ctx context.Context, slug string) (*model.Provider, error) {
-	p, err := scanProvider(s.db.QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE slug=?`, slug))
+	p, err := scanProvider(s.conn(ctx).QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE slug=?`, slug))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -608,7 +617,7 @@ func (s *Store) GetProviderBySlug(ctx context.Context, slug string) (*model.Prov
 }
 
 func (s *Store) GetProviderByHost(ctx context.Context, host string) (*model.Provider, error) {
-	p, err := scanProvider(s.db.QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE host=? AND enabled=1`, host))
+	p, err := scanProvider(s.conn(ctx).QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE host=? AND enabled=1`, host))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -616,7 +625,7 @@ func (s *Store) GetProviderByHost(ctx context.Context, host string) (*model.Prov
 }
 
 func (s *Store) GetSupertenant(ctx context.Context) (*model.Provider, error) {
-	p, err := scanProvider(s.db.QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE is_supertenant=1 ORDER BY id LIMIT 1`))
+	p, err := scanProvider(s.conn(ctx).QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE is_supertenant=1 ORDER BY id LIMIT 1`))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -624,7 +633,7 @@ func (s *Store) GetSupertenant(ctx context.Context) (*model.Provider, error) {
 }
 
 func (s *Store) ListProviders(ctx context.Context) ([]*model.Provider, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+providerCols+` FROM providers ORDER BY id`)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+providerCols+` FROM providers ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -641,7 +650,7 @@ func (s *Store) ListProviders(ctx context.Context) ([]*model.Provider, error) {
 }
 
 func (s *Store) UpdateProvider(ctx context.Context, p *model.Provider) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE providers SET slug=?, name=?, host=?, auth_type=?, oidc_issuer=?, oidc_client_id=?, oidc_client_secret=?, oidc_redirect_url=?, role_claim=?, admin_group=?, cookie_domain=?, is_supertenant=?, enabled=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 		p.Slug, p.Name, p.Host, p.AuthType, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret,
 		p.OIDCRedirectURL, p.RoleClaim, p.AdminGroup, p.CookieDomain, btoi(p.IsSupertenant), btoi(p.Enabled), p.ID)
@@ -649,13 +658,13 @@ func (s *Store) UpdateProvider(ctx context.Context, p *model.Provider) error {
 }
 
 func (s *Store) DeleteProvider(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM providers WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM providers WHERE id=?`, id)
 	return err
 }
 
 func (s *Store) LinkProviderStorage(ctx context.Context, providerID, storageID int64) error {
 	var n int
-	if err := s.db.QueryRowContext(ctx,
+	if err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM provider_storages WHERE provider_id=? AND storage_id=?`,
 		providerID, storageID).Scan(&n); err != nil {
 		return err
@@ -663,19 +672,19 @@ func (s *Store) LinkProviderStorage(ctx context.Context, providerID, storageID i
 	if n > 0 {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO provider_storages (provider_id, storage_id) VALUES (?,?)`, providerID, storageID)
 	return err
 }
 
 func (s *Store) UnlinkProviderStorage(ctx context.Context, providerID, storageID int64) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`DELETE FROM provider_storages WHERE provider_id=? AND storage_id=?`, providerID, storageID)
 	return err
 }
 
 func (s *Store) ListProviderStorageIDs(ctx context.Context, providerID int64) ([]int64, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT storage_id FROM provider_storages WHERE provider_id=? ORDER BY storage_id`, providerID)
 	if err != nil {
 		return nil, err
@@ -694,7 +703,7 @@ func (s *Store) ListProviderStorageIDs(ctx context.Context, providerID int64) ([
 
 func (s *Store) GetProviderIDForStorage(ctx context.Context, storageID int64) (int64, bool, error) {
 	var pid int64
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT provider_id FROM provider_storages WHERE storage_id=? ORDER BY provider_id LIMIT 1`,
 		storageID).Scan(&pid)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -712,7 +721,7 @@ func (s *Store) GetProviderIDForStorage(ctx context.Context, storageID int64) (i
 // provider CRUD SQL — and therefore flag-off behavior — stays byte-identical.
 
 func (s *Store) SetProviderPlan(ctx context.Context, providerID int64, plan, limitsJSON, billingRef string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE providers SET plan=?, limits_json=?, billing_ref=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 		nullIfEmpty(plan), nullIfEmpty(limitsJSON), nullIfEmpty(billingRef), providerID)
 	return err
@@ -720,7 +729,7 @@ func (s *Store) SetProviderPlan(ctx context.Context, providerID int64, plan, lim
 
 func (s *Store) GetProviderPlan(ctx context.Context, providerID int64) (string, string, string, error) {
 	var plan, limitsJSON, billingRef string
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COALESCE(plan,''), COALESCE(limits_json,''), COALESCE(billing_ref,'') FROM providers WHERE id=?`,
 		providerID).Scan(&plan, &limitsJSON, &billingRef)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -739,14 +748,14 @@ func nullIfEmpty(v string) any {
 }
 
 func (s *Store) UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE nodes SET size=?, mime=?, etag=?, backend_mtime=?, seen_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 		size, mime, etag, mtime, id)
 	return err
 }
 
 func (s *Store) TouchNodeSeen(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET seen_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET seen_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
 }
 
@@ -767,10 +776,10 @@ func (s *Store) SoftDeleteAndRetag(ctx context.Context, id int64, trashPath, tra
 	var nodeType string
 	var curPath string
 	var storageID int64
-	scanErr := s.db.QueryRowContext(ctx,
+	scanErr := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT storage_id, type, path FROM nodes WHERE id=?`, id).
 		Scan(&storageID, &nodeType, &curPath)
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.conn(ctx).ExecContext(ctx, `
 		UPDATE nodes
 		SET deleted_at=CURRENT_TIMESTAMP,
 		    updated_at=CURRENT_TIMESTAMP,
@@ -803,7 +812,7 @@ func (s *Store) retagTrashedSubtree(ctx context.Context, storageID int64, origPa
 	}
 	var children []childRow
 	for _, pfx := range prefixes {
-		rows, err := s.db.QueryContext(ctx, `
+		rows, err := s.conn(ctx).QueryContext(ctx, `
 			SELECT id, path FROM nodes
 			WHERE storage_id=? AND deleted_at IS NULL AND SUBSTR(path,1,?)=?`,
 			storageID, prefixChars(pfx), pfx)
@@ -831,7 +840,7 @@ func (s *Store) retagTrashedSubtree(ctx context.Context, storageID int64, origPa
 		}
 		newPath := strings.TrimRight(trashPath, "/") + "/" + suffix
 		newHash := pathkey.Hash(storageID, newPath)
-		_, _ = s.db.ExecContext(ctx, `
+		_, _ = s.conn(ctx).ExecContext(ctx, `
 			UPDATE nodes
 			SET deleted_at=CURRENT_TIMESTAMP,
 			    updated_at=CURRENT_TIMESTAMP,
@@ -856,7 +865,7 @@ func (s *Store) restoreTrashedSubtree(ctx context.Context, storageID int64, tras
 	}
 	var children []childRow
 	for _, pfx := range prefixes {
-		rows, err := s.db.QueryContext(ctx, `
+		rows, err := s.conn(ctx).QueryContext(ctx, `
 			SELECT id, path FROM nodes
 			WHERE storage_id=? AND deleted_at IS NOT NULL AND SUBSTR(path,1,?)=?`,
 			storageID, prefixChars(pfx), pfx)
@@ -884,7 +893,7 @@ func (s *Store) restoreTrashedSubtree(ctx context.Context, storageID int64, tras
 		}
 		newPath := strings.TrimRight(restoredPath, "/") + "/" + suffix
 		newHash := pathkey.Hash(storageID, newPath)
-		_, _ = s.db.ExecContext(ctx, `
+		_, _ = s.conn(ctx).ExecContext(ctx, `
 			UPDATE nodes
 			SET deleted_at=NULL,
 			    updated_at=CURRENT_TIMESTAMP,
@@ -933,12 +942,12 @@ func subtreeSuffix(p string, prefixes []string) string {
 }
 
 func (s *Store) SoftDeleteNode(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET deleted_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET deleted_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
 }
 
 func (s *Store) HardDeleteNode(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM nodes WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM nodes WHERE id=?`, id)
 	return err
 }
 
@@ -962,7 +971,7 @@ func (s *Store) HardDeleteNode(ctx context.Context, id int64) error {
 // from a row that has to be hard-deleted. Overwriting it here would destroy
 // both. Live rows mirror path; trashed rows keep their origin.
 func (s *Store) MoveNode(ctx context.Context, id int64, parentID *int64, name, path, hash string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE nodes
 		    SET parent_id=?, name=?, path=?, path_hash=?,
 		        storage_key=CASE WHEN deleted_at IS NULL THEN ? ELSE storage_key END,
@@ -981,7 +990,7 @@ func (s *Store) ListStaleNodes(ctx context.Context, storageID int64, before time
 	// pass nukes rows the walk just touched. Format `before` to match
 	// CURRENT_TIMESTAMP's wire format so the comparison is honest.
 	beforeStr := before.UTC().Format("2006-01-02 15:04:05")
-	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+` FROM nodes WHERE storage_id=? AND seen_at < ? AND deleted_at IS NULL`, storageID, beforeStr)
+	rows, err := s.conn(ctx).QueryContext(ctx, nodeSelectColumns()+` FROM nodes WHERE storage_id=? AND seen_at < ? AND deleted_at IS NULL`, storageID, beforeStr)
 	if err != nil {
 		return nil, err
 	}
@@ -1005,7 +1014,7 @@ func (s *Store) ListStaleNodesUnder(ctx context.Context, storageID int64, dir st
 	// The same CURRENT_TIMESTAMP wire format ListStaleNodes explains.
 	beforeStr := before.UTC().Format("2006-01-02 15:04:05")
 	args := append([]any{storageID, beforeStr}, belowArgs(slashed, bare)...)
-	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+
+	rows, err := s.conn(ctx).QueryContext(ctx, nodeSelectColumns()+
 		` FROM nodes WHERE storage_id=? AND seen_at < ? AND deleted_at IS NULL AND `+belowClause, args...)
 	if err != nil {
 		return nil, err
@@ -1029,14 +1038,14 @@ func (s *Store) CountLiveNodesUnder(ctx context.Context, storageID int64, dir st
 	}
 	var n int64
 	args := append([]any{storageID}, belowArgs(slashed, bare)...)
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM nodes WHERE storage_id=? AND deleted_at IS NULL AND `+belowClause, args...).Scan(&n)
 	return n, err
 }
 
 func (s *Store) CountNodesByStorage(ctx context.Context, storageID int64) (int64, error) {
 	var n int64
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE storage_id=? AND deleted_at IS NULL`, storageID).Scan(&n)
+	err := s.conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE storage_id=? AND deleted_at IS NULL`, storageID).Scan(&n)
 	return n, err
 }
 
@@ -1045,7 +1054,7 @@ func (s *Store) StorageStats(ctx context.Context, storageID int64) (int64, int64
 		count int64
 		size  sql.NullInt64
 	)
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM nodes
 		   WHERE storage_id=? AND type='file' AND deleted_at IS NULL`,
 		storageID,
@@ -1061,7 +1070,7 @@ func (s *Store) StorageStats(ctx context.Context, storageID int64) (int64, int64
 // duplicate report. Plain GROUP BY … HAVING in a derived table, so the
 // same SQL runs on SQLite and MySQL (this driver backs both).
 func (s *Store) ListDuplicateNodes(ctx context.Context, minSize int64) ([]db.DuplicateNode, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT n.id, n.storage_id, n.path, n.name, n.size, COALESCE(n.etag,'')
 		   FROM nodes n
 		   JOIN (SELECT size, etag FROM nodes
@@ -1197,7 +1206,7 @@ func (s *Store) SearchNodes(ctx context.Context, storageID int64, m model.NameMa
 	}
 	q.WriteString(` LIMIT ?`)
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, q.String(), args...)
+	rows, err := s.conn(ctx).QueryContext(ctx, q.String(), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1221,7 +1230,7 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash, role, local
 	// installs behave unchanged and every user can log in; OIDC JIT overrides
 	// this with the host-resolved tenant via SetUserProvider. This keeps the
 	// CreateUser signature stable for its many callers.
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO users (email, password_hash, role, locale, timezone, provider_id)
 		 VALUES (?,?,?,?,?, (SELECT id FROM providers WHERE slug='default'))`,
 		email, passwordHash, role, locale, tz)
@@ -1237,7 +1246,7 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash, role, local
 // oidcSubject leaves the column as-is is NOT done here — it is overwritten, so
 // callers should pass the current value when only changing the provider.
 func (s *Store) SetUserProvider(ctx context.Context, userID, providerID int64, oidcSubject string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE users SET provider_id=?, oidc_subject=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 		providerID, oidcSubject, userID)
 	return err
@@ -1246,7 +1255,7 @@ func (s *Store) SetUserProvider(ctx context.Context, userID, providerID int64, o
 // GetUserByProviderEmail looks a user up within a single provider (tenant), the
 // multi-tenant analogue of GetUserByEmail. Returns (nil, nil) if absent.
 func (s *Store) GetUserByProviderEmail(ctx context.Context, providerID int64, email string) (*model.User, error) {
-	u, err := scanUser(s.db.QueryRowContext(ctx, userSelect()+` FROM users WHERE provider_id=? AND email=?`, providerID, email))
+	u, err := scanUser(s.conn(ctx).QueryRowContext(ctx, userSelect()+` FROM users WHERE provider_id=? AND email=?`, providerID, email))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1255,7 +1264,7 @@ func (s *Store) GetUserByProviderEmail(ctx context.Context, providerID int64, em
 
 // ListUsersByProvider lists a tenant's users (provider admin + delete-cascade).
 func (s *Store) ListUsersByProvider(ctx context.Context, providerID int64) ([]*model.User, error) {
-	rows, err := s.db.QueryContext(ctx, userSelect()+` FROM users WHERE provider_id=? ORDER BY id`, providerID)
+	rows, err := s.conn(ctx).QueryContext(ctx, userSelect()+` FROM users WHERE provider_id=? ORDER BY id`, providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -1272,12 +1281,12 @@ func (s *Store) ListUsersByProvider(ctx context.Context, providerID int64) ([]*m
 }
 
 func (s *Store) GetUser(ctx context.Context, id int64) (*model.User, error) {
-	row := s.db.QueryRowContext(ctx, userSelect()+` FROM users WHERE id=?`, id)
+	row := s.conn(ctx).QueryRowContext(ctx, userSelect()+` FROM users WHERE id=?`, id)
 	return scanUser(row)
 }
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*model.User, error) {
-	row := s.db.QueryRowContext(ctx, userSelect()+` FROM users WHERE email=?`, email)
+	row := s.conn(ctx).QueryRowContext(ctx, userSelect()+` FROM users WHERE email=?`, email)
 	return scanUser(row)
 }
 
@@ -1285,7 +1294,7 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*model.User, 
 // Callers should reach it through identity.Resolve rather than directly, so
 // the e-mail/username disambiguation lives in one place.
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (*model.User, error) {
-	row := s.db.QueryRowContext(ctx, userSelect()+` FROM users WHERE username=?`, username)
+	row := s.conn(ctx).QueryRowContext(ctx, userSelect()+` FROM users WHERE username=?`, username)
 	return scanUser(row)
 }
 
@@ -1293,13 +1302,13 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (*model.
 // this call — is what actually guarantees uniqueness, so a caller racing
 // another creation gets an error here and is expected to try another name.
 func (s *Store) SetUserUsername(ctx context.Context, id int64, username string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE users SET username=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, username, id)
 	return err
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]*model.User, error) {
-	rows, err := s.db.QueryContext(ctx, userSelect()+` FROM users ORDER BY id`)
+	rows, err := s.conn(ctx).QueryContext(ctx, userSelect()+` FROM users ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -1317,22 +1326,22 @@ func (s *Store) ListUsers(ctx context.Context) ([]*model.User, error) {
 
 func (s *Store) CountUsers(ctx context.Context) (int64, error) {
 	var n int64
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
+	err := s.conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
 	return n, err
 }
 
 func (s *Store) UpdateUserPassword(ctx context.Context, id int64, hash string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, hash, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET password_hash=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, hash, id)
 	return err
 }
 
 func (s *Store) UpdateUserEmail(ctx context.Context, id int64, email string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE users SET email=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, email, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET email=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, email, id)
 	return err
 }
 
 func (s *Store) UpdateUserDisplayName(ctx context.Context, id int64, displayName string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE users SET display_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, displayName, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET display_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, displayName, id)
 	return err
 }
 
@@ -1340,7 +1349,7 @@ func (s *Store) UpdateUserDisplayName(ctx context.Context, id int64, displayName
 // picture. Validation of the URI belongs to the API layer, which is the only
 // place that knows what a browser will accept.
 func (s *Store) UpdateUserAvatar(ctx context.Context, id int64, avatarURL string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE users SET avatar_url=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, avatarURL, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET avatar_url=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, avatarURL, id)
 	return err
 }
 
@@ -1348,7 +1357,7 @@ func (s *Store) UpdateUserAvatar(ctx context.Context, id int64, avatarURL string
 // codes prior to the user verifying with a one-time code.
 func (s *Store) SetTotpPendingSecret(ctx context.Context, id int64, secret string, recoveryCodes []string) error {
 	codes, _ := json.Marshal(recoveryCodes)
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE users SET totp_pending_secret=?, totp_recovery_codes_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 		secret, string(codes), id)
 	return err
@@ -1357,7 +1366,7 @@ func (s *Store) SetTotpPendingSecret(ctx context.Context, id int64, secret strin
 // ActivateTotp moves the pending secret into totp_secret and flips the
 // totp_enabled flag on.
 func (s *Store) ActivateTotp(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE users SET totp_secret=COALESCE(totp_pending_secret,''), totp_pending_secret=NULL, totp_enabled=1, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 		id)
 	return err
@@ -1365,36 +1374,36 @@ func (s *Store) ActivateTotp(ctx context.Context, id int64) error {
 
 // ClearTotp wipes all 2FA state.
 func (s *Store) ClearTotp(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE users SET totp_secret=NULL, totp_pending_secret=NULL, totp_enabled=0, totp_recovery_codes_json='[]', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 		id)
 	return err
 }
 
 func (s *Store) UpdateUserLocale(ctx context.Context, id int64, locale, tz string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE users SET locale=?, timezone=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, locale, tz, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET locale=?, timezone=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, locale, tz, id)
 	return err
 }
 
 func (s *Store) UpdateUserRole(ctx context.Context, id int64, role string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE users SET role=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, role, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, role, id)
 	return err
 }
 
 func (s *Store) TouchLastLogin(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
 }
 
 func (s *Store) DeleteUser(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM users WHERE id=?`, id)
 	return err
 }
 
 // ─────────────────── Sessions ───────────────────
 
 func (s *Store) CreateSession(ctx context.Context, userID int64, token string, expiresAt time.Time, ip, ua string) (*model.Session, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO sessions (user_id, token, expires_at, ip, user_agent) VALUES (?,?,?,?,?)`,
 		userID, token, expiresAt, ip, ua)
 	if err != nil {
@@ -1405,7 +1414,7 @@ func (s *Store) CreateSession(ctx context.Context, userID int64, token string, e
 }
 
 func (s *Store) GetSessionByToken(ctx context.Context, token string) (*model.Session, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT id, user_id, token, expires_at, COALESCE(ip,''), COALESCE(user_agent,''), created_at FROM sessions WHERE token=? AND expires_at > CURRENT_TIMESTAMP`,
 		token)
 	out := &model.Session{}
@@ -1416,13 +1425,13 @@ func (s *Store) GetSessionByToken(ctx context.Context, token string) (*model.Ses
 }
 
 func (s *Store) DeleteSession(ctx context.Context, token string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token=?`, token)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM sessions WHERE token=?`, token)
 	return err
 }
 
 // SetSessionIDToken implements db.Store (migration 00057).
 func (s *Store) SetSessionIDToken(ctx context.Context, token, idToken string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET id_token=? WHERE token=?`, idToken, token)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE sessions SET id_token=? WHERE token=?`, idToken, token)
 	return err
 }
 
@@ -1431,7 +1440,7 @@ func (s *Store) SetSessionIDToken(ctx context.Context, token, idToken string) er
 // expired id_token as a hint, and sign-out is exactly when it has expired.
 func (s *Store) GetSessionIDToken(ctx context.Context, token string) (string, error) {
 	var idToken sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT id_token FROM sessions WHERE token=?`, token).Scan(&idToken)
+	err := s.conn(ctx).QueryRowContext(ctx, `SELECT id_token FROM sessions WHERE token=?`, token).Scan(&idToken)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -1443,29 +1452,29 @@ func (s *Store) GetSessionIDToken(ctx context.Context, token string) (string, er
 // password change).
 func (s *Store) DeleteSessionsForUser(ctx context.Context, userID int64, exceptToken string) error {
 	if exceptToken == "" {
-		_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=?`, userID)
+		_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM sessions WHERE user_id=?`, userID)
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=? AND token<>?`, userID, exceptToken)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM sessions WHERE user_id=? AND token<>?`, userID, exceptToken)
 	return err
 }
 
 // CountActiveSessions returns the count of unexpired sessions.
 func (s *Store) CountActiveSessions(ctx context.Context) (int64, error) {
 	var n int64
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions WHERE expires_at > CURRENT_TIMESTAMP`).Scan(&n)
+	err := s.conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions WHERE expires_at > CURRENT_TIMESTAMP`).Scan(&n)
 	return n, err
 }
 
 func (s *Store) DeleteExpiredSessions(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP`)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP`)
 	return err
 }
 
 // ─────────────────── API tokens ───────────────────
 
 func (s *Store) CreateAPIToken(ctx context.Context, t *model.APIToken) (*model.APIToken, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO api_tokens (user_id, label, token_hash, scopes, usernames, kind, expires_at) VALUES (?,?,?,?,?,?,?)`,
 		t.UserID, t.Label, t.TokenHash, t.Scopes, t.Usernames, model.NormalizeTokenKind(t.Kind), t.ExpiresAt)
 	if err != nil {
@@ -1500,7 +1509,7 @@ func scanS3AccessKey(r rowScanner) (*model.S3AccessKey, error) {
 }
 
 func (s *Store) CreateS3AccessKey(ctx context.Context, k *model.S3AccessKey) (*model.S3AccessKey, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO s3_access_keys (access_key_id, secret_enc, user_id, api_token_id, label, bucket, prefix, expires_at)
 		 VALUES (?,?,?,?,?,?,?,?)`,
 		k.AccessKeyID, k.SecretEnc, k.UserID, k.APITokenID, k.Label, k.Bucket, k.Prefix, k.ExpiresAt)
@@ -1512,17 +1521,17 @@ func (s *Store) CreateS3AccessKey(ctx context.Context, k *model.S3AccessKey) (*m
 }
 
 func (s *Store) GetS3AccessKeyByID(ctx context.Context, id int64) (*model.S3AccessKey, error) {
-	return scanS3AccessKey(s.db.QueryRowContext(ctx, `SELECT `+s3KeyCols+` FROM s3_access_keys WHERE id=?`, id))
+	return scanS3AccessKey(s.conn(ctx).QueryRowContext(ctx, `SELECT `+s3KeyCols+` FROM s3_access_keys WHERE id=?`, id))
 }
 
 // GetS3AccessKey is the hot path: every signed request looks its key up here,
 // so it is a single indexed read and nothing more.
 func (s *Store) GetS3AccessKey(ctx context.Context, accessKeyID string) (*model.S3AccessKey, error) {
-	return scanS3AccessKey(s.db.QueryRowContext(ctx, `SELECT `+s3KeyCols+` FROM s3_access_keys WHERE access_key_id=?`, accessKeyID))
+	return scanS3AccessKey(s.conn(ctx).QueryRowContext(ctx, `SELECT `+s3KeyCols+` FROM s3_access_keys WHERE access_key_id=?`, accessKeyID))
 }
 
 func (s *Store) ListS3AccessKeys(ctx context.Context, userID int64) ([]*model.S3AccessKey, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+s3KeyCols+` FROM s3_access_keys WHERE user_id=? ORDER BY created_at DESC`, userID)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+s3KeyCols+` FROM s3_access_keys WHERE user_id=? ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1542,16 +1551,16 @@ func (s *Store) ListS3AccessKeys(ctx context.Context, userID int64) ([]*model.S3
 }
 
 func (s *Store) TouchS3AccessKey(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE s3_access_keys SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE s3_access_keys SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
 }
 
 func (s *Store) SetS3AccessKeyDisabled(ctx context.Context, id int64, disabled bool) error {
 	if disabled {
-		_, err := s.db.ExecContext(ctx, `UPDATE s3_access_keys SET disabled_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+		_, err := s.conn(ctx).ExecContext(ctx, `UPDATE s3_access_keys SET disabled_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE s3_access_keys SET disabled_at=NULL WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE s3_access_keys SET disabled_at=NULL WHERE id=?`, id)
 	return err
 }
 
@@ -1559,7 +1568,7 @@ func (s *Store) SetS3AccessKeyDisabled(ctx context.Context, id int64, disabled b
 // self-service surface, and a query scoped to the owner cannot delete another
 // account key even if the handler above it forgets to check.
 func (s *Store) DeleteS3AccessKey(ctx context.Context, id, userID int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM s3_access_keys WHERE id=? AND user_id=?`, id, userID)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM s3_access_keys WHERE id=? AND user_id=?`, id, userID)
 	return err
 }
 
@@ -1577,7 +1586,7 @@ func scanSSHPublicKey(r rowScanner) (*model.SSHPublicKey, error) {
 }
 
 func (s *Store) CreateSSHPublicKey(ctx context.Context, k *model.SSHPublicKey) (*model.SSHPublicKey, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO ssh_public_keys (user_id, name, fingerprint, public_key) VALUES (?,?,?,?)`,
 		k.UserID, k.Name, k.Fingerprint, k.PublicKey)
 	if err != nil {
@@ -1589,17 +1598,17 @@ func (s *Store) CreateSSHPublicKey(ctx context.Context, k *model.SSHPublicKey) (
 
 // GetSSHPublicKey is the login path: one indexed read on the fingerprint.
 func (s *Store) GetSSHPublicKey(ctx context.Context, fingerprint string) (*model.SSHPublicKey, error) {
-	return scanSSHPublicKey(s.db.QueryRowContext(ctx,
+	return scanSSHPublicKey(s.conn(ctx).QueryRowContext(ctx,
 		`SELECT `+sshKeyCols+` FROM ssh_public_keys WHERE fingerprint=?`, fingerprint))
 }
 
 func (s *Store) GetSSHPublicKeyByID(ctx context.Context, id int64) (*model.SSHPublicKey, error) {
-	return scanSSHPublicKey(s.db.QueryRowContext(ctx,
+	return scanSSHPublicKey(s.conn(ctx).QueryRowContext(ctx,
 		`SELECT `+sshKeyCols+` FROM ssh_public_keys WHERE id=?`, id))
 }
 
 func (s *Store) ListSSHPublicKeys(ctx context.Context, userID int64) ([]*model.SSHPublicKey, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT `+sshKeyCols+` FROM ssh_public_keys WHERE user_id=? ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -1619,16 +1628,16 @@ func (s *Store) ListSSHPublicKeys(ctx context.Context, userID int64) ([]*model.S
 }
 
 func (s *Store) TouchSSHPublicKey(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE ssh_public_keys SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE ssh_public_keys SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
 }
 
 func (s *Store) SetSSHPublicKeyDisabled(ctx context.Context, id int64, disabled bool) error {
 	if disabled {
-		_, err := s.db.ExecContext(ctx, `UPDATE ssh_public_keys SET disabled_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+		_, err := s.conn(ctx).ExecContext(ctx, `UPDATE ssh_public_keys SET disabled_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE ssh_public_keys SET disabled_at=NULL WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE ssh_public_keys SET disabled_at=NULL WHERE id=?`, id)
 	return err
 }
 
@@ -1636,7 +1645,7 @@ func (s *Store) SetSSHPublicKeyDisabled(ctx context.Context, id int64, disabled 
 // DeleteS3AccessKey does: the surface is self-service, and a query scoped to
 // the owner cannot delete somebody else key even if a handler forgets to check.
 func (s *Store) DeleteSSHPublicKey(ctx context.Context, id, userID int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM ssh_public_keys WHERE id=? AND user_id=?`, id, userID)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM ssh_public_keys WHERE id=? AND user_id=?`, id, userID)
 	return err
 }
 
@@ -1660,7 +1669,7 @@ func scanNFSExport(r rowScanner) (*model.NFSExport, error) {
 }
 
 func (s *Store) CreateNFSExport(ctx context.Context, e *model.NFSExport) (*model.NFSExport, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO nfs_exports (user_id, api_token_id, label, token_hash, storage_name, prefix, read_only, allow_cidrs, expires_at)
 		 VALUES (?,?,?,?,?,?,?,?,?)`,
 		e.UserID, e.APITokenID, e.Label, e.TokenHash, e.StorageName, e.Prefix, e.ReadOnly, e.AllowCIDRs, e.ExpiresAt)
@@ -1673,17 +1682,17 @@ func (s *Store) CreateNFSExport(ctx context.Context, e *model.NFSExport) (*model
 
 // GetNFSExport is the mount path: one indexed read on the hashed secret.
 func (s *Store) GetNFSExport(ctx context.Context, tokenHash string) (*model.NFSExport, error) {
-	return scanNFSExport(s.db.QueryRowContext(ctx,
+	return scanNFSExport(s.conn(ctx).QueryRowContext(ctx,
 		`SELECT `+nfsExportCols+` FROM nfs_exports WHERE token_hash=?`, tokenHash))
 }
 
 func (s *Store) GetNFSExportByID(ctx context.Context, id int64) (*model.NFSExport, error) {
-	return scanNFSExport(s.db.QueryRowContext(ctx,
+	return scanNFSExport(s.conn(ctx).QueryRowContext(ctx,
 		`SELECT `+nfsExportCols+` FROM nfs_exports WHERE id=?`, id))
 }
 
 func (s *Store) ListNFSExports(ctx context.Context, userID int64) ([]*model.NFSExport, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT `+nfsExportCols+` FROM nfs_exports WHERE user_id=? ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -1701,27 +1710,27 @@ func (s *Store) ListNFSExports(ctx context.Context, userID int64) ([]*model.NFSE
 }
 
 func (s *Store) TouchNFSExport(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE nfs_exports SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nfs_exports SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
 }
 
 func (s *Store) SetNFSExportDisabled(ctx context.Context, id int64, disabled bool) error {
 	if disabled {
-		_, err := s.db.ExecContext(ctx, `UPDATE nfs_exports SET disabled_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+		_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nfs_exports SET disabled_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE nfs_exports SET disabled_at=NULL WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nfs_exports SET disabled_at=NULL WHERE id=?`, id)
 	return err
 }
 
 // DeleteNFSExport takes the owner id too — see DeleteS3AccessKey.
 func (s *Store) DeleteNFSExport(ctx context.Context, id, userID int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM nfs_exports WHERE id=? AND user_id=?`, id, userID)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM nfs_exports WHERE id=? AND user_id=?`, id, userID)
 	return err
 }
 
 func (s *Store) GetAPITokenByHash(ctx context.Context, tokenHash string) (*model.APIToken, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens WHERE token_hash=?`,
 		tokenHash)
 	return scanAPIToken(row)
@@ -1731,12 +1740,12 @@ func (s *Store) GetAPITokenByHash(ctx context.Context, tokenHash string) (*model
 // references a token and the credential itself was never presented — an S3
 // access key checking that the token it inherits from is still valid.
 func (s *Store) GetAPITokenByID(ctx context.Context, id int64) (*model.APIToken, error) {
-	return scanAPIToken(s.db.QueryRowContext(ctx,
+	return scanAPIToken(s.conn(ctx).QueryRowContext(ctx,
 		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens WHERE id=?`, id))
 }
 
 func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -1754,7 +1763,7 @@ func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
 }
 
 func (s *Store) ListAPITokensByUser(ctx context.Context, userID int64) ([]*model.APIToken, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens WHERE user_id=? ORDER BY created_at DESC`,
 		userID)
 	if err != nil {
@@ -1773,7 +1782,7 @@ func (s *Store) ListAPITokensByUser(ctx context.Context, userID int64) ([]*model
 }
 
 func (s *Store) TouchAPIToken(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE api_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
 }
 
@@ -1781,17 +1790,17 @@ func (s *Store) TouchAPIToken(ctx context.Context, id int64) error {
 // kind. nil = keep.
 func (s *Store) UpdateAPITokenMeta(ctx context.Context, id int64, label, usernames, kind *string) error {
 	if label != nil {
-		if _, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET label=? WHERE id=?`, *label, id); err != nil {
+		if _, err := s.conn(ctx).ExecContext(ctx, `UPDATE api_tokens SET label=? WHERE id=?`, *label, id); err != nil {
 			return err
 		}
 	}
 	if usernames != nil {
-		if _, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET usernames=? WHERE id=?`, *usernames, id); err != nil {
+		if _, err := s.conn(ctx).ExecContext(ctx, `UPDATE api_tokens SET usernames=? WHERE id=?`, *usernames, id); err != nil {
 			return err
 		}
 	}
 	if kind != nil {
-		if _, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET kind=? WHERE id=?`, model.NormalizeTokenKind(*kind), id); err != nil {
+		if _, err := s.conn(ctx).ExecContext(ctx, `UPDATE api_tokens SET kind=? WHERE id=?`, model.NormalizeTokenKind(*kind), id); err != nil {
 			return err
 		}
 	}
@@ -1799,7 +1808,7 @@ func (s *Store) UpdateAPITokenMeta(ctx context.Context, id int64, label, usernam
 }
 
 func (s *Store) DeleteAPIToken(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM api_tokens WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM api_tokens WHERE id=?`, id)
 	return err
 }
 
@@ -1839,7 +1848,7 @@ func scanFileGrant(r rowScanner) (*model.FileGrant, error) {
 }
 
 func (s *Store) ListFileGrantsByStorageUser(ctx context.Context, storageID, userID int64) ([]*model.FileGrant, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE storage_id=? AND user_id=?`, storageID, userID)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE storage_id=? AND user_id=?`, storageID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1856,7 +1865,7 @@ func (s *Store) ListFileGrantsByStorageUser(ctx context.Context, storageID, user
 }
 
 func (s *Store) ListFileGrantsByStorage(ctx context.Context, storageID int64) ([]*model.FileGrant, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE storage_id=? ORDER BY path_prefix, user_id`, storageID)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE storage_id=? ORDER BY path_prefix, user_id`, storageID)
 	if err != nil {
 		return nil, err
 	}
@@ -1873,11 +1882,11 @@ func (s *Store) ListFileGrantsByStorage(ctx context.Context, storageID int64) ([
 }
 
 func (s *Store) GetFileGrant(ctx context.Context, id int64) (*model.FileGrant, error) {
-	return scanFileGrant(s.db.QueryRowContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE id=?`, id))
+	return scanFileGrant(s.conn(ctx).QueryRowContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE id=?`, id))
 }
 
 func (s *Store) ListAllFileGrants(ctx context.Context) ([]*model.FileGrant, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants ORDER BY storage_id, path_prefix, user_id`)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants ORDER BY storage_id, path_prefix, user_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -1898,18 +1907,18 @@ func (s *Store) ListAllFileGrants(ctx context.Context) ([]*model.FileGrant, erro
 // same code path works for the MySQL driver that wraps this Store — MySQL does
 // not understand SQLite's `ON CONFLICT ... excluded.` upsert.
 func (s *Store) CreateFileGrant(ctx context.Context, g *model.FileGrant) (*model.FileGrant, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE file_grants SET level=?, is_dir=?, created_by=? WHERE storage_id=? AND path_prefix=? AND user_id=?`,
 		g.Level, btoi(g.IsDir), g.CreatedBy, g.StorageID, g.PathPrefix, g.UserID)
 	if err != nil {
 		return nil, err
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
-		return scanFileGrant(s.db.QueryRowContext(ctx,
+		return scanFileGrant(s.conn(ctx).QueryRowContext(ctx,
 			`SELECT `+fileGrantCols+` FROM file_grants WHERE storage_id=? AND path_prefix=? AND user_id=?`,
 			g.StorageID, g.PathPrefix, g.UserID))
 	}
-	ins, err := s.db.ExecContext(ctx,
+	ins, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO file_grants (storage_id, path_prefix, is_dir, user_id, level, created_by) VALUES (?,?,?,?,?,?)`,
 		g.StorageID, g.PathPrefix, btoi(g.IsDir), g.UserID, g.Level, g.CreatedBy)
 	if err != nil {
@@ -1920,12 +1929,12 @@ func (s *Store) CreateFileGrant(ctx context.Context, g *model.FileGrant) (*model
 }
 
 func (s *Store) UpdateFileGrantLevel(ctx context.Context, id int64, level string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE file_grants SET level=? WHERE id=?`, level, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE file_grants SET level=? WHERE id=?`, level, id)
 	return err
 }
 
 func (s *Store) DeleteFileGrant(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM file_grants WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM file_grants WHERE id=?`, id)
 	return err
 }
 
@@ -1942,7 +1951,7 @@ func (s *Store) DeleteFileGrant(ctx context.Context, id int64) error {
 const shareCols = `id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, COALESCE(created_via,''), created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings, plugin_id, COALESCE(page_id,''), COALESCE(subject,''), COALESCE(state_json,''), COALESCE(files_json,''), pin_fails, locked_until, COALESCE(pin_enc,''), visit_count, COALESCE(purpose_json,'')`
 
 func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO shares (node_id, token, pin_hash, pin_enc, expires_at, max_downloads, created_by, created_via, kind, max_uploads, drop_settings, plugin_id, page_id, subject, state_json, files_json, purpose_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		sh.NodeID, sh.Token, sh.PinHash, sh.PinEnc, sh.ExpiresAt, sh.MaxDownloads, sh.CreatedBy, sh.CreatedVia, shareKind(sh.Kind), sh.MaxUploads, sh.DropSettings,
 		sh.PluginID, sh.PageID, sh.Subject, sh.StateJSON, sh.FilesJSON, sh.PurposeJSON)
@@ -1958,12 +1967,12 @@ func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share,
 }
 
 func (s *Store) GetShareByToken(ctx context.Context, token string) (*model.Share, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+shareCols+` FROM shares WHERE token=?`, token)
+	row := s.conn(ctx).QueryRowContext(ctx, `SELECT `+shareCols+` FROM shares WHERE token=?`, token)
 	return scanShare(row)
 }
 
 func (s *Store) GetShareByID(ctx context.Context, id int64) (*model.Share, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+shareCols+` FROM shares WHERE id=?`, id)
+	row := s.conn(ctx).QueryRowContext(ctx, `SELECT `+shareCols+` FROM shares WHERE id=?`, id)
 	return scanShare(row)
 }
 
@@ -1986,11 +1995,11 @@ func (s *Store) ListAllShares(ctx context.Context, creatorID *int64, activeOnly 
 	whereSQL := strings.Join(where, " AND ")
 
 	var total int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM shares s WHERE `+whereSQL, args...).Scan(&total); err != nil {
+	if err := s.conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM shares s WHERE `+whereSQL, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	args = append(args, limit, offset)
-	rows, err := s.db.QueryContext(ctx, `SELECT `+shareMetaCols+` FROM shares s `+shareMetaJoins+` WHERE `+whereSQL+` ORDER BY s.created_at DESC LIMIT ? OFFSET ?`, args...)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+shareMetaCols+` FROM shares s `+shareMetaJoins+` WHERE `+whereSQL+` ORDER BY s.created_at DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -2068,11 +2077,11 @@ func (s *Store) ListAppPluginShares(ctx context.Context, pluginID int64, activeO
 	whereSQL := strings.Join(where, " AND ")
 
 	var total int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM shares s WHERE `+whereSQL, args...).Scan(&total); err != nil {
+	if err := s.conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM shares s WHERE `+whereSQL, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	args = append(args, limit, offset)
-	rows, err := s.db.QueryContext(ctx, `SELECT `+shareMetaCols+` FROM shares s `+shareMetaJoins+` WHERE `+whereSQL+` ORDER BY s.created_at DESC LIMIT ? OFFSET ?`, args...)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+shareMetaCols+` FROM shares s `+shareMetaJoins+` WHERE `+whereSQL+` ORDER BY s.created_at DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -2086,7 +2095,7 @@ func (s *Store) ListAppPluginShares(ctx context.Context, pluginID int64, activeO
 
 // UpdateShareAppState replaces the plugin's durable record for one link.
 func (s *Store) UpdateShareAppState(ctx context.Context, id int64, stateJSON string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE shares SET state_json=? WHERE id=?`, orJSON(stateJSON, "{}"), id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE shares SET state_json=? WHERE id=?`, orJSON(stateJSON, "{}"), id)
 	return err
 }
 
@@ -2094,7 +2103,7 @@ func (s *Store) UpdateShareAppState(ctx context.Context, id int64, stateJSON str
 // NOTHING else — a wrong PIN must not be able to move an expiry or a cap by
 // riding along in a whole-row save.
 func (s *Store) UpdateSharePinLock(ctx context.Context, id int64, fails int, until *time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE shares SET pin_fails=?, locked_until=? WHERE id=?`, fails, until, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE shares SET pin_fails=?, locked_until=? WHERE id=?`, fails, until, id)
 	return err
 }
 
@@ -2104,12 +2113,12 @@ func (s *Store) RevokeShare(ctx context.Context, id int64) error {
 	// ⚠ Both columns, one statement: `expires_at` is what stops the link
 	// (every public path already checks it); `revoked_at` is only the word a
 	// listing needs to say "revoked" instead of "expired" (00053).
-	_, err := s.db.ExecContext(ctx, `UPDATE shares SET expires_at=CURRENT_TIMESTAMP, revoked_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE shares SET expires_at=CURRENT_TIMESTAMP, revoked_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
 }
 
 func (s *Store) ListSharesByNode(ctx context.Context, nodeID int64) ([]*model.Share, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+shareCols+` FROM shares WHERE node_id=? ORDER BY created_at DESC`, nodeID)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+shareCols+` FROM shares WHERE node_id=? ORDER BY created_at DESC`, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -2126,14 +2135,14 @@ func (s *Store) ListSharesByNode(ctx context.Context, nodeID int64) ([]*model.Sh
 }
 
 func (s *Store) IncrementShareDownload(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE shares SET download_count = download_count + 1 WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE shares SET download_count = download_count + 1 WHERE id=?`, id)
 	return err
 }
 
 // IncrementShareVisit counts one opening of an app page (00052): what the
 // page's `max_visits` ceiling is measured against, and never a download.
 func (s *Store) IncrementShareVisit(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE shares SET visit_count = visit_count + 1 WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE shares SET visit_count = visit_count + 1 WHERE id=?`, id)
 	return err
 }
 
@@ -2141,7 +2150,7 @@ func (s *Store) IncrementShareVisit(ctx context.Context, id int64) error {
 // statement, so overlapping requests cannot all pass a check that each of them
 // read before any of them wrote. False = the cap is already spent.
 func (s *Store) ReserveShareDownload(ctx context.Context, id int64) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `UPDATE shares SET download_count = download_count + 1
+	res, err := s.conn(ctx).ExecContext(ctx, `UPDATE shares SET download_count = download_count + 1
 		WHERE id=? AND (max_downloads IS NULL OR download_count < max_downloads)`, id)
 	if err != nil {
 		return false, err
@@ -2155,23 +2164,23 @@ func (s *Store) ReserveShareDownload(ctx context.Context, id int64) (bool, error
 
 // ReleaseShareDownload hands a reserved slot back, never below zero.
 func (s *Store) ReleaseShareDownload(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE shares SET download_count = download_count - 1
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE shares SET download_count = download_count - 1
 		WHERE id=? AND download_count > 0`, id)
 	return err
 }
 
 func (s *Store) IncrementShareUpload(ctx context.Context, id int64, n int) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE shares SET upload_count = upload_count + ? WHERE id=?`, n, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE shares SET upload_count = upload_count + ? WHERE id=?`, n, id)
 	return err
 }
 
 func (s *Store) DeleteShare(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM shares WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM shares WHERE id=?`, id)
 	return err
 }
 
 func (s *Store) DeleteExpiredShares(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM shares WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP`)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM shares WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP`)
 	return err
 }
 
@@ -2179,14 +2188,14 @@ func (s *Store) DeleteExpiredShares(ctx context.Context) error {
 
 func (s *Store) CreateChunkedUpload(ctx context.Context, u *model.ChunkedUpload) error {
 	parts, _ := json.Marshal(u.Parts)
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO chunked_uploads (id, storage_id, storage_key, upload_id, total_size, parts_json, expires_at) VALUES (?,?,?,?,?,?,?)`,
 		u.ID, u.StorageID, u.StorageKey, u.UploadID, u.TotalSize, string(parts), u.ExpiresAt)
 	return err
 }
 
 func (s *Store) GetChunkedUpload(ctx context.Context, id string) (*model.ChunkedUpload, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, storage_id, storage_key, upload_id, total_size, parts_json, expires_at FROM chunked_uploads WHERE id=?`, id)
+	row := s.conn(ctx).QueryRowContext(ctx, `SELECT id, storage_id, storage_key, upload_id, total_size, parts_json, expires_at FROM chunked_uploads WHERE id=?`, id)
 	out := &model.ChunkedUpload{}
 	var partsJSON string
 	if err := row.Scan(&out.ID, &out.StorageID, &out.StorageKey, &out.UploadID, &out.TotalSize, &partsJSON, &out.ExpiresAt); err != nil {
@@ -2198,17 +2207,17 @@ func (s *Store) GetChunkedUpload(ctx context.Context, id string) (*model.Chunked
 
 func (s *Store) UpdateChunkedUploadParts(ctx context.Context, id string, parts []model.UploadPart) error {
 	pj, _ := json.Marshal(parts)
-	_, err := s.db.ExecContext(ctx, `UPDATE chunked_uploads SET parts_json=? WHERE id=?`, string(pj), id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE chunked_uploads SET parts_json=? WHERE id=?`, string(pj), id)
 	return err
 }
 
 func (s *Store) DeleteChunkedUpload(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM chunked_uploads WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM chunked_uploads WHERE id=?`, id)
 	return err
 }
 
 func (s *Store) DeleteExpiredChunkedUploads(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM chunked_uploads WHERE expires_at < CURRENT_TIMESTAMP`)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM chunked_uploads WHERE expires_at < CURRENT_TIMESTAMP`)
 	return err
 }
 
@@ -2229,7 +2238,7 @@ func scanStagedUpload(r rowScanner) (*model.StagedUpload, error) {
 }
 
 func (s *Store) CreateStagedUpload(ctx context.Context, u *model.StagedUpload) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO staged_uploads (id, storage_id, storage_key, user_id, total_size, chunk_size, mime, hash, received_bytes, state, expires_at)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
 		u.ID, u.StorageID, u.StorageKey, u.UserID, u.TotalSize, u.ChunkSize, u.Mime, u.Hash, u.ReceivedBytes, u.State, u.ExpiresAt)
@@ -2237,35 +2246,35 @@ func (s *Store) CreateStagedUpload(ctx context.Context, u *model.StagedUpload) e
 }
 
 func (s *Store) GetStagedUpload(ctx context.Context, id string) (*model.StagedUpload, error) {
-	return scanStagedUpload(s.db.QueryRowContext(ctx,
+	return scanStagedUpload(s.conn(ctx).QueryRowContext(ctx,
 		`SELECT `+stagedUploadColumns+` FROM staged_uploads WHERE id=?`, id))
 }
 
 func (s *Store) GetStagedUploadByNode(ctx context.Context, nodeID int64) (*model.StagedUpload, error) {
-	return scanStagedUpload(s.db.QueryRowContext(ctx,
+	return scanStagedUpload(s.conn(ctx).QueryRowContext(ctx,
 		`SELECT `+stagedUploadColumns+` FROM staged_uploads WHERE node_id=? ORDER BY updated_at DESC LIMIT 1`, nodeID))
 }
 
 func (s *Store) UpdateStagedUploadProgress(ctx context.Context, id string, receivedBytes int64) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE staged_uploads SET received_bytes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, receivedBytes, id)
 	return err
 }
 
 func (s *Store) UpdateStagedUploadState(ctx context.Context, id, state, errMsg string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE staged_uploads SET state=?, error=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, state, errMsg, id)
 	return err
 }
 
 func (s *Store) AttachStagedUploadTarget(ctx context.Context, id string, nodeID, opID int64) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE staged_uploads SET node_id=?, op_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, nodeID, opID, id)
 	return err
 }
 
 func (s *Store) DeleteStagedUpload(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM staged_uploads WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM staged_uploads WHERE id=?`, id)
 	return err
 }
 
@@ -2281,7 +2290,7 @@ func (s *Store) ListStagedUploads(ctx context.Context, state string, limit int) 
 	}
 	q += ` ORDER BY updated_at DESC LIMIT ?`
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.conn(ctx).QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2306,7 +2315,7 @@ func (s *Store) ListIdleStagedUploads(ctx context.Context, before time.Time, lim
 	// `' '` < `T`, so an unformatted bound would call every row of the current
 	// second "idle" and sweep uploads that are in flight right now.
 	beforeStr := before.UTC().Format("2006-01-02 15:04:05")
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT `+stagedUploadColumns+` FROM staged_uploads WHERE updated_at < ? ORDER BY updated_at ASC LIMIT ?`,
 		beforeStr, limit)
 	if err != nil {
@@ -2329,7 +2338,7 @@ func (s *Store) SumOpenStagedUploadBytes(ctx context.Context, userID int64) (int
 		return 0, nil
 	}
 	var total sql.NullInt64
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT SUM(total_size) FROM staged_uploads WHERE user_id=? AND state IN ('staging','committing')`,
 		userID).Scan(&total)
 	if err != nil {
@@ -2342,7 +2351,7 @@ func (s *Store) ListUnstoredNodes(ctx context.Context, afterID int64, limit int)
 	if limit <= 0 || limit > 1000 {
 		limit = 200
 	}
-	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+
+	rows, err := s.conn(ctx).QueryContext(ctx, nodeSelectColumns()+
 		` FROM nodes WHERE deleted_at IS NULL AND transfer_state IN ('staged','failed') AND id > ? ORDER BY id LIMIT ?`,
 		afterID, limit)
 	if err != nil {
@@ -2361,7 +2370,7 @@ func (s *Store) ListUnstoredNodes(ctx context.Context, afterID int64, limit int)
 }
 
 func (s *Store) SetNodeTransferState(ctx context.Context, nodeID int64, state string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE nodes SET transfer_state=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, state, nodeID)
 	return err
 }
@@ -2369,7 +2378,7 @@ func (s *Store) SetNodeTransferState(ctx context.Context, nodeID int64, state st
 // ─────────────────── Sync ───────────────────
 
 func (s *Store) CreateSyncRun(ctx context.Context, storageID int64, cursorBefore string) (*model.SyncRun, error) {
-	res, err := s.db.ExecContext(ctx, `INSERT INTO sync_runs (storage_id, cursor_before, status) VALUES (?,?,'running')`, storageID, cursorBefore)
+	res, err := s.conn(ctx).ExecContext(ctx, `INSERT INTO sync_runs (storage_id, cursor_before, status) VALUES (?,?,'running')`, storageID, cursorBefore)
 	if err != nil {
 		return nil, err
 	}
@@ -2378,14 +2387,14 @@ func (s *Store) CreateSyncRun(ctx context.Context, storageID int64, cursorBefore
 }
 
 func (s *Store) FinishSyncRun(ctx context.Context, id int64, cursorAfter string, seen, added, updated, deleted int, status, errMsg string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE sync_runs SET finished_at=CURRENT_TIMESTAMP, cursor_after=?, seen_count=?, added=?, updated=?, deleted=?, status=?, error=? WHERE id=?`,
 		cursorAfter, seen, added, updated, deleted, status, errMsg, id)
 	return err
 }
 
 func (s *Store) GetLastSyncRun(ctx context.Context, storageID int64) (*model.SyncRun, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'')
 		 FROM sync_runs WHERE storage_id=? ORDER BY started_at DESC LIMIT 1`, storageID)
 	return scanSyncRun(row)
@@ -2393,14 +2402,14 @@ func (s *Store) GetLastSyncRun(ctx context.Context, storageID int64) (*model.Syn
 
 func (s *Store) GetLastSyncRunByStatus(ctx context.Context, storageID int64, status string) (*model.SyncRun, error) {
 	// id breaks a same-second tie: CURRENT_TIMESTAMP has no fraction here.
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'')
 		 FROM sync_runs WHERE storage_id=? AND status=? AND finished_at IS NOT NULL ORDER BY started_at DESC, id DESC LIMIT 1`, storageID, status)
 	return scanSyncRun(row)
 }
 
 func (s *Store) AbortUnfinishedSyncRuns(ctx context.Context, errMsg string) (int64, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE sync_runs SET status='aborted', finished_at=CURRENT_TIMESTAMP, error=? WHERE finished_at IS NULL`, errMsg)
 	if err != nil {
 		return 0, err
@@ -2409,7 +2418,7 @@ func (s *Store) AbortUnfinishedSyncRuns(ctx context.Context, errMsg string) (int
 }
 
 func (s *Store) GetSyncRun(ctx context.Context, id int64) (*model.SyncRun, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'')
 		 FROM sync_runs WHERE id=?`, id)
 	return scanSyncRun(row)
@@ -2444,11 +2453,11 @@ func (s *Store) ListSyncRunsAcrossAll(ctx context.Context, storageID int64, stat
 	}
 	whereSQL := strings.Join(where, " AND ")
 	var total int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sync_runs WHERE `+whereSQL, args...).Scan(&total); err != nil {
+	if err := s.conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM sync_runs WHERE `+whereSQL, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	args = append(args, limit, offset)
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'')
 		 FROM sync_runs WHERE `+whereSQL+` ORDER BY started_at DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
@@ -2470,7 +2479,7 @@ func (s *Store) ListSyncRuns(ctx context.Context, storageID int64, limit int) ([
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'')
 		 FROM sync_runs WHERE storage_id=? ORDER BY started_at DESC LIMIT ?`, storageID, limit)
 	if err != nil {
@@ -2489,14 +2498,14 @@ func (s *Store) ListSyncRuns(ctx context.Context, storageID int64, limit int) ([
 }
 
 func (s *Store) CreateSyncConflict(ctx context.Context, c *model.SyncConflict) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO sync_conflicts (node_id, storage_id, storage_key, db_etag, backend_etag, db_mtime, backend_mtime) VALUES (?,?,?,?,?,?,?)`,
 		c.NodeID, c.StorageID, c.StorageKey, c.DBEtag, c.BackendEtag, c.DBMtime, c.BackendMtime)
 	return err
 }
 
 func (s *Store) ListUnresolvedConflicts(ctx context.Context) ([]*model.SyncConflict, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, node_id, storage_id, COALESCE(storage_key,''), COALESCE(db_etag,''), COALESCE(backend_etag,''), db_mtime, backend_mtime, detected_at, resolved_at, COALESCE(resolution,'')
 		 FROM sync_conflicts WHERE resolved_at IS NULL ORDER BY detected_at DESC`)
 	if err != nil {
@@ -2515,7 +2524,7 @@ func (s *Store) ListUnresolvedConflicts(ctx context.Context) ([]*model.SyncConfl
 }
 
 func (s *Store) ResolveConflict(ctx context.Context, id int64, resolution string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE sync_conflicts SET resolved_at=CURRENT_TIMESTAMP, resolution=? WHERE id=?`, resolution, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE sync_conflicts SET resolved_at=CURRENT_TIMESTAMP, resolution=? WHERE id=?`, resolution, id)
 	return err
 }
 
@@ -2525,7 +2534,7 @@ func (s *Store) ListConflictsByStorage(ctx context.Context, storageID int64, lim
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, node_id, storage_id, COALESCE(storage_key,''), COALESCE(db_etag,''), COALESCE(backend_etag,''), db_mtime, backend_mtime, detected_at, resolved_at, COALESCE(resolution,'')
 		 FROM sync_conflicts WHERE storage_id=? ORDER BY detected_at DESC LIMIT ?`, storageID, limit)
 	if err != nil {
@@ -2549,7 +2558,7 @@ func (s *Store) ListConflictsByStorage(ctx context.Context, storageID int64, lim
 func (s *Store) CountSyncConflictsByRun(ctx context.Context, runID int64) (int64, error) {
 	var n int64
 	// Match conflicts detected during the run window for the same storage.
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM sync_conflicts c
 		 INNER JOIN sync_runs r ON r.storage_id=c.storage_id
 		 WHERE r.id=? AND c.detected_at >= r.started_at AND (r.finished_at IS NULL OR c.detected_at <= r.finished_at)`,
@@ -2561,7 +2570,7 @@ func (s *Store) CountSyncConflictsByRun(ctx context.Context, runID int64) (int64
 // "queue depth" until we ship a real op queue table).
 func (s *Store) CountQueueDepth(ctx context.Context) (int64, error) {
 	var n int64
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sync_runs WHERE status='running'`).Scan(&n)
+	err := s.conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM sync_runs WHERE status='running'`).Scan(&n)
 	return n, err
 }
 
@@ -2569,7 +2578,7 @@ func (s *Store) CountQueueDepth(ctx context.Context) (int64, error) {
 
 func (s *Store) InsertAuditEntry(ctx context.Context, e *model.AuditEntry) error {
 	mj, _ := json.Marshal(e.Metadata)
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO audit_log (user_id, action, target_type, target_id, metadata_json, ip) VALUES (?,?,?,?,?,?)`,
 		e.UserID, e.Action, e.TargetType, e.TargetID, string(mj), e.IP)
 	return err
@@ -2579,7 +2588,7 @@ func (s *Store) ListAuditRecent(ctx context.Context, limit int) ([]*model.AuditE
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, user_id, action, COALESCE(target_type,''), COALESCE(target_id,''), metadata_json, COALESCE(ip,''), created_at
 		 FROM audit_log ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
@@ -2603,12 +2612,12 @@ func (s *Store) ListAuditRecent(ctx context.Context, limit int) ([]*model.AuditE
 
 func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
 	var v string
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE setting_key=?`, key).Scan(&v)
+	err := s.conn(ctx).QueryRowContext(ctx, `SELECT value FROM settings WHERE setting_key=?`, key).Scan(&v)
 	return v, err
 }
 
 func (s *Store) UpsertSetting(ctx context.Context, key, value string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		s.upsert(`INSERT INTO settings (setting_key, value, updated_at) VALUES (?,?,CURRENT_TIMESTAMP)
 		 ON CONFLICT(setting_key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`),
 		key, value)
@@ -2616,7 +2625,7 @@ func (s *Store) UpsertSetting(ctx context.Context, key, value string) error {
 }
 
 func (s *Store) ListSettings(ctx context.Context) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT setting_key, COALESCE(value,'') FROM settings ORDER BY setting_key`)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT setting_key, COALESCE(value,'') FROM settings ORDER BY setting_key`)
 	if err != nil {
 		return nil, err
 	}
@@ -2635,7 +2644,7 @@ func (s *Store) ListSettings(ctx context.Context) (map[string]string, error) {
 // ─────────────────── External services ───────────────────
 
 func (s *Store) UpsertExternalService(ctx context.Context, name string, enabled bool, urlS, secretEnc, optionsJSON string, lastCheck time.Time, lastState string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		s.upsert(`INSERT INTO external_services (name, enabled, url, secret_enc, options_json, last_check, last_state) VALUES (?,?,?,?,?,?,?)
 		 ON CONFLICT(name) DO UPDATE SET enabled=excluded.enabled, url=excluded.url, secret_enc=excluded.secret_enc, options_json=excluded.options_json, last_check=excluded.last_check, last_state=excluded.last_state`),
 		name, btoi(enabled), urlS, secretEnc, optionsJSON, nullTime(lastCheck), lastState)
@@ -2643,13 +2652,13 @@ func (s *Store) UpsertExternalService(ctx context.Context, name string, enabled 
 }
 
 func (s *Store) GetExternalService(ctx context.Context, name string) (*db.ExternalService, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT name, enabled, COALESCE(url,''), COALESCE(secret_enc,''), options_json, last_check, COALESCE(last_state,'') FROM external_services WHERE name=?`, name)
 	return scanExternalService(row)
 }
 
 func (s *Store) ListExternalServices(ctx context.Context) ([]*db.ExternalService, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT name, enabled, COALESCE(url,''), COALESCE(secret_enc,''), options_json, last_check, COALESCE(last_state,'') FROM external_services ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -2667,14 +2676,14 @@ func (s *Store) ListExternalServices(ctx context.Context) ([]*db.ExternalService
 }
 
 func (s *Store) UpdateExternalServiceState(ctx context.Context, name string, lastCheck time.Time, state string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE external_services SET last_check=?, last_state=? WHERE name=?`, lastCheck, state, name)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE external_services SET last_check=?, last_state=? WHERE name=?`, lastCheck, state, name)
 	return err
 }
 
 // ─────────────────── Thumbnails / versions ───────────────────
 
 func (s *Store) GetThumbnail(ctx context.Context, nodeID int64) (*model.Thumbnail, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT node_id, state, COALESCE(storage_key,''), COALESCE(width,0), COALESCE(height,0), COALESCE(error,''), generated_at FROM thumbnails WHERE node_id=?`, nodeID)
+	row := s.conn(ctx).QueryRowContext(ctx, `SELECT node_id, state, COALESCE(storage_key,''), COALESCE(width,0), COALESCE(height,0), COALESCE(error,''), generated_at FROM thumbnails WHERE node_id=?`, nodeID)
 	t := &model.Thumbnail{}
 	if err := row.Scan(&t.NodeID, &t.State, &t.StorageKey, &t.Width, &t.Height, &t.Error, &t.GeneratedAt); err != nil {
 		return nil, err
@@ -2683,7 +2692,7 @@ func (s *Store) GetThumbnail(ctx context.Context, nodeID int64) (*model.Thumbnai
 }
 
 func (s *Store) UpsertThumbnail(ctx context.Context, t *model.Thumbnail) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		s.upsert(`INSERT INTO thumbnails (node_id, state, storage_key, width, height, error, generated_at) VALUES (?,?,?,?,?,?,?)
 		 ON CONFLICT(node_id) DO UPDATE SET state=excluded.state, storage_key=excluded.storage_key, width=excluded.width, height=excluded.height, error=excluded.error, generated_at=excluded.generated_at`),
 		t.NodeID, t.State, t.StorageKey, t.Width, t.Height, t.Error, t.GeneratedAt)
@@ -2691,12 +2700,12 @@ func (s *Store) UpsertThumbnail(ctx context.Context, t *model.Thumbnail) error {
 }
 
 func (s *Store) SetThumbnailState(ctx context.Context, nodeID int64, state, errMsg string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE thumbnails SET state=?, error=? WHERE node_id=?`, state, errMsg, nodeID)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE thumbnails SET state=?, error=? WHERE node_id=?`, state, errMsg, nodeID)
 	return err
 }
 
 func (s *Store) DeleteThumbnail(ctx context.Context, nodeID int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM thumbnails WHERE node_id=?`, nodeID)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM thumbnails WHERE node_id=?`, nodeID)
 	return err
 }
 
@@ -2717,7 +2726,7 @@ func (s *Store) ExistingNodeIDs(ctx context.Context, ids []int64) (map[int64]boo
 		for _, id := range chunk {
 			args = append(args, id)
 		}
-		rows, err := s.db.QueryContext(ctx, `SELECT id FROM nodes WHERE id IN (`+ph+`)`, args...)
+		rows, err := s.conn(ctx).QueryContext(ctx, `SELECT id FROM nodes WHERE id IN (`+ph+`)`, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -2739,7 +2748,7 @@ func (s *Store) ExistingNodeIDs(ctx context.Context, ids []int64) (map[int64]boo
 }
 
 func (s *Store) CreateNodeVersion(ctx context.Context, v *model.NodeVersion) (*model.NodeVersion, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO node_versions (node_id, version_n, storage_key, size, etag) VALUES (?,?,?,?,?)`,
 		v.NodeID, v.VersionN, v.StorageKey, v.Size, v.Etag)
 	if err != nil {
@@ -2752,7 +2761,7 @@ func (s *Store) CreateNodeVersion(ctx context.Context, v *model.NodeVersion) (*m
 }
 
 func (s *Store) ListNodeVersions(ctx context.Context, nodeID int64) ([]*model.NodeVersion, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, node_id, version_n, COALESCE(storage_key,''), size, COALESCE(etag,''), created_at FROM node_versions WHERE node_id=? ORDER BY version_n DESC`, nodeID)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT id, node_id, version_n, COALESCE(storage_key,''), size, COALESCE(etag,''), created_at FROM node_versions WHERE node_id=? ORDER BY version_n DESC`, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -2915,7 +2924,7 @@ const conflictColumns = `id, node_id, storage_id, storage_key, db_etag, backend_
 // V0.1 schema does not link conflicts to a run; we approximate by returning
 // conflicts detected within the run's time window (best effort).
 func (s *Store) ListSyncConflictsByRun(ctx context.Context, runID int64) ([]*model.SyncConflict, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.conn(ctx).QueryContext(ctx, `
 		SELECT `+conflictColumns+`
 		FROM sync_conflicts c
 		WHERE c.detected_at >= COALESCE((SELECT started_at FROM sync_runs WHERE id=?), c.detected_at)
@@ -2934,7 +2943,7 @@ func (s *Store) ListSyncConflictsByStorage(ctx context.Context, storageID int64,
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.conn(ctx).QueryContext(ctx, `
 		SELECT `+conflictColumns+`
 		FROM sync_conflicts
 		WHERE storage_id=? AND resolved_at IS NULL
@@ -2965,7 +2974,7 @@ var nodeColumnsForIndex = nodeColumnList
 
 // AllNodesForIndex returns every non-deleted node for the search rebuild job.
 func (s *Store) AllNodesForIndex(ctx context.Context) ([]*model.Node, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.conn(ctx).QueryContext(ctx, `
 		SELECT `+nodeColumnsForIndex+`
 		FROM nodes
 		WHERE deleted_at IS NULL
@@ -2990,7 +2999,7 @@ func (s *Store) AllNodesForIndex(ctx context.Context) ([]*model.Node, error) {
 // CountNodesAddedSince counts non-deleted nodes created in the given window.
 func (s *Store) CountNodesAddedSince(ctx context.Context, storageID int64, since time.Time) (int64, error) {
 	var n int64
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM nodes WHERE storage_id=? AND created_at >= ? AND deleted_at IS NULL`,
 		storageID, since).Scan(&n)
 	return n, err
@@ -2999,7 +3008,7 @@ func (s *Store) CountNodesAddedSince(ctx context.Context, storageID int64, since
 // CountNodesDeletedSince counts soft-deleted nodes in the given window.
 func (s *Store) CountNodesDeletedSince(ctx context.Context, storageID int64, since time.Time) (int64, error) {
 	var n int64
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM nodes WHERE storage_id=? AND deleted_at IS NOT NULL AND deleted_at >= ?`,
 		storageID, since).Scan(&n)
 	return n, err
@@ -3008,7 +3017,7 @@ func (s *Store) CountNodesDeletedSince(ctx context.Context, storageID int64, sin
 // CountTotalShares returns the number of currently-active shares.
 func (s *Store) CountTotalShares(ctx context.Context) (int64, error) {
 	var n int64
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM shares WHERE expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP`).Scan(&n)
 	return n, err
 }
@@ -3048,12 +3057,12 @@ func (s *Store) ListAuditFiltered(ctx context.Context, userID *int64, action str
 	}
 
 	var total int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log a WHERE `+cond, args...).Scan(&total); err != nil {
+	if err := s.conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log a WHERE `+cond, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
 	args = append(args, limit, offset)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.conn(ctx).QueryContext(ctx, `
 		SELECT a.id, a.user_id, COALESCE(u.email,''), a.action, COALESCE(a.target_type,''),
 		       COALESCE(a.target_id,''), COALESCE(a.metadata_json,''), COALESCE(a.ip,''), a.created_at
 		FROM audit_log a
@@ -3084,7 +3093,7 @@ func (s *Store) ListAuditFiltered(ctx context.Context, userID *int64, action str
 // SumNodesBytesByStorage returns the total size in bytes of non-deleted files for one storage.
 func (s *Store) SumNodesBytesByStorage(ctx context.Context, storageID int64) (int64, error) {
 	var total sql.NullInt64
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(size),0) FROM nodes WHERE storage_id=? AND type=1 AND deleted_at IS NULL`,
 		storageID).Scan(&total)
 	if err != nil {
@@ -3097,7 +3106,7 @@ func (s *Store) SumNodesBytesByStorage(ctx context.Context, storageID int64) (in
 
 // GetNodeVersion looks up a single version row by id.
 func (s *Store) GetNodeVersion(ctx context.Context, id int64) (*model.NodeVersion, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT id, node_id, version_n, COALESCE(storage_key,''), size, COALESCE(etag,''), created_at FROM node_versions WHERE id=?`, id)
 	v := &model.NodeVersion{}
 	if err := row.Scan(&v.ID, &v.NodeID, &v.VersionN, &v.StorageKey, &v.Size, &v.Etag, &v.CreatedAt); err != nil {
@@ -3109,7 +3118,7 @@ func (s *Store) GetNodeVersion(ctx context.Context, id int64) (*model.NodeVersio
 // NextNodeVersionNumber returns COALESCE(MAX(version_n),0)+1 for a node.
 func (s *Store) NextNodeVersionNumber(ctx context.Context, nodeID int64) (int, error) {
 	var n sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version_n),0) FROM node_versions WHERE node_id=?`, nodeID).Scan(&n); err != nil {
+	if err := s.conn(ctx).QueryRowContext(ctx, `SELECT COALESCE(MAX(version_n),0) FROM node_versions WHERE node_id=?`, nodeID).Scan(&n); err != nil {
 		return 0, err
 	}
 	return int(n.Int64) + 1, nil
@@ -3117,7 +3126,7 @@ func (s *Store) NextNodeVersionNumber(ctx context.Context, nodeID int64) (int, e
 
 // DeleteNodeVersion removes a single version row.
 func (s *Store) DeleteNodeVersion(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM node_versions WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM node_versions WHERE id=?`, id)
 	return err
 }
 
@@ -3132,7 +3141,7 @@ func (s *Store) DeleteOldNodeVersions(ctx context.Context, nodeID int64, keep in
 	// failed on every snapshot there, and Snapshot deliberately ignores a
 	// cleanup error, so version history grew without bound and nobody was
 	// told. The largest signed 64-bit value means "no limit" to both engines.
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, node_id, version_n, COALESCE(storage_key,''), size, COALESCE(etag,''), created_at
 		 FROM node_versions
 		 WHERE node_id=?
@@ -3154,7 +3163,7 @@ func (s *Store) DeleteOldNodeVersions(ctx context.Context, nodeID int64, keep in
 		return nil, err
 	}
 	for _, v := range doomed {
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM node_versions WHERE id=?`, v.ID); err != nil {
+		if _, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM node_versions WHERE id=?`, v.ID); err != nil {
 			return doomed, err
 		}
 	}
@@ -3164,7 +3173,7 @@ func (s *Store) DeleteOldNodeVersions(ctx context.Context, nodeID int64, keep in
 // ListNodeIDsWithVersions returns the distinct node ids holding at least
 // one version row — the work list for the daily retention job.
 func (s *Store) ListNodeIDsWithVersions(ctx context.Context) ([]int64, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT node_id FROM node_versions ORDER BY node_id`)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT DISTINCT node_id FROM node_versions ORDER BY node_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -3185,7 +3194,7 @@ func (s *Store) ListNodeIDsWithVersions(ctx context.Context) ([]int64, error) {
 // GetUserUsage returns (used_bytes, quota_bytes).
 func (s *Store) GetUserUsage(ctx context.Context, userID int64) (int64, int64, error) {
 	var used, limit int64
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COALESCE(usage_bytes,0), COALESCE(quota_bytes,0) FROM users WHERE id=?`, userID).
 		Scan(&used, &limit)
 	if err != nil {
@@ -3203,7 +3212,7 @@ func (s *Store) GetUserUsage(ctx context.Context, userID int64) (int64, int64, e
 // MySQL every upload succeeded, usage_bytes never moved, and no quota was ever
 // enforced. CASE means the same thing to both engines.
 func (s *Store) IncrementUserUsage(ctx context.Context, userID int64, delta int64) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE users SET usage_bytes = CASE
 		   WHEN COALESCE(usage_bytes,0) + ? < 0 THEN 0
 		   ELSE COALESCE(usage_bytes,0) + ?
@@ -3218,7 +3227,7 @@ func (s *Store) SetUserEnabled(ctx context.Context, userID int64, enabled bool) 
 	if enabled {
 		v = 1
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE users SET enabled=? WHERE id=?`, v, userID)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=? WHERE id=?`, v, userID)
 	return err
 }
 
@@ -3227,7 +3236,7 @@ func (s *Store) SetUserQuota(ctx context.Context, userID int64, bytes int64) err
 	if bytes < 0 {
 		bytes = 0
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE users SET quota_bytes=? WHERE id=?`, bytes, userID)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET quota_bytes=? WHERE id=?`, bytes, userID)
 	return err
 }
 
@@ -3243,13 +3252,13 @@ func (s *Store) SetUserQuota(ctx context.Context, userID int64, bytes int64) err
 // the drift was silent.
 func (s *Store) RecomputeUserUsage(ctx context.Context, userID int64) (int64, error) {
 	var total sql.NullInt64
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(size),0) FROM nodes WHERE owner_id=? AND type='file'`,
 		userID).Scan(&total)
 	if err != nil {
 		return 0, err
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE users SET usage_bytes=? WHERE id=?`, total.Int64, userID); err != nil {
+	if _, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET usage_bytes=? WHERE id=?`, total.Int64, userID); err != nil {
 		return 0, err
 	}
 	return total.Int64, nil
@@ -3259,7 +3268,7 @@ func (s *Store) RecomputeUserUsage(ctx context.Context, userID int64) (int64, er
 
 // SetNodeOwner updates the owner_id column for one node.
 func (s *Store) SetNodeOwner(ctx context.Context, nodeID int64, ownerID *int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET owner_id=? WHERE id=?`, ownerID, nodeID)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET owner_id=? WHERE id=?`, ownerID, nodeID)
 	return err
 }
 
@@ -3293,7 +3302,7 @@ func (s *Store) GetUserDisplayNames(ctx context.Context, ids []int64) (map[int64
 		for _, id := range chunk {
 			args = append(args, id)
 		}
-		rows, err := s.db.QueryContext(ctx,
+		rows, err := s.conn(ctx).QueryContext(ctx,
 			`SELECT id, COALESCE(display_name,''), COALESCE(username,''), COALESCE(email,'') FROM users WHERE id IN (`+ph+`)`, args...)
 		if err != nil {
 			return nil, err
@@ -3321,21 +3330,21 @@ func (s *Store) GetUserDisplayNames(ctx context.Context, ids []int64) (map[int64
 // writing the previous actor there instead would be a lie the UI cannot see
 // through.
 func (s *Store) SetNodeActor(ctx context.Context, nodeID int64, actorID *int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET last_actor_id=? WHERE id=?`, actorID, nodeID)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET last_actor_id=? WHERE id=?`, actorID, nodeID)
 	return err
 }
 
 // SetNodeExternalUpload marks (or unmarks) a node as having arrived through an
 // anonymous drop link. Only ever set to true, by the drop handler.
 func (s *Store) SetNodeExternalUpload(ctx context.Context, nodeID int64, external bool) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET external_upload=? WHERE id=?`, external, nodeID)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET external_upload=? WHERE id=?`, external, nodeID)
 	return err
 }
 
 // GetNodeOwner returns the owner_id (nullable) for one node.
 func (s *Store) GetNodeOwner(ctx context.Context, nodeID int64) (*int64, error) {
 	var owner sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT owner_id FROM nodes WHERE id=?`, nodeID).Scan(&owner)
+	err := s.conn(ctx).QueryRowContext(ctx, `SELECT owner_id FROM nodes WHERE id=?`, nodeID).Scan(&owner)
 	if err != nil {
 		return nil, err
 	}
@@ -3367,7 +3376,7 @@ func (s *Store) ListTrashedExpired(ctx context.Context, before time.Time, storag
 		}
 	}
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+`
+	rows, err := s.conn(ctx).QueryContext(ctx, nodeSelectColumns()+`
 		FROM nodes WHERE `+where+`
 		ORDER BY id ASC LIMIT ?`, args...)
 	if err != nil {
@@ -3388,7 +3397,7 @@ func (s *Store) ListTrashedExpired(ctx context.Context, before time.Time, storag
 // CountTrashedExpired tallies per storage what ListTrashedExpired walks for
 // the same cutoff. One grouped read over the partial deleted_at index.
 func (s *Store) CountTrashedExpired(ctx context.Context, before time.Time) (map[int64]db.TrashTally, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.conn(ctx).QueryContext(ctx, `
 		SELECT storage_id, COUNT(*), COALESCE(SUM(CASE WHEN type='file' THEN size ELSE 0 END), 0)
 		  FROM nodes WHERE deleted_at IS NOT NULL AND deleted_at < ?
 		 GROUP BY storage_id`, before)
@@ -3410,7 +3419,7 @@ func (s *Store) CountTrashedExpired(ctx context.Context, before time.Time) (map[
 
 // RestoreNode flips deleted_at back to NULL.
 func (s *Store) RestoreNode(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET deleted_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET deleted_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
 }
 
@@ -3430,11 +3439,11 @@ func (s *Store) ListTrashed(ctx context.Context, storageID *int64, limit, offset
 		args = append(args, *storageID)
 	}
 	var total int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes `+where, args...).Scan(&total); err != nil {
+	if err := s.conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes `+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	args = append(args, limit, offset)
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		nodeSelectColumns()+` FROM nodes `+where+` ORDER BY deleted_at DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, 0, err
@@ -3461,7 +3470,7 @@ func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, or
 	if clean == "" {
 		clean = "/"
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT storage_id, type, path FROM nodes WHERE id=?`, id)
+	row := s.conn(ctx).QueryRowContext(ctx, `SELECT storage_id, type, path FROM nodes WHERE id=?`, id)
 	var sid int64
 	var nodeType, trashPath string
 	if err := row.Scan(&sid, &nodeType, &trashPath); err != nil {
@@ -3470,7 +3479,7 @@ func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, or
 	hash := pathkey.Hash(sid, clean)
 	name := path.Base(clean)
 	if parentID == nil {
-		if _, err := s.db.ExecContext(ctx, `
+		if _, err := s.conn(ctx).ExecContext(ctx, `
 			UPDATE nodes
 			SET deleted_at=NULL,
 			    updated_at=CURRENT_TIMESTAMP,
@@ -3480,7 +3489,7 @@ func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, or
 			return err
 		}
 	} else {
-		if _, err := s.db.ExecContext(ctx, `
+		if _, err := s.conn(ctx).ExecContext(ctx, `
 			UPDATE nodes
 			SET deleted_at=NULL,
 			    updated_at=CURRENT_TIMESTAMP,
@@ -3514,7 +3523,7 @@ func (s *Store) LookupParentByPath(ctx context.Context, storageID int64, fullPat
 		}
 		var id int64
 		if parentPtr == nil {
-			err := s.db.QueryRowContext(ctx, `
+			err := s.conn(ctx).QueryRowContext(ctx, `
 				SELECT id FROM nodes
 				WHERE storage_id=? AND name=? AND deleted_at IS NULL
 				  AND parent_id IS NULL
@@ -3523,7 +3532,7 @@ func (s *Store) LookupParentByPath(ctx context.Context, storageID int64, fullPat
 				return nil, err
 			}
 		} else {
-			err := s.db.QueryRowContext(ctx, `
+			err := s.conn(ctx).QueryRowContext(ctx, `
 				SELECT id FROM nodes
 				WHERE storage_id=? AND name=? AND deleted_at IS NULL
 				  AND parent_id=?
@@ -3541,7 +3550,7 @@ func (s *Store) LookupParentByPath(ctx context.Context, storageID int64, fullPat
 
 // SetUserNodeMeta upserts a (user, node, key) row.
 func (s *Store) SetUserNodeMeta(ctx context.Context, userID, nodeID int64, key, value string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		s.upsert(`INSERT INTO user_node_meta (user_id, node_id, meta_key, value, updated_at)
 		 VALUES (?,?,?,?,CURRENT_TIMESTAMP)
 		 ON CONFLICT(user_id, node_id, meta_key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`),
@@ -3551,14 +3560,14 @@ func (s *Store) SetUserNodeMeta(ctx context.Context, userID, nodeID int64, key, 
 
 // DeleteUserNodeMeta removes a single (user, node, key) row.
 func (s *Store) DeleteUserNodeMeta(ctx context.Context, userID, nodeID int64, key string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM user_node_meta WHERE user_id=? AND node_id=? AND meta_key=?`, userID, nodeID, key)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM user_node_meta WHERE user_id=? AND node_id=? AND meta_key=?`, userID, nodeID, key)
 	return err
 }
 
 // GetUserNodeMeta fetches a single value (returns empty string + sql.ErrNoRows if absent).
 func (s *Store) GetUserNodeMeta(ctx context.Context, userID, nodeID int64, key string) (string, error) {
 	var v sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM user_node_meta WHERE user_id=? AND node_id=? AND meta_key=?`, userID, nodeID, key).Scan(&v)
+	err := s.conn(ctx).QueryRowContext(ctx, `SELECT value FROM user_node_meta WHERE user_id=? AND node_id=? AND meta_key=?`, userID, nodeID, key).Scan(&v)
 	if err != nil {
 		return "", err
 	}
@@ -3574,7 +3583,7 @@ func (s *Store) ListUserNodeMetaForNode(ctx context.Context, userID, nodeID int6
 		q += ` AND meta_key LIKE ?`
 		args = append(args, prefix+"%")
 	}
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.conn(ctx).QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -3596,7 +3605,7 @@ func (s *Store) ListNodesByUserMeta(ctx context.Context, userID int64, key strin
 	if limit <= 0 || limit > 1000 {
 		limit = 50
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT `+nodeColumnsN+`
 		 FROM user_node_meta m
 		 INNER JOIN nodes n ON n.id = m.node_id
@@ -3653,7 +3662,7 @@ func scanTags(rows *sql.Rows) ([]*model.Tag, error) {
 // ListTags implements db.Store.
 func (s *Store) ListTags(ctx context.Context, q model.TagQuery) ([]*model.Tag, error) {
 	where, args := db.TagQueryWhere(q, "t", 1, sqlitePH)
-	rows, err := s.db.QueryContext(ctx, `SELECT `+tagCols+` FROM tags t WHERE `+where+` ORDER BY t.id`, args...)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+tagCols+` FROM tags t WHERE `+where+` ORDER BY t.id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -3662,7 +3671,7 @@ func (s *Store) ListTags(ctx context.Context, q model.TagQuery) ([]*model.Tag, e
 
 // CreateTag implements db.Store.
 func (s *Store) CreateTag(ctx context.Context, t *model.Tag) (*model.Tag, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO tags (kind, tenant_id, owner_id, name, name_key) VALUES (?,?,?,?,?)`,
 		t.Kind, t.TenantID, t.OwnerID, t.Name, t.Key)
 	if err != nil {
@@ -3676,7 +3685,7 @@ func (s *Store) CreateTag(ctx context.Context, t *model.Tag) (*model.Tag, error)
 
 // ListNodeTags implements db.Store.
 func (s *Store) ListNodeTags(ctx context.Context, nodeID int64) ([]*model.Tag, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT t.id, t.kind, t.tenant_id, t.owner_id, t.name, t.name_key, t.created_at
 		 FROM node_tags nt JOIN tags t ON t.id = nt.tag_id
 		 WHERE nt.node_id = ? ORDER BY t.id`, nodeID)
@@ -3692,7 +3701,7 @@ func (s *Store) ListNodeTags(ctx context.Context, nodeID int64) ([]*model.Tag, e
 // already carries is not an error on either engine (MySQL has no ON CONFLICT
 // DO NOTHING; the rewrite in upsert turns this into ON DUPLICATE KEY UPDATE).
 func (s *Store) LinkNodeTags(ctx context.Context, nodeID int64, add, remove []int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := db.BeginOwnTx(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -3725,7 +3734,7 @@ func (s *Store) ListNodesByTagIDs(ctx context.Context, tagIDs []int64, limit int
 		limit = 500
 	}
 	in, args := db.IDList(tagIDs, 1, sqlitePH)
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT `+nodeColumnsN+`
 		 FROM nodes n
 		 WHERE n.deleted_at IS NULL
@@ -3750,7 +3759,7 @@ func (s *Store) ListNodesByTagIDs(ctx context.Context, tagIDs []int64, limit int
 // ListTagPlacements implements db.Store.
 func (s *Store) ListTagPlacements(ctx context.Context, q model.TagQuery) ([]model.TagPlacement, error) {
 	where, args := db.TagQueryWhere(q, "t", 1, sqlitePH)
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT nt.tag_id, n.id, n.storage_id, n.path
 		 FROM node_tags nt
 		 JOIN tags t ON t.id = nt.tag_id
@@ -3792,7 +3801,7 @@ func (s *Store) InsertNotification(ctx context.Context, n *model.NotificationInp
 	if n.UserID != nil {
 		userID = *n.UserID
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO notifications (event, severity, title, body, meta_json, user_id, webhook_status)
 		 VALUES (?,?,?,?,?,?,?)`,
 		n.Event, n.Severity, n.Title, n.Body, string(meta), userID, "pending",
@@ -3806,7 +3815,7 @@ func (s *Store) InsertNotification(ctx context.Context, n *model.NotificationInp
 
 // GetNotification returns a single row by id.
 func (s *Store) GetNotification(ctx context.Context, id int64) (*model.Notification, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT id, event, severity, title, body, meta_json,
 		        user_id, read_at, webhook_status, COALESCE(webhook_error,''), created_at
 		 FROM notifications WHERE id=?`, id)
@@ -3906,7 +3915,7 @@ func (s *Store) readThroughOf(ctx context.Context, readerID int64) (readThrough,
 	if readerID <= 0 {
 		return rt, nil
 	}
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT through_id, read_at FROM notification_read_through WHERE user_id=?`, readerID,
 	).Scan(&rt.through, &rt.at)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -3992,11 +4001,11 @@ func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread
 	}
 
 	var total int64
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*)"+from, args...).Scan(&total); err != nil {
+	if err := s.conn(ctx).QueryRowContext(ctx, "SELECT COUNT(*)"+from, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("sqlite: count notifications: %w", err)
 	}
 
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT n.id, n.event, n.severity, n.title, n.body, n.meta_json,
 		        n.user_id, n.read_at, n.webhook_status, COALESCE(n.webhook_error,''), n.created_at, `+readCol+from+`
 		 ORDER BY n.created_at DESC, n.id DESC
@@ -4037,7 +4046,7 @@ func (s *Store) MarkNotificationRead(ctx context.Context, id int64, userID *int6
 		q += ` AND user_id = ?`
 		args = append(args, *userID)
 	}
-	_, err := s.db.ExecContext(ctx, q, args...)
+	_, err := s.conn(ctx).ExecContext(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("sqlite: mark notif read: %w", err)
 	}
@@ -4054,7 +4063,7 @@ func (s *Store) MarkAllNotificationsRead(ctx context.Context, userID *int64) err
 		q += ` AND user_id = ?`
 		args = append(args, *userID)
 	}
-	_, err := s.db.ExecContext(ctx, q, args...)
+	_, err := s.conn(ctx).ExecContext(ctx, q, args...)
 	return err
 }
 
@@ -4071,13 +4080,13 @@ func (s *Store) MarkAllBroadcastsRead(ctx context.Context, readerID int64) error
 		return nil
 	}
 	var through int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM notifications`).Scan(&through); err != nil {
+	if err := s.conn(ctx).QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM notifications`).Scan(&through); err != nil {
 		return fmt.Errorf("sqlite: newest notification: %w", err)
 	}
 	if through == 0 {
 		return nil
 	}
-	if _, err := s.db.ExecContext(ctx, s.upsert(
+	if _, err := s.conn(ctx).ExecContext(ctx, s.upsert(
 		`INSERT INTO notification_read_through (user_id, through_id, read_at) VALUES (?, ?, CURRENT_TIMESTAMP)
 		 ON CONFLICT(user_id) DO UPDATE SET
 		   read_at = CASE WHEN excluded.through_id > through_id THEN excluded.read_at ELSE read_at END,
@@ -4085,7 +4094,7 @@ func (s *Store) MarkAllBroadcastsRead(ctx context.Context, readerID int64) error
 		readerID, through); err != nil {
 		return fmt.Errorf("sqlite: mark all broadcasts read: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx,
+	if _, err := s.conn(ctx).ExecContext(ctx,
 		`DELETE FROM notification_reads WHERE user_id = ? AND notification_id <= ?`, readerID, through); err != nil {
 		return fmt.Errorf("sqlite: drop overtaken marks: %w", err)
 	}
@@ -4126,7 +4135,7 @@ func (s *Store) MarkBroadcastsRead(ctx context.Context, readerID int64, ids []in
 		for _, id := range keep {
 			vals = append(vals, id, readerID)
 		}
-		if _, err := s.db.ExecContext(ctx, s.upsert(
+		if _, err := s.conn(ctx).ExecContext(ctx, s.upsert(
 			`INSERT INTO notification_reads (notification_id, user_id) VALUES `+
 				strings.TrimSuffix(strings.Repeat("(?,?),", len(keep)), ",")+`
 			 ON CONFLICT(notification_id, user_id) DO UPDATE SET notification_id=excluded.notification_id`),
@@ -4140,7 +4149,7 @@ func (s *Store) MarkBroadcastsRead(ctx context.Context, readerID int64, ids []in
 // unreadBroadcastIDs keeps the ids that are broadcasts nobody stamped through
 // the shared column.
 func (s *Store) unreadBroadcastIDs(ctx context.Context, ids []any) ([]int64, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id FROM notifications WHERE user_id IS NULL AND read_at IS NULL AND id IN (`+qmarks(len(ids))+`)`, ids...)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: find broadcasts: %w", err)
@@ -4182,7 +4191,7 @@ func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64, mute
 		args = append(args, hideArgs...)
 	}
 	var n int64
-	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
+	if err := s.conn(ctx).QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
 		return 0, err
 	}
 	return n, nil
@@ -4191,7 +4200,7 @@ func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64, mute
 // UpdateWebhookStatus is invoked by Service.Send after the HTTP attempt
 // chain completes (or skips).
 func (s *Store) UpdateWebhookStatus(ctx context.Context, id int64, status, errMsg string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE notifications SET webhook_status=?, webhook_error=? WHERE id=?`,
 		status, errMsg, id)
 	if err != nil {
@@ -4212,7 +4221,7 @@ func (s *Store) CreateWebhookTarget(ctx context.Context, t *model.WebhookTarget)
 	if t.Enabled {
 		enabled = 1
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO webhook_targets (name, url, secret, events, enabled)
 		 VALUES (?,?,?,?,?)`,
 		t.Name, t.URL, t.Secret, t.Events, enabled)
@@ -4225,7 +4234,7 @@ func (s *Store) CreateWebhookTarget(ctx context.Context, t *model.WebhookTarget)
 
 // GetWebhookTarget returns a single target by id.
 func (s *Store) GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookTarget, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at
 		 FROM webhook_targets WHERE id=?`, id)
 	return scanWebhookTarget(row)
@@ -4235,7 +4244,7 @@ func (s *Store) GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookT
 // filtering happens in the notify dispatcher, not in SQL — the table is
 // tiny and the admin list needs disabled rows too.
 func (s *Store) ListWebhookTargets(ctx context.Context) ([]*model.WebhookTarget, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at
 		 FROM webhook_targets ORDER BY id`)
 	if err != nil {
@@ -4262,7 +4271,7 @@ func (s *Store) UpdateWebhookTarget(ctx context.Context, t *model.WebhookTarget)
 	if t.Enabled {
 		enabled = 1
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE webhook_targets SET name=?, url=?, secret=?, events=?, enabled=? WHERE id=?`,
 		t.Name, t.URL, t.Secret, t.Events, enabled, t.ID)
 	if err != nil {
@@ -4276,7 +4285,7 @@ func (s *Store) UpdateWebhookTarget(ctx context.Context, t *model.WebhookTarget)
 
 // DeleteWebhookTarget removes a target row.
 func (s *Store) DeleteWebhookTarget(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM webhook_targets WHERE id=?`, id)
+	res, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM webhook_targets WHERE id=?`, id)
 	if err != nil {
 		return fmt.Errorf("sqlite: delete webhook target: %w", err)
 	}
@@ -4293,7 +4302,7 @@ func (s *Store) UpdateWebhookTargetDelivery(ctx context.Context, id int64, httpS
 	if errMsg != "" {
 		errVal = errMsg
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE webhook_targets SET last_status=?, last_error=?, last_delivery_at=? WHERE id=?`,
 		httpStatus, errVal, at.UTC(), id)
 	if err != nil {
@@ -4337,7 +4346,7 @@ func scanWebhookTarget(rs interface {
 // GetNotificationSettings returns the per-user toggle. A missing row
 // is treated as the default (in_app_enabled=true, no muted events).
 func (s *Store) GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT user_id, in_app_enabled, muted_events
 		 FROM notification_settings WHERE user_id=?`, userID)
 	out := &model.NotificationSettings{UserID: userID, InAppEnabled: true, MutedEventsRaw: []byte("[]")}
@@ -4374,7 +4383,7 @@ func (s *Store) UpsertNotificationSettings(ctx context.Context, st *model.Notifi
 	if st.InAppEnabled {
 		enabled = 1
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		s.upsert(`INSERT INTO notification_settings (user_id, in_app_enabled, muted_events, updated_at)
 		 VALUES (?,?,?, CURRENT_TIMESTAMP)
 		 ON CONFLICT(user_id) DO UPDATE SET
@@ -4392,7 +4401,7 @@ func (s *Store) UpsertNotificationSettings(ctx context.Context, st *model.Notifi
 
 // ListReplicaRules returns the rule list ordered priority asc.
 func (s *Store) ListReplicaRules(ctx context.Context) ([]*model.ReplicaRule, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, path_pattern, mode, priority, enabled, description, created_at, updated_at
 		 FROM replica_rules
 		 ORDER BY priority ASC, id ASC`)
@@ -4415,7 +4424,7 @@ func (s *Store) ListReplicaRules(ctx context.Context) ([]*model.ReplicaRule, err
 
 // GetReplicaRule returns a single rule by id.
 func (s *Store) GetReplicaRule(ctx context.Context, id int64) (*model.ReplicaRule, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT id, path_pattern, mode, priority, enabled, description, created_at, updated_at
 		 FROM replica_rules WHERE id=?`, id)
 	r := &model.ReplicaRule{}
@@ -4436,7 +4445,7 @@ func (s *Store) CreateReplicaRule(ctx context.Context, in *model.ReplicaRuleInpu
 	if in.Enabled {
 		enabled = 1
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO replica_rules (path_pattern, mode, priority, enabled, description)
 		 VALUES (?,?,?,?,?)`,
 		in.PathPattern, in.Mode, in.Priority, enabled, in.Description)
@@ -4456,7 +4465,7 @@ func (s *Store) UpdateReplicaRule(ctx context.Context, id int64, in *model.Repli
 	if in.Enabled {
 		enabled = 1
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE replica_rules
 		 SET path_pattern=?, mode=?, priority=?, enabled=?, description=?, updated_at=CURRENT_TIMESTAMP
 		 WHERE id=?`,
@@ -4473,7 +4482,7 @@ func (s *Store) UpdateReplicaRule(ctx context.Context, id int64, in *model.Repli
 
 // DeleteReplicaRule removes a rule.
 func (s *Store) DeleteReplicaRule(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM replica_rules WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM replica_rules WHERE id=?`, id)
 	return err
 }
 
@@ -4481,7 +4490,7 @@ func (s *Store) DeleteReplicaRule(ctx context.Context, id int64) error {
 // + last_attempt_at + the latest error code/message for the existing
 // (path, op) row. Idempotent under retry.
 func (s *Store) UpsertReplicaFailure(ctx context.Context, path, op, errCode, errMsg string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		s.upsert(`INSERT INTO replica_failures (path, op, error_code, error_msg, attempts, last_attempt_at)
 		 VALUES (?,?,?,?,1, CURRENT_TIMESTAMP)
 		 ON CONFLICT(path, op) DO UPDATE SET
@@ -4500,7 +4509,7 @@ func (s *Store) UpsertReplicaFailure(ctx context.Context, path, op, errCode, err
 // ResolveReplicaFailure stamps resolved_at on the matching row.
 // Missing rows are a no-op.
 func (s *Store) ResolveReplicaFailure(ctx context.Context, path, op string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE replica_failures SET resolved_at = CURRENT_TIMESTAMP
 		 WHERE path=? AND op=? AND resolved_at IS NULL`, path, op)
 	return err
@@ -4519,13 +4528,13 @@ func (s *Store) ListReplicaFailures(ctx context.Context, onlyUnresolved bool, li
 		whereSQL = "WHERE resolved_at IS NULL"
 	}
 	var total int64
-	if err := s.db.QueryRowContext(ctx,
+	if err := s.conn(ctx).QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM replica_failures "+whereSQL,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("sqlite: count replica failures: %w", err)
 	}
 
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT id, path, op, error_code, error_msg, attempts, last_attempt_at, resolved_at
 		 FROM replica_failures `+whereSQL+`
 		 ORDER BY last_attempt_at DESC, id DESC
@@ -4555,7 +4564,7 @@ func (s *Store) ListReplicaFailures(ctx context.Context, onlyUnresolved bool, li
 // directly — cheaper than List for the dashboard counter.
 func (s *Store) CountUnresolvedReplicaFailures(ctx context.Context) (int64, error) {
 	var n int64
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM replica_failures WHERE resolved_at IS NULL`,
 	).Scan(&n)
 	return n, err
@@ -4566,7 +4575,7 @@ func (s *Store) CountUnresolvedReplicaFailures(ctx context.Context) (int64, erro
 // status report's "repaired_count" metric.
 func (s *Store) CountRecentlyResolvedReplicaFailures(ctx context.Context, since time.Time) (int64, error) {
 	var n int64
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM replica_failures
 		 WHERE resolved_at IS NOT NULL AND resolved_at >= ?`, since,
 	).Scan(&n)
@@ -4578,7 +4587,7 @@ func (s *Store) UpsertReplicaStatusReport(ctx context.Context, total, failed, re
 	if len(summaryJSON) == 0 {
 		summaryJSON = []byte("{}")
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		s.upsert(`INSERT INTO replica_status_reports (id, generated_at, total_files, failed_count, repaired_count, summary_json)
 		 VALUES (1, CURRENT_TIMESTAMP, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
@@ -4597,7 +4606,7 @@ func (s *Store) UpsertReplicaStatusReport(ctx context.Context, total, failed, re
 // GetReplicaStatusReport returns the singleton row. nil + nil err
 // when no report has been generated yet.
 func (s *Store) GetReplicaStatusReport(ctx context.Context) (*model.ReplicaStatusReport, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT generated_at, total_files, failed_count, repaired_count, summary_json
 		 FROM replica_status_reports WHERE id=1`)
 	out := &model.ReplicaStatusReport{}
@@ -4618,7 +4627,7 @@ func (s *Store) GetReplicaStatusReport(ctx context.Context) (*model.ReplicaStatu
 // GetReplicaSettings returns the singleton row. Missing row maps to
 // defaults (mirror, no cron).
 func (s *Store) GetReplicaSettings(ctx context.Context) (*model.ReplicaSettings, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT report_cron, report_enabled, default_mode FROM replica_settings WHERE id=1`)
 	out := &model.ReplicaSettings{DefaultMode: model.ReplicaModeMirror}
 	var enabled int
@@ -4644,7 +4653,7 @@ func (s *Store) UpsertReplicaSettings(ctx context.Context, st *model.ReplicaSett
 	if st.ReportEnabled {
 		enabled = 1
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		s.upsert(`INSERT INTO replica_settings (id, report_cron, report_enabled, default_mode, updated_at)
 		 VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
 		 ON CONFLICT(id) DO UPDATE SET
@@ -4758,7 +4767,7 @@ func (s *Store) CreateNodeComment(ctx context.Context, c *model.NodeComment) (*m
 	if c == nil || c.NodeID == 0 || c.UserID == 0 || c.Body == "" {
 		return nil, errors.New("sqlite: node comment missing node/user/body")
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO node_comments (node_id, user_id, body) VALUES (?,?,?)`,
 		c.NodeID, c.UserID, c.Body)
 	if err != nil {
@@ -4770,7 +4779,7 @@ func (s *Store) CreateNodeComment(ctx context.Context, c *model.NodeComment) (*m
 
 // GetNodeComment returns a single live (not soft-deleted) comment by id.
 func (s *Store) GetNodeComment(ctx context.Context, id int64) (*model.NodeComment, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT c.id, c.node_id, c.user_id, c.body, c.created_at, c.updated_at,
 		        COALESCE(NULLIF(u.display_name, ''), u.email)
 		 FROM node_comments c
@@ -4783,7 +4792,7 @@ func (s *Store) GetNodeComment(ctx context.Context, id int64) (*model.NodeCommen
 // order (oldest first), each carrying the author's display name (falling
 // back to the author's email).
 func (s *Store) ListNodeComments(ctx context.Context, nodeID int64) ([]*model.NodeComment, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT c.id, c.node_id, c.user_id, c.body, c.created_at, c.updated_at,
 		        COALESCE(NULLIF(u.display_name, ''), u.email)
 		 FROM node_comments c
@@ -4807,7 +4816,7 @@ func (s *Store) ListNodeComments(ctx context.Context, nodeID int64) ([]*model.No
 
 // SoftDeleteNodeComment flips deleted_at on a live comment.
 func (s *Store) SoftDeleteNodeComment(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE node_comments SET deleted_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
 		 WHERE id=? AND deleted_at IS NULL`, id)
 	if err != nil {
@@ -4823,7 +4832,7 @@ func (s *Store) SoftDeleteNodeComment(ctx context.Context, id int64) error {
 // the trash purge hook (belt and suspenders next to the nodes FK
 // CASCADE, which engines without FK enforcement may skip).
 func (s *Store) DeleteNodeCommentsByNode(ctx context.Context, nodeID int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM node_comments WHERE node_id=?`, nodeID)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM node_comments WHERE node_id=?`, nodeID)
 	if err != nil {
 		return fmt.Errorf("sqlite: delete node comments by node: %w", err)
 	}
@@ -4860,7 +4869,7 @@ func scanPlugin(r rowScanner) (*model.Plugin, error) {
 }
 
 func (s *Store) CreatePlugin(ctx context.Context, p *model.Plugin) (*model.Plugin, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO plugins (name, kind, binary_path, sha256, address, token_sealed, enabled, version, driver, last_error)
 		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
 		p.Name, p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError)
@@ -4872,15 +4881,15 @@ func (s *Store) CreatePlugin(ctx context.Context, p *model.Plugin) (*model.Plugi
 }
 
 func (s *Store) GetPlugin(ctx context.Context, id int64) (*model.Plugin, error) {
-	return scanPlugin(s.db.QueryRowContext(ctx, `SELECT `+pluginCols+` FROM plugins WHERE id=?`, id))
+	return scanPlugin(s.conn(ctx).QueryRowContext(ctx, `SELECT `+pluginCols+` FROM plugins WHERE id=?`, id))
 }
 
 func (s *Store) GetPluginByName(ctx context.Context, name string) (*model.Plugin, error) {
-	return scanPlugin(s.db.QueryRowContext(ctx, `SELECT `+pluginCols+` FROM plugins WHERE name=?`, name))
+	return scanPlugin(s.conn(ctx).QueryRowContext(ctx, `SELECT `+pluginCols+` FROM plugins WHERE name=?`, name))
 }
 
 func (s *Store) ListPlugins(ctx context.Context) ([]*model.Plugin, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+pluginCols+` FROM plugins ORDER BY name`)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+pluginCols+` FROM plugins ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -4897,7 +4906,7 @@ func (s *Store) ListPlugins(ctx context.Context) ([]*model.Plugin, error) {
 }
 
 func (s *Store) UpdatePlugin(ctx context.Context, p *model.Plugin) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE plugins SET kind=?, binary_path=?, sha256=?, address=?, token_sealed=?, enabled=?, version=?, driver=?, last_error=?, updated_at=CURRENT_TIMESTAMP
 		 WHERE id=?`,
 		p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError, p.ID)
@@ -4905,7 +4914,7 @@ func (s *Store) UpdatePlugin(ctx context.Context, p *model.Plugin) error {
 }
 
 func (s *Store) DeletePlugin(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM plugins WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM plugins WHERE id=?`, id)
 	return err
 }
 
@@ -4943,7 +4952,7 @@ func scanAppPlugin(r rowScanner) (*model.AppPlugin, error) {
 }
 
 func (s *Store) CreateAppPlugin(ctx context.Context, p *model.AppPlugin) (*model.AppPlugin, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO app_plugins (name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.Name, p.Version, orJSON(p.LabelJSON, "{}"), orJSON(p.ManifestJSON, "{}"), p.WasmPath, p.SHA256,
@@ -4956,15 +4965,15 @@ func (s *Store) CreateAppPlugin(ctx context.Context, p *model.AppPlugin) (*model
 }
 
 func (s *Store) GetAppPlugin(ctx context.Context, id int64) (*model.AppPlugin, error) {
-	return scanAppPlugin(s.db.QueryRowContext(ctx, `SELECT `+appPluginCols+` FROM app_plugins WHERE id=?`, id))
+	return scanAppPlugin(s.conn(ctx).QueryRowContext(ctx, `SELECT `+appPluginCols+` FROM app_plugins WHERE id=?`, id))
 }
 
 func (s *Store) GetAppPluginByName(ctx context.Context, name string) (*model.AppPlugin, error) {
-	return scanAppPlugin(s.db.QueryRowContext(ctx, `SELECT `+appPluginCols+` FROM app_plugins WHERE name=?`, name))
+	return scanAppPlugin(s.conn(ctx).QueryRowContext(ctx, `SELECT `+appPluginCols+` FROM app_plugins WHERE name=?`, name))
 }
 
 func (s *Store) ListAppPlugins(ctx context.Context) ([]*model.AppPlugin, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+appPluginCols+` FROM app_plugins ORDER BY name`)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+appPluginCols+` FROM app_plugins ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -4981,7 +4990,7 @@ func (s *Store) ListAppPlugins(ctx context.Context) ([]*model.AppPlugin, error) 
 }
 
 func (s *Store) UpdateAppPlugin(ctx context.Context, p *model.AppPlugin) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE app_plugins SET version=?, label_json=?, manifest_json=?, wasm_path=?, sha256=?, source=?, source_url=?, signed=?, permissions_json=?, enabled=?, last_error=?, updated_at=CURRENT_TIMESTAMP
 		 WHERE id=?`,
 		p.Version, orJSON(p.LabelJSON, "{}"), orJSON(p.ManifestJSON, "{}"), p.WasmPath, p.SHA256, p.Source, p.SourceURL,
@@ -4990,7 +4999,7 @@ func (s *Store) UpdateAppPlugin(ctx context.Context, p *model.AppPlugin) error {
 }
 
 func (s *Store) DeleteAppPlugin(ctx context.Context, id int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := db.BeginOwnTx(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -5012,7 +5021,7 @@ func (s *Store) DeleteAppPlugin(ctx context.Context, id int64) error {
 }
 
 func (s *Store) GetAppPluginSettings(ctx context.Context, pluginID int64) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT `key`, value FROM app_plugin_settings WHERE plugin_id=?", pluginID)
+	rows, err := s.conn(ctx).QueryContext(ctx, "SELECT `key`, value FROM app_plugin_settings WHERE plugin_id=?", pluginID)
 	if err != nil {
 		return nil, err
 	}
@@ -5029,7 +5038,7 @@ func (s *Store) GetAppPluginSettings(ctx context.Context, pluginID int64) (map[s
 }
 
 func (s *Store) PutAppPluginSettings(ctx context.Context, pluginID int64, values map[string]string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := db.BeginOwnTx(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -5046,7 +5055,7 @@ func (s *Store) PutAppPluginSettings(ctx context.Context, pluginID int64, values
 }
 
 func (s *Store) ListAppPluginOverrides(ctx context.Context, pluginID int64) ([]*model.AppPluginOverride, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT plugin_id, action_id, enabled, admin_only, applies_json FROM app_plugin_overrides WHERE plugin_id=? ORDER BY action_id`, pluginID)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT plugin_id, action_id, enabled, admin_only, applies_json FROM app_plugin_overrides WHERE plugin_id=? ORDER BY action_id`, pluginID)
 	if err != nil {
 		return nil, err
 	}
@@ -5063,7 +5072,7 @@ func (s *Store) ListAppPluginOverrides(ctx context.Context, pluginID int64) ([]*
 }
 
 func (s *Store) PutAppPluginOverrides(ctx context.Context, pluginID int64, list []*model.AppPluginOverride) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := db.BeginOwnTx(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -5086,7 +5095,7 @@ func (s *Store) PutAppPluginOverrides(ctx context.Context, pluginID int64, list 
 
 func (s *Store) GetAppPluginState(ctx context.Context, pluginID, storageID int64, pathHash, key string) (string, bool, error) {
 	var v string
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		"SELECT value FROM app_plugin_state WHERE plugin_id=? AND storage_id=? AND path_hash=? AND `key`=?",
 		pluginID, storageID, pathHash, key).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -5099,7 +5108,7 @@ func (s *Store) GetAppPluginState(ctx context.Context, pluginID, storageID int64
 }
 
 func (s *Store) SetAppPluginState(ctx context.Context, pluginID, storageID int64, pathHash, rel, key, value string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := db.BeginOwnTx(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -5118,7 +5127,7 @@ func (s *Store) SetAppPluginState(ctx context.Context, pluginID, storageID int64
 }
 
 func (s *Store) DeleteAppPluginState(ctx context.Context, pluginID, storageID int64, pathHash, key string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		"DELETE FROM app_plugin_state WHERE plugin_id=? AND storage_id=? AND path_hash=? AND `key`=?",
 		pluginID, storageID, pathHash, key)
 	return err
@@ -5136,7 +5145,7 @@ func scanAppPluginJob(r rowScanner) (*model.AppPluginJob, error) {
 }
 
 func (s *Store) CreateAppPluginJob(ctx context.Context, j *model.AppPluginJob) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO app_plugin_jobs (id, op_id, plugin_id, plugin_name, action_id, storage_id, paths_json, params_json, actor_id, locale, label, status, message, outputs_json, error)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		j.ID, j.OpID, j.PluginID, j.PluginName, j.ActionID, j.StorageID, orJSON(j.PathsJSON, "[]"), orJSON(j.ParamsJSON, "{}"),
@@ -5145,7 +5154,7 @@ func (s *Store) CreateAppPluginJob(ctx context.Context, j *model.AppPluginJob) e
 }
 
 func (s *Store) GetAppPluginJob(ctx context.Context, id string) (*model.AppPluginJob, error) {
-	return scanAppPluginJob(s.db.QueryRowContext(ctx, `SELECT `+appPluginJobCols+` FROM app_plugin_jobs WHERE id=?`, id))
+	return scanAppPluginJob(s.conn(ctx).QueryRowContext(ctx, `SELECT `+appPluginJobCols+` FROM app_plugin_jobs WHERE id=?`, id))
 }
 
 func (s *Store) ListAppPluginJobsByOp(ctx context.Context, opIDs []int64) (map[int64]*model.AppPluginJob, error) {
@@ -5159,7 +5168,7 @@ func (s *Store) ListAppPluginJobsByOp(ctx context.Context, opIDs []int64) (map[i
 		ph[i] = "?"
 		args[i] = id
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+appPluginJobCols+` FROM app_plugin_jobs WHERE op_id IN (`+strings.Join(ph, ",")+`)`, args...)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+appPluginJobCols+` FROM app_plugin_jobs WHERE op_id IN (`+strings.Join(ph, ",")+`)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -5177,12 +5186,12 @@ func (s *Store) ListAppPluginJobsByOp(ctx context.Context, opIDs []int64) (map[i
 }
 
 func (s *Store) SetAppPluginJobOp(ctx context.Context, jobID string, opID int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE app_plugin_jobs SET op_id=? WHERE id=?`, opID, jobID)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE app_plugin_jobs SET op_id=? WHERE id=?`, opID, jobID)
 	return err
 }
 
 func (s *Store) UpdateAppPluginJob(ctx context.Context, j *model.AppPluginJob) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE app_plugin_jobs SET op_id=?, status=?, message=?, outputs_json=?, error=?, finished_at=? WHERE id=?`,
 		j.OpID, j.Status, j.Message, orJSON(j.OutputsJSON, "[]"), j.Error, j.FinishedAt, j.ID)
 	return err
@@ -5208,18 +5217,18 @@ func scanAppPluginSigningKey(r rowScanner) (*model.AppPluginSigningKey, error) {
 }
 
 func (s *Store) CreateAppPluginSigningKey(ctx context.Context, k *model.AppPluginSigningKey) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO app_plugin_signing_keys (id, tenant_id, plugin_id, purpose, subject, cert_pem, key_sealed, expires_at) VALUES (?,?,?,?,?,?,?,?)`,
 		k.ID, k.TenantID, k.PluginID, k.Purpose, k.Subject, k.CertPEM, k.KeySealed, k.ExpiresAt)
 	return err
 }
 
 func (s *Store) GetAppPluginSigningKey(ctx context.Context, id string) (*model.AppPluginSigningKey, error) {
-	return scanAppPluginSigningKey(s.db.QueryRowContext(ctx, `SELECT `+appPluginSigningKeyCols+` FROM app_plugin_signing_keys WHERE id=?`, id))
+	return scanAppPluginSigningKey(s.conn(ctx).QueryRowContext(ctx, `SELECT `+appPluginSigningKeyCols+` FROM app_plugin_signing_keys WHERE id=?`, id))
 }
 
 func (s *Store) GetAppPluginSigningCA(ctx context.Context, tenantID int64) (*model.AppPluginSigningKey, error) {
-	k, err := scanAppPluginSigningKey(s.db.QueryRowContext(ctx,
+	k, err := scanAppPluginSigningKey(s.conn(ctx).QueryRowContext(ctx,
 		`SELECT `+appPluginSigningKeyCols+` FROM app_plugin_signing_keys WHERE tenant_id=? AND purpose='ca' AND retired_at IS NULL AND destroyed_at IS NULL ORDER BY created_at DESC LIMIT 1`, tenantID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -5228,7 +5237,7 @@ func (s *Store) GetAppPluginSigningCA(ctx context.Context, tenantID int64) (*mod
 }
 
 func (s *Store) GetAppPluginSealKey(ctx context.Context, tenantID, pluginID int64) (*model.AppPluginSigningKey, error) {
-	k, err := scanAppPluginSigningKey(s.db.QueryRowContext(ctx,
+	k, err := scanAppPluginSigningKey(s.conn(ctx).QueryRowContext(ctx,
 		`SELECT `+appPluginSigningKeyCols+` FROM app_plugin_signing_keys WHERE tenant_id=? AND plugin_id=? AND purpose='platform' AND destroyed_at IS NULL ORDER BY created_at DESC LIMIT 1`, tenantID, pluginID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -5237,12 +5246,12 @@ func (s *Store) GetAppPluginSealKey(ctx context.Context, tenantID, pluginID int6
 }
 
 func (s *Store) RetireAppPluginSigningCA(ctx context.Context, tenantID int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE app_plugin_signing_keys SET retired_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND purpose='ca' AND retired_at IS NULL`, tenantID)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE app_plugin_signing_keys SET retired_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND purpose='ca' AND retired_at IS NULL`, tenantID)
 	return err
 }
 
 func (s *Store) ListAppPluginSigningCAs(ctx context.Context, tenantID int64) ([]*model.AppPluginSigningKey, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT `+appPluginSigningKeyCols+` FROM app_plugin_signing_keys WHERE tenant_id=? AND purpose='ca' ORDER BY created_at DESC`, tenantID)
 	if err != nil {
 		return nil, err
@@ -5260,7 +5269,7 @@ func (s *Store) ListAppPluginSigningCAs(ctx context.Context, tenantID int64) ([]
 }
 
 func (s *Store) DestroyAppPluginSigningKey(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE app_plugin_signing_keys SET key_sealed='', destroyed_at=CURRENT_TIMESTAMP WHERE id=? AND destroyed_at IS NULL`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE app_plugin_signing_keys SET key_sealed='', destroyed_at=CURRENT_TIMESTAMP WHERE id=? AND destroyed_at IS NULL`, id)
 	return err
 }
 
@@ -5285,7 +5294,7 @@ func (s *Store) ListAppPluginStateFiles(ctx context.Context, pluginID int64, key
 	}
 	q += " ORDER BY st.rel LIMIT ?"
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.conn(ctx).QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -5318,7 +5327,7 @@ func (s *Store) ListAppPluginStateKeys(ctx context.Context, storageID int64, pat
 			ph[i] = "?"
 			args = append(args, h)
 		}
-		rows, err := s.db.QueryContext(ctx,
+		rows, err := s.conn(ctx).QueryContext(ctx,
 			"SELECT st.path_hash, p.name, st.`key` FROM app_plugin_state st JOIN app_plugins p ON p.id=st.plugin_id WHERE st.storage_id=? AND st.path_hash IN ("+strings.Join(ph, ",")+")",
 			args...)
 		if err != nil {
@@ -5353,7 +5362,7 @@ func scanAppPluginLock(r rowScanner) (*model.AppPluginLock, error) {
 }
 
 func (s *Store) PutAppPluginLock(ctx context.Context, l *model.AppPluginLock) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := db.BeginOwnTx(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -5370,7 +5379,7 @@ func (s *Store) PutAppPluginLock(ctx context.Context, l *model.AppPluginLock) er
 }
 
 func (s *Store) GetAppPluginLock(ctx context.Context, storageID int64, pathHash string) (*model.AppPluginLock, error) {
-	l, err := scanAppPluginLock(s.db.QueryRowContext(ctx, `SELECT `+appPluginLockCols+` FROM app_plugin_locks WHERE storage_id=? AND path_hash=?`, storageID, pathHash))
+	l, err := scanAppPluginLock(s.conn(ctx).QueryRowContext(ctx, `SELECT `+appPluginLockCols+` FROM app_plugin_locks WHERE storage_id=? AND path_hash=?`, storageID, pathHash))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -5383,9 +5392,9 @@ func (s *Store) ListAppPluginLocks(ctx context.Context, storageID int64) ([]*mod
 		err  error
 	)
 	if storageID > 0 {
-		rows, err = s.db.QueryContext(ctx, `SELECT `+appPluginLockCols+` FROM app_plugin_locks WHERE storage_id=? ORDER BY created_at`, storageID)
+		rows, err = s.conn(ctx).QueryContext(ctx, `SELECT `+appPluginLockCols+` FROM app_plugin_locks WHERE storage_id=? ORDER BY created_at`, storageID)
 	} else {
-		rows, err = s.db.QueryContext(ctx, `SELECT `+appPluginLockCols+` FROM app_plugin_locks ORDER BY created_at`)
+		rows, err = s.conn(ctx).QueryContext(ctx, `SELECT `+appPluginLockCols+` FROM app_plugin_locks ORDER BY created_at`)
 	}
 	if err != nil {
 		return nil, err
@@ -5403,12 +5412,12 @@ func (s *Store) ListAppPluginLocks(ctx context.Context, storageID int64) ([]*mod
 }
 
 func (s *Store) DeleteAppPluginLock(ctx context.Context, storageID int64, pathHash string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM app_plugin_locks WHERE storage_id=? AND path_hash=?`, storageID, pathHash)
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM app_plugin_locks WHERE storage_id=? AND path_hash=?`, storageID, pathHash)
 	return err
 }
 
 func (s *Store) DeleteExpiredAppPluginLocks(ctx context.Context, now time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM app_plugin_locks WHERE until IS NOT NULL AND until < ?`, now)
+	res, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM app_plugin_locks WHERE until IS NOT NULL AND until < ?`, now)
 	if err != nil {
 		return 0, err
 	}
@@ -5439,7 +5448,7 @@ func scanAppPluginScheduleItem(r rowScanner) (*model.AppPluginScheduleItem, erro
 // Delete-then-insert rather than an upsert: the two engines this file serves
 // spell upserts differently, and the read is needed anyway to see the lease.
 func (s *Store) PutAppPluginScheduleItem(ctx context.Context, it *model.AppPluginScheduleItem) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := db.BeginOwnTx(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -5473,7 +5482,7 @@ func (s *Store) PutAppPluginScheduleItem(ctx context.Context, it *model.AppPlugi
 // ClaimAppPluginScheduleItem is the lease: one conditional UPDATE, true only
 // for the process whose UPDATE actually moved the row out of `due`.
 func (s *Store) ClaimAppPluginScheduleItem(ctx context.Context, pluginID int64, key, owner string, now time.Time) (bool, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		"UPDATE app_plugin_schedule SET status=?, claimed_by=?, claimed_at=?, attempts=attempts+1, updated_at=CURRENT_TIMESTAMP"+
 			" WHERE plugin_id=? AND `key`=? AND status=? AND due_at<=?",
 		model.AppPluginScheduleRunning, owner, now.UTC(), pluginID, key, model.AppPluginScheduleDue, now.UTC())
@@ -5486,13 +5495,13 @@ func (s *Store) ClaimAppPluginScheduleItem(ctx context.Context, pluginID int64, 
 
 func (s *Store) FinishAppPluginScheduleItem(ctx context.Context, pluginID int64, key, status, jobID, errMsg string, rearmAt *time.Time) error {
 	if rearmAt != nil {
-		_, err := s.db.ExecContext(ctx,
+		_, err := s.conn(ctx).ExecContext(ctx,
 			"UPDATE app_plugin_schedule SET status=?, due_at=?, claimed_by='', claimed_at=NULL, job_id=?, error=?, updated_at=CURRENT_TIMESTAMP"+
 				" WHERE plugin_id=? AND `key`=?",
 			model.AppPluginScheduleDue, rearmAt.UTC(), jobID, errMsg, pluginID, key)
 		return err
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		"UPDATE app_plugin_schedule SET status=?, job_id=?, error=?, updated_at=CURRENT_TIMESTAMP WHERE plugin_id=? AND `key`=?",
 		status, jobID, errMsg, pluginID, key)
 	return err
@@ -5502,7 +5511,7 @@ func (s *Store) DueAppPluginScheduleItems(ctx context.Context, now time.Time, li
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT `+appPluginScheduleCols+" FROM app_plugin_schedule WHERE status=? AND due_at<=? ORDER BY due_at ASC, plugin_id ASC, `key` ASC LIMIT ?",
 		model.AppPluginScheduleDue, now.UTC(), limit)
 	if err != nil {
@@ -5518,7 +5527,7 @@ func (s *Store) DueAppPluginScheduleItems(ctx context.Context, now time.Time, li
 // the ordinary state of a quiet instance, not a failure to report.
 func (s *Store) NextAppPluginScheduleDue(ctx context.Context) (*time.Time, error) {
 	var t time.Time
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT due_at FROM app_plugin_schedule WHERE status=? ORDER BY due_at ASC LIMIT 1`, model.AppPluginScheduleDue).Scan(&t)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -5530,7 +5539,7 @@ func (s *Store) NextAppPluginScheduleDue(ctx context.Context) (*time.Time, error
 }
 
 func (s *Store) ListAppPluginScheduleItems(ctx context.Context, pluginID int64) ([]*model.AppPluginScheduleItem, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT `+appPluginScheduleCols+" FROM app_plugin_schedule WHERE plugin_id=? ORDER BY due_at ASC, `key` ASC", pluginID)
 	if err != nil {
 		return nil, err
@@ -5540,7 +5549,7 @@ func (s *Store) ListAppPluginScheduleItems(ctx context.Context, pluginID int64) 
 }
 
 func (s *Store) ReapAppPluginScheduleItems(ctx context.Context, before time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.conn(ctx).ExecContext(ctx,
 		`DELETE FROM app_plugin_schedule WHERE status IN (?,?,?) AND due_at < ?`,
 		model.AppPluginScheduleQueued, model.AppPluginScheduleFailed, model.AppPluginScheduleSkipped, before.UTC())
 	if err != nil {

@@ -1,6 +1,9 @@
 package webdav
 
-import "github.com/brf-tech/filex/backend/internal/storage"
+import (
+	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storage/stall"
+)
 
 // Config contract for the webdav driver — every key Init reads, declared
 // once so the admin form, the replication-target dialog, the CLI and
@@ -16,7 +19,7 @@ func init() {
 		Driver:  "webdav",
 		Label:   "WebDAV",
 		I18nKey: "storages.driver.webdav",
-		Fields: []storage.Field{
+		Fields: append([]storage.Field{
 			{
 				Key:         "url",
 				Type:        storage.FieldString,
@@ -54,6 +57,15 @@ func init() {
 				Root:        true,
 				Aliases:     []string{"base_path", "remote_path"},
 			},
-		},
+		}, defaults.Fields(stall.ServerTexts(attemptText))...),
 	})
+}
+
+// attemptText is the attempt timeout's text on the WebDAV form: the shared
+// one, plus the requests that wait longer for the server (timeout.go).
+var attemptText = stall.FieldText{
+	Label:       stall.AttemptText.Label,
+	I18nKey:     stall.AttemptText.I18nKey,
+	Help:        stall.AttemptText.Help + " Copies, moves and deletes wait up to 10 minutes for the answer, because the server answers them only when the work is done.",
+	HelpI18nKey: "storages.fieldHelp.webdavAttemptTimeout",
 }

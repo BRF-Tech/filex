@@ -1,6 +1,9 @@
 package s3
 
-import "github.com/brf-tech/filex/backend/internal/storage"
+import (
+	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storage/stall"
+)
 
 // Config contract for the s3 driver — every key Init reads, declared once
 // so the admin form, the replication-target dialog, the CLI and
@@ -13,7 +16,7 @@ func init() {
 		Driver:  "s3",
 		Label:   "S3 / Hetzner / MinIO",
 		I18nKey: "storages.driver.s3",
-		Fields: []storage.Field{
+		Fields: append([]storage.Field{
 			{
 				Key:         "bucket",
 				Type:        storage.FieldString,
@@ -93,6 +96,33 @@ func init() {
 				Default:     true,
 				Advanced:    true,
 			},
-		},
+		}, defaults.Fields(timeoutTexts)...),
 	})
+}
+
+// timeoutTexts are the S3 form's texts for the three settings of issue #44
+// (resilience.go). With the defaults a dead store is reported within 15 s;
+// before them a drop into one took 85 s, and a store that accepted the
+// connection but never answered did not return at all. S3 names its own
+// store-side waits, so the attempt timeout and the attempts have their own
+// catalogue entries; the other network drivers share stall.ServerTexts.
+var timeoutTexts = stall.Texts{
+	AttemptTimeout: stall.FieldText{
+		Label:       "Attempt timeout (seconds)",
+		I18nKey:     "storages.fields.s3AttemptTimeout",
+		Help:        "How long one attempt may wait for a sign of life from the store: connecting, the TLS handshake, the answer after the request is sent, and each next piece of the answer. A transfer that keeps moving is never cut, however long it takes; an upload the store stops taking is cut after 60 seconds, or after this if it is longer. Copies and renames wait up to 10 minutes for the answer, because the store answers them only when the copy is done.",
+		HelpI18nKey: "storages.fieldHelp.s3AttemptTimeout",
+	},
+	MaxAttempts: stall.FieldText{
+		Label:       "Attempts per request",
+		I18nKey:     "storages.fields.s3MaxAttempts",
+		Help:        "How many times a request is tried in all when the failure can pass: a network error, a timeout, a 5xx answer, throttling. 1 turns retrying off. A refusal (403, a missing bucket, a host name that does not resolve) is never retried.",
+		HelpI18nKey: "storages.fieldHelp.s3MaxAttempts",
+	},
+	TotalTimeout: stall.FieldText{
+		Label:       "Give up after (seconds)",
+		I18nKey:     "storages.fields.s3TotalTimeout",
+		Help:        "No new attempt starts unless it could finish within this many seconds of the first, so an upload or a listing on a store that is down reports the outage within this time. A transfer that is under way is not cut. A request that timed out is tried again only when this is at least twice the attempt timeout.",
+		HelpI18nKey: "storages.fieldHelp.s3TotalTimeout",
+	},
 }

@@ -84,15 +84,48 @@ its row and every row under it.
    quietly — see "Change frames").
 3. **List** the folder from disk (`driver.List`, one directory, never recursive).
    A failed listing changes nothing.
-4. **Apply** the listing with the scan's own per-entry code (the body of
-   `sync.walk`, extracted as `catalogueEntry`): create rows for new entries
-   (size, mime, etag, **mtime** — a row without one drifts later and makes the
-   desktop re-download it), update drifted ones, settle landed staged uploads,
-   repair a row left behind by a folder move, queue the antivirus for new or
-   changed files, index them. The encrypted-folder marker is applied first.
-   Child folders are **not** entered; each gets an `uncatalogued` row.
-5. **Delete pass** (see the invariant).
-6. **Record** the folder `catalogued` (or keep it `watched`) with `reconciled_at`.
+4. **Apply** the listing with the scan's own per-entry code (`catalogueEntry`,
+   through `applyListing`, which the full scan's `sync.walk` uses too): create
+   rows for new entries (size, mime, etag, **mtime** — a row without one
+   drifts later and makes the desktop re-download it), update drifted ones,
+   settle landed staged uploads, repair a row left behind by a folder move. The
+   encrypted-folder marker is applied first. Child folders are **not**
+   entered; each gets an `uncatalogued` row.
+5. **Record** the folder `catalogued` (or keep it `watched`) with `reconciled_at`.
+6. **Delete pass** (see the invariant), which reads that record back.
+7. **Hand off**, once 4–6 have committed: the new and changed rows go to the
+   search index in one batch (content extraction is queued per file, as
+   before), new or changed files to the antivirus.
+
+### One transaction per folder
+
+Steps 4–6 are **one database transaction** (issue #70; `Store.WithTx`, on
+SQLite, PostgreSQL and MySQL alike): the folder's rows, the folders it
+revealed, its state row and its removals commit together or not at all. A
+folder of more than 500 entries is written in transactions of 500, the last of
+which carries steps 5 and 6 — on SQLite a transaction holds the database's only
+connection, and every other request waits until it commits.
+
+- The transaction travels in the context. Every statement of every driver asks
+  `db.Conn(ctx, pool)` for its handle, so the quota wrapper and the quota
+  service, which pass the context on, join it with no code of their own
+  (`internal/db/tx.go`).
+- ⚠ Nothing that reaches the database through **another** handle may run
+  inside it. The job queue shares the application's database but not the
+  transaction, and on SQLite an enqueue from inside would wait for ever for the
+  connection the transaction holds. That is why the search index (whose content
+  hook enqueues extraction) and the antivirus are told in step 7, after the
+  commit — and so never hear of a row that was rolled back.
+- A store method that commits on its own (`LinkNodeTags`, the app-plugin
+  writes) refuses to run inside one (`db.ErrNestedTx`) instead of waiting.
+- A transaction that fails — an INSERT refused because another writer holds the
+  key (on PostgreSQL that ends the transaction), a refused commit — is rolled
+  back, and the folder is applied again one statement at a time: the per-entry
+  path exactly as it was, where a row another writer won is re-read and carried
+  on with.
+
+The full scan applies each directory the same way, and only then walks into its
+subfolders. Why it matters is under "Measured".
 
 It never takes the storage-wide run lock (`runMu`) — a full scan and any number
 of folder reconciles run side by side. Two reconciles of the SAME folder never
@@ -101,7 +134,9 @@ marks it dirty so it runs once more afterwards.
 
 Running beside a full scan is safe because every create in both paths tolerates
 losing the race: a unique-key refusal re-reads the row the other one wrote and
-carries on with it (`walk`, `EnsureDirChain`). Before this change the walk
+carries on with it (`walk`, `EnsureDirChain`). Inside a folder's transaction the
+refusal sends the folder back to the per-entry path, which does exactly that
+(see "One transaction per folder"). Before this change the walk
 skipped the subtree of a folder row it failed to create, and a full scan that
 met a folder reconcile at the top of a folder finished with a hole in its
 catalogue.
@@ -121,7 +156,10 @@ Concretely:
 - `deletePass(dir, listing)` refuses to run unless the folder's state row says
   it was reconciled by **this** listing (`reconciled_at` equals the listing's
   timestamp). A caller that reaches it any other way — an event handler, a
-  cleanup, a future refactor — removes nothing.
+  cleanup, a future refactor — removes nothing. It runs inside the folder's
+  transaction, after that row was written in it: its removals commit only
+  together with the listing that justified them, and a transaction rolled back
+  removed nothing (its search-index deletions wait for the commit too).
 - Candidates are **direct children** of the listed folder only. A candidate's
   subtree goes with it only when the candidate itself is confirmed gone; rows in
   a child folder that still exists are never candidates, whatever state that
@@ -338,9 +376,38 @@ partial). Behaviour B catalogued exactly the three folders that were opened and
 nothing more in the following minute. The per-entry catalogue work is the
 full scan's own (`catalogueEntry`): the filler ran at ~43 files/s while the
 measurement polled the storage's figures every second (each poll sums every
-row, and SQLite has one connection), the full scan at ~82 files/s alone. Making
-that per-entry work cheaper (a transaction per folder, say) would speed up
-both and is outside this change.
+row, and SQLite has one connection), the full scan at ~82 files/s alone. Issue
+#70 made that work cheaper for both; see the next section.
+
+### Catalogue rate: one transaction per folder (issue #70)
+
+The same tree, the binary before #70 (`d6ab747c`) and the one after, run one
+after the other on the same Windows 11 machine with SQLite by
+`scripts/measure-catalogue-rate.mjs`: behaviour A with the storage's figures
+polled every second until it converges, then, on the same server, a `poll`
+storage's first sync (2026-09-25). The machine was busier than for the figures
+above — the old filler made 34 files/s here, not 43 — so compare within the
+table:
+
+| | before | after | |
+|---|---|---|---|
+| behaviour A, the filler to convergence | 2,923 s — 34 files/s | 1,056 s — 95 files/s | 2.8× |
+| full scan (`poll`, first sync), its first 60 s | 59 files/s | 118 files/s | 2× |
+| full scan, the whole run | 2,163 s — 46 files/s | 617 s — 162 files/s | 3.5× |
+
+Where the time went: a folder's rows were written one statement at a time — on
+SQLite an fsync per commit — and every new row was indexed on its own, one
+Bleve write that waits for the disk each: about 10 ms a file on this machine,
+most of the cost. The reconcile alone on 1,000 files made 85 files/s before
+and 539 with no search index at all.
+
+What bounds the catalogue now is the content extraction it queues for every new
+file (as before): four queue workers, each job a Bleve write and commits of its
+own on the same database. With `FILEX_SEARCH_CONTENT=0` the new filler
+converged in 213 s (470 files/s). With extraction on, the catalogue finishes
+first and extraction catches up behind it — 53,680 jobs were still queued at
+convergence, and the new binary's full scan above ran while they were being
+worked through.
 
 ## What is refused
 

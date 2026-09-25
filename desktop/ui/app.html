@@ -903,6 +903,46 @@
         'set.connections_sub':  ['See how to reach this server from this computer — mount it, or connect with an S3 client, over SFTP or with this app. Storages themselves are created and edited in the admin panel.',
                                  'Bu sunucuya bu bilgisayardan nasıl erişileceğini görün — bağlayın ya da bir S3 istemcisi, SFTP veya bu uygulamayla erişin. Depoların kendisi yönetim panelinde oluşturulur ve düzenlenir.'],
         'set.connections_open': ['How to connect', 'Nasıl bağlanılır'],
+        // "Mount as a drive" (WebDAV) — the one-click counterpart of the guide.
+        'drive.title':          ['Mount as a drive', 'Sürücü olarak bağla'],
+        'drive.sub':            ['Attach this server as a drive on this computer over WebDAV, so your files appear in your file manager. Files open on demand; nothing is downloaded up front.',
+                                 'Bu sunucuyu WebDAV üzerinden bu bilgisayarda bir sürücü olarak bağla; dosyaların, dosya yöneticinde görünsün. Dosyalar istendikçe açılır, önceden hiçbir şey indirilmez.'],
+        'drive.mount':          ['Mount as a drive', 'Sürücü olarak bağla'],
+        'drive.unmount':        ['Detach', 'Ayır'],
+        'drive.mounting':       ['Mounting…', 'Bağlanıyor…'],
+        'drive.unmounting':     ['Detaching…', 'Ayrılıyor…'],
+        'drive.mounted_at':     ['Mounted at {where}', '{where} konumuna bağlandı'],
+        'drive.open':           ['Open', 'Aç'],
+        // ⚠ The honest limits, said BEFORE the click, not discovered after.
+        'drive.note_win':       ['Uses Windows’ built-in WebDAV client. It must be reached over HTTPS, its WebClient service must be running (this starts it for you), and it is weak with very large files — for those, sync the folder instead.',
+                                 'Windows’un yerleşik WebDAV istemcisini kullanır. HTTPS üzerinden erişilmeli, WebClient hizmeti çalışıyor olmalı (bunu senin için başlatır) ve çok büyük dosyalarda zayıftır — onlar için klasörü eşitle.'],
+        'drive.note_mac':       ['Uses macOS’ built-in WebDAV client (Finder). Best over HTTPS.',
+                                 'macOS’un yerleşik WebDAV istemcisini (Finder) kullanır. En iyisi HTTPS üzerindedir.'],
+        'drive.note_linux':     ['Uses your desktop’s WebDAV client (GVfs / gio). Best over HTTPS.',
+                                 'Masaüstünün WebDAV istemcisini (GVfs / gio) kullanır. En iyisi HTTPS üzerindedir.'],
+        'drive.warn_http':      ['This server is on http:// — Windows refuses to send credentials to a WebDAV drive without HTTPS, and the others are insecure. Use https://.',
+                                 'Bu sunucu http:// üzerinde — Windows, HTTPS olmadan bir WebDAV sürücüsüne kimlik bilgisi göndermeyi reddeder, diğerlerinde de güvensizdir. https:// kullan.'],
+        // Failures, one message per machine-readable problem from src/drive.ts.
+        'drive.err.no-free-letter':   ['No free drive letter is available. Detach an existing network drive and try again.',
+                                       'Boş sürücü harfi yok. Var olan bir ağ sürücüsünü ayırıp yeniden dene.'],
+        'drive.err.webclient-missing':['Windows’ WebClient (WebDAV Redirector) is not installed on this system.',
+                                       'Windows’un WebClient (WebDAV Redirector) bileşeni bu sistemde kurulu değil.'],
+        'drive.err.webclient-disabled':['Windows’ WebClient service is disabled. Enable it (Services → WebClient, or an administrator running: sc config webclient start= demand) and try again.',
+                                       'Windows’un WebClient hizmeti devre dışı. Etkinleştir (Hizmetler → WebClient ya da yönetici olarak: sc config webclient start= demand) ve yeniden dene.'],
+        'drive.err.webclient-stopped':['Windows’ WebClient service could not be started. Start it (Services → WebClient) and try again.',
+                                       'Windows’un WebClient hizmeti başlatılamadı. Başlat (Hizmetler → WebClient) ve yeniden dene.'],
+        'drive.err.auth':             ['The server refused the sign-in. Reconnect this account and try again.',
+                                       'Sunucu girişi reddetti. Bu hesapla yeniden bağlanıp dene.'],
+        'drive.err.tls':              ['The server’s HTTPS certificate is not trusted on this computer, so the drive cannot be mounted.',
+                                       'Sunucunun HTTPS sertifikası bu bilgisayarda güvenilir değil, bu yüzden sürücü bağlanamıyor.'],
+        'drive.err.plain-http':       ['This server is on http://; a WebDAV drive needs HTTPS.',
+                                       'Bu sunucu http:// üzerinde; WebDAV sürücüsü HTTPS ister.'],
+        'drive.err.in-use':           ['That drive letter is already in use. It will pick another next time.',
+                                       'O sürücü harfi zaten kullanımda. Bir dahakine başka bir harf seçilecek.'],
+        'drive.err.no-tool':          ['This desktop has no WebDAV client (gio) installed.',
+                                       'Bu masaüstünde WebDAV istemcisi (gio) kurulu değil.'],
+        'drive.err.failed':           ['The drive could not be mounted. {detail}',
+                                       'Sürücü bağlanamadı. {detail}'],
         'set.close':            ['Close settings', 'Ayarları kapat'],
         // ⚠ Names the rail's + rather than drawing a second one. See the note
         // over settingsHtml().
@@ -978,6 +1018,10 @@
         'set.other_copy_sub':   ['The copy downloaded from filex.sh is still on this computer. Both use the same accounts and folders, so you get two tray icons and every notification twice. In the installed apps list, remove "filex 0.…" published by BRF Tech; this Microsoft Store copy is the one published by BRF Teknoloji.',
                                  'filex.sh\'tan indirilen kopya hâlâ bu bilgisayarda. İkisi aynı hesapları ve klasörleri kullandığı için iki tepsi simgesi görür, her bildirimi iki kez alırsınız. Yüklü uygulamalar listesinde yayımcısı BRF Tech olan "filex 0.…" kaydını kaldırın; bu Microsoft Store kopyasının yayımcısı BRF Teknoloji\'dir.'],
         'set.other_copy_open':  ['Open installed apps', 'Yüklü uygulamaları aç'],
+        // Linux has no one "installed apps" page to open, so the text carries
+        // the commands. The snap is the one published as filex-app.
+        'set.other_copy_snap_sub': ['The Snap Store copy of filex is installed on this computer as well. It keeps its own accounts and its own sync history, so a folder paired in both is synced by two apps that do not know about each other — duplicate uploads, conflict copies, a delete reaching the side that did not ask for it. Keep one: remove the snap with "sudo snap remove filex-app", or remove this copy with your package manager.',
+                                    'filex\'in Snap Store kopyası da bu bilgisayarda kurulu. Kendi hesaplarını ve kendi senkron geçmişini tuttuğu için ikisinde de eşlenen bir klasörü birbirinden habersiz iki uygulama senkronlar: aynı dosya iki kez yüklenir, çakışma kopyaları oluşur, bir silme istemeyen tarafa ulaşabilir. Birini tutun: snap\'i "sudo snap remove filex-app" komutuyla ya da bu kopyayı paket yöneticinizle kaldırın.'],
         'set.language':         ['Language', 'Dil'],
         'set.language_sub':     ['Applies to this window, the tray menu and the file list.',
                                  'Bu pencere, tepsi menüsü ve dosya listesi için geçerlidir.'],
@@ -1582,6 +1626,23 @@
             cancel: () => window.filexApp.dragCancel(),
             onProgress: (cb) => { explorerDragCb = cb; },
           },
+          // #47 — the palette's "Everywhere" group searches EVERY account on
+          // the rail, one badge per account. The explorer holds no credential
+          // for the others: the search and the download are made by the main
+          // process (src/remote-search.ts), the drag by the same drag-out it
+          // already runs, with the OTHER account's id. `others` is read on
+          // each query, so an account added or signed out meanwhile counts.
+          accountSearch: {
+            // A getter: the server's brand name usually lands after the mount.
+            get self() { return searchAccountRef(account); },
+            others: () => (state.accounts || [])
+              .filter((a) => a.id !== account.id && !a.signedOut)
+              .map(searchAccountRef),
+            search: (id, q, opts) => window.filexApp.searchAccount(id, q, opts),
+            open: (id, item) => openAccountHit(id, item),
+            download: (id, item) => window.filexApp.downloadRemote(id, item.path),
+            dragStart: (id, items) => window.filexApp.dragStart(id, items),
+          },
         };
         explorer.addEventListener('error', (e) => console.error('[explorer]', e.detail));
         // Host-owned open (config.openInHost above): the explorer emits
@@ -1629,6 +1690,43 @@
         // already mounted, and the component has no "navigate to" input.
         mountedFor = null;
         await mountExplorer(active);
+      }
+
+      /**
+       * #47 — one account as the palette's group badge draws it: the server's
+       * brand name (or its host) with the signed-in email under it, in the
+       * rail avatar's own colour, so a badge and a rail row read as one thing.
+       */
+      function searchAccountRef(a) {
+        const b = brands.get(a.id);
+        return {
+          id: a.id,
+          label: (b && b.name) || host(a.serverUrl),
+          detail: a.email,
+          color: avatarColor(a.email + a.serverUrl),
+        };
+      }
+
+      /**
+       * #47 — a ⌘K hit from ANOTHER account was chosen. Switch the rail to it,
+       * land on the hit's folder with the row ticked (the same reveal a clicked
+       * notification uses), and open a file in its own window as the explorer
+       * does for its own hits. `item.path` arrives addressed (name://rel) from
+       * the shared component; this page does not work out where a file is.
+       */
+      async function openAccountHit(accountId, item) {
+        const wire = item && typeof item.path === 'string' ? item.path : '';
+        const at = wire.indexOf('://');
+        if (at <= 0) return;
+        const storage = wire.slice(0, at);
+        const rel = wire.slice(at + 3);
+        const isDir = item.type === 'dir';
+        const folder = isDir ? rel : rel.slice(0, Math.max(0, rel.lastIndexOf('/')));
+        state = await window.filexApp.switchAccount(accountId);
+        pendingReveal = { kind: 'folder', storage, folder, select: isDir ? '' : wire };
+        mountedFor = null;
+        render();
+        if (!isDir) void window.filexApp.openDoc(accountId, wire);
       }
 
       // ── rail ──────────────────────────────────────────────────
@@ -1936,6 +2034,7 @@
               <div class="muted">${esc(T('set.connections_sub'))}</div></div>
             <button id="conn-open" ${active ? '' : 'disabled'}>${esc(T('set.connections_open'))}</button>
           </div></div>
+          ${driveCard()}
 
           <h2>${esc(T('set.folders'))}</h2>
           ${engineWarning}
@@ -2008,11 +2107,11 @@
             : state.launchAtLoginEffective === false && state.launchAtLogin
               ? 'set.autostart_refused' : 'set.autostart_sub'),
             state.launchAtLoginSupported === false)}
-          ${state.directCopyInstalled ? `
+          ${state.otherCopy ? `
           <div class="card"><div class="between">
             <div><div class="label">${esc(T('set.other_copy'))}</div>
-              <div class="muted">${esc(T('set.other_copy_sub'))}</div></div>
-            <button id="other-copy-open">${esc(T('set.other_copy_open'))}</button>
+              <div class="muted">${esc(T(state.otherCopy === 'snap' ? 'set.other_copy_snap_sub' : 'set.other_copy_sub'))}</div></div>
+            ${state.otherCopy === 'direct' ? `<button id="other-copy-open">${esc(T('set.other_copy_open'))}</button>` : ''}
           </div></div>` : ''}
           ${portableCard()}
           ${openWithCard()}
@@ -2033,6 +2132,57 @@
       // to have done something.
       let owState = null;
       let owJson = '';
+
+      // ── "Mount as a drive" (WebDAV) ────────────────────────────────
+      // The one-click counterpart of the "How to connect" guide: attach the
+      // active account's server as an OS drive. The token never touches this
+      // page — driveMount tells the main process which account, and it hands
+      // the credential to the OS mounter on stdin (src/drive.ts).
+      let driveState = null;
+      let driveJson = '';
+      let driveBusy = false;
+
+      function refreshDrive() {
+        if (!window.filexApp.driveState) return;
+        window.filexApp.driveState().then((s) => {
+          const j = JSON.stringify(s);
+          if (j === driveJson) return; // no re-render on an identical answer
+          driveJson = j;
+          driveState = s;
+          if ($('#settings').classList.contains('open')) renderSettings();
+        }).catch(() => {});
+      }
+
+      /** The mount record for the active account's whole-server drive, if any. */
+      function activeDriveMount() {
+        if (!driveState || !state.activeId) return null;
+        return (driveState.mounts || []).find((m) => m.accountId === state.activeId && !m.storage) || null;
+      }
+
+      function driveCard() {
+        const active = state.accounts.find((a) => a.id === state.activeId);
+        if (!active) return '';
+        const plat = (driveState && driveState.platform) || 'win32';
+        const note = plat === 'darwin' ? 'drive.note_mac' : plat === 'linux' ? 'drive.note_linux' : 'drive.note_win';
+        const http = /^http:\/\//i.test(active.serverUrl);
+        const mounted = activeDriveMount();
+        const where = mounted ? (mounted.letter || mounted.mountDir || '') : '';
+        const right = driveBusy
+          ? `<button disabled>${esc(mounted ? T('drive.unmounting') : T('drive.mounting'))}</button>`
+          : mounted
+            ? `<div class="row">${where ? `<button id="drive-open">${esc(T('drive.open'))}</button>` : ''}<button class="danger" id="drive-unmount">${esc(T('drive.unmount'))}</button></div>`
+            : `<button class="primary" id="drive-mount">${esc(T('drive.mount'))}</button>`;
+        return `
+          <div class="card"><div class="between">
+            <div style="min-width:0">
+              <div class="label">${esc(T('drive.title'))}</div>
+              <div class="muted">${esc(mounted && where ? T('drive.mounted_at', { where }) : T('drive.sub'))}</div>
+              <div class="muted">${esc(T(note))}</div>
+              ${http ? `<div class="err">${esc(T('drive.warn_http'))}</div>` : ''}
+            </div>
+            ${right}
+          </div></div>`;
+      }
 
       function refreshOpenWith() {
         if (!window.filexApp.openWith) return;
@@ -2177,6 +2327,31 @@
         }));
         const connOpen = $('#conn-open', el);
         if (connOpen) connOpen.addEventListener('click', () => openConnections());
+        // "Mount as a drive": one call per click; the main process holds the
+        // token and hands it to the OS mounter, so nothing secret is here.
+        const driveMountBtn = $('#drive-mount', el);
+        if (driveMountBtn) driveMountBtn.addEventListener('click', async () => {
+          driveBusy = true; renderSettings();
+          let res;
+          try { res = await window.filexApp.driveMount(state.activeId); }
+          catch (e) { res = { ok: false, problem: 'failed', detail: String(e && e.message || e) }; }
+          driveBusy = false; driveJson = '';
+          if (!res.ok) alert(T('drive.err.' + (res.problem || 'failed'), { detail: res.detail || '' }));
+          refreshDrive(); renderSettings();
+        });
+        const driveUnmountBtn = $('#drive-unmount', el);
+        if (driveUnmountBtn) driveUnmountBtn.addEventListener('click', async () => {
+          driveBusy = true; renderSettings();
+          try { await window.filexApp.driveUnmount(state.activeId); } catch {}
+          driveBusy = false; driveJson = '';
+          refreshDrive(); renderSettings();
+        });
+        const driveOpenBtn = $('#drive-open', el);
+        if (driveOpenBtn) driveOpenBtn.addEventListener('click', () => {
+          const m = activeDriveMount();
+          const where = m && (m.letter ? m.letter + '\\' : m.mountDir);
+          if (where) window.filexApp.openLocal(where);
+        });
         const addSync = $('#add-sync', el);
         if (addSync) addSync.addEventListener('click', () => openPicker());
         const rootChange = $('#sync-root-change', el);
@@ -2275,6 +2450,7 @@
           refreshOpenWith();
         });
         refreshOpenWith();
+        refreshDrive();
       }
 
       // ── storage connections ───────────────────────────────────

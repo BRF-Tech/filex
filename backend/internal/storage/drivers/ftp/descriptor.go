@@ -1,6 +1,9 @@
 package ftp
 
-import "github.com/brf-tech/filex/backend/internal/storage"
+import (
+	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storage/stall"
+)
 
 func intp(v int) *int { return &v }
 
@@ -16,7 +19,7 @@ func init() {
 		Driver:  "ftp",
 		Label:   "FTP / FTPS",
 		I18nKey: "storages.driver.ftp",
-		Fields: []storage.Field{
+		Fields: append([]storage.Field{
 			{
 				Key:         "host",
 				Type:        storage.FieldString,
@@ -83,6 +86,6 @@ func init() {
 				HelpI18nKey: "storages.fieldHelp.passive",
 				Advanced:    true,
 			},
-		},
+		}, defaults.Fields(stall.ServerTexts(stall.AttemptText))...),
 	})
 }

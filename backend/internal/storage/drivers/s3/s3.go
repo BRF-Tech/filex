@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -50,6 +49,8 @@ type Driver struct {
 	// to backend-stream is the safe path until the SigV4 quirks are
 	// understood. Toggle via storage config `disable_presign: true`.
 	disablePresign bool
+	// policy is the storage's retry and timeout settings (resilience.go).
+	policy policy
 }
 
 // Name implements storage.Driver.
@@ -108,40 +109,33 @@ func (d *Driver) Init(ctx context.Context, cfg map[string]any) error {
 			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
 		))
 	}
-	loadOpts = append(loadOpts, awsconfig.WithRetryer(newRetryer))
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		return fmt.Errorf("s3: aws config: %w", err)
 	}
 
+	// Retries and timeouts are the storage's own settings (resilience.go).
+	// They are set on the S3 client alone — the credential chain (instance
+	// role, IMDS) keeps the SDK's — and they win over AWS_MAX_ATTEMPTS: the
+	// storage row is the more specific answer.
+	d.policy = policyFrom(cfg)
+	label := d.endpoint
+	if label == "" {
+		label = "AWS S3 (" + d.region + ")"
+	}
 	d.client = s3.NewFromConfig(awsCfg, func(o *s3.Options) {
 		if d.endpoint != "" {
 			o.BaseEndpoint = aws.String(d.endpoint)
 		}
 		o.UsePathStyle = d.pathStyle
+		o.HTTPClient = d.policy.httpClient()
+		o.Retryer = newRetryer(d.policy)
+		o.RetryMaxAttempts = 0
+		o.APIOptions = append(o.APIOptions, d.policy.apiOption(label))
 	})
 	d.presigner = s3.NewPresignClient(d.client)
 	return nil
-}
-
-// newRetryer widens the retry budget past the SDK default of 3 attempts.
-//
-// Object stores answer a transient 503 ServiceUnavailable under load, and three
-// attempts inside a couple of seconds is not enough to ride one out: the whole
-// sync run then dies on a single listing page and the catalogue stays stale
-// until the next scheduled run (15 min by default). Measured against Hetzner
-// Object Storage — "sync: run failed … ListObjectsV2, exceeded maximum number
-// of attempts, 3 … 503" recurred 12 times over a month.
-//
-// 6 attempts with a 10s backoff cap bounds one request at roughly half a
-// minute: a brief upstream wobble is absorbed, while a sustained outage still
-// fails fast enough that a sync run cannot stall for minutes.
-func newRetryer() aws.Retryer {
-	return retry.NewStandard(func(o *retry.StandardOptions) {
-		o.MaxAttempts = 6
-		o.MaxBackoff = 10 * time.Second
-	})
 }
 
 // Capabilities — S3 supports everything except Watch (notifications go via

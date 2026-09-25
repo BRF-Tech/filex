@@ -40,6 +40,12 @@ const props = defineProps<{
   surface: PluginSurface | null;
   /** Adapter-qualified path of the row the view was opened on (echoed on every event). */
   path?: string;
+  /**
+   * Every row of the selection the view was opened on (echoed on every
+   * event as `paths`). ⚠ Without it a screen opened on three files talks
+   * about the first one from its second event on (#64).
+   */
+  paths?: string[];
   /** Storage names a file-chooser may span; where its picker opens. */
   storages?: string[];
   startAt?: string;
@@ -69,6 +75,7 @@ const conv = usePluginSurface(
     plugin: props.plugin,
     view: props.view,
     path: () => props.path,
+    paths: () => props.paths,
     locale: () => props.locale,
     errorText: () => t('plugin.view.error'),
   },

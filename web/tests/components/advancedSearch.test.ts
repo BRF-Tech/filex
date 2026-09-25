@@ -230,7 +230,7 @@ describe('AdvancedSearch — what the form hands the query', () => {
     expect(last().filters.people).toBe('me');
     expect(w.find('[data-testid="advsearch-people"]').attributes('disabled')).toBeUndefined();
 
-    // ⚠ A content hit reaches the client through FileExplorer.advHitToNode,
+    // ⚠ A content hit reaches the client through lib/searchHit.hitToNode,
     // which carries no owner — every row would read as System. Disabling the
     // control is only half of it: the value it was left holding must stop
     // reaching the request too, or a filter survives its own control.

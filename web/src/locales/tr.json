@@ -270,7 +270,13 @@
       "dialTimeout": "Bağlanma zaman aşımı (saniye)",
       "nameChangedWarning": "İstemciler bu depoya adıyla ulaşır. Adı değiştirmek WebDAV, SFTP, S3 ve NFS yollarını değiştirir — eski adı kullanan bir bağlama ya da yer imi, siz güncelleyene kadar 404 döner.",
       "stableAddress": "Değişmeyen adres",
-      "stableAddressHint": "Bağlamalar ve betikler ad yerine bunu kullanabilir. Bir kez atanır ve hiç değişmez, böylece deponun adını değiştirmek onları bozmaz."
+      "stableAddressHint": "Bağlamalar ve betikler ad yerine bunu kullanabilir. Bir kez atanır ve hiç değişmez, böylece deponun adını değiştirmek onları bozmaz.",
+      "s3AttemptTimeout": "Deneme zaman aşımı (saniye)",
+      "s3MaxAttempts": "İstek başına deneme sayısı",
+      "s3TotalTimeout": "Vazgeçme süresi (saniye)",
+      "attemptTimeout": "Deneme zaman aşımı (saniye)",
+      "maxAttempts": "İstek başına deneme sayısı",
+      "totalTimeout": "Vazgeçme süresi (saniye)"
     },
     "fieldHelp": {
       "path": "Sunucudaki dizin. Yoksa oluşturulur; filex asla / dizinini mount etmez.",
@@ -294,7 +300,14 @@
       "passive": "Kapatmak aktif moda geçirir; bu, sunucunun bu makineye geri bağlanmasını gerektirir.",
       "smbShare": "Sunucu adı olmadan yalnızca paylaşım adı: `\\\\nas\\media` değil, `media`.",
       "smbDomain": "Yalnızca Windows etki alanı hesabı için. NAS kullanıyorsanız boş bırakın.",
-      "smbRoot": "Paylaşımın içindeki alt klasör. Paylaşımın tamamı için boş bırakın."
+      "smbRoot": "Paylaşımın içindeki alt klasör. Paylaşımın tamamı için boş bırakın.",
+      "s3AttemptTimeout": "Tek bir denemenin depodan bir yaşam belirtisi için bekleyebileceği süre: bağlanma, TLS el sıkışması, istek gönderildikten sonraki cevap ve cevabın her yeni parçası. İlerleyen bir aktarım, süresi ne olursa olsun hiçbir zaman kesilmez; deponun almayı bıraktığı bir yükleme 60 saniye sonra, bu değer daha uzunsa bu kadar sonra kesilir. Kopyalama ve yeniden adlandırma cevap için 10 dakikaya kadar bekler, çünkü depo bunları ancak kopya bittiğinde cevaplar.",
+      "s3MaxAttempts": "Hata geçebilecek türdeyse bir isteğin toplamda kaç kez deneneceği: ağ hatası, zaman aşımı, 5xx cevabı, hız sınırlaması. 1 yeniden denemeyi kapatır. Bir ret (403, bulunmayan bir kova, çözümlenmeyen bir sunucu adı) hiçbir zaman yeniden denenmez.",
+      "s3TotalTimeout": "İlk denemeden itibaren bu kadar saniye içinde bitemeyecek yeni bir deneme başlatılmaz; böylece çalışmayan bir depoya yükleme ya da listeleme, kesintiyi bu süre içinde bildirir. Sürmekte olan bir aktarım kesilmez. Zaman aşımına uğrayan bir istek ancak bu değer deneme zaman aşımının en az iki katıysa yeniden denenir.",
+      "attemptTimeout": "Tek bir denemenin sunucudan bir yaşam belirtisi için bekleyebileceği süre: bağlanma, oturum açma, her isteğin cevabı ve bir aktarımın her yeni parçası. İlerleyen bir aktarım, süresi ne olursa olsun hiçbir zaman kesilmez; sunucunun almayı bıraktığı bir yükleme 60 saniye sonra, bu değer daha uzunsa bu kadar sonra kesilir.",
+      "webdavAttemptTimeout": "Tek bir denemenin sunucudan bir yaşam belirtisi için bekleyebileceği süre: bağlanma, oturum açma, her isteğin cevabı ve bir aktarımın her yeni parçası. İlerleyen bir aktarım, süresi ne olursa olsun hiçbir zaman kesilmez; sunucunun almayı bıraktığı bir yükleme 60 saniye sonra, bu değer daha uzunsa bu kadar sonra kesilir. Kopyalama, taşıma ve silme cevap için 10 dakikaya kadar bekler, çünkü sunucu bunları ancak iş bittiğinde cevaplar.",
+      "maxAttempts": "Hata geçebilecek türdeyse bir isteğin toplamda kaç kez deneneceği: bağlantı reddedilir ya da kopar, cevap zamanında gelmez, sunucu şu an hizmet veremediğini söyler (5xx). 1 yeniden denemeyi kapatır. Bir ret (yanlış parola, bulunmayan bir klasör, doğrulanamayan bir sertifika) hiçbir zaman yeniden denenmez; gönderilmeye başlamış bir yükleme de yeniden denenmez.",
+      "totalTimeout": "İlk denemeden itibaren bu kadar saniye içinde bitemeyecek yeni bir deneme başlatılmaz; böylece çalışmayan bir sunucu bu süre içinde bildirilir. Sürmekte olan bir aktarım kesilmez. Zaman aşımına uğrayan bir istek ancak bu değer deneme zaman aşımının en az iki katıysa yeniden denenir."
     },
     "lazyFill": {
       "background": "Önce tıklanan, arkada tamamlanan",
@@ -880,7 +893,9 @@
       "signing_ca_import": "imza sertifikası içe aktarıldı",
       "pin_locked": "PIN denemeleri kilitlendi",
       "pin_revealed": "PIN gösterildi",
-      "tags": "etiketler değiştirildi"
+      "tags": "etiketler değiştirildi",
+      "download_link": "dışarı sürüklenerek indirildi",
+      "download_link_refused": "dışarı sürükleyerek indirme reddedildi"
     },
     "target": {
       "auth_provider": "Kimlik sağlayıcısı",
@@ -1702,7 +1717,20 @@
       "minor": "ara sürümleri kur"
     },
     "policyIs": "Politika: {policy}",
-    "checkedAtWhen": "Son kontrol: {when}"
+    "checkedAtWhen": "Son kontrol: {when}",
+    "behavior": {
+      "off": "Kontrol kapalı",
+      "announce": "Yalnızca duyurur",
+      "patch": "Yamaları kurar",
+      "minor": "Ara sürümleri kurar"
+    },
+    "policyLimit": {
+      "disabled": "Kayıtlı politika (“{policy}”) etkisiz: bu sunucuda sürüm kontrolü kapalı, bu yüzden filex yeni sürüm aramaz ve kurmaz.",
+      "container": "Kayıtlı politika (“{policy}”) bu kurulumda etkisiz: bir container kendi imajını değiştiremez, bu yüzden filex yeni sürümleri yalnızca duyurur. Yükseltmek için yeni imajı çekin ya da bunu harici bir güncelleyiciye bırakın.",
+      "package": "Kayıtlı politika (“{policy}”) bu kurulumda etkisiz: ikili dosyanın sahibi {manager}, bu yüzden filex yeni sürümleri yalnızca duyurur; yükseltmeyi {manager} yapar:",
+      "packageUnknown": "Kayıtlı politika (“{policy}”) bu kurulumda etkisiz: ikili dosyanın sahibi bir paket yöneticisi, bu yüzden filex yeni sürümleri yalnızca duyurur. Paket yöneticinizle yükseltin.",
+      "zero_major": "Kayıtlı politika (“{policy}”) filex 0.x sürümündeyken yalnızca yamaları kurar: 0.x ara sürümleri uyumluluğu bozabilir, bu yüzden duyurulur ve onayınızı bekler."
+    }
   },
   "desktop": {
     "handoff": "Masaüstü uygulamasına dönebilirsiniz — yetkilendirme tamamlandı.",

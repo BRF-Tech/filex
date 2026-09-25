@@ -246,7 +246,16 @@ func confineBody(root Root, body []byte) ([]byte, error) {
 			m[key] = np
 		}
 	}
-	if src, ok := m["source"].([]any); ok {
+	// ⚠ `paths` too: the app doors (run, view events) and the selection
+	// archive take their files as a `paths` array, and before it was listed
+	// here a root-confined token reached any file of the storage through them
+	// (2026-09-25). The handlers check the root as well (rootAllows); this is
+	// the layer that catches a door that forgets to.
+	for _, key := range []string{"source", "paths"} {
+		src, ok := m[key].([]any)
+		if !ok {
+			continue
+		}
 		for i, s := range src {
 			if ss, ok := s.(string); ok {
 				np, err := root.enforce(ss)

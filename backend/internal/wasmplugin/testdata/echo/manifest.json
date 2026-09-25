@@ -270,6 +270,25 @@
         "mode": "none"
       },
       "hidden": true
+    },
+    {
+      "id": "gather",
+      "label": {
+        "en": "Gather",
+        "tr": "Topla"
+      },
+      "applies": {
+        "kind": "file",
+        "ext": [
+          "txt"
+        ],
+        "multi": true
+      },
+      "output": {
+        "mode": "sibling",
+        "name": "{stem}-gathered{ext}"
+      },
+      "view": "picks"
     }
   ],
   "views": [
@@ -287,6 +306,14 @@
       "label": {
         "en": "Wizard",
         "tr": "Wizard"
+      }
+    },
+    {
+      "id": "picks",
+      "placement": "modal",
+      "label": {
+        "en": "Picks",
+        "tr": "Seçilenler"
       }
     }
   ],

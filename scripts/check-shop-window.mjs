@@ -37,6 +37,8 @@
 //   node scripts/check-shop-window.mjs --instance http://127.0.0.1:5941
 //   node scripts/check-shop-window.mjs --published
 //   node scripts/check-shop-window.mjs --instance --boot bin/filex --published
+//   node scripts/check-shop-window.mjs --pictures    the git-only half alone
+//                                                    (`pnpm release`'s audit step)
 //
 // The exhaustive half of the demo check is a Go test, because chi's route table
 // is the only place the routes are knowable and it is not reachable from here:

@@ -24,6 +24,14 @@ var ErrReadOnly = errors.New("storage: read-only")
 // ErrUnsupported is returned when an op is not supported by this driver.
 var ErrUnsupported = errors.New("storage: unsupported")
 
+// ErrUnavailable is wrapped around a failure that means the backend could not
+// be reached or would not answer (connection refused, no answer in time, a
+// name that does not resolve, a 5xx after the retries): the storage is down,
+// the request was fine. Answer it with 503 and "try again later", never with
+// "check your input". A refusal the backend answered (403, a missing bucket)
+// is not this.
+var ErrUnavailable = errors.New("storage: unavailable")
+
 // Driver is the minimum surface a backend must implement. All paths use
 // POSIX-style forward slashes and are relative to the storage root.
 type Driver interface {

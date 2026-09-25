@@ -33,6 +33,14 @@ type Store interface {
 	Ping(ctx context.Context) error
 	Close() error
 
+	// WithTx runs fn in ONE transaction: every statement a Store method runs
+	// with the context fn is handed is part of it — through the wrappers
+	// (quotastore, identitystore) too, since they pass the context on. It
+	// commits when fn returns nil and rolls back otherwise. See tx.go for
+	// what must NOT run inside it (anything reaching the database through
+	// another handle, the job queue above all).
+	WithTx(ctx context.Context, fn func(ctx context.Context) error) error
+
 	// Storages
 	CreateStorage(ctx context.Context, s *model.Storage) (*model.Storage, error)
 	GetStorage(ctx context.Context, id int64) (*model.Storage, error)

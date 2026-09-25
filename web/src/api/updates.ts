@@ -41,6 +41,15 @@ export interface UpdateStatus {
   /** mode=package: the manager's command for this install, e.g.
    *  `brew upgrade --cask filex`. */
   upgrade_command?: string;
+  /** What this install does by itself about a new release — the policy as
+   *  far as the install can carry it out: off | announce | patch | minor.
+   *  Worked out by the server (update.EffectiveOf); absent from a server
+   *  older than #72. */
+  behavior?: string;
+  /** Why `behavior` is less than `policy` asks for: disabled | container |
+   *  package | zero_major. Absent when the saved policy is in force. The
+   *  policy itself stays as saved. */
+  policy_limit?: string;
   /** A new binary is on disk but this process is still the old one. */
   restart_required: boolean;
   checked_at?: string;

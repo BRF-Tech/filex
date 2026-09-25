@@ -107,6 +107,14 @@ func (s *Service) Install() Install { return s.install }
 // Policy exposes the configured policy.
 func (s *Service) Policy() Policy { return s.cfg.Policy }
 
+// Effective is the saved policy as this install carries it out (EffectiveOf):
+// what the admin page's policy badge says. An unparsable running version
+// counts as 0.x — the reading that promises less.
+func (s *Service) Effective() Effective {
+	cur, _ := ParseVersion(s.cfg.CurrentVersion)
+	return EffectiveOf(s.cfg.Policy, s.cfg.Enabled, s.install.Mode, cur)
+}
+
 // Enabled reports whether checking is on.
 func (s *Service) Enabled() bool { return s.cfg.Enabled && s.cfg.Policy != PolicyOff }
 

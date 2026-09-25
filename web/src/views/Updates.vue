@@ -120,11 +120,44 @@ const packageHowTo = computed(() => {
     ? t('updates.packageHowTo', { manager: st.package_manager_name })
     : t('updates.packageHowToUnknown');
 });
-const stepVariant = computed(() => {
+/** The saved policy by its name ("install patches"), not the setting's value. */
+const policyName = computed(() => {
+  const p = s.value?.policy ?? '';
+  return te(`updates.policyName.${p}`) ? t(`updates.policyName.${p}`) : p;
+});
+/** The policy badge says what this install DOES by itself. The server works
+ *  that out (`behavior`, and `policy_limit` when it is less than the saved
+ *  policy); the page words it and derives nothing from mode + policy (#72: a
+ *  Homebrew install read "install patches", which it never does). */
+const policyBadge = computed(() => {
+  const st = s.value;
+  if (st?.policy_limit && st.behavior && te(`updates.behavior.${st.behavior}`)) {
+    return t(`updates.behavior.${st.behavior}`);
+  }
+  return t('updates.policyIs', { policy: policyName.value });
+});
+/** Why the saved policy has no (or less) effect here. It is kept as saved —
+ *  the sentence names it. A package manager without a name is "your package
+ *  manager". */
+const policyNote = computed(() => {
+  const st = s.value;
+  const limit = st?.policy_limit;
+  if (!st || !limit) return '';
+  const key = limit === 'package' && !st.package_manager_name ? 'packageUnknown' : limit;
+  if (!te(`updates.policyLimit.${key}`)) return '';
+  return t(`updates.policyLimit.${key}`, { policy: policyName.value, manager: st.package_manager_name ?? '' });
+});
+/** The manager's command, beside the sentence that names the manager. */
+const policyCommand = computed(() =>
+  s.value?.policy_limit === 'package' && s.value.package_manager_name ? s.value.upgrade_command ?? '' : '',
+);
+// ⚠ Badge takes a `tone`; these were `variant`s, which it does not have, so
+// every badge on this page was grey — a security release included.
+const stepTone = computed(() => {
   switch (s.value?.step) {
-    case 'major': return 'warning';
-    case 'minor': return 'info';
-    default: return 'success';
+    case 'major': return 'amber';
+    case 'minor': return 'sky';
+    default: return 'emerald';
   }
 });
 
@@ -201,14 +234,25 @@ const skippedColumns = computed<DataColumn<UpdateRelease>[]>(() => [
             <div class="text-lg font-semibold">{{ s.current }}</div>
           </div>
           <div class="flex flex-wrap items-center justify-end gap-2">
-            <Badge variant="default" data-testid="updates-mode">{{ modeLabel }}</Badge>
+            <Badge data-testid="updates-mode">{{ modeLabel }}</Badge>
             <!-- ⚠ The policy by name ("politika: manual" printed the setting's
-                 value); the colon lives in the message. -->
-            <Badge variant="default" data-testid="updates-policy">{{
-              t('updates.policyIs', { policy: te(`updates.policyName.${s.policy}`) ? t(`updates.policyName.${s.policy}`) : s.policy })
-            }}</Badge>
+                 value); the colon lives in the message. Where the install
+                 cannot carry the policy out, what it does instead ("Announces
+                 only"), as the server says. -->
+            <Badge data-testid="updates-policy">{{ policyBadge }}</Badge>
           </div>
         </div>
+
+        <!-- The saved policy is kept, and said to have no effect here — with
+             who upgrades instead and the command. -->
+        <p v-if="policyNote" class="text-sm text-zinc-600 dark:text-zinc-300" data-testid="updates-policy-note">
+          <span data-testid="updates-policy-note-text">{{ policyNote }}</span>
+          <code
+            v-if="policyCommand"
+            class="ms-2 rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs dark:bg-zinc-800"
+            data-testid="updates-policy-command"
+          >{{ policyCommand }}</code>
+        </p>
 
         <!-- Up to date -->
         <div v-if="!hasUpdate" class="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-300">
@@ -220,9 +264,9 @@ const skippedColumns = computed<DataColumn<UpdateRelease>[]>(() => [
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('updates.available') }}</span>
             <span class="text-lg font-semibold">{{ s.latest?.version }}</span>
-            <Badge :variant="stepVariant">{{ t('updates.step.' + s.step) }}</Badge>
-            <Badge v-if="s.latest?.security" variant="danger">{{ t('updates.security') }}</Badge>
-            <Badge v-if="s.latest?.migrations" variant="warning">{{ t('updates.migrations') }}</Badge>
+            <Badge :tone="stepTone">{{ t('updates.step.' + s.step) }}</Badge>
+            <Badge v-if="s.latest?.security" tone="rose">{{ t('updates.security') }}</Badge>
+            <Badge v-if="s.latest?.migrations" tone="amber">{{ t('updates.migrations') }}</Badge>
           </div>
 
           <p v-if="s.reason" class="text-sm text-zinc-600 dark:text-zinc-300">{{ s.reason }}</p>
@@ -261,8 +305,8 @@ const skippedColumns = computed<DataColumn<UpdateRelease>[]>(() => [
                    narrow column (web/tests/ui/tablePinnedActions → "a Badge
                    shares its cell with nothing"). -->
               <div class="flex flex-wrap gap-1">
-                <Badge v-if="row.migrations" variant="warning">{{ t('updates.migrations') }}</Badge>
-                <Badge v-if="row.security" variant="danger">{{ t('updates.security') }}</Badge>
+                <Badge v-if="row.migrations" tone="amber">{{ t('updates.migrations') }}</Badge>
+                <Badge v-if="row.security" tone="rose">{{ t('updates.security') }}</Badge>
                 <template v-if="!row.migrations && !row.security">—</template>
               </div>
             </template>

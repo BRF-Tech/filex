@@ -218,6 +218,36 @@ attached to any other origin.
 
 ---
 
+## Searching everywhere (⌘K)
+
+**Ctrl+K** (⌘K on a Mac) opens the same palette the web explorer has, and its
+**Everywhere** group searches file names **and contents** across every drive
+the account can reach — the server's full-text index
+([Search](SEARCH.md#which-explorer-box-asks-what)), not only the folder on
+screen. Each result names its drive and folder, and a content match shows the
+line it was found in.
+
+A result is something to act on, not only to open:
+
+- **Click it** (or Enter) — the app goes to its folder with the row ticked, and a
+  file opens in its own window, as a double-click would.
+- **The download button** on the row saves it without opening anything; a folder
+  arrives as one `.zip`.
+- **Drag it** out onto the desktop or into a folder — the same drag-out the file
+  list uses ([Dragging files out](#dragging-files-out)), folders included.
+
+**Several accounts on the rail are searched at once.** The results are grouped
+under one badge per account — the server's name (or address), the email signed
+in there, and the account's rail colour — with the account you are looking at
+first. Every account is searched as **that** account: nobody sees a file they
+could not open in their own account, and a result from another account opens,
+downloads and drags with that account's own sign-in. Opening one switches the
+rail to it. A signed-out account is left out until you reconnect it.
+
+Recent and Starred are in the left panel, as on the web.
+
+---
+
 ## Opening documents from your computer
 
 A Word, Excel or PowerPoint file **on your own disk** can be opened with filex.
@@ -542,6 +572,40 @@ A single file can be dragged out of the web explorer as well — the browser
 downloads it into wherever you dropped it. Folders and multi-selections cannot:
 a web page can hand the operating system exactly one download. That is a browser
 limit, not a filex one, and it is what the desktop app is for.
+
+The browser fetches that download itself, at the drop, and its download stack
+sends cookies but never an `Authorization` header. So what the drag carries
+depends on how the page is signed in — the same explorer code decides it the
+same way on every surface:
+
+- **A cookie session** (an embed such as a portal's Files tab) hands over the
+  plain download URL; the cookie travels with it, through whatever route the
+  embed already proxies.
+- **A bearer session** — the web app itself after you sign in — hands over a
+  **one-file link** that the server mints for you: good for one download, for
+  at most a minute, only for that file, and only on the address it was made on.
+  At the drop the server asks again whether *you* may still read the file (a
+  permission taken away in between refuses it), and the download is written to
+  the Audit log (*downloaded by dragging it out*). The link itself never is.
+
+A row and a ⌘K result drag out alike. A folder drags out in neither
+session — the download button gives it as one archive.
+
+⚠ **The link is asked for before the drag, not during it.** A page has to fill
+in the drag the instant it starts and cannot wait for the server there, so the
+explorer asks while the pointer rests on a file row and again when you press.
+Measured against a local server (2026-09-25, e2e 71): a mint takes 3–4 ms in
+the browser's own request timing (n = 6), and 66 ms passed from Playwright
+starting to hover the row to the link being in hand — a person rests on a row
+far longer than either before a drag, so the gap only shows over a very slow
+connection. A drag that still beats it carries no download, and dropping it on
+the desktop does nothing; drag again. It never drops a file that would turn out
+to be an error page.
+
+Measured with a real mouse in `e2e/tests/71-admin-drag-out-link.spec.ts`
+(bearer: row, ⌘K result, the bytes behind the link, a drag that beats the link,
+the cookie session) and `e2e/tests/47-palette-everywhere.spec.ts`; the server
+side in `backend/internal/api/handlers/download_link_test.go`.
 
 ## Sharing
 

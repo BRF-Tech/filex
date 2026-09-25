@@ -21,6 +21,13 @@
  * look exactly like filex bugs.
  */
 
+import { gioUri, isPlainHttp, netUseCommand, webdavUrl, WEBCLIENT_LIMIT_COMMANDS } from './webdavMount';
+
+// ⚠ The address forms and the OS commands live in webdavMount.ts, because the
+// desktop app's "Mount as a drive" RUNS the same commands this page prints.
+// Re-exported so the existing importers keep working.
+export { isPlainHttp };
+
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
 /** Everything a guide is allowed to know about the deployment. */
@@ -131,12 +138,6 @@ export function hostOf(origin: string): string {
   }
 }
 
-/** True when the deployment is not on TLS — several clients refuse that,
- *  and Windows refuses it silently, which is worse. */
-export function isPlainHttp(origin: string): boolean {
-  return /^http:\/\//i.test(origin);
-}
-
 /**
  * The username a client should be given. Falls back to a placeholder so a
  * guide rendered before `/api/auth/me` answers is still readable rather
@@ -152,8 +153,7 @@ function userOf(ctx: GuideContext, t: Translate): string {
 
 export const buildWebdavGuide: GuideBuilder = (ctx, t) => {
   const origin = ctx.origin.replace(/\/+$/, '');
-  const root = `${origin}/dav/`;
-  const target = ctx.storage ? `${origin}/dav/${ctx.storage}/` : root;
+  const target = webdavUrl(origin, ctx.storage);
   const user = userOf(ctx, t);
   const secret = t('conn.guide.secretPlaceholder');
 
@@ -180,7 +180,7 @@ export const buildWebdavGuide: GuideBuilder = (ctx, t) => {
         {
           kind: 'code',
           caption: t('conn.guide.webdav.win.cmdCaption'),
-          code: `net use Z: "${target}" /user:${user} ${secret} /persistent:yes`,
+          code: netUseCommand({ letter: 'Z:', url: target, user, password: secret, persistent: true }),
         },
         {
           kind: 'warn',
@@ -189,11 +189,7 @@ export const buildWebdavGuide: GuideBuilder = (ctx, t) => {
         {
           kind: 'code',
           caption: t('conn.guide.webdav.win.regCaption'),
-          code: [
-            'reg add "HKLM\\SYSTEM\\CurrentControlSet\\Services\\WebClient\\Parameters" /v FileSizeLimitInBytes /t REG_DWORD /d 4294967295 /f',
-            'reg add "HKLM\\SYSTEM\\CurrentControlSet\\Services\\WebClient\\Parameters" /v FileAttributesLimitInBytes /t REG_DWORD /d 20000000 /f',
-            'net stop webclient && net start webclient',
-          ].join('\n'),
+          code: WEBCLIENT_LIMIT_COMMANDS.join('\n'),
         },
         { kind: 'note', text: t('conn.guide.webdav.win.https') },
         { kind: 'note', text: t('conn.guide.webdav.win.persist') },
@@ -228,7 +224,7 @@ export const buildWebdavGuide: GuideBuilder = (ctx, t) => {
             `sudo mount -t davfs ${target} /mnt/filex`,
             '',
             `# ${t('conn.guide.webdav.linux.gvfsComment')}`,
-            `gio mount ${target.replace(/^https:/i, 'davs:').replace(/^http:/i, 'dav:')}`,
+            `gio mount ${gioUri(target)}`,
           ].join('\n'),
         },
         {

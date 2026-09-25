@@ -392,6 +392,10 @@ func BuildRouter(d *Deps) http.Handler {
 	// credential-free navigation that streams it. Both halves need this store,
 	// so it is built here rather than inside either handler.
 	ah.AttachDownloadTickets(handlers.NewArchiveTicketStore())
+	// …and its one-file mode, the browser's drag-out link (download_link.go):
+	// the same store and the same /z/ redeem, streamed through the manager's
+	// own download path as the link's owner.
+	ah.AttachFileLinks(mh, d.Cfg.MultiTenant)
 	// ⚠ Every absolute URL filex hands out (share + file-request links, the
 	// wss:// endpoint, upload-ticket URLs, every link inside an e-mail) is
 	// built from THIS resolver, so a multi-tenant install names the tenant's
@@ -700,7 +704,9 @@ func BuildRouter(d *Deps) http.Handler {
 	// Selection archive, redeem half. Credential-free on purpose and by the
 	// same reasoning as /u/ above: the ticket authorizes exactly one archive,
 	// was minted under an authenticated caller's own grants, is unguessable,
-	// expires in minutes and is consumed on use.
+	// expires in minutes and is consumed on use. A one-file link (the
+	// browser's drag-out, `"mode":"file"`) redeems here too, and is re-judged
+	// as its owner at the redeem — see handlers/download_link.go.
 	r.Get("/z/{ticket}", ah.DownloadArchive)
 
 	// ────── onlyoffice public endpoints (HMAC/JWT signed) ──────

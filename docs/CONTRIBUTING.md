@@ -575,6 +575,34 @@ none.
 
 Maintainer-only. Reproducible, automated by CI.
 
+**Cut it with `pnpm release X.Y.Z`.** The steps below are what that command
+does, in this order, and every step it can check is a gate that stops the
+release when it is red — there is no option to skip one, and an option it does
+not know is refused rather than ignored. It never signs, pushes or deploys: at
+those steps it stops, prints the exact commands, and on `--resume` reads back
+what was done — each tag's signature and target, what both remotes now hold (a
+public tag naming a private commit is refused out loud), and what the servers,
+the update feeds and docs.filex.sh actually serve. The two judgements no script
+can make are a person's to confirm: the README, screenshot and documentation
+audit (steps 1-3, `--ack audit`) and the parts of the deploy nothing can read
+back (`--ack deploy`).
+
+```bash
+pnpm release 0.45.0 --plan      # every stage and gate, in order; runs nothing
+pnpm release 0.45.0 --dry-run   # every gate, nothing written: the stamp goes to
+                                # a scratch copy, the export to a throwaway clone
+pnpm release 0.45.0             # stops at the first red gate or person's step
+pnpm release 0.45.0 --resume    # carry on (exit 3 = waiting for you, 1 = a red gate)
+pnpm release 0.45.0 --status    # where the recorded run got to
+```
+
+> ⚠ The gates live in `scripts/release/plan.mjs` (this repository's list,
+> guarded by `web/tests/deploy/releasePlan.test.ts`) and
+> `scripts/release/stages.mjs` (the order, and what every release checks).
+> A new rule goes there, not only on this page: on the night of 2026-09-24/25
+> four releases were re-cut, each for a step that was written down here and
+> skipped anyway.
+
 1. **Re-read `README.md` against what actually shipped since the last tag.**
    Run `git log --oneline vPREVIOUS..HEAD`, then ask of every new surface — a
    client, a feature, a docs page — whether it appears in the intro, *Why

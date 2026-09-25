@@ -23,6 +23,7 @@ import {
   explorerVisibleRoot,
   linuxDesktopEntry,
   linuxSandbox,
+  otherCopyOf,
   retargetMimeapps,
   storeChannel,
   storePageUrl,
@@ -109,6 +110,29 @@ test('the direct-download copy is looked for where the installer puts it, and by
   ]);
   // No environment, nothing to look for — never a relative path.
   assert.deepEqual(directCopyMarkers({}), []);
+});
+
+test('which other copy of filex this one warns about', () => {
+  const env = { LOCALAPPDATA: String.raw`C:\Users\ada\AppData\Local`, APPDATA: String.raw`C:\Users\ada\AppData\Roaming` };
+  const all = () => true;
+  const none = () => false;
+  const only = (p: string) => (q: string) => q === p;
+  // The Store copy and the filex.sh copy share accounts through AppData.
+  assert.equal(otherCopyOf('msstore', 'win32', env, only(String.raw`C:\Users\ada\AppData\Local\Programs\filex\filex.exe`)), 'direct');
+  assert.equal(otherCopyOf('msstore', 'win32', env, none), null);
+  // ⚠ The snap keeps its own accounts and sync history (SNAP_USER_COMMON),
+  // so the per-pair lock never sees the other engine: a .deb, .rpm, AppImage
+  // or AUR copy next to the snap syncs the same folders twice. A strict snap
+  // cannot see the host's /usr or /opt, so only this side can tell.
+  assert.equal(otherCopyOf(null, 'linux', {}, only('/snap/bin/filex-app')), 'snap');
+  assert.equal(otherCopyOf('aur', 'linux', {}, only('/snap/bin/filex-app')), 'snap');
+  assert.equal(otherCopyOf(null, 'linux', {}, none), null);
+  // A copy never warns about itself, and a sandbox cannot look.
+  assert.equal(otherCopyOf('snap', 'linux', {}, all), null);
+  assert.equal(otherCopyOf('flatpak', 'linux', {}, all), null);
+  // The filex.sh copy on Windows and the macOS app have nothing to find.
+  assert.equal(otherCopyOf(null, 'win32', env, all), null);
+  assert.equal(otherCopyOf(null, 'darwin', {}, all), null);
 });
 
 // ─────────────────────────── Linux ───────────────────────────

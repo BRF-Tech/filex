@@ -194,6 +194,21 @@ func (f *davFS) OpenFile(ctx context.Context, name string, flag int, _ os.FileMo
 		if _, ok := drv.(storage.Writer); !ok {
 			return nil, storage.ErrUnsupported
 		}
+		// ⚠⚠ A write-open with neither O_CREATE nor O_TRUNC is not an upload.
+		// x/net/webdav makes exactly one: PROPPATCH opens its target os.O_RDWR
+		// to ask whether it holds dead properties, then closes it. Handing that
+		// open the upload spool made its Close commit an EMPTY spool over the
+		// file — and Windows' WebDAV client PROPPATCHes the Win32 times after
+		// every save, so every file saved through a mapped drive landed empty
+		// (measured 2026-09-25, proppatch_keeps_body_test.go). It gets a handle
+		// that describes the file and writes nothing.
+		if flag&(os.O_CREATE|os.O_TRUNC) == 0 {
+			obj, err := drv.Stat(ctx, rel)
+			if err != nil {
+				return nil, mapErr(err)
+			}
+			return &propFile{info: newFileInfo(obj)}, nil
+		}
 		// PUT is O_RDWR|O_CREATE|O_TRUNC, the LOCK-create path is
 		// O_RDWR|O_CREATE — either way the upload spools to a temp file and
 		// lands on the driver at Close (drivers write whole objects).

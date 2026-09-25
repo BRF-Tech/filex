@@ -167,6 +167,19 @@ when the surface carries `job`, the handler enqueues it with the same checks
 as `run` and answers `202 {"op": …, "job_id"}`. Views may read the named
 files but never write; `state_set` is refused outside a job.
 
+**`paths` on every event (#64).** A screen opened on a selection
+names the WHOLE selection on every event — `change`, `action` and `submit`,
+not only the opening `run` — and the event's `context.inputs` are built from
+it. The explorer sends `paths` beside the older single-row `path`; when both
+come, `paths` wins, and `path` alone (an older client, a deep link) still
+means that one file. Each path is judged again for the person asking (viewer
+ACL, encrypted folders → `403` naming the path, before the plugin is asked);
+a submit that queues a job re-checks the action's `applies` on every file
+(`422 not_applicable`). At most 500 paths, as for `run` (`400 too many
+paths`). Up to 0.44.2 the explorer echoed only `path`, so from the second
+event on a multi-file screen was answered about its first file and its job
+ran on that file alone.
+
 **v3.1:** `?section=<id>` on the opening `GET` hands the plugin
 `data.section` (a home page's menu — see *Placements*), and every view
 event's `context.actor` carries `ip`: the address the person's request
@@ -1087,6 +1100,58 @@ Every node may carry `id`; a node with `id` that holds a value contributes
 - `preview` — `{path: "adapter://rel"}` — the explorer's existing preview of
   a storage file (thumbnail/viewer); call-scoped refs are not previewable.
 
+### Theme tokens, node by node
+
+An app never styles its screen: it describes it, and filex draws every node
+with its own components. So whatever paints filex paints the app — the
+built-in palettes, an operator's own theme (its colours, corner radius and
+face), light and dark, right to left — with nothing for the app to do. An app
+cannot opt out and cannot bring colours of its own; a signer's `color` in
+`pdf-fields` is the one exception, below.
+
+The table is what the host guarantees. `web/tests/quality/surfaceTokens.test.ts`
+fails the build when a node's CSS carries a fixed colour, a fixed corner or a
+fixed face, and it finds a NEW node's rules by itself (every CSS block a
+plugin component uses that no other screen does).
+
+| Node | Reads | Fixed on purpose |
+|---|---|---|
+| `text` | `--fe-text` (inherited); `--fe-text-muted`, `--fe-danger`, `--fe-primary` for the three tones | — |
+| `divider` | `--fe-border` | — |
+| `form` | filex's own field components, the same as the storage and settings forms: `--fe-bg`, `--fe-border-strong`, `--fe-primary` (focus, a chosen button), `--fe-bg-selected`, `--fe-danger`, `--fe-radius` | — |
+| `steps` | `--fe-text`, `--fe-text-muted`, `--fe-border-strong`; the current step's disc is `--fe-primary` with `--fe-text-on-primary` on it, a finished step's tick `--fe-primary` | — |
+| `list` | the explorer's one table (DataTable), so every token it reads | — |
+| `progress` | track `--fe-border`, bar `--fe-primary`, pill corners | — |
+| `people-picker` | chips `--fe-bg-elev` + `--fe-border-strong`; the avatar `--fe-primary` with `--fe-text-on-primary` on it | — |
+| `pin-input` | the form input's tokens; `--fe-danger` when refused | — |
+| `file-chooser` | `--fe-bg`, `--fe-border-strong`, `--fe-radius`, `--fe-text-muted` while empty | — |
+| `preview` | `--fe-bg-elev`, `--fe-radius`, `--fe-text-muted` | the file itself |
+| `pdf-fields` | the chrome: `--fe-bg`, `--fe-bg-elev`, `--fe-border*`, `--fe-primary` (the selected box), `--fe-radius*`, `--fe-shadow-sm`, `--fe-text*` | **Document space**: the page is white and the ink on it dark in every theme, because it is the PDF. **Signer colours** (`SIGNER_PALETTE`, or the plugin's own `signers[].color`) are identity colours, like a file type's: the same in every theme, so a signer is one colour on the page and on the card. The number on a card takes its ink from that colour (`inkOn`: white or near-black, whichever reads), never from `--fe-text-on-primary`, which is dark in dark mode |
+| `signature-pad` | the frame `--fe-border-strong` (`--fe-danger` when invalid), `--fe-radius`; the hint `--fe-text-muted`; "Signed" `--fe-ok`; the mode and face buttons are filex's buttons | **Paper**: the pad is white and the ink `#111111` in every theme — see below |
+| sections, footer | tabs `--fe-text`, `--fe-text-muted`, `--fe-primary`; the footer is filex's buttons | — |
+
+**Why the pad stays white in dark mode.** A signature is a picture bound for a
+PDF, and the pad exports exactly what it shows. A dark pad would need light
+ink on the screen and dark ink in the file — two renderings of one gesture —
+and the other two ways in could not follow at all: an uploaded picture of a
+signature is usually dark on white, and a typed one is rendered into the same
+PNG. Showing the paper keeps what the signer sees identical to what is
+stamped, and it sits beside the PDF page, which is white for the same reason.
+Nothing on it comes from the theme, so it needs no redrawing when the theme
+changes; its frame is CSS and turns with the rest.
+
+**Light and dark while the screen is open.** An app's page in the admin panel,
+its full-page view and its public page turn with the window: the panel hands
+the page the mode as it is painted (`web/src/lib/theme.ts` → `liveTheme`), and
+the public page follows the operating system (`composables/useSystemDark.ts`)
+unless its host forced a mode.
+
+**Not themed, for anyone.** Font sizes, spacing and control heights are
+metrics, not a palette (`packages/core/src/lib/themes.ts`), so they are the
+same on an app's screen as on filex's own. The compact density is a setting
+of the file list, so it tightens the explorer's rows only, as it does for
+filex's own tables.
+
 ### Fields, and what a step may ask (v3)
 
 Three rules the renderer enforces, so no plugin can break them. They come
@@ -1274,7 +1339,9 @@ did not pin down. Each is what the frontend sends or expects today.
 1. **Paths, not storage ids.** The explorer holds adapter-qualified wire
    paths (`docs://reports/nda.pdf`) and no id→name map, so `POST …/run`,
    `GET …/views/{plugin}/{view}` and `POST …/event` are sent with `paths`
-   (`path` for a view) in that form — the same form `/api/files/copy` and
+   (`?path=` on the opening `GET`; a modal's events carry `path` AND, when
+   it was opened on a selection, `paths` — see the view section above) in
+   that form — the same form `/api/files/copy` and
    `/api/files/move` already accept. `storage_id` is optional and omitted;
    the server resolves the storage from the path's first segment (name or
    uid, as `storageref` does).

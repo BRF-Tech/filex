@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 
 import PluginViewModal from '@brftech/filex-core/src/components/plugin/PluginViewModal.vue';
-import { SURFACE_CHANGE_DEBOUNCE_MS } from '@brftech/filex-core/src/composables/usePluginSurface';
+import { SURFACE_CHANGE_DEBOUNCE_MS, usePluginSurface } from '@brftech/filex-core/src/composables/usePluginSurface';
 import type { PluginSurface } from '@brftech/filex-core/src/types/Plugins';
 
 async function flush() {
@@ -126,5 +126,87 @@ describe('PluginViewModal', () => {
       },
     });
     expect(w.find('.fe-modal__card--xl').exists()).toBe(true);
+  });
+});
+
+// #64 — a modal opened on a SELECTION. The run that opened it carried every
+// path; the conversation after it echoed only `path` (the first row), so the
+// second screen said "a.txt" where the first had said "3 files", and the job
+// the submit queued ran on one file.
+describe('PluginViewModal on a selection', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const selection = ['docs://a.txt', 'docs://b.txt', 'docs://c.txt'];
+  const redrawn: PluginSurface = {
+    ...first,
+    nodes: [{ type: 'form', props: { fields: [{ key: 'subject', type: 'string' }] } }],
+  };
+
+  it('echoes EVERY path on change, action and submit — not the first one', async () => {
+    const ev = vi.fn(async () => ({ surface: redrawn }));
+    const w = mount(PluginViewModal, {
+      props: {
+        open: true,
+        locale: 'en',
+        api: { pluginViewEvent: ev } as never,
+        plugin: 'convert',
+        view: 'wizard',
+        surface: first,
+        path: selection[0],
+        paths: selection,
+      },
+    });
+    await w.find('#fe-cf-subject').setValue('x');
+    vi.advanceTimersByTime(SURFACE_CHANGE_DEBOUNCE_MS);
+    await flush();
+    await w.find('[data-testid="plugin-view-action-cancel"]').trigger('click');
+    await flush();
+    await w.find('[data-testid="plugin-view-action-next"]').trigger('click');
+    await flush();
+
+    expect(ev.mock.calls.map((c) => (c[2] as { event: string }).event)).toEqual(['change', 'action', 'submit']);
+    for (const [, , body] of ev.mock.calls) {
+      // `path` stays — an older server reads only that — and `paths` carries
+      // the whole selection, in the order it was opened on.
+      expect(body).toMatchObject({ path: selection[0], paths: selection });
+    }
+    w.unmount();
+  });
+
+  it('a view opened on one row (a deep link, a home page) sends no `paths` at all', async () => {
+    const ev = vi.fn(async () => ({ surface: { ...first, done: true } }));
+    const w = open(ev);
+    await w.find('[data-testid="plugin-view-action-next"]').trigger('click');
+    await flush();
+    expect(ev).toHaveBeenCalledTimes(1);
+    expect(Object.keys(ev.mock.calls[0][2] as object)).not.toContain('paths');
+    w.unmount();
+  });
+
+  it('the composable itself carries the selection, and an empty one falls back to `path`', async () => {
+    const ev = vi.fn(async () => ({ surface: redrawn }));
+    let selected: string[] = [...selection];
+    const conv = usePluginSurface(
+      {
+        api: { pluginViewEvent: ev } as never,
+        plugin: 'convert',
+        view: 'wizard',
+        path: () => selection[0],
+        paths: () => selected,
+        locale: () => 'en',
+        errorText: () => 'error',
+      },
+      { onOp: () => {}, onDone: () => {}, onToast: () => {} },
+    );
+    conv.setSurface(first);
+    await conv.post('change');
+    expect(ev.mock.calls[0][2]).toMatchObject({ path: selection[0], paths: selection });
+
+    selected = [];
+    await conv.post('change');
+    expect(Object.keys(ev.mock.calls[1][2] as object)).not.toContain('paths');
+    expect(ev.mock.calls[1][2]).toMatchObject({ path: selection[0] });
+    conv.dispose();
   });
 });

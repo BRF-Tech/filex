@@ -186,6 +186,30 @@ export function directCopyMarkers(env: Record<string, string | undefined>): stri
   return out;
 }
 
+/**
+ * Another copy of filex on this computer that Settings warns about:
+ *  - `direct`: the Store copy found the filex.sh (NSIS) copy — see
+ *    directCopyMarkers;
+ *  - `snap`: a .deb, .rpm, AppImage or AUR copy found the Snap Store copy.
+ *    The snap keeps its own accounts and its own sync history
+ *    (engineStateDir → SNAP_USER_COMMON), so the per-pair sync lock never
+ *    meets the other engine and a folder paired in both is synced twice.
+ *    snapd puts every snap command in /snap/bin. A strict snap cannot see the
+ *    host's /usr or /opt, so only the non-snap side can tell.
+ * A copy never warns about itself, and a sandbox cannot look.
+ */
+export type OtherCopy = 'direct' | 'snap';
+export function otherCopyOf(
+  ch: StoreChannel | null,
+  platform: NodeJS.Platform,
+  env: Record<string, string | undefined>,
+  exists: (p: string) => boolean,
+): OtherCopy | null {
+  if (ch === 'msstore') return directCopyMarkers(env).some(exists) ? 'direct' : null;
+  if (platform === 'linux' && !linuxSandbox(ch) && exists(`/snap/bin/${STORE_IDS.snap}`)) return 'snap';
+  return null;
+}
+
 // ─────────────────────────── Linux ───────────────────────────
 
 /**

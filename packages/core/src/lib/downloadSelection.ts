@@ -106,6 +106,40 @@ export async function requestArchive(
 }
 
 /**
+ * #71 — a short-lived, single-use, credential-free link to ONE file: the
+ * browser's drag-out (`DownloadURL`) for a session whose credential cannot
+ * travel on its own (a bearer — the admin SPA). The same mint as an archive,
+ * asked with `mode: "file"`, and the same `/z/<ticket>` redeem; the server
+ * streams the file as itself and re-checks the minter's reach at the drop
+ * (backend handlers/download_link.go).
+ *
+ * Resolves `null` for a server that does not know the mode. An older one
+ * ignores the field and mints a ZIP of the one file, and a zip dropped on the
+ * desktop under the file's own name is a broken file — worse than a drag that
+ * carries nothing. `ttlMs` is the link's life as the server counted it, so the
+ * caller never has to compare its clock with the server's.
+ */
+export async function requestFileLink(
+  api: Pick<FileApi, 'jsonFetch' | 'endpoints'>,
+  path: string,
+): Promise<{ url: string; ttlMs: number } | null> {
+  const ticket = await api.jsonFetch<ArchiveTicket & { mode?: string; ttl_seconds?: number }>(
+    archiveTicketUrl(api.endpoints.manager),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: [path], mode: 'file' }),
+    },
+  );
+  if (!ticket || ticket.mode !== 'file' || typeof ticket.url !== 'string') return null;
+  const ttl = Number(ticket.ttl_seconds);
+  return {
+    url: absoluteTicketUrl(api.endpoints.manager, ticket.url),
+    ttlMs: Number.isFinite(ttl) && ttl > 0 ? ttl * 1000 : 60_000,
+  };
+}
+
+/**
  * How long a download iframe is left in the document.
  *
  * It only has to outlive the moment the browser reads the response headers and

@@ -61,6 +61,7 @@ bundled CLI also mounts a real drive letter (`filex mount Z:`, needs the free
 | `src/sync.ts` | Supervises one `filex sync run --watch` per account; pairs, trash, status |
 | `src/openwith.ts` | "Open with filex", the parts that can lose a document: argv classification, local path → synced twin, scratch naming, the atomic write-back, the sweeps. No Electron import — that is what makes it testable |
 | `src/openwith-io.ts` | The six server calls that round trip does (list, stat, mkdir, upload, download, delete) |
+| `src/remote-search.ts` | ⌘K across the rail: the search and download addresses the main process uses for an account the window is NOT showing, with that account's token (`config.accountSearch` in the shared component). No Electron import |
 | `src/preload-app.cts` | The window's only bridge: `window.filexApp` (state, settings, sync, updates) |
 | `src/preload-shell.cts` | The narrower bridge for the chrome (rail/settings) |
 | `src/preload-editor.cts` | One line, for the editor window: it gets no `filexApp` bridge, only the SPA's own "you are inside the desktop app" flag |
@@ -479,6 +480,7 @@ a server and credentials (`FILEX_SERVER`, `FILEX_EMAIL`, `FILEX_PASSWORD`), and
 | `lang-e2e.mjs` | The language setting moves the shell, the file list and the stored state |
 | `shell-e2e.mjs` | The shell windows (settings, pickers) open and answer |
 | `dragout-e2e.mjs` | Dragging files OUT: what lands on this computer before an OS drag can start |
+| `search-e2e.mjs` | ⌘K "Everywhere" in the app window: the rows are exactly the server's answer; a hit downloads and drags out from its row; a drop on the palette is not an upload; with two accounts on the rail (one server, two people) one badge per account, the second person sees only what they may, another account's hit downloads and drags as THAT account, and opening it switches the rail. Needs an ADMIN (it creates its own storage, files and second user); `FILEX_SHOTS_DIR` saves two screenshots |
 | `openwith-e2e.mjs` | A document double-clicked from outside every synced folder: second instance → editor window → server-side save → the bytes on the ORIGINAL local path change → the copy is gone after the window closes. Plus the synced-twin route, which makes no copy at all |
 | `plumbing-smoke.mjs` | `app://`, preload injection and `safeStorage`, without a server |
 

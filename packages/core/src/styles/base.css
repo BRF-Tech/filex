@@ -2304,6 +2304,71 @@ filex-explorer {
   outline-offset: -2px;
 }
 
+/* #47 — a search hit's own verbs: a Download button on the row, the row
+   itself draggable, and one badge per signed-in account above its rows. */
+.fe-cmdp__item--hit {
+  user-select: none;
+}
+.fe-cmdp__hitact {
+  flex: 0 0 auto;
+  align-self: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  padding: 2px 6px;
+  font: inherit;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+  opacity: 0.55;
+}
+.fe-cmdp__item--hit:hover .fe-cmdp__hitact,
+.fe-cmdp__item--hit.is-active .fe-cmdp__hitact {
+  opacity: 1;
+}
+.fe-cmdp__hitact:hover {
+  background: var(--fe-bg-elev);
+  color: var(--fe-primary);
+}
+.fe-cmdp__hitact:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+  opacity: 1;
+}
+.fe-cmdp__hitact .fe-aicon {
+  width: 16px;
+  height: 16px;
+}
+.fe-cmdp__acct {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 10px 2px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--fe-text);
+}
+.fe-cmdp__acct-dot {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--fe-primary);
+}
+.fe-cmdp__acct-label {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-cmdp__acct-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fe-text-muted);
+}
+
 /* List view — search-result snippet line under the filename. */
 .fe-list__snippet {
   max-width: 100%;
@@ -4690,6 +4755,11 @@ filex-explorer {
 .fe-sidenav__item {
   display: flex;
   align-items: center;
+  /* ⚠ Said out loud, not left to the default: the explorer is not in a shadow
+     root, so a host page's own `button { justify-content: center }` reached
+     these buttons — the desktop app has exactly that rule for its dialogs,
+     and every sidebar entry sat in the middle of its row (#53). */
+  justify-content: flex-start;
   gap: 10px;
   width: 100%;
   padding: 7px 10px;
@@ -11518,7 +11588,10 @@ filex-explorer {
 .fe-steps__item.is-active .fe-steps__marker {
   border-color: var(--fe-primary);
   background: var(--fe-primary);
-  color: #fff;
+  /* The palette's ink for its primary, as on every primary button. White
+     measured 3.16:1 on the stock dark primary and 2.3:1 on an operator's pale
+     pink one (#57), where the share dialog beside it used this token. */
+  color: var(--fe-text-on-primary);
 }
 .fe-steps__item.is-done .fe-steps__marker {
   border-color: var(--fe-primary);
@@ -11552,14 +11625,14 @@ filex-explorer {
 .fe-sprogress__track {
   position: relative;
   height: 6px;
-  border-radius: 3px;
+  border-radius: 999px;
   background: var(--fe-border);
   overflow: hidden;
 }
 .fe-sprogress__bar {
   height: 100%;
   background: var(--fe-primary);
-  border-radius: 3px;
+  border-radius: 999px;
   transition: width 0.2s ease;
 }
 .fe-sprogress__track.is-indeterminate .fe-sprogress__bar {
@@ -11608,7 +11681,7 @@ filex-explorer {
   height: 20px;
   border-radius: 50%;
   background: var(--fe-primary);
-  color: #fff;
+  color: var(--fe-text-on-primary);
   font-size: 11px;
   font-weight: 600;
   flex: 0 0 auto;
@@ -12027,7 +12100,7 @@ filex-explorer {
   padding-block: 10px; padding-inline: 14px 12px;
   border: 1px solid var(--fe-border);
   border-inline-start: 3px solid var(--spdf-color, var(--fe-primary));
-  border-radius: var(--fe-radius-md, 8px);
+  border-radius: var(--fe-radius-md);
   background: var(--fe-bg-elev);
 }
 .fe-spdf__card .fe-spdf__props {
@@ -12114,7 +12187,11 @@ filex-explorer {
   place-items: center;
   font-size: var(--fe-text-xs, 11px);
   font-weight: 600;
-  color: var(--fe-text-on-primary);
+  /* ⚠ The ink is the COLOUR's, not the theme's: the ground is a signer's
+     identity colour (lib/pdfFields SIGNER_PALETTE), the same in every theme,
+     so `--fe-text-on-primary` — dark in dark mode — measured 3.5:1 on the
+     first signer's blue. SurfacePdfFields sets --spdf-ink = inkOn(colour). */
+  color: var(--spdf-ink, var(--fe-text-on-primary));
   background: var(--spdf-color, var(--fe-primary));
 }
 .fe-spdf__add {
@@ -12132,7 +12209,7 @@ filex-explorer {
 .fe-spdf__empty {
   padding: 14px;
   border: 1px dashed var(--fe-border);
-  border-radius: var(--fe-radius-md, 8px);
+  border-radius: var(--fe-radius-md);
   color: var(--fe-text-muted);
   font-size: var(--fe-text-sm);
   line-height: 1.5;

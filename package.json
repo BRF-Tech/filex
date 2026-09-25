@@ -23,8 +23,8 @@
     "sync:embed": "node scripts/sync-embed.mjs",
     "check:embed": "node scripts/check-embed.mjs",
     "shots": "node scripts/shots.mjs",
-    "release:dry": "goreleaser release --snapshot --clean --skip=publish",
-    "release": "goreleaser release --clean"
+    "goreleaser:snapshot": "goreleaser release --snapshot --clean --skip=publish",
+    "release": "node scripts/release.mjs"
   },
   "engines": {
     "node": ">=20",

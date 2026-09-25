@@ -21,7 +21,7 @@ import (
 // an error.
 func (s *Store) GetUserPrefs(ctx context.Context, userID int64, surface string) (string, error) {
 	var v sql.NullString
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT doc FROM user_prefs WHERE user_id=$1 AND surface=$2`, userID, surface).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -34,7 +34,7 @@ func (s *Store) GetUserPrefs(ctx context.Context, userID int64, surface string) 
 
 // SetUserPrefs replaces the whole document for one person on one surface.
 func (s *Store) SetUserPrefs(ctx context.Context, userID int64, surface, doc string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO user_prefs (user_id, surface, doc, updated_at)
 		 VALUES ($1,$2,$3,NOW())
 		 ON CONFLICT(user_id, surface) DO UPDATE SET doc=EXCLUDED.doc, updated_at=NOW()`,

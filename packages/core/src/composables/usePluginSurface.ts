@@ -38,6 +38,13 @@ export interface PluginSurfaceHost {
   view: string;
   /** Adapter-qualified path the view was opened on — echoed on every event. */
   path?: () => string | undefined;
+  /**
+   * Every row the view was opened on (a selection) — echoed on every event
+   * as `paths`, beside `path`. Absent or empty for a frame opened on one
+   * row or on none (a deep link, a home page, the inspector, a public page),
+   * which then sends `path` alone, exactly as before.
+   */
+  paths?: () => readonly string[] | undefined;
   locale: () => string;
   /** The words for an answer without a surface. */
   errorText: () => string;
@@ -128,9 +135,14 @@ export function usePluginSurface(host: PluginSurfaceHost, events: PluginSurfaceE
     }
     const mine = ++seq;
     failure.value = '';
+    // ⚠⚠ The WHOLE selection, on every event (#64). The opening `run` carried
+    // it; echoing only `path` here made the server answer every later event
+    // about the first file, and the submit queue the job on that file alone.
+    const selection = host.paths?.();
     try {
       const res = await host.api.pluginViewEvent(host.plugin, host.view, {
         path: host.path?.(),
+        ...(selection?.length ? { paths: [...selection] } : {}),
         state: current.value?.state ?? {},
         event,
         action_id: actionId,

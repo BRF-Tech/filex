@@ -32,3 +32,12 @@ auth providers, network exposure and secrets. Reports about the software itself
 escalation, secret leakage, RBAC bypass, and an app-plugin sandbox escape or
 permission bypass) are in scope. Misconfiguration of a
 specific deployment is not, though we welcome hardening suggestions.
+
+Some URLs are credential-free **by design**, and each is bound to exactly what
+it names: a share link (`/s/…`) or file request (`/d/…`) to its item and its
+settings; an upload ticket (`/u/…`) to one destination and one write; a
+download ticket (`/z/…`) to one archive or — for the web app's drag-out — one
+file, for at most a minute, and re-checked against its owner's current
+permissions and tenant when it is used. That anyone holding such a URL can use
+it is the design; a URL reaching **beyond** what it names, outliving its
+limits, or being minted by someone who could not read the target is in scope.

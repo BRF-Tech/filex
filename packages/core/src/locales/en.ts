@@ -1339,6 +1339,19 @@ export const en: Record<string, string> = {
   'storages.fields.tls': 'FTPS (explicit AUTH TLS)',
   'storages.fields.url': 'Base URL',
   'storages.fields.user': 'User',
+  'storages.fields.s3AttemptTimeout': 'Attempt timeout (seconds)',
+  'storages.fields.s3MaxAttempts': 'Attempts per request',
+  'storages.fields.s3TotalTimeout': 'Give up after (seconds)',
+  'storages.fieldHelp.s3AttemptTimeout': 'How long one attempt may wait for a sign of life from the store: connecting, the TLS handshake, the answer after the request is sent, and each next piece of the answer. A transfer that keeps moving is never cut, however long it takes; an upload the store stops taking is cut after 60 seconds, or after this if it is longer. Copies and renames wait up to 10 minutes for the answer, because the store answers them only when the copy is done.',
+  'storages.fieldHelp.s3MaxAttempts': 'How many times a request is tried in all when the failure can pass: a network error, a timeout, a 5xx answer, throttling. 1 turns retrying off. A refusal (403, a missing bucket, a host name that does not resolve) is never retried.',
+  'storages.fieldHelp.s3TotalTimeout': 'No new attempt starts unless it could finish within this many seconds of the first, so an upload or a listing on a store that is down reports the outage within this time. A transfer that is under way is not cut. A request that timed out is tried again only when this is at least twice the attempt timeout.',
+  'storages.fields.attemptTimeout': 'Attempt timeout (seconds)',
+  'storages.fields.maxAttempts': 'Attempts per request',
+  'storages.fields.totalTimeout': 'Give up after (seconds)',
+  'storages.fieldHelp.attemptTimeout': 'How long one attempt may wait for a sign of life from the server: connecting, logging in, the answer to each request, and each next piece of a transfer. A transfer that keeps moving is never cut, however long it takes; an upload the server stops taking is cut after 60 seconds, or after this if it is longer.',
+  'storages.fieldHelp.webdavAttemptTimeout': 'How long one attempt may wait for a sign of life from the server: connecting, logging in, the answer to each request, and each next piece of a transfer. A transfer that keeps moving is never cut, however long it takes; an upload the server stops taking is cut after 60 seconds, or after this if it is longer. Copies, moves and deletes wait up to 10 minutes for the answer, because the server answers them only when the work is done.',
+  'storages.fieldHelp.maxAttempts': 'How many times a request is tried in all when the failure can pass: the connection is refused or drops, no answer comes in time, the server answers that it is unavailable (5xx). 1 turns retrying off. A refusal (a wrong password, a missing folder, a certificate that does not verify) is never retried, and neither is an upload that has started sending.',
+  'storages.fieldHelp.totalTimeout': 'No new attempt starts unless it could finish within this many seconds of the first, so a server that is down is reported within this time. A transfer that is under way is not cut. A request that timed out is tried again only when this is at least twice the attempt timeout.',
 
 
   /* === gezinti:g1 — navigation panel (SideNav) === */

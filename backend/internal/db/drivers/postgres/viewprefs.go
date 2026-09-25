@@ -20,7 +20,7 @@ import (
 // is none. No row and an empty column are one answer; neither is an error.
 func (s *Store) GetUserViewPrefs(ctx context.Context, userID int64) (string, error) {
 	var v sql.NullString
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT prefs_json FROM user_view_prefs WHERE user_id=$1`, userID).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -33,7 +33,7 @@ func (s *Store) GetUserViewPrefs(ctx context.Context, userID int64) (string, err
 
 // SetUserViewPrefs replaces the whole document for a user.
 func (s *Store) SetUserViewPrefs(ctx context.Context, userID int64, doc string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO user_view_prefs (user_id, prefs_json, updated_at)
 		 VALUES ($1,$2,NOW())
 		 ON CONFLICT(user_id) DO UPDATE SET prefs_json=EXCLUDED.prefs_json, updated_at=NOW()`,

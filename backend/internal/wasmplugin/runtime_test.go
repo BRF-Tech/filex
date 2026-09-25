@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/brf-tech/filex/backend/internal/testutil/wasmfixture"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
 
@@ -34,12 +35,7 @@ var (
 // failure, not a skip.
 func fixture(t *testing.T) *Compiled {
 	t.Helper()
-	if _, err := os.Stat(fixtureWasm); err != nil {
-		if os.Getenv("FILEX_REQUIRE_WASM_FIXTURE") != "" {
-			t.Fatalf("%s is missing on CI: run scripts/build-wasm-fixture.sh before go test", fixtureWasm)
-		}
-		t.Skipf("%s not built (bash scripts/build-wasm-fixture.sh)", fixtureWasm)
-	}
+	wasmfixture.Require(t, fixtureWasm)
 	sharedOnce.Do(func() {
 		raw, err := os.ReadFile("testdata/echo/manifest.json")
 		if err != nil {

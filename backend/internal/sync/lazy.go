@@ -414,55 +414,59 @@ func (lc *lazyCatalogue) reconcileOnce(ctx context.Context, dir string, why lazy
 	markerFirst(objs)
 	stamp := time.Now().UTC().Truncate(time.Second)
 	c := &walkCounts{}
-	seen := make(map[string]bool, len(objs))
-	var found []model.CatalogueFolder
-	for _, obj := range objs {
-		if err := ctx.Err(); err != nil {
-			return res, err
+	var (
+		seen          map[string]bool
+		removed, held int
+	)
+	// The entries, the folders they revealed, the folder's own state row and
+	// its delete pass: one transaction (applyListing's finish), so what this
+	// listing found and what it removed commit together or not at all.
+	_, err = s.applyListing(ctx, dir, parent, objs, c, func(ctx context.Context, listed []listedEntry, b *entryBatch) error {
+		seen = make(map[string]bool, len(listed))
+		res.ChildDirs = nil
+		var found []model.CatalogueFolder
+		for _, e := range listed {
+			seen[e.obj.Name] = true
+			if e.node != nil && e.descend {
+				p := db.CatalogueFolderPath(e.obj.Path)
+				found = append(found, model.CatalogueFolder{
+					PathHash: pathkey.Hash(st.ID, p), Path: p, Depth: db.CatalogueFolderDepth(p),
+				})
+				res.ChildDirs = append(res.ChildDirs, p)
+			}
 		}
-		if s.rule.Skips(obj.Path) {
-			continue
+		if len(found) > 0 {
+			if err := s.store.DiscoverCatalogueFolders(ctx, st.ID, found); err != nil {
+				return err
+			}
 		}
-		seen[obj.Name] = true
-		n, isDir, abandon := s.catalogueEntry(ctx, dir, parent, obj, c)
-		if abandon {
-			return res, errAbandoned
-		}
-		if n != nil && isDir {
-			p := db.CatalogueFolderPath(obj.Path)
-			found = append(found, model.CatalogueFolder{
-				PathHash: pathkey.Hash(st.ID, p), Path: p, Depth: db.CatalogueFolderDepth(p),
-			})
-			res.ChildDirs = append(res.ChildDirs, p)
-		}
-	}
-	if len(found) > 0 {
-		if err := s.store.DiscoverCatalogueFolders(ctx, st.ID, found); err != nil {
-			return res, err
-		}
-	}
 
-	// The listing is applied: say so BEFORE the delete pass, which reads it
-	// back and refuses to run on anything else.
-	rec := &model.CatalogueFolder{
-		StorageID: st.ID, PathHash: hash, Path: dir, Depth: db.CatalogueFolderDepth(dir),
-		State: model.FolderCatalogued, ReconciledAt: &stamp, Entries: len(seen),
-	}
-	if prior != nil {
-		rec.VisitedAt = prior.VisitedAt
-		if lc.watch.has(dir) {
-			rec.State, rec.WatchedAt = model.FolderWatched, prior.WatchedAt
+		// The listing is applied: say so BEFORE the delete pass, which reads
+		// it back and refuses to run on anything else.
+		rec := &model.CatalogueFolder{
+			StorageID: st.ID, PathHash: hash, Path: dir, Depth: db.CatalogueFolderDepth(dir),
+			State: model.FolderCatalogued, ReconciledAt: &stamp, Entries: len(seen),
 		}
-	}
-	if err := s.store.RecordCatalogueFolder(ctx, rec); err != nil {
-		return res, err
-	}
-	removed, held := lc.deletePass(ctx, dir, parent, seen, stamp)
-	if held > 0 {
-		rec.HeldBack = held
+		if prior != nil {
+			rec.VisitedAt = prior.VisitedAt
+			if lc.watch.has(dir) {
+				rec.State, rec.WatchedAt = model.FolderWatched, prior.WatchedAt
+			}
+		}
 		if err := s.store.RecordCatalogueFolder(ctx, rec); err != nil {
-			return res, err
+			return err
 		}
+		removed, held = lc.deletePass(ctx, dir, parent, seen, stamp, b)
+		if held > 0 {
+			rec.HeldBack = held
+			if err := s.store.RecordCatalogueFolder(ctx, rec); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return res, err
 	}
 	lc.setHeldBack(dir, held > 0)
 
@@ -484,9 +488,17 @@ func (lc *lazyCatalogue) reconcileOnce(ctx context.Context, dir string, why lazy
 // is confirmed gone. A folder that was never visited or reconciled is never
 // treated as deleted, however old its rows are. Every clause below is one part
 // of that sentence; the tests in lazy_safety_test.go break each one.
-func (lc *lazyCatalogue) deletePass(ctx context.Context, dir string, parent *int64, seen map[string]bool, stamp time.Time) (removed, held int) {
+//
+// It runs inside the folder's transaction (reconcileOnce): the documents of the
+// rows it removes leave the search index through b, once that commits. A nil b
+// takes them out at once.
+func (lc *lazyCatalogue) deletePass(ctx context.Context, dir string, parent *int64, seen map[string]bool, stamp time.Time, b *entryBatch) (removed, held int) {
 	s := lc.s
 	st := s.storage
+	if b == nil {
+		b = &entryBatch{}
+		defer s.handOff(ctx, b)
+	}
 	// 1. Only a folder whose state row says THIS listing was applied to it.
 	// A caller that reaches here any other way — an event, a cleanup, a later
 	// refactor — removes nothing.
@@ -543,7 +555,7 @@ func (lc *lazyCatalogue) deletePass(ctx context.Context, dir string, parent *int
 		// path the scan rule skips, the file rows each Stat-confirmed again,
 		// and never bytes — the trash purge leaves a path alone whose row was
 		// deleted where it stood (trash.ownsBytesAt).
-		removed += s.tombstone(ctx, batch)
+		removed += s.tombstoneRows(ctx, batch, b)
 		if n.Type == model.NodeTypeDirectory {
 			p := db.CatalogueFolderPath(n.Path)
 			_ = s.store.DeleteCatalogueFoldersUnder(ctx, st.ID, p)

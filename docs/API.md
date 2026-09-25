@@ -696,11 +696,59 @@ GET  /z/<ticket>                   ← a navigation; streams the ZIP
   unguessable, it authorizes exactly one archive, it expires in minutes and it
   is consumed on use. Nothing is written into storage and nothing is buffered
   in the tab; a 700 MB archive costs the server under a megabyte of memory.
-- Refusals at the mint: `403` a named path is not readable by this caller ·
-  `404` the storage is not this tenant's · `409` the selection resolved to no
-  readable file at all · `413` more members than the cap. The `409` matters —
-  an empty ZIP arriving as a "successful" download is the kind of thing people
-  file bugs about six months later.
+- Refusals at the mint: `403` a named path is not readable by this caller, or
+  lies outside a `root:`-confined token's folder · `404` the storage is not
+  this tenant's · `409` the selection resolved to no readable file at all ·
+  `413` more members than the cap. The `409` matters — an empty ZIP arriving as
+  a "successful" download is the kind of thing people file bugs about six
+  months later.
+- The answer says what was minted: `mode: "zip"`, and `ttl_seconds` — the
+  ticket's life from now, so a client never compares its clock with the
+  server's.
+
+#### A single file: the drag-out link
+
+```
+POST /api/files/archive/download   { "paths": ["main://docs/a.pdf"], "mode": "file" }
+  → { url: "/z/<ticket>", ticket, name: "a.pdf", files: 1, bytes, expires_at,
+      mode: "file", ttl_seconds: 60 }
+GET  /z/<ticket>                   ← the file's own bytes; attachment, no-store
+```
+
+The same mint, store and redeem, for the one thing a plain download URL cannot
+do: a page that signs with a **bearer** handing a `DownloadURL` to the browser's
+drag-out, whose download stack sends no `Authorization` header. What differs
+from an archive ticket:
+
+- **Exactly one path, and a file.** A folder is `409 {"code":"IS_FOLDER"}`:
+  the explorer mints these speculatively (below), and minting a folder's
+  archive walks its whole subtree — work nobody asked for, on every folder a
+  pointer crosses. Download gives a folder as an archive.
+- **A minute, once.** `ttl_seconds` is at most 60; `expires_in_seconds` may
+  shorten it, never lengthen it. A lapsed link is `410`, a used one `404`.
+- **Re-judged at the redeem, as its owner.** An archive ticket carries the
+  member list its mint authorized; a file link asks again at the drop: the
+  account can still sign in (enabled, its tenant not suspended), the token it
+  was minted with is not revoked, the request arrives on the tenant host it was
+  minted on (`403`), the storage is still the owner's tenant's (`404`) and the
+  owner still has ≥ viewer on the file (`403`). A refusal consumes the link; a
+  server-side failure (`5xx`) does not, so the same drop can be retried.
+- **Audited at the redeem**: `file.download_link` when the download starts,
+  `file.download_link_refused` with a `reason` (`account` · `token` · `host` ·
+  `storage` · `acl`) when it is refused. The link itself never goes into the
+  row. Minting is not audited — it happens on hover.
+- ⚠ **Check `mode` in the answer.** A server that predates it ignores the field
+  and mints a ZIP of the one file; `requestFileLink(api, path)` (core
+  `lib/downloadSelection`) answers `null` for that rather than hand the desktop
+  a zip named like the file.
+
+Why the explorer mints on hover: `dragstart` must fill the dataTransfer
+synchronously — it is writable during that event and never after — so a link
+asked for when the drag starts is always too late. `createDragLinks` (core
+`lib/dragOut`) asks when the pointer rests on a file row or a ⌘K result and
+again on the press, keeps one mint in flight (a sweep across forty rows is two
+requests), hands each link out once, and drops one in its last seconds. A drag
+that beats the mint carries no `DownloadURL` — never a URL that would 401.
 
 `downloadArchive(api, paths, { name })` does both halves, and navigates through
 a hidden iframe rather than `window.open` (a popup by then — blocked) or

@@ -24,6 +24,7 @@ import type { LocaleCode, ThemeMode } from '../../types/ExplorerConfig';
 import type { PublicRequestInfo, PublicShareInfo } from '../../types/Public';
 import { useLocale } from '../../composables/useLocale';
 import { usePublicBranding } from '../../composables/usePublicBranding';
+import { useSystemDark } from '../../composables/useSystemDark';
 import { usePublicRequest, usePublicShare } from '../../composables/usePublicLink';
 import { hasLocale, normalizeLocaleCode } from '../../lib/uiLocales';
 import { localPref, setLocalPref } from '../../lib/prefs';
@@ -81,6 +82,10 @@ const { t, formatSize } = useLocale(() => locale.value);
 
 const brand = usePublicBranding({ base: props.base });
 
+/* ⚠ The system's answer as a LIVE ref (#57): read inside the computed below
+   it was read once, and an open page kept the mode it was opened in. */
+const systemDark = useSystemDark();
+
 /**
  * Light or dark.
  *
@@ -92,11 +97,7 @@ const brand = usePublicBranding({ base: props.base });
 const resolvedTheme = computed<'light' | 'dark'>(() => {
   const want = props.theme && props.theme !== 'auto' ? props.theme : localPref('theme') || brand.themeDefault.value;
   if (want === 'light' || want === 'dark') return want;
-  try {
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  } catch {
-    return 'light';
-  }
+  return systemDark.value ? 'dark' : 'light';
 });
 
 /* ── the link itself ──────────────────────────────────────────────────── */

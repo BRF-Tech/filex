@@ -23,6 +23,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/testutil/dbtest"
+	"github.com/brf-tech/filex/backend/internal/testutil/wasmfixture"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
 
@@ -125,12 +126,7 @@ func (m *memSink) catalogue(ctx context.Context, storageID int64, rel string) er
 
 func newHarness(t *testing.T, opts func(*Options)) *harness {
 	t.Helper()
-	if _, err := os.Stat(fixtureWasm); err != nil {
-		if os.Getenv("FILEX_REQUIRE_WASM_FIXTURE") != "" {
-			t.Fatalf("%s is missing on CI", fixtureWasm)
-		}
-		t.Skipf("%s not built (bash scripts/build-wasm-fixture.sh)", fixtureWasm)
-	}
+	wasmfixture.Require(t, fixtureWasm)
 	_, store := dbtest.NewTestDB(t)
 	root := t.TempDir()
 	drv := &local.Driver{}

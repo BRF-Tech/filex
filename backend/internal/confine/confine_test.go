@@ -105,6 +105,34 @@ func TestMiddleware_BodyConfinement(t *testing.T) {
 	require.Empty(t, seen, "handler must not run for an out-of-root request")
 }
 
+// The app doors and the selection archive name their files in a `paths`
+// array; until 2026-09-25 this layer let it through untouched.
+func TestMiddleware_BodyPathsArrayConfinement(t *testing.T) {
+	var seen string
+	h := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(b)
+		seen = string(b)
+		w.WriteHeader(200)
+	}))
+	mkReq := func(body string) *http.Request {
+		r := httptest.NewRequest("POST", "/api/files/plugins/actions/convert/to-pdf/run", bytes.NewReader([]byte(body)))
+		r.Header.Set("Content-Type", "application/json")
+		return r.WithContext(auth.WithToken(r.Context(), &model.APIToken{Scopes: "root:main://projeler/acme"}))
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, mkReq(`{"paths":["main://projeler/acme/a.txt","main://projeler/acme/b.txt"]}`))
+	require.Equal(t, 200, rec.Code)
+	require.Contains(t, seen, "projeler/acme/b.txt")
+
+	seen = ""
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, mkReq(`{"paths":["main://projeler/acme/a.txt","main://projeler/EVIL/s.txt"]}`))
+	require.Equal(t, http.StatusForbidden, rec.Code, "one path outside the root refuses the request")
+	require.Empty(t, seen, "handler must not run for an out-of-root request")
+}
+
 func TestMiddleware_Unconfined_Passthrough(t *testing.T) {
 	called := false
 	h := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true; w.WriteHeader(200) }))

@@ -734,6 +734,29 @@ curl -G https://files.example.com/api/files/search \
 > = 0) that the index can't answer returns empty rather than scanning every
 > mount.
 
+### Which explorer box asks what
+
+Every search box in the explorer — in the web app, in the desktop app and in an
+embed, which all draw the same component — reads **this one index**, through one
+of two routes:
+
+| Box | Request | Fields | Where |
+|---|---|---|---|
+| The header field (*Search in …*) and Advanced search's **Name** scope | `GET /api/files/manager?action=search&filter=…` | name + path (`scope=name`) | the drive you are in; every drive at the root |
+| Advanced search's **Content** / **All** scopes | `GET /api/files/search?scope=content` (or `all`) `&limit=250` | name, path, content | every drive you can reach |
+| **⌘K → Everywhere** | `GET /api/files/search?scope=all&limit=8` | name, path, content | every drive you can reach — and, in the desktop app, every account on the rail, each searched with its own sign-in |
+| Admin → **Search** (index test page) | `GET /api/files/search` | as asked | every drive the administrator can reach |
+
+Both routes drop what the caller may not see before answering (tenant, per-drive
+grants, a token's root) — a content hit never carries a snippet from a file the
+caller could not open. `e2e/tests/47-palette-everywhere.spec.ts` checks it from
+the palette with a user granted one folder of three.
+
+A ⌘K result is also something to act on: its row opens the file (or folder), has
+a download button (a folder downloads as one `.zip`), and drags out the way a
+row of the file list does — through the desktop app's own drag, or, in a
+browser, as a single-file download where the session is a cookie.
+
 ### `GET /api/ai/search?path=<adapter://>&q=…` — token / agent surface
 
 The programmatic search used by API tokens and the MCP/AI integration. Requires

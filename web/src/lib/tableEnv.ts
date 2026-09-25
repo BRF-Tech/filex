@@ -10,26 +10,20 @@
  * by hand, and the column menu — which the imitation table never had — would
  * have had no way to know at all.
  *
- * ⚠ The light/dark ref is MODULE-scoped with one observer for the whole page:
- * a page of forty rows must not mean forty MutationObservers on <html>.
+ * ⚠ The light/dark ref is MODULE-scoped — `lib/theme` → `liveTheme`, one ref
+ * for the whole page: a page of forty rows must not mean forty watchers.
  */
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { provideTableEnv, type LocaleCode } from '@brftech/filex-core';
 import { i18n } from '@/i18n';
-import { effectiveTheme } from '@/lib/theme';
-
-const theme = ref<'light' | 'dark'>(typeof document === 'undefined' ? 'light' : effectiveTheme());
-
-if (typeof document !== 'undefined' && typeof MutationObserver !== 'undefined') {
-  new MutationObserver(() => {
-    theme.value = effectiveTheme();
-  }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-}
+import { liveTheme } from '@/lib/theme';
 
 /** Call once, in App.vue's setup. */
 export function installTableEnv(): void {
   provideTableEnv({
     locale: computed(() => String(i18n.global.locale.value) as LocaleCode),
-    theme,
+    // The ONE live mode (lib/theme): written where `<html class="dark">` is
+    // written, so it needs no observer of its own.
+    theme: liveTheme,
   });
 }

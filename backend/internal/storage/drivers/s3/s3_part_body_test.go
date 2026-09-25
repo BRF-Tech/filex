@@ -87,7 +87,7 @@ func partDriver(t *testing.T, srv *httptest.Server) *Driver {
 		awsconfig.WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider("fake", "fake", ""),
 		),
-		awsconfig.WithRetryer(newRetryer),
+		awsconfig.WithRetryer(func() aws.Retryer { return newRetryer(defaultPolicy()) }),
 	)
 	require.NoError(t, err)
 	d := &Driver{bucket: "b", region: "auto", endpoint: srv.URL, pathStyle: true}

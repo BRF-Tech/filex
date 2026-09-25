@@ -128,18 +128,20 @@ export async function arrived(win, url, timeout = 30_000) {
 }
 
 /**
- * Plays the browser's half of the sign-in over HTTP and feeds the code back
- * through the app's own manual-entry box.
+ * Plays the browser's half of ONE sign-in over HTTP, on a connect window that
+ * is already open, and feeds the code back through the app's own manual-entry
+ * box. `signIn` below is the first account; a suite that needs a second one
+ * (search-e2e: two accounts on the rail) opens the connect window with
+ * `filexApp.addAccount()` and calls this with the second person's password.
  *
  * The manual path is used deliberately: it exercises the same PKCE exchange as
  * the deep link AND proves the escape hatch a user falls back to when the deep
  * link silently does nothing.
  *
- * Returns the app window plus an admin bearer for seeding fixtures.
+ * Returns that person's bearer (for seeding fixtures) and the auth URL.
  */
-export async function signIn(app, { label = 'filex desktop — e2e' } = {}) {
-  if (!EMAIL || !PASSWORD) throw new Error('set FILEX_EMAIL and FILEX_PASSWORD');
-  const connect = await app.firstWindow();
+export async function completeSignIn(connect, { email = EMAIL, password = PASSWORD, label = 'filex desktop — e2e' } = {}) {
+  if (!email || !password) throw new Error('set FILEX_EMAIL and FILEX_PASSWORD');
   await connect.waitForLoadState('domcontentloaded');
   await connect.locator('#server').fill(SERVER);
   await connect.locator('#go').click();
@@ -154,11 +156,11 @@ export async function signIn(app, { label = 'filex desktop — e2e' } = {}) {
   const login = await fetch(`${SERVER}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: EMAIL, password: PASSWORD, remember: true }),
+    body: JSON.stringify({ email, password, remember: true }),
   });
   if (!login.ok) throw new Error(`browser login failed (${login.status})`);
   const cookie = (login.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).join('; ');
-  const adminToken = (await login.clone().json().catch(() => ({}))).token ?? null;
+  const token = (await login.clone().json().catch(() => ({}))).token ?? null;
 
   const done = await fetch(`${SERVER}/api/auth/desktop/complete`, {
     method: 'POST',
@@ -172,6 +174,19 @@ export async function signIn(app, { label = 'filex desktop — e2e' } = {}) {
   // resolves. That is the success path, not a failure.
   await connect.locator('#code').fill(code);
   await connect.locator('#usecode').click().catch(() => {});
+  return { token, authUrl };
+}
+
+/**
+ * The first sign-in: the connect window the app opens with, then the explorer
+ * window it opens after.
+ *
+ * Returns the app window plus an admin bearer for seeding fixtures.
+ */
+export async function signIn(app, { label = 'filex desktop — e2e' } = {}) {
+  if (!EMAIL || !PASSWORD) throw new Error('set FILEX_EMAIL and FILEX_PASSWORD');
+  const connect = await app.firstWindow();
+  const { token: adminToken, authUrl } = await completeSignIn(connect, { label });
 
   const win = await arrived(await app.waitForEvent('window', { timeout: 60_000 }), /^app:\/\/filex/);
 

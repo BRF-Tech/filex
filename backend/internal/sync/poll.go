@@ -267,6 +267,9 @@ func (s *storageSyncer) prefetchTree(ctx context.Context, root string) (treeInde
 // walk recursively lists the storage from `path` downwards. parent is the
 // DB id of the parent node (nil at root). list answers each directory —
 // the driver, or a tree fetched up front (see prefetchTree).
+//
+// A directory's own entries are applied first, all of them (applyListing: in
+// one transaction), and only then are its subfolders walked.
 func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *walkCounts, list dirLister, guard *storage.CycleGuard, depth int) (int, error) {
 	objs, err := list(ctx, p)
 	if err != nil {
@@ -276,56 +279,191 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *wa
 		return 0, err
 	}
 	markerFirst(objs)
+	listed, err := s.applyListing(ctx, p, parent, objs, c, func(ctx context.Context, _ []listedEntry, _ *entryBatch) error {
+		s.dirListed(ctx, p, len(objs))
+		return nil
+	})
+	if errors.Is(err, errAbandoned) {
+		c.partial = true
+		return 0, nil
+	}
 	count := 0
-	for _, obj := range objs {
-		select {
-		case <-ctx.Done():
-			return count, ctx.Err()
-		default:
-		}
-		// filex's own trees at the storage root are not part of the catalogue
-		// and are not the walk's to reconcile (syspath.Sealed).
-		//
-		//   - `.filex-trash/`: the rows for everything in there already exist
-		//     -- soft-deleted, retagged to the very keys sitting on the storage
-		//     -- and the trash service maintains them (restore, retention
-		//     purge), never a listing. Walking in was how a deletion undid
-		//     itself.
-		//   - `.versions/`: snapshots belong to node_versions rows keyed by
-		//     the file they version. Walking in minted a system-owned row for
-		//     every snapshot folder and file — counted in the storage's totals,
-		//     indexed for search — and, once unseen, the tombstone pass put the
-		//     folder rows in the trash in place, where a purge deletes the
-		//     whole prefix on the backend: the version history itself.
-		//   - `.thumbs/`: a cache, never content.
-		//
-		// …and nor are the paths the storage's scan exclusions name (issue
-		// #44): a matching folder is not listed at all, which is the point —
-		// a `.git` or a download client's `incomplete/` costs nothing.
-		// scanrule.Rule.Skips is the one question for both.
-		if s.rule.Skips(obj.Path) {
-			continue
-		}
-		n, descend, abandon := s.catalogueEntry(ctx, p, parent, obj, c)
-		if abandon {
-			c.partial = true
-			return count, nil
-		}
-		if n == nil {
-			continue
-		}
-		count++
-		if descend && guard.Enter(obj, depth+1) {
-			cn, err := s.walk(ctx, obj.Path, &n.ID, c, list, guard, depth+1)
-			if err == nil {
-				count += cn
-			} else {
-				c.partial = true
-			}
+	for _, e := range listed {
+		if e.node != nil {
+			count++
 		}
 	}
-	s.dirListed(ctx, p, len(objs))
+	if err != nil {
+		return count, err
+	}
+	for _, e := range listed {
+		if err := ctx.Err(); err != nil {
+			return count, err
+		}
+		if e.node == nil || !e.descend || !guard.Enter(e.obj, depth+1) {
+			continue
+		}
+		cn, err := s.walk(ctx, e.obj.Path, &e.node.ID, c, list, guard, depth+1)
+		if err == nil {
+			count += cn
+		} else {
+			c.partial = true
+		}
+	}
 	return count, nil
+}
+
+// catalogueTxEntries bounds one transaction of applyListing. A directory of
+// this many entries or fewer is written in one; a bigger one in as many as it
+// takes. ⚠ On SQLite the transaction holds the database's only connection:
+// every listing, search and upload on the server waits until it commits, and
+// a hundred thousand entries in one would stall them for seconds.
+var catalogueTxEntries = 500
+
+// errRetryOutsideTx: a write inside a directory's transaction failed. On
+// PostgreSQL a failed statement ends the transaction, so the per-entry
+// recovery (a row another writer won the insert of, a row a folder move left
+// behind) cannot run there; the transaction is rolled back and the entries are
+// applied again one statement at a time, where it can.
+var errRetryOutsideTx = errors.New("sync: a catalogue write failed inside the directory's transaction")
+
+// entryBatch is what the entries applied in one transaction still owe the rest
+// of filex once it commits: rows for the search index, files for the
+// antivirus, and rows tombstoned whose documents leave the index.
+type entryBatch struct {
+	// inTx: the entries run inside Store.WithTx.
+	inTx    bool
+	index   []*model.Node
+	scan    []*model.Node
+	unindex []int64
+}
+
+// listedEntry is one entry of a directory's listing as applyListing left it.
+type listedEntry struct {
+	obj storage.Object
+	// node is the entry's row; nil when it could not be recorded this pass.
+	node *model.Node
+	// descend: a folder the walk may enter.
+	descend bool
+}
+
+// applyListing applies ONE directory's listing to the catalogue, every entry
+// through catalogueEntry. It is catalogueEntry's only caller: the full walk
+// (and the copy mirror, which walks) and the lazy catalogue's folder reconcile
+// both come through here, so neither can batch its writes differently.
+//
+// ⚠⚠ Issue #70: the entries' writes go in ONE transaction (catalogueTxEntries
+// at most each). They used to be one implicit transaction per statement — on
+// SQLite an fsync each — and every new row was indexed on its own, one Bleve
+// write that waits for the disk per file. Measured on the 100k-file tree
+// (docs/LAZY-CATALOGUE.md "Measured") that was the whole cost of cataloguing.
+//
+// Only after a transaction commits does anything outside the database hear of
+// its rows: the search index (one batch) and the antivirus. Both enqueue jobs
+// through the job queue, which shares the database but not the transaction —
+// on SQLite a call from inside it would wait for ever for the connection the
+// transaction holds (internal/db/tx.go).
+//
+// finish runs inside the LAST transaction, after the last entry, with every
+// entry the listing held: the walk records the folder there, the lazy
+// reconcile records it and runs its delete pass, so a folder's rows and its
+// state row commit together.
+//
+// A transaction that fails is rolled back and its entries applied again
+// without one — the per-entry path exactly as it was before, where losing an
+// insert to another writer is recovered row by row.
+//
+// errAbandoned: the directory's encrypted-folder marker row could not be
+// written; nothing more of the directory is recorded this pass.
+func (s *storageSyncer) applyListing(ctx context.Context, p string, parent *int64, objs []storage.Object, c *walkCounts,
+	finish func(ctx context.Context, listed []listedEntry, b *entryBatch) error) ([]listedEntry, error) {
+	var listed []listedEntry
+	for start := 0; ; start += catalogueTxEntries {
+		end := min(start+catalogueTxEntries, len(objs))
+		chunk, last := objs[start:end], end == len(objs)
+		var (
+			b   *entryBatch
+			cc  walkCounts
+			got []listedEntry
+		)
+		apply := func(ctx context.Context, inTx bool) error {
+			b, cc, got = &entryBatch{inTx: inTx}, *c, nil
+			for _, obj := range chunk {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				// filex's own trees at the storage root are not part of the
+				// catalogue and are not the walk's to reconcile
+				// (syspath.Sealed).
+				//
+				//   - `.filex-trash/`: the rows for everything in there
+				//     already exist -- soft-deleted, retagged to the very keys
+				//     sitting on the storage -- and the trash service maintains
+				//     them (restore, retention purge), never a listing. Walking
+				//     in was how a deletion undid itself.
+				//   - `.versions/`: snapshots belong to node_versions rows
+				//     keyed by the file they version. Walking in minted a
+				//     system-owned row for every snapshot folder and file —
+				//     counted in the storage's totals, indexed for search —
+				//     and, once unseen, the tombstone pass put the folder rows
+				//     in the trash in place, where a purge deletes the whole
+				//     prefix on the backend: the version history itself.
+				//   - `.thumbs/`: a cache, never content.
+				//
+				// …and nor are the paths the storage's scan exclusions name
+				// (issue #44): a matching folder is not listed at all, which
+				// is the point — a `.git` or a download client's `incomplete/`
+				// costs nothing. scanrule.Rule.Skips is the one question for
+				// both.
+				if s.rule.Skips(obj.Path) {
+					continue
+				}
+				n, descend, err := s.catalogueEntry(ctx, p, parent, obj, &cc, b)
+				if err != nil {
+					return err
+				}
+				got = append(got, listedEntry{obj: obj, node: n, descend: descend})
+			}
+			if last && finish != nil {
+				return finish(ctx, append(listed[:len(listed):len(listed)], got...), b)
+			}
+			return nil
+		}
+		err := s.store.WithTx(ctx, func(ctx context.Context) error { return apply(ctx, true) })
+		applied := err == nil
+		if err != nil && ctx.Err() == nil {
+			if !errors.Is(err, errRetryOutsideTx) {
+				slog.Warn("sync: a directory's catalogue transaction failed; applying its entries one by one",
+					slog.String("path", p), slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
+			}
+			// Outside a transaction whatever is written stays written, even
+			// when the pass stops half way: its rows are owed their hand-offs.
+			err, applied = apply(ctx, false), true
+		}
+		if applied {
+			*c = cc
+			s.handOff(ctx, b)
+			listed = append(listed, got...)
+		}
+		if err != nil || last {
+			return listed, err
+		}
+	}
+}
+
+// handOff gives the search index and the antivirus what one applied batch of
+// entries owes them. After the batch committed, never inside it: see
+// applyListing.
+func (s *storageSyncer) handOff(ctx context.Context, b *entryBatch) {
+	if s.index != nil {
+		for _, id := range b.unindex {
+			_ = s.index.DeleteNode(ctx, id)
+		}
+		_ = s.index.IndexNodes(ctx, b.index)
+	}
+	for _, n := range b.scan {
+		s.enqueueScan(ctx, n)
+	}
 }
 
 // markerFirst moves the encrypted-folder marker to the front of a listing.
@@ -352,19 +490,23 @@ func markerFirst(objs []storage.Object) {
 
 // catalogueEntry applies ONE listed entry of directory p to the catalogue —
 // what the walk does for every object it sees, minus the descent — and returns
-// the entry's row, whether a walk should descend into it, and whether the
-// whole directory has to be abandoned for this pass (an encrypted-folder
-// marker whose row could not be written).
+// the entry's row and whether a walk should descend into it. What the search
+// index and the antivirus are owed goes into b, for after the commit.
 //
 // It is the one per-entry rule of the catalogue: the full walk, the copy
 // mirror (CatalogueTree) and the lazy catalogue's folder reconcile all come
-// through here, so a fix to how an object becomes a row cannot reach one of
-// them and miss the others. n is nil when the entry could not be recorded.
-func (s *storageSyncer) catalogueEntry(ctx context.Context, p string, parent *int64, obj storage.Object, c *walkCounts) (n *model.Node, descend, abandon bool) {
+// through here (applyListing), so a fix to how an object becomes a row cannot
+// reach one of them and miss the others. n is nil when the entry could not be
+// recorded.
+//
+// errAbandoned: the whole directory has to be abandoned for this pass (an
+// encrypted-folder marker whose row could not be written). errRetryOutsideTx:
+// a write failed inside the directory's transaction (see applyListing).
+func (s *storageSyncer) catalogueEntry(ctx context.Context, p string, parent *int64, obj storage.Object, c *walkCounts, b *entryBatch) (n *model.Node, descend bool, err error) {
 	hash := pathkey.Hash(s.storage.ID, obj.Path)
 	if existing, _ := s.store.GetNodeByPath(ctx, s.storage.ID, hash); existing != nil {
-		s.refreshEntry(ctx, existing, obj, c)
-		return existing, existing.Type == model.NodeTypeDirectory, false
+		s.refreshEntry(ctx, existing, obj, c, b)
+		return existing, existing.Type == model.NodeTypeDirectory, nil
 	}
 	// ⚠⚠ There may still be a TRASHED row at this path -- not the
 	// everyday deletion (that row was retagged into `.filex-trash`,
@@ -434,6 +576,11 @@ func (s *storageSyncer) catalogueEntry(ctx context.Context, p string, parent *in
 	}
 	created, err := s.store.CreateNode(ctx, row)
 	wasRepair := false
+	if err != nil && b.inTx {
+		// ⚠ Not here. Everything below reads and writes again, and on
+		// PostgreSQL the failed INSERT has already ended the transaction.
+		return nil, false, errRetryOutsideTx
+	}
 	if err != nil {
 		// ⚠⚠ A LIVE row may already sit at (storage, parent, name)
 		// carrying a DIFFERENT path — what a folder move that did not
@@ -462,8 +609,8 @@ func (s *storageSyncer) catalogueEntry(ctx context.Context, p string, parent *in
 			// row the other writer created: everything below it that the
 			// other writer had not catalogued yet was left out of the pass,
 			// and a full scan finished with a hole in its catalogue.
-			s.refreshEntry(ctx, raced, obj, c)
-			return raced, raced.Type == model.NodeTypeDirectory, false
+			s.refreshEntry(ctx, raced, obj, c, b)
+			return raced, raced.Type == model.NodeTypeDirectory, nil
 		} else {
 			slog.Warn("sync: create node failed", slog.String("path", obj.Path), slog.String("err", err.Error()))
 			/* wiring:e2 — a marker that was LISTED but whose row did not
@@ -474,10 +621,10 @@ func (s *storageSyncer) catalogueEntry(ctx context.Context, p string, parent *in
 			if obj.Name == e2e.MarkerName && obj.Kind != storage.KindDirectory {
 				slog.Warn("sync: leaving a directory uncatalogued this pass, its encrypted-folder marker row could not be written",
 					slog.String("path", p), slog.String("storage", s.storage.Name))
-				return nil, false, true
+				return nil, false, errAbandoned
 			}
 			/* /wiring:e2 */
-			return nil, false, false
+			return nil, false, nil
 		}
 	}
 	if wasRepair {
@@ -485,21 +632,19 @@ func (s *storageSyncer) catalogueEntry(ctx context.Context, p string, parent *in
 	} else {
 		c.added++
 	}
-	if s.index != nil {
-		_ = s.index.IndexNode(ctx, created)
-	}
+	b.index = append(b.index, created)
 	// A file nobody wrote through filex, catalogued for the first
 	// time. This — not the drift branch below — is the first import
 	// of an existing storage, and the reason the hook exists.
-	s.enqueueScan(ctx, created)
-	return created, obj.Kind == storage.KindDirectory, false
+	b.scan = append(b.scan, created)
+	return created, obj.Kind == storage.KindDirectory, nil
 }
 
 // refreshEntry is catalogueEntry for an entry that already has a row. A row
 // whose staged upload never flipped to stored is settled first when the
 // object is demonstrably its bytes; then the row is updated if the backend's
 // copy drifted from it.
-func (s *storageSyncer) refreshEntry(ctx context.Context, existing *model.Node, obj storage.Object, c *walkCounts) {
+func (s *storageSyncer) refreshEntry(ctx context.Context, existing *model.Node, obj storage.Object, c *walkCounts, b *entryBatch) {
 	unstored := isUnstored(existing)
 	settled := unstored && s.settleTransfer(ctx, existing, obj)
 	drifted := false
@@ -553,10 +698,8 @@ func (s *storageSyncer) refreshEntry(ctx context.Context, existing *model.Node, 
 	// has to be applied to the bytes that are actually there.
 	if (drifted || settled) && (s.index != nil || s.avScan != nil) {
 		if fresh, _ := s.store.GetNode(ctx, existing.ID); fresh != nil {
-			if s.index != nil {
-				_ = s.index.IndexNode(ctx, fresh)
-			}
-			s.enqueueScan(ctx, fresh)
+			b.index = append(b.index, fresh)
+			b.scan = append(b.scan, fresh)
 		}
 	}
 }
@@ -784,6 +927,16 @@ func (s *storageSyncer) settleTransfer(ctx context.Context, n *model.Node, obj s
 // wrong — a folder row in the trash is purged by deleting its prefix on the
 // backend, and the folder is still there.
 func (s *storageSyncer) tombstone(ctx context.Context, stale []*model.Node) int {
+	b := &entryBatch{}
+	deleted := s.tombstoneRows(ctx, stale, b)
+	s.handOff(ctx, b)
+	return deleted
+}
+
+// tombstoneRows is tombstone with the search-index deletions left in b, for a
+// caller running inside a transaction (the lazy delete pass): the documents
+// leave the index only once the soft deletes have committed.
+func (s *storageSyncer) tombstoneRows(ctx context.Context, stale []*model.Node, b *entryBatch) int {
 	deleted := 0
 	for _, n := range stale {
 		if s.rule.Skips(n.Path) {
@@ -794,9 +947,7 @@ func (s *storageSyncer) tombstone(ctx context.Context, stale []*model.Node) int 
 		}
 		if err := s.store.SoftDeleteNode(ctx, n.ID); err == nil {
 			deleted++
-			if s.index != nil {
-				_ = s.index.DeleteNode(ctx, n.ID)
-			}
+			b.unindex = append(b.unindex, n.ID)
 		}
 	}
 	return deleted

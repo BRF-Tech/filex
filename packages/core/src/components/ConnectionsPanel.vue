@@ -24,9 +24,10 @@
  * copy of the first in the screen that answers the OTHER question was the
  * whole complaint; do not bring it back, extend Admin → Storages instead.
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { useSystemDark } from '../composables/useSystemDark';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import { useConnections, connectionsOrigin } from '../composables/useConnections';
 import {
@@ -71,14 +72,7 @@ const { visible, me, publicUrl, error, load } = useConnections(props.config);
 // Resolved in JS rather than left to `prefers-color-scheme`, because the
 // stylesheet's auto rule keys off the explorer's own `.fe` root and this
 // panel is mounted on its own.
-const mq =
-  typeof window !== 'undefined' && window.matchMedia
-    ? window.matchMedia('(prefers-color-scheme: dark)')
-    : undefined;
-const osDark = ref(!!mq?.matches);
-function onMq(e: MediaQueryListEvent) {
-  osDark.value = e.matches;
-}
+const osDark = useSystemDark();
 const themeResolved = computed(() => {
   const mode = props.config.theme ?? 'auto';
   if (mode === 'light' || mode === 'dark') return mode;
@@ -169,10 +163,8 @@ watch(
 
 // ── lifecycle ────────────────────────────────────────────────────────
 onMounted(() => {
-  mq?.addEventListener?.('change', onMq);
   void load();
 });
-onBeforeUnmount(() => mq?.removeEventListener?.('change', onMq));
 
 // The panel is often mounted once and re-pointed (the desktop app switches
 // accounts without tearing the window down), so a changed server must

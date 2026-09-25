@@ -5,7 +5,6 @@
 package webdav
 
 import (
-	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storage/stall"
 )
 
 func init() {
@@ -34,6 +34,10 @@ type Driver struct {
 	user     string
 	pass     string
 	client   *http.Client
+	// policy bounds how long a server that does not answer is waited for
+	// (timeout.go); what names the server in the error that says so.
+	policy stall.Policy
+	what   string
 }
 
 // Name implements storage.Driver.
@@ -66,7 +70,16 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 	d.basePath = path.Join(u.Path, root)
 	d.user = user
 	d.pass = pass
-	d.client = &http.Client{Timeout: 60 * time.Second}
+	// ⚠ No http.Client.Timeout: it bounds the WHOLE request, body included,
+	// so the 60 s it used to be cut every transfer longer than a minute
+	// (issue #73). Silence is bounded per attempt instead (timeout.go).
+	d.policy = stall.Settings{
+		AttemptTimeout: cfg["attempt_timeout_s"],
+		MaxAttempts:    cfg["max_attempts"],
+		TotalTimeout:   cfg["total_timeout_s"],
+	}.Policy(defaults)
+	d.client = &http.Client{Transport: d.transport()}
+	d.what = "webdav server " + (&url.URL{Scheme: u.Scheme, Host: u.Host}).String()
 	return nil
 }
 
@@ -88,11 +101,6 @@ func (d *Driver) urlFor(p string) string {
 	u := *d.endpoint
 	u.Path = path.Join(d.basePath, clean)
 	return u.String()
-}
-
-func (d *Driver) do(req *http.Request) (*http.Response, error) {
-	req.SetBasicAuth(d.user, d.pass)
-	return d.client.Do(req)
 }
 
 // Standard PROPFIND XML body — Depth: 1.
@@ -130,10 +138,7 @@ type multistatusResponse struct {
 
 // List implements storage.Driver.
 func (d *Driver) List(ctx context.Context, p string) ([]storage.Object, error) {
-	req, _ := http.NewRequestWithContext(ctx, "PROPFIND", d.urlFor(p), strings.NewReader(propfindBody))
-	req.Header.Set("Depth", "1")
-	req.Header.Set("Content-Type", `application/xml; charset="utf-8"`)
-	resp, err := d.do(req)
+	resp, err := d.exchange(ctx, propfind(p, "1"), true)
 	if err != nil {
 		return nil, err
 	}
@@ -187,10 +192,7 @@ func (d *Driver) List(ctx context.Context, p string) ([]storage.Object, error) {
 
 // Stat implements storage.Driver — emulated via PROPFIND Depth:0.
 func (d *Driver) Stat(ctx context.Context, p string) (storage.Object, error) {
-	req, _ := http.NewRequestWithContext(ctx, "PROPFIND", d.urlFor(p), strings.NewReader(propfindBody))
-	req.Header.Set("Depth", "0")
-	req.Header.Set("Content-Type", `application/xml; charset="utf-8"`)
-	resp, err := d.do(req)
+	resp, err := d.exchange(ctx, propfind(p, "0"), true)
 	if err != nil {
 		return storage.Object{}, err
 	}
@@ -229,8 +231,7 @@ func (d *Driver) Stat(ctx context.Context, p string) (storage.Object, error) {
 
 // Read implements storage.Driver.
 func (d *Driver) Read(ctx context.Context, p string) (io.ReadCloser, error) {
-	req, _ := http.NewRequestWithContext(ctx, "GET", d.urlFor(p), nil)
-	resp, err := d.do(req)
+	resp, err := d.exchange(ctx, call{method: http.MethodGet, path: p}, false)
 	if err != nil {
 		return nil, err
 	}
@@ -264,9 +265,7 @@ func (d *Driver) ReadRange(ctx context.Context, p string, off, length int64) (io
 	if length > 0 {
 		rng = fmt.Sprintf("bytes=%d-%d", off, off+length-1)
 	}
-	req, _ := http.NewRequestWithContext(ctx, "GET", d.urlFor(p), nil)
-	req.Header.Set("Range", rng)
-	resp, err := d.do(req)
+	resp, err := d.exchange(ctx, call{method: http.MethodGet, path: p, header: http.Header{"Range": {rng}}}, false)
 	if err != nil {
 		return nil, err
 	}
@@ -294,9 +293,8 @@ func (d *Driver) ReadRange(ctx context.Context, p string, off, length int64) (io
 }
 
 // Write implements storage.Writer.
-func (d *Driver) Write(ctx context.Context, p string, r io.Reader, _ int64) error {
-	req, _ := http.NewRequestWithContext(ctx, "PUT", d.urlFor(p), r)
-	resp, err := d.do(req)
+func (d *Driver) Write(ctx context.Context, p string, r io.Reader, size int64) error {
+	resp, err := d.exchange(ctx, call{method: http.MethodPut, path: p, stream: r, size: size}, false)
 	if err != nil {
 		return err
 	}
@@ -309,10 +307,7 @@ func (d *Driver) Write(ctx context.Context, p string, r io.Reader, _ int64) erro
 
 // Move implements storage.Mover.
 func (d *Driver) Move(ctx context.Context, src, dst string) error {
-	req, _ := http.NewRequestWithContext(ctx, "MOVE", d.urlFor(src), nil)
-	req.Header.Set("Destination", d.urlFor(dst))
-	req.Header.Set("Overwrite", "T")
-	resp, err := d.do(req)
+	resp, err := d.exchange(ctx, call{method: "MOVE", path: src, header: d.destination(dst)}, false)
 	if err != nil {
 		return err
 	}
@@ -325,10 +320,7 @@ func (d *Driver) Move(ctx context.Context, src, dst string) error {
 
 // Copy implements storage.Copier.
 func (d *Driver) Copy(ctx context.Context, src, dst string) error {
-	req, _ := http.NewRequestWithContext(ctx, "COPY", d.urlFor(src), nil)
-	req.Header.Set("Destination", d.urlFor(dst))
-	req.Header.Set("Overwrite", "T")
-	resp, err := d.do(req)
+	resp, err := d.exchange(ctx, call{method: "COPY", path: src, header: d.destination(dst)}, false)
 	if err != nil {
 		return err
 	}
@@ -341,8 +333,7 @@ func (d *Driver) Copy(ctx context.Context, src, dst string) error {
 
 // Delete implements storage.Deleter.
 func (d *Driver) Delete(ctx context.Context, p string) error {
-	req, _ := http.NewRequestWithContext(ctx, "DELETE", d.urlFor(p), nil)
-	resp, err := d.do(req)
+	resp, err := d.exchange(ctx, call{method: http.MethodDelete, path: p}, false)
 	if err != nil {
 		return err
 	}
@@ -358,8 +349,7 @@ func (d *Driver) Delete(ctx context.Context, p string) error {
 
 // Mkdir implements storage.Mkdirer (MKCOL).
 func (d *Driver) Mkdir(ctx context.Context, p string) error {
-	req, _ := http.NewRequestWithContext(ctx, "MKCOL", d.urlFor(p), bytes.NewReader(nil))
-	resp, err := d.do(req)
+	resp, err := d.exchange(ctx, call{method: "MKCOL", path: p}, false)
 	if err != nil {
 		return err
 	}

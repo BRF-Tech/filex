@@ -227,6 +227,20 @@ func (r *readFile) reopen() error {
 	return nil
 }
 
+// ─────────────────────────────── propFile ─────────────────────────────────
+
+// propFile is what a write-open that is not an upload gets (see OpenFile): it
+// describes the file and does nothing else. Its Close is a no-op on purpose —
+// the upload spool's Close is a commit, and a commit of nothing is a truncation.
+type propFile struct{ info os.FileInfo }
+
+func (p *propFile) Close() error                       { return nil }
+func (p *propFile) Read([]byte) (int, error)           { return 0, fs.ErrInvalid }
+func (p *propFile) Write([]byte) (int, error)          { return 0, fs.ErrInvalid }
+func (p *propFile) Seek(int64, int) (int64, error)     { return 0, fs.ErrInvalid }
+func (p *propFile) Readdir(int) ([]os.FileInfo, error) { return nil, fs.ErrInvalid }
+func (p *propFile) Stat() (os.FileInfo, error)         { return p.info, nil }
+
 // ─────────────────────────────── writeFile ────────────────────────────────
 
 // writeFile spools an upload to a local temp file and hands the whole

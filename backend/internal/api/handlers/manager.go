@@ -470,6 +470,43 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 // link's cap before any byte leaves, which is why they stay on the
 // unranged path (see share.go claimDownload).
 func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, asAttachment bool) {
+	h.streamBody(w, r, s, rel, bodyMode{attachment: asAttachment})
+}
+
+// bodyMode is how one file body is handed over.
+type bodyMode struct {
+	// attachment: a download (Content-Disposition: attachment) rather than an
+	// inline preview.
+	attachment bool
+	// linked: the request is a credential-free one-file link (#71,
+	// download_link.go), redeemed by the browser's own download stack. Two
+	// answers change, and both for the same reason — whatever body arrives is
+	// what lands on the person's desktop:
+	//   - it is never told "not yet" (the 202 / wait page of a slow-and-big
+	//     file). A browser drop saves that page as the file. A link waits for
+	//     the bytes instead, exactly as a non-browser caller does;
+	//   - the body is `no-store`: a single-use link's response is not
+	//     something any cache should keep.
+	linked bool
+}
+
+// ServeLinkedFile streams one file for a credential-free download link (the
+// one-file tickets of archive_download.go / download_link.go).
+//
+// ⚠ The link's OWNER is already on the request context. The ≥viewer check in
+// streamBody is therefore the owner's reach NOW — at the drop — and not the
+// reach they had when the link was minted; a grant revoked in between refuses
+// the download. That is the property that lets the redeem carry no credential.
+func (h *Manager) ServeLinkedFile(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string) {
+	if syspath.Sealed(rel) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	h.streamBody(w, r, s, rel, bodyMode{attachment: true, linked: true})
+}
+
+func (h *Manager) streamBody(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, mode bodyMode) {
+	asAttachment := mode.attachment
 	if h.StorageResolver == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "storage offline"})
 		return
@@ -530,11 +567,11 @@ func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Stor
 	//     the 2xx for the file: it wrote the JSON to disk and uploaded it over
 	//     the real one. Old clients stay in the field for months, so the fix
 	//     has to live here, where it protects all of them at once.
-	if r.URL.Query().Get("cache") == "status" {
+	if r.URL.Query().Get("cache") == "status" && !mode.linked {
 		writeCacheStatus(w, src.Status(r.Context(), stat))
 		return
 	}
-	if asAttachment && r.Header.Get("Range") == "" && (wantsHTML(r) || acceptsPrepare(r)) {
+	if asAttachment && !mode.linked && r.Header.Get("Range") == "" && (wantsHTML(r) || acceptsPrepare(r)) {
 		if prep := src.Prepare(r.Context(), stat); prep != nil && !prep.Ready {
 			writeCachePreparing(w, r, path.Base(rel), prep)
 			return
@@ -564,7 +601,11 @@ func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Stor
 	} else {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 	}
-	w.Header().Set("Cache-Control", "private, max-age=60")
+	if mode.linked {
+		w.Header().Set("Cache-Control", "no-store")
+	} else {
+		w.Header().Set("Cache-Control", "private, max-age=60")
+	}
 
 	// Ranged path — the driver can start a transfer at an offset, so
 	// http.ServeContent gets a real seeker and answers 206 /

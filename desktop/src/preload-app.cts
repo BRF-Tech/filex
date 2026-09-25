@@ -41,6 +41,12 @@ contextBridge.exposeInMainWorld('filexApp', {
   storages: (accountId: string) => ipcRenderer.invoke('remote:storages', accountId),
   /** The server's own logo + name (Branding settings), for the account rail. */
   branding: (accountId: string) => ipcRenderer.invoke('remote:branding', accountId),
+  /** #47 — ⌘K across accounts: search / download on ANOTHER account's server,
+   *  with the credential the main process keeps for it (never handed here). */
+  searchAccount: (accountId: string, query: string, opts?: { limit?: number; scope?: string }) =>
+    ipcRenderer.invoke('remote:search', accountId, query, opts),
+  downloadRemote: (accountId: string, remote: string) =>
+    ipcRenderer.invoke('remote:download', accountId, remote),
 
   // sync
   browse: (accountId: string, remotePath: string) =>
@@ -107,6 +113,14 @@ contextBridge.exposeInMainWorld('filexApp', {
   // here can take a file type over on its own.
   openWith: () => ipcRenderer.invoke('openwith:state'),
   openWithSetDefault: () => ipcRenderer.invoke('openwith:setDefault'),
+
+  // "Mount as a drive" (WebDAV) — attach this account's server (or one storage)
+  // as an OS drive, and detach it. The token never crosses this bridge: the main
+  // process reads it from the account and hands it to the OS mounter on stdin
+  // (src/drive.ts).
+  driveState: () => ipcRenderer.invoke('drive:state'),
+  driveMount: (accountId: string, storage?: string) => ipcRenderer.invoke('drive:mount', accountId, storage),
+  driveUnmount: (accountId: string, storage?: string) => ipcRenderer.invoke('drive:unmount', accountId, storage),
 
   /** The log file's path — for a bug report, and for Settings to reveal. */
   logPath: () => ipcRenderer.invoke('app:logPath'),

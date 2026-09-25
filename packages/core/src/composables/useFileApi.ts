@@ -22,7 +22,7 @@
  */
 
 import type { StorageInfo } from '../lib/catalogCoverage';
-import type { ExplorerConfig, AuthConfig, EndpointMap } from '../types/ExplorerConfig';
+import type { ExplorerConfig, AuthConfig, EndpointMap, SearchAccount } from '../types/ExplorerConfig';
 import { resolveLocale } from '../locales/resolve';
 import { listingAddress } from '../lib/internalPaths';
 import { localeTag } from './useLocale';
@@ -212,6 +212,15 @@ export interface GlobalSearchHit {
   snippet?: string;
   /** Where the hit matched: name | content | both. */
   matched?: 'name' | 'content' | 'both';
+  /** Drive NAME the hit lives on (the server fills it; older ones did not). */
+  storage?: string;
+  /**
+   * #47 — which signed-in account the hit came from. Never on the wire: the
+   * explorer stamps it when the host searches several accounts
+   * (`ExplorerConfig.accountSearch`). Absent = this mount's own account, with
+   * no other account in play.
+   */
+  account?: SearchAccount;
   [k: string]: unknown;
 }
 

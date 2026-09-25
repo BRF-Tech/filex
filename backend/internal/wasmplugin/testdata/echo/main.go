@@ -101,9 +101,18 @@ var manifest = wire.Manifest{
 	}, {
 		ID: "applied", Label: wire.Text{"en": "Hidden apply", "tr": "Hidden apply"},
 		Applies: wire.Applies{Kind: "any"}, Output: wire.Output{Mode: "none"}, Hidden: true,
+	}, {
+		// gather is a MODAL opened on a selection (`picks`) whose submit
+		// queues the job on every file of it — the shape filex #64 broke:
+		// the first screen saw the whole selection, every later event only
+		// the first file.
+		ID: "gather", Label: wire.Text{"en": "Gather", "tr": "Topla"}, View: "picks",
+		Applies: wire.Applies{Kind: "file", Ext: []string{"txt"}, Multi: true},
+		Output:  wire.Output{Mode: "sibling", Name: "{stem}-gathered{ext}"},
 	}},
 	PublicPages: []wire.PublicPage{{ID: "signer", Label: wire.Text{"en": "Sign the document", "tr": "Belgeyi imzala"}, PIN: "optional", DefaultTTLDays: 7, MaxTTLDays: 30}},
-	Views:       []wire.View{{ID: "hello", Placement: "modal", Label: wire.Text{"en": "Hello", "tr": "Hello"}}, {ID: "wizard", Placement: "page", Label: wire.Text{"en": "Wizard", "tr": "Wizard"}}},
+	Views: []wire.View{{ID: "hello", Placement: "modal", Label: wire.Text{"en": "Hello", "tr": "Hello"}}, {ID: "wizard", Placement: "page", Label: wire.Text{"en": "Wizard", "tr": "Wizard"}},
+		{ID: "picks", Placement: "modal", Label: wire.Text{"en": "Picks", "tr": "Seçilenler"}}},
 	// held: the lock reason `lock` names when asked (params.msg), which filex
 	// says in each reader's language.
 	Messages: map[string]wire.Text{"held": {"en": "held for {who}", "tr": "{who} için tutuluyor"}},
@@ -150,6 +159,27 @@ func init() {
 					return nil, errors.New("expected not_found for a ref outside the scope")
 				}
 				return &wire.ActionRunOutput{OK: true, Outputs: outs, Message: wire.Text{"en": "done", "tr": "bitti"}}, nil
+			},
+			// gather writes one sibling per input carrying the note the
+			// `picks` screen collected, so a test can count the files the
+			// job really ran on and see that the form's answer arrived.
+			"gather": func(in *wire.ActionRunInput) (*wire.ActionRunOutput, error) {
+				note, _ := in.Params["note"].(string)
+				var outs []wire.OutputRef
+				for i, f := range in.Inputs {
+					data, err := pluginkit.ReadInput(f.Ref)
+					if err != nil {
+						return nil, err
+					}
+					ref, err := pluginkit.WriteOutput(strings.TrimSuffix(f.Name, ".txt")+"-gathered.txt", []byte(note+":"+string(data)))
+					if err != nil {
+						return nil, err
+					}
+					outs = append(outs, ref)
+					pluginkit.Progress(int64(i+1), int64(len(in.Inputs)), "gathered "+f.Name)
+				}
+				n := strconv.Itoa(len(outs))
+				return &wire.ActionRunOutput{OK: true, Outputs: outs, Message: wire.Text{"en": "gathered " + n, "tr": n + " dosya toplandı"}}, nil
 			},
 			"engine": func(in *wire.ActionRunInput) (*wire.ActionRunOutput, error) {
 				if !pluginkit.EngineAvailable("ffmpeg") {
@@ -611,6 +641,31 @@ func init() {
 				return &wire.Surface{Title: wire.Text{"en": "Wizard", "tr": "Wizard"}, Section: section,
 					Sections: []wire.Section{{ID: "a", Label: wire.Text{"en": "A", "tr": "A"}}, {ID: "b", Label: wire.Text{"en": "B", "tr": "B"}}},
 					Nodes:    []wire.Node{{Type: "text", Props: map[string]any{"text": map[string]string{"en": "page " + in.Event + " section=" + section + " ip=" + ip + " ro=" + ro + " locale=" + in.Context.Locale}}}}}, nil
+			},
+			"picks": func(in *wire.ViewEventInput) (*wire.Surface, error) {
+				// Every answer says how many files the host handed this event
+				// and which: a client that falls back to one file after the
+				// first event (filex #64) reads "n=1" on its second screen.
+				paths := make([]string, 0, len(in.Context.Inputs))
+				for _, f := range in.Context.Inputs {
+					paths = append(paths, f.Path)
+				}
+				values, _ := in.Data["values"].(map[string]any)
+				note, _ := values["note"].(string)
+				if in.Event == "submit" {
+					return &wire.Surface{Job: &wire.JobRequest{ActionID: "gather", Params: map[string]any{"note": note}}}, nil
+				}
+				summary := "picks " + in.Event + " n=" + strconv.Itoa(len(paths)) + ": " + strings.Join(paths, ", ")
+				return &wire.Surface{
+					Title: wire.Text{"en": "Picks", "tr": "Seçilenler"},
+					Nodes: []wire.Node{
+						{Type: "text", Props: map[string]any{"text": map[string]string{"en": summary, "tr": summary}}},
+						{Type: "form", Props: map[string]any{"fields": []map[string]any{{
+							"key": "note", "type": "string",
+							"label": map[string]string{"en": "Note", "tr": "Not"}}}}},
+					},
+					Actions: []wire.SurfaceAction{{ID: "gather", Label: wire.Text{"en": "Gather", "tr": "Topla"}, Primary: true}},
+				}, nil
 			},
 			"hello": func(in *wire.ViewEventInput) (*wire.Surface, error) {
 				if in.Event == "submit" {

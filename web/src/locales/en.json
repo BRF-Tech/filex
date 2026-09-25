@@ -270,7 +270,13 @@
       "dialTimeout": "Connect timeout (seconds)",
       "nameChangedWarning": "Clients address this storage by name. Renaming it changes the WebDAV, SFTP, S3 and NFS paths — a mount or bookmark using the old name will start answering 404 until you update it.",
       "stableAddress": "Stable address",
-      "stableAddressHint": "Mounts and scripts can use this instead of the name. It is assigned once and never changes, so renaming the storage does not break them."
+      "stableAddressHint": "Mounts and scripts can use this instead of the name. It is assigned once and never changes, so renaming the storage does not break them.",
+      "s3AttemptTimeout": "Attempt timeout (seconds)",
+      "s3MaxAttempts": "Attempts per request",
+      "s3TotalTimeout": "Give up after (seconds)",
+      "attemptTimeout": "Attempt timeout (seconds)",
+      "maxAttempts": "Attempts per request",
+      "totalTimeout": "Give up after (seconds)"
     },
     "fieldHelp": {
       "path": "Directory on the server. It is created if missing; filex never mounts /.",
@@ -294,7 +300,14 @@
       "passive": "Off switches to active mode, which needs the server to dial back into this host.",
       "smbShare": "The share name alone, without the server: `media`, not `\\\\nas\\media`.",
       "smbDomain": "Only for a Windows domain account. Leave empty for a NAS.",
-      "smbRoot": "Sub-folder inside the share. Leave empty for the whole share."
+      "smbRoot": "Sub-folder inside the share. Leave empty for the whole share.",
+      "s3AttemptTimeout": "How long one attempt may wait for a sign of life from the store: connecting, the TLS handshake, the answer after the request is sent, and each next piece of the answer. A transfer that keeps moving is never cut, however long it takes; an upload the store stops taking is cut after 60 seconds, or after this if it is longer. Copies and renames wait up to 10 minutes for the answer, because the store answers them only when the copy is done.",
+      "s3MaxAttempts": "How many times a request is tried in all when the failure can pass: a network error, a timeout, a 5xx answer, throttling. 1 turns retrying off. A refusal (403, a missing bucket, a host name that does not resolve) is never retried.",
+      "s3TotalTimeout": "No new attempt starts unless it could finish within this many seconds of the first, so an upload or a listing on a store that is down reports the outage within this time. A transfer that is under way is not cut. A request that timed out is tried again only when this is at least twice the attempt timeout.",
+      "attemptTimeout": "How long one attempt may wait for a sign of life from the server: connecting, logging in, the answer to each request, and each next piece of a transfer. A transfer that keeps moving is never cut, however long it takes; an upload the server stops taking is cut after 60 seconds, or after this if it is longer.",
+      "webdavAttemptTimeout": "How long one attempt may wait for a sign of life from the server: connecting, logging in, the answer to each request, and each next piece of a transfer. A transfer that keeps moving is never cut, however long it takes; an upload the server stops taking is cut after 60 seconds, or after this if it is longer. Copies, moves and deletes wait up to 10 minutes for the answer, because the server answers them only when the work is done.",
+      "maxAttempts": "How many times a request is tried in all when the failure can pass: the connection is refused or drops, no answer comes in time, the server answers that it is unavailable (5xx). 1 turns retrying off. A refusal (a wrong password, a missing folder, a certificate that does not verify) is never retried, and neither is an upload that has started sending.",
+      "totalTimeout": "No new attempt starts unless it could finish within this many seconds of the first, so a server that is down is reported within this time. A transfer that is under way is not cut. A request that timed out is tried again only when this is at least twice the attempt timeout."
     },
     "lazyFill": {
       "background": "Click first, fill in the background",
@@ -880,7 +893,9 @@
       "signing_ca_import": "signing certificate imported",
       "pin_locked": "PIN attempts locked",
       "pin_revealed": "PIN shown",
-      "tags": "tags changed"
+      "tags": "tags changed",
+      "download_link": "downloaded by dragging it out",
+      "download_link_refused": "drag-out download refused"
     },
     "target": {
       "auth_provider": "Sign-in provider",
@@ -1702,7 +1717,20 @@
       "minor": "install minor releases"
     },
     "policyIs": "Policy: {policy}",
-    "checkedAtWhen": "Last checked: {when}"
+    "checkedAtWhen": "Last checked: {when}",
+    "behavior": {
+      "off": "Checking off",
+      "announce": "Announces only",
+      "patch": "Installs patches",
+      "minor": "Installs minor releases"
+    },
+    "policyLimit": {
+      "disabled": "The saved policy, “{policy}”, has no effect: update checking is switched off on this server, so filex neither looks for new releases nor installs them.",
+      "container": "The saved policy, “{policy}”, has no effect on this install: a container cannot replace its own image, so filex only announces new releases. Pull the new image to upgrade, or let an external updater do it.",
+      "package": "The saved policy, “{policy}”, has no effect on this install: {manager} owns the binary, so filex only announces new releases and {manager} upgrades it:",
+      "packageUnknown": "The saved policy, “{policy}”, has no effect on this install: a package manager owns the binary, so filex only announces new releases. Upgrade it with your package manager.",
+      "zero_major": "The saved policy, “{policy}”, installs patches only while filex is on 0.x: a 0.x minor release may break compatibility, so it is announced and waits for you."
+    }
   },
   "desktop": {
     "handoff": "You can return to the desktop app — authorization complete.",

@@ -104,6 +104,21 @@ test('the old `filex` desktop package is replaced on upgrade — and only the ol
   assert.ok(!newer(bounds[0]!, PKG.version), `${bounds[0]} must not pass package.json ${PKG.version}, or this release's CLI package would be replaced`);
 });
 
+test('the .deb and .rpm depend on the ALSA library Electron loads at start', () => {
+  // electron-builder's default Depends (measured on the v0.44.2 .deb: gtk3,
+  // notify, nss, xss, xtst, xdg-utils, atspi, uuid, secret) has no sound
+  // library, and Electron refuses to start without libasound.so.2: on a
+  // minimal install the app did not open. Added through `fpm` so the default
+  // list stays; the t64 name is Debian 13's and Ubuntu 24.04's, the rpm side
+  // is Fedora's alsa-lib or openSUSE's libasound2.
+  const args = (block: string) => list(yamlBlock(block), 'fpm').map((x) => x.replace(/^"|"$/g, ''));
+  assert.ok(args('deb').includes('--depends=libasound2 | libasound2t64'), JSON.stringify(args('deb')));
+  assert.ok(args('rpm').includes('--depends=(alsa-lib or libasound2)'), JSON.stringify(args('rpm')));
+  // Only added, never a `depends:` list: that would replace the default one.
+  assert.doesNotMatch(yamlBlock('deb'), /^ {2}depends:/m);
+  assert.doesNotMatch(yamlBlock('rpm'), /^ {2}depends:/m);
+});
+
 test('every Linux package declares the scheme the sign-in hands back on', () => {
   const scheme = /const DEEP_LINK_SCHEME = '([^']+)'/.exec(MAIN)?.[1];
   assert.equal(scheme, 'filex');

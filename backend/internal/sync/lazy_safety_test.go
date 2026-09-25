@@ -13,6 +13,7 @@ package sync
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -35,6 +36,7 @@ import (
 type lazyLab struct {
 	lc    *lazyCatalogue
 	store db.Store
+	pool  *sql.DB
 	st    *model.Storage
 	root  string
 	ctx   context.Context
@@ -42,7 +44,14 @@ type lazyLab struct {
 
 func newLazyLab(t *testing.T, extra map[string]any) *lazyLab {
 	t.Helper()
-	_, store := dbtest.NewTestDB(t)
+	return newLazyLabOn(t, extra, nil)
+}
+
+// newLazyLabOn is newLazyLab whose catalogue writes through wrap(store, pool)
+// (nil: the store itself); the lab's own reads and seeds use the raw store.
+func newLazyLabOn(t *testing.T, extra map[string]any, wrap func(db.Store, *sql.DB) db.Store) *lazyLab {
+	t.Helper()
+	pool, store := dbtest.NewTestDB(t)
 	root := t.TempDir()
 	cfg := map[string]any{"root": root}
 	for k, v := range extra {
@@ -59,12 +68,16 @@ func newLazyLab(t *testing.T, extra map[string]any) *lazyLab {
 	require.NoError(t, drv.Init(context.Background(), cfg))
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	s := &storageSyncer{store: store, storage: st, driver: drv, rule: ruleFor(st, cfg), ctx: ctx, fallback: time.Minute}
+	through := store
+	if wrap != nil {
+		through = wrap(store, pool)
+	}
+	s := &storageSyncer{store: through, storage: st, driver: drv, rule: ruleFor(st, cfg), ctx: ctx, fallback: time.Minute}
 	lc := newLazyCatalogue(s, nil, time.Minute)
 	s.lazy.Store(lc)
 	require.NoError(t, lc.watch.start())
 	t.Cleanup(lc.watch.close)
-	return &lazyLab{lc: lc, store: store, st: st, root: root, ctx: ctx}
+	return &lazyLab{lc: lc, store: store, pool: pool, st: st, root: root, ctx: ctx}
 }
 
 func (l *lazyLab) write(t *testing.T, rel, body string) {
@@ -168,7 +181,7 @@ func TestLazySafety_DeletePassRefusesAFolderThisListingDidNotReconcile(t *testin
 	l.seed(t, "/u/yok.txt", model.NodeTypeFile)
 	ctx := l.ctx
 
-	removed, held := l.lc.deletePass(ctx, "/u", &u.ID, map[string]bool{}, time.Now().UTC().Truncate(time.Second))
+	removed, held := l.lc.deletePass(ctx, "/u", &u.ID, map[string]bool{}, time.Now().UTC().Truncate(time.Second), nil)
 	assert.Zero(t, removed, "never reconciled: no delete pass")
 	assert.Zero(t, held)
 	require.NotNil(t, l.row("/u/yok.txt"))
@@ -179,7 +192,7 @@ func TestLazySafety_DeletePassRefusesAFolderThisListingDidNotReconcile(t *testin
 		StorageID: l.st.ID, PathHash: pathkey.Hash(l.st.ID, "/u"), Path: "/u", Depth: 1,
 		State: model.FolderCatalogued, ReconciledAt: &then,
 	}))
-	removed, _ = l.lc.deletePass(ctx, "/u", &u.ID, map[string]bool{}, time.Now().UTC().Truncate(time.Second))
+	removed, _ = l.lc.deletePass(ctx, "/u", &u.ID, map[string]bool{}, time.Now().UTC().Truncate(time.Second), nil)
 	assert.Zero(t, removed, "a listing the state row does not record is not a listing the pass may act on")
 	assert.NotNil(t, l.row("/u/yok.txt"))
 }

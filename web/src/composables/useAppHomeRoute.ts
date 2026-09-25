@@ -13,7 +13,7 @@ import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
-import { effectiveTheme } from '@/lib/theme';
+import { liveTheme } from '@/lib/theme';
 import { usePluginHomeApps } from '@/composables/usePluginHomeApps';
 
 export function useAppHomeRoute() {
@@ -48,7 +48,8 @@ export function useAppHomeRoute() {
   // The active language, a language pack's included (the app's OWN words fall
   // back to English by themselves when it does not speak it — feat/043-lang).
   const uiLocale = computed<string>(() => locale.value);
-  const theme = computed(() => effectiveTheme());
+  // ⚠ LIVE: the page turns with the window (#57, lib/theme → liveTheme).
+  const theme = liveTheme;
 
   return { plugin, view, section, onSection, title, icon, uiLocale, theme };
 }

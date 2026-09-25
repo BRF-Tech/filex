@@ -102,6 +102,12 @@ If you want containers to update themselves, use a dedicated updater
 `/var/run/docker.sock`: that socket is root on the host, and a file manager is
 the last service that should hold it.
 
+In a container, `FILEX_UPDATE_POLICY=patch` (or `minor`, or `AUTO_UPGRADE=true`)
+therefore changes nothing: every release is announced. **Ops → Updates** says
+so — its policy badge reads **Announces only**, and a line under it names the
+saved policy as having no effect on this install. See
+[What the policy badge says](#what-the-policy-badge-says).
+
 ---
 
 ## Package-manager installs
@@ -120,6 +126,7 @@ tells you the command:
 | Homebrew (formula) | the binary lives under `…/Cellar/<formula>/<version>/<dir>/` | `brew upgrade filex` |
 | winget | the binary lives under `…\WinGet\Packages\<id>_<source>\` — per user under `%LOCALAPPDATA%\Microsoft`, machine-wide under `%ProgramFiles%` | `winget upgrade BRFTech.filex` |
 | Snap | `SNAP` and `SNAP_NAME` are set **and** the binary lives under `$SNAP` | `snap refresh filex` |
+| a distribution package (`.deb`, `.rpm`, AUR …), Linux | the binary lives directly in `/usr/bin`, `/usr/sbin`, `/bin` or `/sbin` — only a package manager puts files there; a hand install goes to `/usr/local/bin` | none named: upgrade with the package manager that installed it |
 
 The name in the command is read from where the binary lives — the cask token,
 the formula, the winget package id, the snap instance — so a renamed or forked
@@ -142,15 +149,20 @@ filex self-update --check    # reports the newest release, and:
 ```
 
 The admin page (**Ops → Updates**) shows the release, why filex is not taking it
-and the command, with no **Upgrade now** button. Two things filex would have
+and the command, with no **Upgrade now** button. Its policy badge reads
+**Announces only** whatever `FILEX_UPDATE_POLICY` says, and the line under it
+names the saved policy as having no effect here, with the package manager and
+its command (`brew upgrade --cask filex`) — or "your package manager" when
+filex cannot tell which one it was. Two things filex would have
 done itself are yours now, and the instructions say so: a package manager
 replaces the file, not the running process, so **restart filex** afterwards (on
 Windows, stop it first — a running `filex.exe` cannot be replaced); and the
 database snapshot a self-upgrade takes before a schema change does not happen,
 so when a release changes the schema, **back up first**.
 
-**Packagers:** a distribution package whose layout filex does not recognize (a
-`.deb`, an `.rpm`, an AUR package) can declare itself with
+**Packagers:** a package that installs filex into `/usr/bin` (or `/usr/sbin`,
+`/bin`, `/sbin`) is recognized without help. One that puts it elsewhere (under
+`/opt`, say) can declare itself with
 `FILEX_INSTALL_MODE=package` in the environment filex runs in — the service
 unit's `Environment=` covers the server's automatic updates; a `filex
 self-update` typed in a shell reads the shell's. filex then refuses to replace
@@ -179,6 +191,26 @@ Before a patch is applied without asking, **all** of these must hold:
 Minor releases have one extra rule: while filex is on a `0.x` version, semver
 gives minor releases no compatibility promise, so they are **never** automatic —
 even under `policy: minor`. That relaxes once the project reaches `1.0`.
+
+### What the policy badge says
+
+The badge on **Ops → Updates** says what this install **does** by itself, which
+is not always what the saved policy asks for. The server works it out from the
+policy, the checking switch, the install mode and the running version — the
+same rules as the list above, in one place — and the page only words it:
+
+| Saved policy | Install | Badge | Why |
+|---|---|---|---|
+| any | every case not listed below | **Policy: …** (the saved policy) | the policy is in force |
+| `manual`, `patch`, `minor` | any, with `FILEX_UPDATE_CHECK=0` | **Checking off** | nothing is checked, so nothing is announced or installed |
+| `patch`, `minor` | container | **Announces only** | the image owns the binary |
+| `patch`, `minor` | package manager (Homebrew, winget, Snap, a distribution package) | **Announces only** | the package manager owns the binary; its name and command are shown |
+| `minor` | plain binary on `0.x` | **Installs patches** | a `0.x` minor release is never automatic |
+
+When the badge is not the saved policy, a line under it names the saved policy
+and says it has no effect here, and why. The policy itself is **kept**, not
+reset: it takes effect again when the reason goes away — checking is switched
+back on, the data directory is served by a plain binary, filex reaches `1.0`.
 
 ## What an upgrade does, in order
 
@@ -321,3 +353,11 @@ The status names the install: `mode` is `binary`, `docker` or `package`, and a
 `upgrade_command` (e.g. `brew upgrade --cask filex`). The manager fields are
 absent when `FILEX_INSTALL_MODE=package` was set and nothing more could be
 detected.
+
+`policy` is the saved policy, always as saved. `behavior` is what the install
+does with it by itself — `off`, `announce`, `patch` or `minor` — and
+`policy_limit` says why that is less than `policy` asks for: `disabled`
+(checking is switched off), `container`, `package`, or `zero_major` (`minor` on
+a `0.x` version). `policy_limit` is absent when the policy is in force. A
+client shows these; it does not work them out from `mode` and `policy` (see
+[What the policy badge says](#what-the-policy-badge-says)).

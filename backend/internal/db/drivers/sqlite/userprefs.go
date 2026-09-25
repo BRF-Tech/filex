@@ -29,7 +29,7 @@ import (
 // first day, on every surface they have not opened.
 func (s *Store) GetUserPrefs(ctx context.Context, userID int64, surface string) (string, error) {
 	var v sql.NullString
-	err := s.db.QueryRowContext(ctx,
+	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT doc FROM user_prefs WHERE user_id=? AND surface=?`, userID, surface).Scan(&v)
 	if err == sql.ErrNoRows {
 		return "", nil
@@ -42,7 +42,7 @@ func (s *Store) GetUserPrefs(ctx context.Context, userID int64, surface string) 
 
 // SetUserPrefs replaces the whole document for one person on one surface.
 func (s *Store) SetUserPrefs(ctx context.Context, userID int64, surface, doc string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.conn(ctx).ExecContext(ctx,
 		s.upsert(`INSERT INTO user_prefs (user_id, surface, doc, updated_at)
 		 VALUES (?,?,?,CURRENT_TIMESTAMP)
 		 ON CONFLICT(user_id, surface) DO UPDATE SET doc=excluded.doc, updated_at=CURRENT_TIMESTAMP`),

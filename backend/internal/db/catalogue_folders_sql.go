@@ -94,7 +94,7 @@ func PlainTime(t *time.Time) any {
 }
 
 func (c *CatalogueFolderSQL) GetCatalogueFolder(ctx context.Context, storageID int64, pathHash string) (*model.CatalogueFolder, error) {
-	f, err := ScanCatalogueFolder(c.DB.QueryRowContext(ctx,
+	f, err := ScanCatalogueFolder(Conn(ctx, c.DB).QueryRowContext(ctx,
 		c.q(`SELECT `+CatalogueFolderColumns+` FROM catalogue_folders WHERE storage_id=? AND path_hash=?`),
 		storageID, pathHash))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -125,7 +125,7 @@ func (c *CatalogueFolderSQL) DiscoverCatalogueFolders(ctx context.Context, stora
 		// DO UPDATE shape, and "keep the row that is there" is what every
 		// engine spells with it.
 		b.WriteString(` ON CONFLICT(storage_id, path_hash) DO UPDATE SET path_hash=excluded.path_hash`)
-		if _, err := c.DB.ExecContext(ctx, c.upsert(b.String()), args...); err != nil {
+		if _, err := Conn(ctx, c.DB).ExecContext(ctx, c.upsert(b.String()), args...); err != nil {
 			return err
 		}
 	}
@@ -133,7 +133,7 @@ func (c *CatalogueFolderSQL) DiscoverCatalogueFolders(ctx context.Context, stora
 }
 
 func (c *CatalogueFolderSQL) RecordCatalogueFolder(ctx context.Context, f *model.CatalogueFolder) error {
-	_, err := c.DB.ExecContext(ctx, c.upsert(`INSERT INTO catalogue_folders
+	_, err := Conn(ctx, c.DB).ExecContext(ctx, c.upsert(`INSERT INTO catalogue_folders
 		 (storage_id, path_hash, path, depth, state, reconciled_at, visited_at, watched_at, reconcile_on_open, entries, held_back)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(storage_id, path_hash) DO UPDATE SET path=excluded.path, depth=excluded.depth,
@@ -151,7 +151,7 @@ func (c *CatalogueFolderSQL) SetCatalogueFolderWatch(ctx context.Context, storag
 	if watchedAt != nil {
 		state = model.FolderWatched
 	}
-	_, err := c.DB.ExecContext(ctx,
+	_, err := Conn(ctx, c.DB).ExecContext(ctx,
 		c.q(`UPDATE catalogue_folders SET state=?, watched_at=?, reconcile_on_open=?
 		 WHERE storage_id=? AND path_hash=? AND state<>?`),
 		string(state), c.t(watchedAt), reconcileOnOpen, storageID, pathHash, string(model.FolderUncatalogued))
@@ -159,7 +159,7 @@ func (c *CatalogueFolderSQL) SetCatalogueFolderWatch(ctx context.Context, storag
 }
 
 func (c *CatalogueFolderSQL) TouchCatalogueFolderVisit(ctx context.Context, storageID int64, pathHash string, at time.Time) error {
-	_, err := c.DB.ExecContext(ctx,
+	_, err := Conn(ctx, c.DB).ExecContext(ctx,
 		c.q(`UPDATE catalogue_folders SET visited_at=? WHERE storage_id=? AND path_hash=?`),
 		c.t(&at), storageID, pathHash)
 	return err
@@ -189,7 +189,7 @@ func (c *CatalogueFolderSQL) ListCatalogueFolders(ctx context.Context, storageID
 		q += ` LIMIT ?`
 		args = append(args, f.Limit)
 	}
-	rows, err := c.DB.QueryContext(ctx, c.q(q), args...)
+	rows, err := Conn(ctx, c.DB).QueryContext(ctx, c.q(q), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func (c *CatalogueFolderSQL) ListCatalogueFolders(ctx context.Context, storageID
 
 func (c *CatalogueFolderSQL) CountCatalogueFolders(ctx context.Context, storageID int64) (model.CatalogueCounts, error) {
 	var out model.CatalogueCounts
-	rows, err := c.DB.QueryContext(ctx,
+	rows, err := Conn(ctx, c.DB).QueryContext(ctx,
 		c.q(`SELECT state, COUNT(*), SUM(CASE WHEN held_back>0 THEN 1 ELSE 0 END) FROM catalogue_folders WHERE storage_id=? GROUP BY state`),
 		storageID)
 	if err != nil {
@@ -237,7 +237,7 @@ func (c *CatalogueFolderSQL) CountCatalogueFolders(ctx context.Context, storageI
 		return out, err
 	}
 	var rootState string
-	err = c.DB.QueryRowContext(ctx,
+	err = Conn(ctx, c.DB).QueryRowContext(ctx,
 		c.q(`SELECT state FROM catalogue_folders WHERE storage_id=? AND path=? AND reconciled_at IS NOT NULL`),
 		storageID, "/").Scan(&rootState)
 	switch {
@@ -250,7 +250,7 @@ func (c *CatalogueFolderSQL) CountCatalogueFolders(ctx context.Context, storageI
 }
 
 func (c *CatalogueFolderSQL) ResetCatalogueWatches(ctx context.Context, storageID int64) (int64, error) {
-	res, err := c.DB.ExecContext(ctx,
+	res, err := Conn(ctx, c.DB).ExecContext(ctx,
 		c.q(`UPDATE catalogue_folders SET state=?, watched_at=NULL, reconcile_on_open=? WHERE storage_id=? AND state=?`),
 		string(model.FolderCatalogued), true, storageID, string(model.FolderWatched))
 	if err != nil {
@@ -263,10 +263,10 @@ func (c *CatalogueFolderSQL) DeleteCatalogueFoldersUnder(ctx context.Context, st
 	p := CatalogueFolderPath(dir)
 	lo, hi, ok := CatalogueSubtreeRange(p)
 	if !ok {
-		_, err := c.DB.ExecContext(ctx, c.q(`DELETE FROM catalogue_folders WHERE storage_id=?`), storageID)
+		_, err := Conn(ctx, c.DB).ExecContext(ctx, c.q(`DELETE FROM catalogue_folders WHERE storage_id=?`), storageID)
 		return err
 	}
-	_, err := c.DB.ExecContext(ctx,
+	_, err := Conn(ctx, c.DB).ExecContext(ctx,
 		c.q(`DELETE FROM catalogue_folders WHERE storage_id=? AND (path=? OR (path>? AND path<?))`),
 		storageID, p, lo, hi)
 	return err
@@ -283,7 +283,7 @@ func (c *CatalogueFolderSQL) HasUncataloguedUnder(ctx context.Context, storageID
 		args = append(args, "/")
 	}
 	var one int
-	err := c.DB.QueryRowContext(ctx, c.q(q+` LIMIT 1`), args...).Scan(&one)
+	err := Conn(ctx, c.DB).QueryRowContext(ctx, c.q(q+` LIMIT 1`), args...).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

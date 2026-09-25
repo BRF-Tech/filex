@@ -31,7 +31,7 @@ import {
   shell,
 } from 'electron';
 import electronUpdater from 'electron-updater';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -56,7 +56,7 @@ import {
   LEGACY_LINUX_DESKTOP_ENTRY,
   appImageDesktopEntry,
   defaultHandlerRoute as handlerRouteFor,
-  directCopyMarkers,
+  otherCopyOf,
   engineStateDir,
   explorerVisibleRoot,
   linuxDesktopEntry,
@@ -66,8 +66,15 @@ import {
   userHome,
   type DefaultHandlerRoute,
 } from './channel.js';
+import {
+  mount as mountDrive,
+  unmount as unmountDrive,
+  type DrivePlatform,
+  type MountResult,
+} from './drive.js';
 import { DragOutCache, createPlaceholders, fulfilDrop, type DragItem } from './dragout.js';
 import { localDriveRoots, watchForDrop } from './dropwatch.js';
+import { remoteDownloadUrl, remoteSearchUrl, searchResults } from './remote-search.js';
 import { log, logPath } from './log.js';
 import {
   LEGACY_LINUX_AUTOSTART_NAME,
@@ -1400,10 +1407,11 @@ function publicState() {
     keychainAdvice: keychainAdvice(keychainNow, process.platform, CURRENT_CHANNEL),
     // The exact command for a snap (its name comes from snapd, not from us).
     keychainCommand: CURRENT_CHANNEL === 'snap' ? snapConnectCommand(process.env) : null,
-    // The Store copy found the filex.sh copy installed as well — same
-    // accounts, same folders, two apps. Settings says so and offers the way
-    // to remove one (src/channel.ts → directCopyMarkers).
-    directCopyInstalled: CURRENT_CHANNEL === 'msstore' && directCopyMarkers(process.env).some((p) => fs.existsSync(p)),
+    // Another copy of filex on this computer: the Store copy found the
+    // filex.sh copy ('direct'), or a .deb/.rpm/AppImage copy found the snap
+    // ('snap'). Settings says so and how to remove one (src/channel.ts →
+    // otherCopyOf).
+    otherCopy: otherCopyOf(CURRENT_CHANNEL, process.platform, process.env, (p) => fs.existsSync(p)),
     appVersion: app.getVersion(),
     update: updateState,
     // Set on a build that can never apply an update in place — an ad-hoc
@@ -1609,6 +1617,20 @@ function dragKeyOf(items: Array<{ path: string }>): string {
     .map((i) => i.path)
     .sort()
     .join(' ');
+}
+
+/**
+ * The key `dragReady` is remembered under: the selection AND whose it is.
+ *
+ * ⚠ #47 — paths alone are not an identity. Two accounts can hold the same
+ * `name://rel` (two people on one server, or two servers with a drive of the
+ * same name), and since ⌘K drags another account's hit through this same
+ * shell, a copy prepared for one account was handed to the other's drag.
+ * Measured (search-e2e.mjs): the outsider's own ortak-47.txt dragged out as the
+ * administrator's cached copy, from the administrator's cache folder.
+ */
+function readyKeyOf(accountId: string, items: Array<{ path: string }>): string {
+  return `${accountId}|${dragKeyOf(items)}`;
 }
 
 /** The sync engine's local copy of a wire path, when it keeps one. Used only
@@ -2680,6 +2702,52 @@ function openWithPublicState() {
   };
 }
 
+/**
+ * Runs an OS mount helper for src/drive.ts: writes `input` (a JSON payload or a
+ * credential — never a command line) to the child's stdin and captures both
+ * streams.
+ *
+ * ⚠ `windowsHide` so a mount never flashes a console window, and the token is
+ * written to stdin and nowhere else. On Windows each helper is resolved to its
+ * real system path rather than trusting PATH — but note powershell.exe does NOT
+ * live in System32 itself (it is under System32\WindowsPowerShell\v1.0), so a
+ * blanket "join System32" resolves it to a path that does not exist (ENOENT).
+ */
+function windowsHelperPath(file: string): string {
+  const root = process.env.SystemRoot || 'C:\\Windows';
+  if (file === 'powershell.exe') return path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  if (file === 'net.exe') return path.join(root, 'System32', 'net.exe');
+  return file;
+}
+
+function runMountHelper(
+  file: string,
+  args: string[],
+  input: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const resolved =
+    process.platform === 'win32' && !file.includes('\\') && !file.includes('/')
+      ? windowsHelperPath(file)
+      : file;
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(resolved, args, { windowsHide: true });
+    } catch (err) {
+      resolve({ code: -1, stdout: '', stderr: String(err) });
+      return;
+    }
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => (stdout += d.toString()));
+    child.stderr.on('data', (d) => (stderr += d.toString()));
+    child.on('error', (err) => resolve({ code: -1, stdout, stderr: `${stderr}${err}` }));
+    child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
+    if (input) child.stdin.write(input);
+    child.stdin.end();
+  });
+}
+
 function wireIpc(): void {
   ipcMain.handle('state:get', () => publicState());
 
@@ -2847,6 +2915,45 @@ function wireIpc(): void {
     return (body.storages ?? []).map((name) => ({ name }));
   });
 
+  // #47 — ⌘K across every account on the rail. The mounted explorer holds a
+  // credential for ONE account (its own, fetched per call); it reaches the
+  // others only through `config.accountSearch`, and these two answer with the
+  // token kept here, which never crosses into the page. Addresses:
+  // src/remote-search.ts.
+  ipcMain.handle(
+    'remote:search',
+    async (_e, accountId: string, query: string, opts?: { limit?: number; scope?: string }) => {
+      const acc = state.accounts.find((a) => a.id === accountId);
+      // A signed-out account has nothing to say; it is not an error to report
+      // in the middle of somebody else's search.
+      if (!acc || acc.signedOut) return [];
+      const res = await net.fetch(remoteSearchUrl(acc.serverUrl, query, opts), {
+        headers: { Authorization: `Bearer ${acc.token}` },
+      });
+      if (res.status === 401) {
+        markSignedOut(acc.id, 'a search was refused (HTTP 401)');
+        return [];
+      }
+      if (!res.ok) throw new Error(`server said ${res.status}`);
+      return searchResults(await res.json());
+    },
+  );
+
+  ipcMain.handle('remote:download', (e, accountId: string, remote: string) => {
+    const acc = state.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error('unknown account');
+    // ⚠ The credential is put on the request HERE rather than left to
+    // wireAuthHeaderInjection: that one picks a token by ORIGIN, the active
+    // account first, and two accounts on one server share an origin — the
+    // download would go out as whoever the window is showing, and come back as
+    // that person's 403 (or, worse, as that person's file of the same name).
+    // Same save path as every other download in this window (openOutward).
+    const win = BrowserWindow.fromWebContents(e.sender) ?? mainWindow;
+    win?.webContents.downloadURL(remoteDownloadUrl(acc.serverUrl, remote), {
+      headers: { Authorization: `Bearer ${acc.token}` },
+    });
+  });
+
   // The server's own identity — the logo and name an admin set under Branding.
   // A desktop client that shows the vendor's mark while the server it is looking
   // at has its own is a client that looks like it belongs to someone else.
@@ -2907,6 +3014,60 @@ function wireIpc(): void {
       for (const it of await listTrash(p.id)) out.push({ rel: it.rel, deleted: it.deleted });
     }
     return out;
+  });
+
+  // ── "Mount as a drive" (WebDAV) ────────────────────────────────────────
+  //
+  // Attaches the account's filex server as an OS drive, and detaches it. The
+  // commands and the address forms are shared with the connection guide
+  // (src/drive.ts → @brftech/filex-core), so the drive the button attaches is
+  // the one the guide describes.
+  //
+  // ⚠ The credential is the account's own token, handed to src/drive.ts as an
+  // argument and delivered to the OS mounter on stdin — never on a command line
+  // (drive.ts enforces and its tests measure that). The password field of a
+  // filex WebDAV login accepts the API token, so no new credential is minted.
+  //
+  // The mounts are tracked only in memory: they are per-session (persistent:no),
+  // so a restart honestly starts with none rather than claiming a drive that a
+  // reboot dropped.
+  const driveMounts = new Map<string, { letter?: string; mountDir?: string; storage?: string }>();
+  const driveKey = (accountId: string, storage?: string) => `${accountId}\u0000${storage ?? ''}`;
+
+  ipcMain.handle('drive:state', () => ({
+    platform: process.platform,
+    mounts: [...driveMounts.entries()].map(([key, m]) => {
+      const accountId = key.split('\u0000')[0];
+      return { accountId, storage: m.storage, letter: m.letter, mountDir: m.mountDir };
+    }),
+  }));
+
+  ipcMain.handle('drive:mount', async (_e, accountId: string, storage?: string): Promise<MountResult> => {
+    const acc = state.accounts.find((a) => a.id === accountId);
+    if (!acc) return { ok: false, problem: 'failed', detail: 'unknown account' };
+    const res = await mountDrive(
+      {
+        platform: process.platform as DrivePlatform,
+        serverUrl: acc.serverUrl,
+        storage: storage || undefined,
+        user: acc.email,
+        password: acc.token,
+      },
+      { exec: runMountHelper, exists: (p) => fs.existsSync(p), log, home: app.getPath('home') },
+    );
+    if (res.ok) driveMounts.set(driveKey(accountId, storage), { letter: res.letter, mountDir: res.mountDir, storage: storage || undefined });
+    return res;
+  });
+
+  ipcMain.handle('drive:unmount', async (_e, accountId: string, storage?: string): Promise<MountResult> => {
+    const key = driveKey(accountId, storage);
+    const m = driveMounts.get(key);
+    const res = await unmountDrive(
+      { platform: process.platform as DrivePlatform, letter: m?.letter, mountDir: m?.mountDir },
+      { exec: runMountHelper, exists: (p) => fs.existsSync(p), log, home: app.getPath('home') },
+    );
+    if (res.ok) driveMounts.delete(key);
+    return res;
   });
 
   // Where the log lives, so a report can name it and Settings can open it.
@@ -3185,7 +3346,7 @@ function wireIpc(): void {
     const acc = state.accounts.find((a) => a.id === accountId);
     if (!acc) throw new Error('unknown account');
     if (!dragCache || !Array.isArray(items) || items.length === 0) return { ready: false };
-    const key = dragKeyOf(items);
+    const key = readyKeyOf(acc.id, items);
     if (dragReady?.key === key) return { ready: true, paths: dragReady.paths };
 
     // A new selection cancels the previous preparation: the user has moved on,
@@ -3226,8 +3387,11 @@ function wireIpc(): void {
     // ⚠ Every path is re-checked rather than trusted from prepare(): a drop
     // completed as a MOVE takes the cache entry with it, and a drag started on
     // a path that is gone is a gesture that silently does nothing.
-    const key = dragKeyOf(items);
+    const key = readyKeyOf(acc.id, items);
     if (dragReady?.key === key && dragReady.paths.length > 0 && dragReady.paths.every((f) => fs.existsSync(f))) {
+      // Logged like route 2 is, so which copies went to which account's drag
+      // can be read back (search-e2e.mjs does).
+      dragLog('prepared copies', { account: acc.id, paths: dragReady.paths });
       beginOsDrag(e.sender, dragReady.paths);
       return 'files';
     }

@@ -36,6 +36,7 @@ import (
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/tenantstore"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/wasmfixture"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
 
@@ -82,12 +83,7 @@ func (f *appFixture) addStorage(t *testing.T, name string) (*model.Storage, stri
 
 func newAppFixture(t *testing.T, cfgMutate func(*config.Config)) *appFixture {
 	t.Helper()
-	if _, err := os.Stat(filepath.Join(echoDir, "echo.wasm")); err != nil {
-		if os.Getenv("FILEX_REQUIRE_WASM_FIXTURE") != "" {
-			t.Fatal("echo.wasm missing on CI")
-		}
-		t.Skip("echo.wasm not built (bash scripts/build-wasm-fixture.sh)")
-	}
+	wasmfixture.Require(t, filepath.Join(echoDir, "echo.wasm"))
 	ctx := context.Background()
 
 	// Mirror internal/server.New's store stack (see newMTFix), because the

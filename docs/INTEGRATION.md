@@ -585,11 +585,20 @@ defense-in-depth (the token itself can't escape its folder).
 
 Dragging a **single file** out of the explorer onto the desktop works in any
 Chromium browser with no host involvement: the component puts a `DownloadURL`
-on the drag and the browser downloads it where it was dropped. It is offered
-only when the credential travels on its own — a cookie session or `auth: {kind:
-'none' | 'csrf'}`. With a bearer token the browser's download stack would send
-no Authorization header, so the drop would produce a `401` page named like the
-file; the component leaves the drag alone instead.
+on the drag and the browser downloads it where it was dropped. The browser's
+download stack sends cookies but no `Authorization` header, so the URL depends
+on the credential:
+
+- **`auth: {kind: 'none' | 'csrf'}` or a cookie session** — the plain download
+  URL, through `apiBase` like every other call (so a host proxy that covers
+  `/api/files/*` covers it too).
+- **A bearer token** — a short-lived, single-use link the server mints for that
+  one file (`POST …/archive/download {"mode":"file"}` → `/z/<ticket>` on the
+  API's origin; [API.md](API.md#a-single-file-the-drag-out-link)).
+  The component asks for it while the pointer rests on the row, because
+  `dragstart` cannot wait for the network; a drag that beats it carries
+  nothing rather than a URL that would `401`. Against a server older than this
+  mode the drag is not offered, as before.
 
 A host that CAN hand the OS real paths (the desktop app) supplies `dragOut`, and
 folders and multi-selections then drop as separate real files:
@@ -614,6 +623,50 @@ payload on its side and every drop target reads it through the same helper, so a
 row dropped on a folder inside the app is still a server-side move rather than a
 re-upload of the temp copy. A host implementing `dragOut` does not have to do
 anything about that; a host writing its own drop targets does.
+
+A result in the ⌘K palette's **Everywhere** group drags out through the same
+path — `dragOut` when the host supplies it, the single-file `DownloadURL`
+(plain URL or minted link, as above) otherwise — and carries a download button
+of its own. A drag
+let go on the palette itself is swallowed there (the explorer's root would take
+an OS file drop for an upload) and the host's `cancel` is called.
+
+## 4e. ⌘K across several accounts (host hook)
+
+A host that holds several accounts at once — the desktop app's rail — can have
+the palette's **Everywhere** group search all of them. The explorer never talks
+to another account's server itself and is never handed its credential; every
+call that reaches another account goes through `accountSearch`:
+
+```ts
+config.accountSearch = {
+  // The account THIS explorer is mounted for — heads its own group.
+  self: { id: 'acc-1', label: 'files.example.com', detail: 'ada@example.com', color: '#4f7ce8' },
+  // Every OTHER account signed in now. Read on each query.
+  others: () => host.accounts().filter((a) => a.id !== 'acc-1'),
+  // /api/files/search on that account's server, with ITS credential.
+  search: (accountId, query, { limit, scope }) => host.search(accountId, query, { limit, scope }),
+  // The hit arrives addressed: { path: 'name://rel', basename, type }.
+  open: (accountId, item) => host.switchAndReveal(accountId, item),
+  download: (accountId, item) => host.download(accountId, item.path),   // optional
+  dragStart: (accountId, items) => host.dragOut(accountId, items),      // optional
+};
+```
+
+Hits come back grouped under one badge per account (`label`, `detail`, a dot in
+`color`), this mount's own account first, each account capped on its own. An
+account whose search fails or times out loses its own group, never the others'.
+Leave `download` or `dragStart` out and those rows simply do not offer the verb.
+Without `accountSearch` — the web app, every single-account embed — the palette
+is unchanged: this account's hits, no badges.
+
+⚠ Put the credential on the request yourself. A host that attaches tokens by
+**origin** (as the desktop app does for `<img>` and download links) picks one
+token per server, and two accounts on one server share an origin — a download
+of the other person's file would go out as whoever the window is showing. The
+desktop app sets the `Authorization` header on that download explicitly
+(`desktop/src/main.ts`, `remote:download`), and keys its prepared drag copies by
+account as well as by path.
 
 ## 5. Backend side (what the host must provide)
 

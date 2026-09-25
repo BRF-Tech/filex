@@ -64,6 +64,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/httpx"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
@@ -118,6 +119,10 @@ type archiveTicket struct {
 	Owner     *model.User
 	ExpiresAt time.Time
 	claimedAt time.Time
+	// File, when set, makes this a ONE-FILE link (`"mode":"file"`): the
+	// redeem streams that file's own bytes instead of an archive, and — unlike
+	// an archive — re-checks the owner's reach at the redeem. download_link.go.
+	File *fileLink
 }
 
 func (t *archiveTicket) expired(now time.Time) bool { return now.After(t.ExpiresAt) }
@@ -212,6 +217,13 @@ type archiveDownloadRequest struct {
 	// Name overrides the archive filename. Optional; the server names the
 	// archive when this is empty, and sanitizes it when it is not.
 	Name string `json:"name,omitempty"`
+	// Mode is "zip" (the default: one archive of the selection) or "file"
+	// (exactly one file, served as itself — the browser's drag-out link,
+	// download_link.go).
+	Mode string `json:"mode,omitempty"`
+	// ExpiresInSeconds shortens a "file" link's life. It can only shorten it:
+	// the ceiling is fileLinkTTL.
+	ExpiresInSeconds int `json:"expires_in_seconds,omitempty"`
 }
 
 // archiveDownloadInfo is what a successful mint returns.
@@ -222,6 +234,13 @@ type archiveDownloadInfo struct {
 	Files     int    `json:"files"`
 	Bytes     int64  `json:"bytes"`
 	ExpiresAt string `json:"expires_at"`
+	// Mode echoes what was minted, "zip" or "file". A client asking for a
+	// file link reads it to tell a server that knows the mode from an older
+	// one that ignored the field and minted a zip.
+	Mode string `json:"mode"`
+	// TTLSeconds is the link's life from now, so a client can keep one without
+	// trusting its own clock against expires_at.
+	TTLSeconds int `json:"ttl_seconds"`
 }
 
 // DownloadTicket resolves a selection into an archive and returns the URL that
@@ -245,6 +264,15 @@ func (a *Archive) DownloadTicket(w http.ResponseWriter, r *http.Request) {
 	var req archiveDownloadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	switch req.Mode {
+	case "", "zip":
+	case "file":
+		a.mintFileLink(w, r, req)
+		return
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown mode: " + req.Mode})
 		return
 	}
 	if len(req.Paths) == 0 {
@@ -272,6 +300,14 @@ func (a *Archive) DownloadTicket(w http.ResponseWriter, r *http.Request) {
 		// rbac_enabled=false storage, so asking it first would let a member of
 		// one customer name another customer's storage id.
 		if !ownsStorage(w, r, storageID, "storage") {
+			return
+		}
+		// ⚠ The token's `root:` confinement. confine.Middleware rewrites the
+		// path fields of a body it knows (`path`, `source`, `items`…) and
+		// `paths` is not one of them, so without this a token confined to one
+		// folder could archive — and download — any file its account reads.
+		if !rootAllows(ctx, a.Store, storageID, rel) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": confine.ErrOutOfRoot.Error()})
 			return
 		}
 		if !aclAllowID(ctx, a.ACL, a.Store, storageID, rel, acl.LevelViewer) {
@@ -342,12 +378,14 @@ func (a *Archive) DownloadTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, archiveDownloadInfo{
-		URL:       "/z/" + tok,
-		Ticket:    tok,
-		Name:      name,
-		Files:     len(members),
-		Bytes:     total,
-		ExpiresAt: time.Now().Add(archiveTicketTTL).UTC().Format(time.RFC3339),
+		URL:        "/z/" + tok,
+		Ticket:     tok,
+		Name:       name,
+		Files:      len(members),
+		Bytes:      total,
+		ExpiresAt:  time.Now().Add(archiveTicketTTL).UTC().Format(time.RFC3339),
+		Mode:       "zip",
+		TTLSeconds: int(archiveTicketTTL / time.Second),
 	})
 }
 
@@ -420,6 +458,10 @@ func (a *Archive) DownloadArchive(w http.ResponseWriter, r *http.Request) {
 		default:
 			http.Error(w, "unknown download link", http.StatusNotFound)
 		}
+		return
+	}
+	if t.File != nil {
+		a.redeemFileLink(w, r, tok, t)
 		return
 	}
 

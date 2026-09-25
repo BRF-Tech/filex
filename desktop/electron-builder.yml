@@ -295,12 +295,17 @@ deb:
   fpm:
     - "--conflicts=filex (<< 0.44.0)"
     - "--replaces=filex (<< 0.44.0)"
+    # Electron loads libasound.so.2 at start and electron-builder's default
+    # Depends has no sound library: on a minimal install the app did not open.
+    # Added here, not as `depends:`, which would replace the default list.
+    - "--depends=libasound2 | libasound2t64"
 rpm:
   packageName: filex-app
   afterRemove: build/linux/after-remove.tpl
   fpm:
     - "--conflicts=filex < 0.44.0"
     - "--replaces=filex < 0.44.0"
+    - "--depends=(alsa-lib or libasound2)"
 
 # ── Snap Store ───────────────────────────────────────────────────────
 # Built on its own, never by `dist:linux`: `pnpm dist:snap` → `--linux snap`.

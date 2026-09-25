@@ -218,9 +218,26 @@ func packageOf(getenv func(string) string, exe, goos string) (Install, bool) {
 		if i, ok := snapPackage(getenv, exe); ok {
 			return i, true
 		}
-		return homebrewPackage(exe)
+		if i, ok := homebrewPackage(exe); ok {
+			return i, true
+		}
+		return distroPackage(exe)
 	case "darwin":
 		return homebrewPackage(exe)
+	}
+	return Install{}, false
+}
+
+// distroPackage is a binary in the system's own bin directories. On Linux
+// only a package manager puts files there (a .deb, an .rpm, an AUR or distro
+// package); a hand install goes to /usr/local/bin, which is where docs/CLI.md
+// puts it. Before this rule such a package had to say FILEX_INSTALL_MODE=package
+// in its unit file, or `filex self-update` replaced a file dpkg or rpm owns.
+// Which manager it was is not known, so no upgrade command is named.
+func distroPackage(exe string) (Install, bool) {
+	switch filepath.ToSlash(filepath.Dir(exe)) {
+	case "/usr/bin", "/usr/sbin", "/bin", "/sbin":
+		return Install{Mode: ModePackage}, true
 	}
 	return Install{}, false
 }

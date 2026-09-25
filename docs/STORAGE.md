@@ -165,9 +165,10 @@ under a root before mounting them one by one: `POST /api/admin/storages/discover
 (see [Mounting several folders at once](#mounting-several-folders-at-once)).
 
 The probe is bounded at **10 seconds**. That is a limit on the *button*, not on
-the driver: the S3 driver keeps its wide retry budget because a background sync
-run needs it, but an unreachable endpoint made this endpoint take 20-30 seconds
-to say so. A probe that runs out of time answers
+the driver: the driver has its own budget (for S3, WebDAV and FTP,
+`total_timeout_s`, 15 s by default — see
+[When the store is down](#when-the-store-is-down)), and an unreachable endpoint used to
+make this endpoint take 20-30 seconds to say so. A probe that runs out of time answers
 `timed out after 10s — the endpoint did not answer: …` with the driver's own
 error after it, so a slow endpoint reads differently from a wrong one.
 
@@ -555,6 +556,9 @@ Storage / Ceph RGW**, and other S3‑compatible stores.
 | `access_key` | no | — | Static key. If omitted, the AWS default credential chain is used (env/IRSA/instance role). |
 | `secret_key` | no | — | Static secret (with `access_key`). |
 | `disable_presign` | no | **`true`** (since v0.42.2) | Uploads and the downloads behind public share links stream through filex, so the bucket `endpoint` never has to be reachable from a browser. Set `false` only when it is (AWS, a public MinIO) and you want the browser to talk to the bucket directly via presigned URLs — faster for very large files; the store must accept SDK-signed URLs. ⚠ A storage saved before v0.42.2 without this key now streams; set `false` explicitly to get the old redirect back. |
+| `attempt_timeout_s` | no | `10` (1–600) | How long **one attempt** may wait for a sign of life from the store: connecting (the DNS lookup included), the TLS handshake, the answer after the request is sent, and each next piece of the answer. **Never a limit on a transfer that keeps moving.** An upload the store stops taking is cut after 60 s (or this, if longer): the system hands a blocked upload to the network in bursts, so a slow store looks stopped for a second or two at a time. Copies, renames and the completion of a multipart upload wait up to 10 minutes for the answer (the store answers them only when the work is done); an upload's answer wait is lengthened by up to 16 s for the bytes still in the sockets' buffers. See [When the store is down](#when-the-store-is-down). |
+| `max_attempts` | no | `6` (1–20) | Attempts per request, the first included, when the failure can pass: a network error, a timeout, a `5xx`, throttling. `1` turns retrying off. A refusal — `403`, a missing bucket, a host name that does not resolve, a certificate that does not verify — is never retried. |
+| `total_timeout_s` | no | `15` (1–3600) | No new attempt starts unless it could finish within this many seconds of the first, so a store that is down is reported within this time. A transfer under way is not cut. A request that **timed out** is tried again only when this is at least twice `attempt_timeout_s`. |
 
 **Examples**
 
@@ -614,6 +618,94 @@ Storage / Ceph RGW**, and other S3‑compatible stores.
   kill on a large one. Browser uploads of big files go out as multipart parts,
   which the store can be asked for again independently.
 
+#### When the store is down
+
+A store can die in several ways, and each used to cost the person waiting on it
+differently. Measured against the SDK defaults filex used until v0.44.x (a
+listing and a 64 KiB upload, in the driver's test suite): a **refused** port
+26 s, an address that **drops the connection attempt** (a host off the network)
+142-147 s, a store that **accepts the connection and never answers** did not
+return at all, and a host name that **does not resolve** 0.1 s. On 2026-08-25 a
+drop into a Hetzner bucket that was answering `503` took 85.6 s to report it.
+
+The three settings above bound all of them. With the defaults a dead store is
+reported within **15 s**: a silent store after one 10 s attempt, a name that
+does not resolve at once. Three cases wait longer on purpose, because a working
+store looks the same for a while:
+
+- a store that takes a whole upload of a few megabytes and then does not answer:
+  10 s plus up to 16 s for the upload's last megabytes, which may still be in
+  the sockets' buffers when the request counts as sent;
+- a store that stops reading in the middle of a large upload: a minute (the
+  system hands a blocked upload to the network in bursts, so a slow store looks
+  stopped for a second or two at a time);
+- a store that never answers a copy or a rename: ten minutes (MinIO answers a
+  copy only when it has copied the object).
+
+It is reported as `503 storage_unavailable` on the drop page and the upload
+ticket, and in the log as, for example:
+
+```
+s3 endpoint https://minio.example.com is unavailable: the connection was refused (6 attempts in 14.8s): …
+s3 endpoint https://minio.example.com is unavailable: no answer within 10s of sending the request (1 attempt in 10.0s): …
+s3 endpoint https://minio.example.com is unavailable: the host name minio.example.com does not resolve (1 attempt in 0.0s): …
+```
+
+(the SDK's own text follows the colon). In code, the error matches
+`storage.ErrUnavailable`; a refusal (403, a missing bucket, a bad certificate)
+does not, and keeps the store's own words (`AccessDenied`, `x509: …`).
+
+What the limits do **not** do: cut a transfer that is moving. A 2 GB upload on a
+slow line, a download the browser reads slowly, a listing of a huge prefix that
+streams — none of them is measured against `total_timeout_s`; each read only has
+to make progress within `attempt_timeout_s`, and a send within a minute. An
+attempt that ran longer than `total_timeout_s` and then broke gets a fresh
+budget, so a long upload that loses its connection near the end is tried again
+(when its body can be sent again — see the bullet on uploads above). One that
+was cut for silence does not: it would only buy the same wait again.
+
+Tuning:
+- **A flaky store** that answers `503` in bursts (measured on Hetzner: 12 times
+  in one month): raise `total_timeout_s` (e.g. 60) so a background sync rides
+  out a longer wobble. Uploads by people wait up to that long when it is really
+  down.
+- **A slow store** that takes more than 10 s to start answering a listing (an
+  HDD-backed MinIO with millions of objects under one prefix): raise
+  `attempt_timeout_s`, and `total_timeout_s` to at least twice it if a timed-out
+  listing should be tried again.
+- The environment variable `AWS_MAX_ATTEMPTS` and `max_attempts` in
+  `~/.aws/config` do not apply to storages: the storage's own setting wins.
+
+**WebDAV and FTP** (v0.45.0, issue #73) have the same three settings, the same
+rule — silence is bounded, length never is — and the same code
+(`backend/internal/storage/stall`). Their defaults differ: an attempt waits 30 s
+on WebDAV (a Nextcloud listing of a large folder can take well over 10 s to
+start) and 15 s on FTP (what its connect alone was allowed before), with 3
+attempts and a 15 s budget. What each sends again is in its table:
+[WebDAV](#webdav), [FTP](#ftp--ftps). Measured in the drivers' test suites
+against a local stand-in, with `attempt_timeout_s` 1 and `total_timeout_s` 3:
+
+| the server… | WebDAV before | WebDAV now | FTP before | FTP now |
+|---|---|---|---|---|
+| refuses the connection | 0.0 s, not reported as down | 2.1-3.0 s | 0.0 s, not reported as down | 2.1-3.0 s |
+| accepts it and never answers | 60 s | 1.3-2.1 s | never returned | 2.2 s |
+| does not answer the connect (black hole) | 19.6 s | 2.0 s | 15 s | 2.0 s |
+| worked, then stopped answering | — | — | never returned, and every other call on the storage waited | 2.0 s; the next caller 4.1 s; a caller that gave up after 0.3 s left at 0.3 s |
+| stops reading an upload / sending an answer | 60 s | 1.0 s / 1.0 s | never returned | 2.0 s / 1.0 s |
+| moves a file at 512 KB/s for 75 s, both ways | **cut at 60.0 s** | whole, 75.5 s | — | whole (4 MB each way at 512 KB/s, the reader pausing 2.5 s) |
+
+The log says it the same way, naming the driver:
+
+```
+webdav server https://cloud.example.com is unavailable: no answer within 30s of sending the request (1 attempt in 30.0s): …
+ftp server ftp.example.com:21 is unavailable: the server sent nothing for 15s (1 attempt in 30.0s): …
+```
+
+**SFTP and SMB do not have these settings yet.** SFTP bounds the connect and the
+SSH handshake (10 s), SMB the connect (`dial_timeout_s`, 15 s); after that SFTP
+waits on a server that stops answering until the operating system gives up on
+the connection, and SMB until the request's own context ends.
+
 ### SFTP
 
 | key | required | default | notes |
@@ -646,12 +738,22 @@ Tested against **Nextcloud, ownCloud, Apache mod_dav, nginx‑dav, SabreDAV**.
 | `user` | **yes** | — | Basic‑auth user. Alias: `username`. |
 | `password` | no | — | Basic‑auth password. |
 | `root` | **yes** | `""` | Sub‑folder under the base URL — the mount point. Aliases: `base_path`, `remote_path`. |
+| `attempt_timeout_s` | no | `30` (1–600) | How long **one attempt** may wait for a sign of life from the server: connecting, the TLS handshake, the answer after the request is sent, and each next piece of the answer. **Never a limit on a transfer that keeps moving**; an upload the server stops taking is cut after 60 s (or this, if longer). `COPY`, `MOVE` (every rename) and `DELETE` wait up to 10 minutes for the answer, because the server answers them only when the whole tree is done. Longer than S3's 10 s: a `PROPFIND` of a large folder on Nextcloud can take well over 10 s to start answering. See [When the store is down](#when-the-store-is-down). |
+| `max_attempts` | no | `3` (1–20) | Attempts per request, the first included. A request that never reached the server (refused, no answer to the connect) is always tried again; one that reached it only when it changes nothing (`PROPFIND`, `GET`) or when the server answered `502`, `503` or `504`. An upload is never sent twice: its body is a stream. |
+| `total_timeout_s` | no | `15` (1–3600) | As for S3: no new attempt starts unless it could finish within this many seconds of the first. |
 
 `root` is joined onto the base URL's path; a storage saved before the driver
 read it (empty `root`) still mounts exactly at the URL, unchanged.
 Only **Basic auth** is supported today (Bearer is planned). Example:
 `{"url":"https://cloud.example.com/remote.php/dav/files/alice/","user":"alice","password":"…","root":"filex"}`.
 `MKCOL`/`MOVE`/`COPY`/`DELETE`/`PROPFIND` back the file operations.
+
+⚠ **Until v0.45.0 every WebDAV request was cut at 60 s, body included**: an
+upload or a download that took longer than a minute failed however well it was
+moving, and a server that was down took that minute to say so. Now only
+silence is bounded (the three settings above). The driver speaks HTTP/1.1: a
+request whose answer never comes is cut by closing its connection, which on
+HTTP/2 would cut every other request sharing it.
 
 ### FTP / FTPS
 
@@ -664,9 +766,23 @@ Only **Basic auth** is supported today (Bearer is planned). Example:
 | `root` | **yes** | `/` | Base directory. Must be a sub‑folder — the root guard rejects `/`. Aliases: `base_path`, `remote_path`. |
 | `tls` | no | `false` | Explicit FTPS (AUTH TLS). |
 | `passive` | no | `true` | PASV mode; set `false` to disable. |
+| `attempt_timeout_s` | no | `15` (1–600) | How long **one attempt** may wait for the server: connecting, the greeting and the login, the answer to each command, and each next piece of a download. **Never a limit on a transfer that keeps moving**; an upload the server stops taking is cut after 60 s (or this, if longer), and the answer to an upload waits up to 16 s more for the bytes still in the sockets' buffers. See [When the store is down](#when-the-store-is-down). |
+| `max_attempts` | no | `3` (1–20) | A connection that could not be made (refused, silent, the server busy with `421`) is tried again, and so is a listing, a stat, a download or a mkdir whose session broke. An upload, a rename or a delete that reached the server is not sent again. A wrong password (`530`) is never retried. |
+| `total_timeout_s` | no | `15` (1–3600) | As for S3: no new attempt starts unless it could finish within this many seconds of the first. |
 
 FTP uses a **single serialized control connection**, so it's the slowest
 adapter and copies stream through a temporary file. Prefer SFTP where possible.
+A request whose client goes away while it waits for that connection stops
+waiting.
+
+⚠ **Until v0.45.0 only the TCP connect was bounded (15 s).** A server that
+stopped answering left the liveness check that starts every operation (`NOOP`)
+waiting forever — while it held the storage's one connection, so every other
+operation on the storage waited forever behind it. So did a server that
+accepted the connection and never greeted, and a transfer the server stopped
+moving. Now each of those waits ends after `attempt_timeout_s`, a fresh
+connection is tried within the budget, and the storage answers
+`503 storage_unavailable`.
 `{"host":"ftp.example.com","user":"filex","password":"…","root":"/files","tls":true}`.
 
 ---

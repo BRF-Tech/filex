@@ -26,7 +26,7 @@ import (
 // retryable. Raising the count would be pointless if the error were treated as
 // terminal.
 func TestRetryerAbsorbsTransient503(t *testing.T) {
-	r := newRetryer()
+	r := newRetryer(defaultPolicy())
 
 	if got := r.MaxAttempts(); got != 6 {
 		t.Fatalf("MaxAttempts = %d, want 6 (SDK default 3 was too tight for a 503)", got)
@@ -41,7 +41,7 @@ func TestRetryerAbsorbsTransient503(t *testing.T) {
 // six attempts only delays a clear failure. Guards against someone "fixing"
 // flakiness later by marking everything retryable.
 func TestRetryerDoesNotRetryPermissionFailures(t *testing.T) {
-	if newRetryer().IsErrorRetryable(responseErr(http.StatusForbidden)) {
+	if newRetryer(defaultPolicy()).IsErrorRetryable(responseErr(http.StatusForbidden)) {
 		t.Fatal("403 treated as retryable; permission failures must fail fast")
 	}
 }

@@ -33,6 +33,9 @@ func snap(name string) Install {
 
 var binary = Install{Mode: ModeBinary}
 
+// A distribution's package manager owns the binary; which one is not known.
+var distro = Install{Mode: ModePackage}
+
 // The whole detection as a table: every path is judged the way the named
 // operating system would see it, on whichever one runs the test. The binary
 // rows are the point as much as the package rows — a false positive turns
@@ -65,6 +68,15 @@ func TestDetectInstall_Layouts(t *testing.T) {
 		{"not Homebrew: the link, when it was not resolved", "darwin", "/opt/homebrew/bin/filex", nil, binary},
 		{"not Homebrew: a plain install", "linux", "/usr/local/bin/filex", nil, binary},
 		{"not Homebrew on Windows: the rules are per OS", "windows", `C:\opt\homebrew\Caskroom\filex\0.44.0\filex.exe`, nil, binary},
+
+		// ── a distribution package (.deb, .rpm, AUR …): the system's own bin ──
+		{"distro package, /usr/bin", "linux", "/usr/bin/filex", nil, distro},
+		{"distro package, /usr/sbin", "linux", "/usr/sbin/filex", nil, distro},
+		{"distro package, merged /bin", "linux", "/bin/filex", nil, distro},
+		{"not a distro package: /usr/local/bin is where docs/CLI.md puts it", "linux", "/usr/local/bin/filex", nil, binary},
+		{"not a distro package: a folder under /usr/bin", "linux", "/usr/bin/tools/filex", nil, binary},
+		{"not a distro package: /usr/binaries only starts the same", "linux", "/usr/binaries/filex", nil, binary},
+		{"not a distro package on macOS: the rule is Linux's", "darwin", "/usr/bin/filex", nil, binary},
 
 		// ── winget (portable package) ──
 		{"winget, per user", "windows", `C:\Users\me\AppData\Local\Microsoft\WinGet\Packages\` + wingetDir + `\filex.exe`, nil, winget("BRFTech.filex")},

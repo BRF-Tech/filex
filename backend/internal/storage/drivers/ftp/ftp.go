@@ -4,12 +4,15 @@
 // first operation. A single shared connection is reused; if a server-side
 // error indicates a dead session, the next operation will redial. FTP is
 // not safe for concurrent use on a single connection so all calls go
-// through a mutex.
+// through one lock — which a caller whose context ends stops waiting for.
+//
+// Every wait on the server is bounded (issue #73, timeout.go): before, only
+// the TCP connect was, and a server that stopped answering held the lock —
+// and so the whole storage — forever.
 package ftp
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -19,11 +22,11 @@ import (
 	"path"
 	"strings"
 	"sync"
-	"time"
 
 	goftp "github.com/jlaffaye/ftp"
 
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storage/stall"
 )
 
 func init() {
@@ -40,15 +43,25 @@ type Driver struct {
 	tls      bool // FTPS (explicit AUTH TLS)
 	passive  bool // PASV (default true)
 
-	mu   sync.Mutex
-	conn *goftp.ServerConn
+	// policy bounds how long a server that does not answer is waited for
+	// (timeout.go); what names the server in the error that says so.
+	policy stall.Policy
+	what   string
+
+	// sem is the lock (see lock); conn the session, ctrl its control
+	// connection's silence guard. All three under the lock.
+	semOnce sync.Once
+	sem     chan struct{}
+	conn    *goftp.ServerConn
+	ctrl    *stall.Conn
 }
 
 // Name implements storage.Driver.
 func (d *Driver) Name() string { return "ftp" }
 
 // Init configures the driver. Required: host, user, password, root.
-// Optional: port (default 21), tls (default false), passive (default true).
+// Optional: port (default 21), tls (default false), passive (default true),
+// and the three timeout settings (timeout.go).
 //
 // The config keys are declared in descriptor.go — keep the two in step,
 // there is a test that fails when they drift. Legacy spellings are read
@@ -76,6 +89,12 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 	if v, ok := cfg["passive"].(bool); ok {
 		d.passive = v
 	}
+	d.policy = stall.Settings{
+		AttemptTimeout: cfg["attempt_timeout_s"],
+		MaxAttempts:    cfg["max_attempts"],
+		TotalTimeout:   cfg["total_timeout_s"],
+	}.Policy(defaults)
+	d.what = "ftp server " + d.addr()
 	if d.host == "" || d.user == "" || d.password == "" {
 		return errors.New("ftp: host, user and password required")
 	}
@@ -96,46 +115,16 @@ func (d *Driver) Capabilities() storage.Capabilities {
 	}
 }
 
-// connect lazily dials the FTP server, logs in and caches the session.
-// Caller MUST hold d.mu.
-func (d *Driver) connectLocked() (*goftp.ServerConn, error) {
-	if d.conn != nil {
-		// Cheap liveness probe — NoOp is one round trip.
-		if err := d.conn.NoOp(); err == nil {
-			return d.conn, nil
-		}
-		_ = d.conn.Quit()
-		d.conn = nil
-	}
-	addr := net.JoinHostPort(d.host, fmt.Sprintf("%d", d.port))
-	opts := []goftp.DialOption{
-		goftp.DialWithTimeout(15 * time.Second),
-		goftp.DialWithDisabledEPSV(!d.passive),
-	}
-	if d.tls {
-		opts = append(opts, goftp.DialWithExplicitTLS(&tls.Config{
-			ServerName:         d.host,
-			InsecureSkipVerify: false,
-		}))
-	}
-	c, err := goftp.Dial(addr, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("ftp: dial: %w", err)
-	}
-	if err := c.Login(d.user, d.password); err != nil {
-		_ = c.Quit()
-		return nil, fmt.Errorf("ftp: login: %w", err)
-	}
-	d.conn = c
-	return c, nil
-}
-
 func (d *Driver) join(p string) string {
 	return path.Join(d.root, strings.TrimLeft(path.Clean("/"+p), "/"))
 }
 
 // translateErr maps server-side FTP errors to storage sentinel errors.
 // FTP 550 "File unavailable" is the canonical not-found code.
+//
+// ⚠ Only for the server's ANSWERS. A transport error's text carries addresses
+// ("127.0.0.1:35501"), and the substring sniff below would read a port with
+// 550 in it as "not found"; fail sends those to "unavailable" first.
 func translateErr(err error) error {
 	if err == nil {
 		return nil
@@ -161,12 +150,12 @@ func translateErr(err error) error {
 	return err
 }
 
-// dropConn evicts the cached session so the next call redials.
-// Caller MUST hold d.mu.
+// dropConnLocked evicts the cached session so the next call redials.
+// Caller MUST hold the lock.
 func (d *Driver) dropConnLocked() {
 	if d.conn != nil {
 		_ = d.conn.Quit()
-		d.conn = nil
+		d.conn, d.ctrl = nil, nil
 	}
 }
 
@@ -190,20 +179,15 @@ func isTransport(err error) bool {
 }
 
 // List implements storage.Driver.
-func (d *Driver) List(_ context.Context, p string) ([]storage.Object, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	c, err := d.connectLocked()
+func (d *Driver) List(ctx context.Context, p string) ([]storage.Object, error) {
+	var entries []*goftp.Entry
+	err := d.run(ctx, true, func(c *goftp.ServerConn) error {
+		var err error
+		entries, err = c.List(d.join(p))
+		return err
+	})
 	if err != nil {
 		return nil, err
-	}
-	abs := d.join(p)
-	entries, err := c.List(abs)
-	if err != nil {
-		if isTransport(err) {
-			d.dropConnLocked()
-		}
-		return nil, translateErr(err)
 	}
 	out := make([]storage.Object, 0, len(entries))
 	for _, e := range entries {
@@ -235,68 +219,54 @@ func (d *Driver) List(_ context.Context, p string) ([]storage.Object, error) {
 // FTP has no portable stat operation. We try GetEntry first (RFC 3659
 // MLST — supported by modern servers) and fall back to listing the parent
 // directory and matching the basename.
-func (d *Driver) Stat(_ context.Context, p string) (storage.Object, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	c, err := d.connectLocked()
+func (d *Driver) Stat(ctx context.Context, p string) (storage.Object, error) {
+	var found *goftp.Entry
+	err := d.run(ctx, true, func(c *goftp.ServerConn) error {
+		abs := d.join(p)
+		if e, err := c.GetEntry(abs); err == nil && e != nil {
+			found = e
+			return nil
+		}
+		// Fallback: list parent and find self.
+		base := path.Base(abs)
+		entries, err := c.List(path.Dir(abs))
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if e.Name == base {
+				found = e
+				return nil
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return storage.Object{}, err
 	}
-	abs := d.join(p)
-
-	if e, err := c.GetEntry(abs); err == nil && e != nil {
-		obj := storage.Object{
-			Path:  p,
-			Name:  path.Base(p),
-			Size:  int64(e.Size),
-			Mtime: e.Time,
-		}
-		switch e.Type {
-		case goftp.EntryTypeFolder:
-			obj.Kind = storage.KindDirectory
-		case goftp.EntryTypeLink:
-			obj.Kind = storage.KindSymlink
-		default:
-			obj.Kind = storage.KindFile
-		}
-		return obj, nil
+	if found == nil {
+		return storage.Object{}, storage.ErrNotFound
 	}
-
-	// Fallback: list parent and find self.
-	parent := path.Dir(abs)
-	base := path.Base(abs)
-	entries, err := c.List(parent)
-	if err != nil {
-		if isTransport(err) {
-			d.dropConnLocked()
-		}
-		return storage.Object{}, translateErr(err)
+	obj := storage.Object{
+		Path:  p,
+		Name:  path.Base(p),
+		Size:  int64(found.Size),
+		Mtime: found.Time,
 	}
-	for _, e := range entries {
-		if e.Name == base {
-			obj := storage.Object{
-				Path:  p,
-				Name:  base,
-				Size:  int64(e.Size),
-				Mtime: e.Time,
-			}
-			switch e.Type {
-			case goftp.EntryTypeFolder:
-				obj.Kind = storage.KindDirectory
-			case goftp.EntryTypeLink:
-				obj.Kind = storage.KindSymlink
-			default:
-				obj.Kind = storage.KindFile
-			}
-			return obj, nil
-		}
+	switch found.Type {
+	case goftp.EntryTypeFolder:
+		obj.Kind = storage.KindDirectory
+	case goftp.EntryTypeLink:
+		obj.Kind = storage.KindSymlink
+	default:
+		obj.Kind = storage.KindFile
 	}
-	return storage.Object{}, storage.ErrNotFound
+	return obj, nil
 }
 
 // ftpReadCloser couples a ftp.Response (which is io.ReadCloser) to the
-// driver mutex. The data connection runs in parallel with the control
-// channel, but FTP serializes data transfers so the mutex must be held
+// driver lock. The data connection runs in parallel with the control
+// channel, but FTP serializes data transfers so the lock must be held
 // for the lifetime of the read.
 type ftpReadCloser struct {
 	r      io.ReadCloser
@@ -319,29 +289,15 @@ func (rc *ftpReadCloser) Close() error {
 		// as its own answer. Drop the session so the next op redials.
 		rc.d.dropConnLocked()
 	}
-	rc.d.mu.Unlock()
+	rc.d.unlock()
 	return err
 }
 
 // Read implements storage.Driver. The returned ReadCloser holds the
-// driver mutex until Close — keep reads short or buffer the body if
+// driver lock until Close — keep reads short or buffer the body if
 // long-lived locks are a concern.
-func (d *Driver) Read(_ context.Context, p string) (io.ReadCloser, error) {
-	d.mu.Lock()
-	c, err := d.connectLocked()
-	if err != nil {
-		d.mu.Unlock()
-		return nil, err
-	}
-	resp, err := c.Retr(d.join(p))
-	if err != nil {
-		if isTransport(err) {
-			d.dropConnLocked()
-		}
-		d.mu.Unlock()
-		return nil, translateErr(err)
-	}
-	return &ftpReadCloser{r: resp, d: d}, nil
+func (d *Driver) Read(ctx context.Context, p string) (io.ReadCloser, error) {
+	return d.retr(ctx, p, 0)
 }
 
 // ReadRange implements storage.RangeReader via the REST command
@@ -353,28 +309,36 @@ func (d *Driver) Read(_ context.Context, p string) (io.ReadCloser, error) {
 // ⚠ Unlike local/S3, an offset past EOF is server-dependent (many answer
 // 550 → ErrNotFound instead of an empty transfer). Callers that know the
 // size should not ask for it; the download seeker never does.
-func (d *Driver) ReadRange(_ context.Context, p string, off, length int64) (io.ReadCloser, error) {
+func (d *Driver) ReadRange(ctx context.Context, p string, off, length int64) (io.ReadCloser, error) {
 	if off < 0 {
 		return nil, fmt.Errorf("ftp: negative range offset %d", off)
 	}
 	if length == 0 {
 		return storage.EmptyReadCloser(), nil
 	}
-	d.mu.Lock()
-	c, err := d.connectLocked()
+	rc, err := d.retr(ctx, p, uint64(off))
 	if err != nil {
-		d.mu.Unlock()
 		return nil, err
 	}
-	resp, err := c.RetrFrom(d.join(p), uint64(off))
-	if err != nil {
-		if isTransport(err) {
-			d.dropConnLocked()
-		}
-		d.mu.Unlock()
-		return nil, translateErr(err)
+	return storage.LimitReadCloser(rc, length), nil
+}
+
+// retr opens a download and returns it holding the lock.
+func (d *Driver) retr(ctx context.Context, p string, off uint64) (io.ReadCloser, error) {
+	if err := d.lock(ctx); err != nil {
+		return nil, err
 	}
-	return storage.LimitReadCloser(&ftpReadCloser{r: resp, d: d}, length), nil
+	var resp *goftp.Response
+	err := d.runLocked(ctx, true, func(c *goftp.ServerConn) error {
+		var err error
+		resp, err = c.RetrFrom(d.join(p), off)
+		return err
+	})
+	if err != nil {
+		d.unlock()
+		return nil, err
+	}
+	return &ftpReadCloser{r: resp, d: d}, nil
 }
 
 // mkdirAll creates each missing path component. FTP MKD does not have
@@ -403,136 +367,93 @@ func (d *Driver) mkdirAll(c *goftp.ServerConn, abs string) error {
 	return nil
 }
 
-// Write implements storage.Writer.
-func (d *Driver) Write(_ context.Context, p string, r io.Reader, _ int64) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	c, err := d.connectLocked()
-	if err != nil {
-		return err
-	}
-	abs := d.join(p)
-	_ = d.mkdirAll(c, path.Dir(abs))
-	if err := c.Stor(abs, r); err != nil {
-		if isTransport(err) {
-			d.dropConnLocked()
-		}
-		return translateErr(err)
-	}
-	return nil
+// Write implements storage.Writer. Not sent again once it reached the
+// server: r is the caller's stream (see run).
+func (d *Driver) Write(ctx context.Context, p string, r io.Reader, _ int64) error {
+	return d.run(ctx, false, func(c *goftp.ServerConn) error {
+		abs := d.join(p)
+		_ = d.mkdirAll(c, path.Dir(abs))
+		return d.stor(c, abs, r)
+	})
 }
 
 // Move implements storage.Mover via RNFR + RNTO (the library's Rename
 // wraps both commands).
-func (d *Driver) Move(_ context.Context, src, dst string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	c, err := d.connectLocked()
-	if err != nil {
-		return err
-	}
-	a := d.join(src)
-	b := d.join(dst)
-	_ = d.mkdirAll(c, path.Dir(b))
-	if err := c.Rename(a, b); err != nil {
-		if isTransport(err) {
-			d.dropConnLocked()
-		}
-		return translateErr(err)
-	}
-	return nil
+func (d *Driver) Move(ctx context.Context, src, dst string) error {
+	return d.run(ctx, false, func(c *goftp.ServerConn) error {
+		b := d.join(dst)
+		_ = d.mkdirAll(c, path.Dir(b))
+		return c.Rename(d.join(src), b)
+	})
 }
 
 // Copy implements storage.Copier. FTP has no native server-side copy
 // command, so we stream the file through the control host: download the
 // source on one data connection, upload to the destination on the next.
-func (d *Driver) Copy(_ context.Context, src, dst string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	c, err := d.connectLocked()
-	if err != nil {
-		return err
-	}
-	resp, err := c.Retr(d.join(src))
-	if err != nil {
-		if isTransport(err) {
-			d.dropConnLocked()
+func (d *Driver) Copy(ctx context.Context, src, dst string) error {
+	return d.run(ctx, false, func(c *goftp.ServerConn) error {
+		resp, err := c.Retr(d.join(src))
+		if err != nil {
+			return err
 		}
-		return translateErr(err)
-	}
-	// Drain the data channel into a temp file so we can release it before
-	// opening the upload data connection — a single FTP control session
-	// only allows one data transfer at a time.
-	tmp, err := os.CreateTemp("", "ftpcopy-*")
-	if err != nil {
-		_ = resp.Close()
-		return err
-	}
-	defer func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
-	}()
-	if _, err := io.Copy(tmp, resp); err != nil {
-		_ = resp.Close()
-		return err
-	}
-	if err := resp.Close(); err != nil {
-		return translateErr(err)
-	}
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	abs := d.join(dst)
-	_ = d.mkdirAll(c, path.Dir(abs))
-	if err := c.Stor(abs, tmp); err != nil {
-		if isTransport(err) {
-			d.dropConnLocked()
+		// Drain the data channel into a temp file so we can release it before
+		// opening the upload data connection — a single FTP control session
+		// only allows one data transfer at a time.
+		tmp, err := os.CreateTemp("", "ftpcopy-*")
+		if err != nil {
+			_ = resp.Close()
+			return err
 		}
-		return translateErr(err)
-	}
-	return nil
+		defer func() {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
+		}()
+		if _, err := io.Copy(tmp, resp); err != nil {
+			_ = resp.Close()
+			return err
+		}
+		if err := resp.Close(); err != nil {
+			return err
+		}
+		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		abs := d.join(dst)
+		_ = d.mkdirAll(c, path.Dir(abs))
+		return d.stor(c, abs, tmp)
+	})
 }
 
 // Delete implements storage.Deleter — tries DELE first, falls back to RMD.
-func (d *Driver) Delete(_ context.Context, p string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	c, err := d.connectLocked()
-	if err != nil {
-		return err
-	}
-	abs := d.join(p)
-	if err := c.Delete(abs); err != nil {
+func (d *Driver) Delete(ctx context.Context, p string) error {
+	return d.run(ctx, false, func(c *goftp.ServerConn) error {
+		abs := d.join(p)
+		err := c.Delete(abs)
+		if err == nil {
+			return nil
+		}
 		// Maybe a directory.
 		if rmErr := c.RemoveDir(abs); rmErr == nil {
 			return nil
 		}
-		if isTransport(err) {
-			d.dropConnLocked()
-		}
-		return translateErr(err)
-	}
-	return nil
+		return err
+	})
 }
 
 // Mkdir implements storage.Mkdirer.
-func (d *Driver) Mkdir(_ context.Context, p string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	c, err := d.connectLocked()
-	if err != nil {
-		return err
-	}
-	return d.mkdirAll(c, d.join(p))
+func (d *Driver) Mkdir(ctx context.Context, p string) error {
+	return d.run(ctx, true, func(c *goftp.ServerConn) error {
+		return d.mkdirAll(c, d.join(p))
+	})
 }
 
-// Close releases the underlying FTP session — called on shutdown.
+// Close releases the underlying FTP session — called on shutdown. It waits
+// for a download that holds the session to be closed.
 func (d *Driver) Close() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.conn != nil {
-		_ = d.conn.Quit()
-		d.conn = nil
+	if err := d.lock(context.Background()); err != nil {
+		return err
 	}
+	defer d.unlock()
+	d.dropConnLocked()
 	return nil
 }

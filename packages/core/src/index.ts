@@ -394,6 +394,11 @@ export { useFileApi, resolveEndpoints } from './composables/useFileApi';
 export type { FileApi, ManagerResponse, PendingOpDto } from './composables/useFileApi';
 /* bul:s3 — global-search contract types + snippet helpers */
 export type { GlobalSearchHit, GlobalSearchScope } from './composables/useFileApi';
+/* #47 — several accounts in one ⌘K (the desktop rail), and the one place a
+   search hit becomes an address. */
+export type { AccountSearchHook, SearchAccount, SearchHitItem } from './types/ExplorerConfig';
+export { groupHitsByAccount, hitItem, hitStorageName, hitToNode } from './lib/searchHit';
+export type { HitDriveContext, HitGroup } from './lib/searchHit';
 /* Browser-side reachability probe for external services (OnlyOffice, drawio).
    Lives here, not in the admin app, because the admin page and every embedder
    need the same answer to "can THIS browser reach the document server?" — see

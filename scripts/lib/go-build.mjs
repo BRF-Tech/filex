@@ -16,7 +16,8 @@
 // Used by scripts/build-backend.mjs (the backend binary),
 // e2e/shots/capture.mjs (the example plugin its plugins screenshot installs)
 // and e2e/shots/scene.mjs (a LINUX build of this tree, for the scene that runs
-// inside the full container image — `goos`/`goarch` below).
+// inside the full container image — `goos`/`goarch` below), and by
+// scripts/release/plan.mjs (which toolchain runs the release's Go gates).
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
@@ -25,12 +26,12 @@ import path from 'node:path';
 
 const lastLines = (s, n) => String(s ?? '').trim().split(/\r?\n/).slice(-n).join('\n');
 
-function nativeGo() {
+export function nativeGo() {
   const r = spawnSync('go', ['version'], { encoding: 'utf8', windowsHide: true });
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
-function wslGo() {
+export function wslGo() {
   if (process.platform !== 'win32') return null;
   const r = spawnSync('wsl', ['-e', 'bash', '-lc', 'go version'], { encoding: 'utf8', windowsHide: true });
   return r.status === 0 ? r.stdout.trim() : null;

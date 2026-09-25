@@ -18,7 +18,7 @@ import (
 
 // ListCustomThemes returns every stored theme, oldest first.
 func (s *Store) ListCustomThemes(ctx context.Context) ([]*model.CustomTheme, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT `+db.CustomThemeColumns+` FROM custom_themes ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -29,7 +29,7 @@ func (s *Store) ListCustomThemes(ctx context.Context) ([]*model.CustomTheme, err
 
 // GetCustomTheme returns one theme by slug, or (nil, nil) when there is none.
 func (s *Store) GetCustomTheme(ctx context.Context, key string) (*model.CustomTheme, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT `+db.CustomThemeColumns+` FROM custom_themes WHERE theme_key=$1`, key)
 	if err != nil {
 		return nil, err
@@ -47,7 +47,7 @@ func (s *Store) UpsertCustomTheme(ctx context.Context, t *model.CustomTheme) err
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx,
+	_, err = s.conn(ctx).ExecContext(ctx,
 		`INSERT INTO custom_themes (theme_key, name, tokens_light, tokens_dark, created_at, updated_at)
 		 VALUES ($1,$2,$3,$4,NOW(),NOW())
 		 ON CONFLICT(theme_key) DO UPDATE SET name=EXCLUDED.name, tokens_light=EXCLUDED.tokens_light,
@@ -58,7 +58,7 @@ func (s *Store) UpsertCustomTheme(ctx context.Context, t *model.CustomTheme) err
 
 // DeleteCustomTheme removes a theme, reporting whether a row was there.
 func (s *Store) DeleteCustomTheme(ctx context.Context, key string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM custom_themes WHERE theme_key=$1`, key)
+	res, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM custom_themes WHERE theme_key=$1`, key)
 	if err != nil {
 		return false, err
 	}

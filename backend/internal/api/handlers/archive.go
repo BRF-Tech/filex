@@ -55,6 +55,12 @@ type Archive struct {
 	// Ops moves expensive archive creation out of the request. Nil retains the
 	// synchronous path for lightweight embedders and focused handler tests.
 	Ops *ops.Service
+	// Files streams the one file a `"mode":"file"` link names (the browser's
+	// drag-out link, download_link.go). Nil answers that mode with 503.
+	Files FileLinkStreamer
+	// MultiTenant decides whether a link's redeem is held to the tenant host
+	// it was minted on and to its owner's tenant scope.
+	MultiTenant bool
 }
 
 // AttachSearchIndex / AttachThumbs wire the two optional halves of the

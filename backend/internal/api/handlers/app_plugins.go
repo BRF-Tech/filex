@@ -171,6 +171,10 @@ func (h *AppPlugins) checkOutputFolder(w http.ResponseWriter, r *http.Request, q
 			return nil, false
 		}
 	}
+	if !rootAllows(r.Context(), h.Store, st.ID, rel) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "the chosen folder is outside this token's root"})
+		return nil, false
+	}
 	if !aclAllowForPlugin(r.Context(), h.ACL, h.Store, st.ID, rel, acl.LevelEditor, pluginID) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "you may not write into the chosen folder"})
 		return nil, false
@@ -194,6 +198,13 @@ func (h *AppPlugins) checkOutputFolder(w http.ResponseWriter, r *http.Request, q
 // until 2026-09-20, so an outside visitor could queue a row the authenticated
 // caller beside them was refused. Raise it here and both doors move together.
 const maxJobParamsBytes = 64 << 10
+
+// maxPluginPaths is the largest selection an app is handed: by the run that
+// opens its screen (authorise) and by every event of that screen (viewEvent).
+// One number for both, because the browser now sends the whole selection on
+// each event (filex #64) and every path costs an ACL walk — an event door
+// wider than the run door would sell a crafted body thousands of them.
+const maxPluginPaths = 500
 
 // pluginACLNeed is the ACL level a caller must hold on every input of a job:
 // viewer to read, editor once the job puts bytes back on the storage, and
@@ -284,7 +295,7 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "paths are required"})
 		return nil, false
 	}
-	if len(paths) > 500 {
+	if len(paths) > maxPluginPaths {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too many paths"})
 		return nil, false
 	}
@@ -361,6 +372,13 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 		rel := strings.Trim(path.Clean("/"+strings.ReplaceAll(raw, "\\", "/")), "/")
 		if rel == "" || rel == "." {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a storage root cannot be an input"})
+			return nil, false
+		}
+		// A root-confined token (the app token a host hands an embed) reaches
+		// only its folder, here as on every other door; the ACL below is the
+		// PERSON's, which an admin-bound token clears everywhere.
+		if !rootAllows(r.Context(), h.Store, storageID, rel) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "outside this token's root: " + rel})
 			return nil, false
 		}
 		if !aclAllowForPlugin(r.Context(), h.ACL, h.Store, storageID, rel, need, p.Row.ID) {
@@ -624,9 +642,20 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 	// The person's own address, for `context.actor.ip` — the same reading
 	// (trusted proxies included) a public page gets as `visitor_ip`.
 	r = r.WithContext(wasmplugin.WithActorIP(r.Context(), clientIP(r)))
+	// `paths` is the selection the screen was opened on, echoed by the browser
+	// on every event; `path` is the older single-row spelling, still honoured
+	// for a client that sends nothing else. ⚠ `paths` wins when both come: a
+	// screen opened on three files that is answered about the first one only
+	// is filex #64 (the second screen said "a.txt", the job ran on one file).
+	// Every path is judged again below for the person asking — the browser
+	// echoing a selection proves nothing about it.
 	paths := req.Paths
 	if len(paths) == 0 && req.Path != "" {
 		paths = []string{req.Path}
+	}
+	if len(paths) > maxPluginPaths {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too many paths"})
+		return
 	}
 	var rels []string
 	if len(paths) > 0 {
@@ -641,6 +670,10 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 		}
 		lk, _ := h.Store.(e2e.NodeByPathLookup)
 		for _, rel := range resolved {
+			if !rootAllows(r.Context(), h.Store, req.StorageID, rel) {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "outside this token's root: " + rel})
+				return
+			}
 			if !aclAllowID(r.Context(), h.ACL, h.Store, req.StorageID, rel, acl.LevelViewer) {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "insufficient permission: " + rel})
 				return

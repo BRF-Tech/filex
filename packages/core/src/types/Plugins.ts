@@ -478,6 +478,18 @@ export type PluginRunResult =
 export interface PluginViewEventBody {
   /** Adapter-qualified wire path of the row the view was opened on. */
   path?: string;
+  /**
+   * Every row the view was opened on, adapter-qualified, in selection order.
+   *
+   * ⚠⚠ Sent on EVERY event of a screen opened on a selection, not only the
+   * first: the server builds the event's inputs from it (and falls back to
+   * `path` only when it is absent), so a conversation that echoed `path`
+   * alone shrank to the first file after the opening screen — the second
+   * screen said "a.txt" where the first said "3 files", and the job its
+   * submit queued ran on one file (#64). The server re-checks each path for
+   * the person asking; this is a report of the selection, not a grant.
+   */
+  paths?: string[];
   storage_id?: number;
   state?: Record<string, unknown>;
   event: 'open' | 'change' | 'submit' | 'action';

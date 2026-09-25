@@ -35,7 +35,7 @@
  * Owner select answers from a field the rows ALREADY carry — the same bargain
  * as type, date and size, and it is named in the same sentence under the
  * count. ⚠ It is offered on NAME searches only: the explorer maps a content
- * hit onto the listing shape by hand (`FileExplorer.advHitToNode`) and that
+ * hit onto the listing shape by hand (`lib/searchHit.hitToNode`) and that
  * mapping does not carry the owner through, so under the content scopes every
  * row would read as "System" — a wrong answer, which is worse than a control
  * that says why it is off.
@@ -123,7 +123,7 @@ const props = defineProps<{
    * carries `storage` (the drive's name) as well as its id, the same way the
    * starred and recently-opened handlers have always answered
    * (`handlers/search.go` `describeHits`). What is left is the explorer's own
-   * hand-written mapping, `FileExplorer.advHitToNode`, which builds a listing
+   * hand-written mapping, `lib/searchHit.hitToNode`, which builds a listing
    * row from the hit and does not read that field — so the caller still has to
    * pass `false` on a multi-storage install until it does.
    */
@@ -263,7 +263,7 @@ const PEOPLE_FIXED: PeopleFilter[] = ['any', 'me', 'system'];
  * maps those hits onto the listing shape by hand; that mapping carries no
  * owner, so every row would read as "System" and both `me` and `system` would
  * answer the wrong question confidently. Off, and it says so, until the
- * mapping carries it (`FileExplorer.advHitToNode`).
+ * mapping carries it (`lib/searchHit.hitToNode`).
  */
 const ownerFilterable = computed(() => scope.value === 'name');
 

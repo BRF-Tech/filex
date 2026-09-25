@@ -22,7 +22,7 @@ import { PluginPageView, useFileApi } from '@brftech/filex-core';
 import type { ExplorerConfig } from '@brftech/filex-core';
 import { explorerAuth } from '@/lib/explorerConfig';
 import { getStoredLocale } from '@/i18n';
-import { effectiveTheme } from '@/lib/theme';
+import { liveTheme } from '@/lib/theme';
 import { currentMountBase } from '@/router';
 
 // The product's palette — main.ts already loads it for the whole app; the
@@ -38,7 +38,9 @@ const path = computed(() => (typeof route.query.path === 'string' ? route.query.
 // The ACTIVE language (web/src/i18n decides it) — a language pack's included;
 // this was `tr ? tr : en`, so the page chrome stayed English under Spanish.
 const locale = computed<string>(() => getStoredLocale());
-const theme = computed(() => effectiveTheme());
+// ⚠ LIVE, not `computed(() => effectiveTheme())`: that is read once, and an
+// open app page kept the mode it was opened in (#57, lib/theme → liveTheme).
+const theme = liveTheme;
 
 // ⚠ The DEFAULT plugin endpoints, not a copy of them: `useFileApi` derives
 // every `/api/files/plugins/…` template from the same config the explorer

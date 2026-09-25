@@ -51,6 +51,17 @@ type updateStatusResponse struct {
 	PackageManager     string `json:"package_manager,omitempty"`
 	PackageManagerName string `json:"package_manager_name,omitempty"`
 	UpgradeCommand     string `json:"upgrade_command,omitempty"`
+
+	// Behavior is what this install does by itself about a new release —
+	// Policy as far as the install can carry it out: off | announce | patch |
+	// minor. PolicyLimit says why that is less than Policy asks for
+	// (disabled | container | package | zero_major) and is absent when the
+	// policy is in force; Policy stays what the operator saved. Worked out by
+	// update.EffectiveOf: the page words these two and works nothing out from
+	// mode + policy (#72: a Homebrew install set to "patch" read "install
+	// patches", which it never does).
+	Behavior    string `json:"behavior"`
+	PolicyLimit string `json:"policy_limit,omitempty"`
 }
 
 type updateRelease struct {
@@ -152,7 +163,9 @@ func (h *Update) status(lang string) updateStatusResponse {
 	if h.svc == nil {
 		resp.Reason = srvtext.Text(lang, "server.update.reason.disabled", nil)
 		resp.Policy = string(update.PolicyOff)
-		describeInstall(&resp, update.DetectInstall())
+		inst := update.DetectInstall()
+		describeInstall(&resp, inst)
+		describeEffective(&resp, update.EffectiveOf(update.PolicyOff, false, inst.Mode, update.Version{}))
 		resp.CanSelfApply = false // no updater, nothing to apply with
 		return resp
 	}
@@ -160,6 +173,7 @@ func (h *Update) status(lang string) updateStatusResponse {
 	resp.Enabled = h.svc.Enabled()
 	resp.Policy = string(h.svc.Policy())
 	describeInstall(&resp, h.svc.Install())
+	describeEffective(&resp, h.svc.Effective())
 	resp.RestartRequired = h.svc.RestartRequired()
 	resp.CheckError = st.LastError
 	resp.LastApplied = st.LastApplied
@@ -198,6 +212,13 @@ func describeInstall(resp *updateStatusResponse, inst update.Install) {
 		resp.PackageManagerName = inst.Manager.Label()
 		resp.UpgradeCommand = inst.UpgradeCommand()
 	}
+}
+
+// describeEffective fills what the policy badge says: what the install does,
+// and why that is less than the saved policy when it is.
+func describeEffective(resp *updateStatusResponse, e update.Effective) {
+	resp.Behavior = string(e.Behavior)
+	resp.PolicyLimit = string(e.Limit)
 }
 
 // instructions renders the copy-paste upgrade steps for this install shape.

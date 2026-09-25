@@ -18,6 +18,7 @@
  */
 
 import type { UiProfile } from '../lib/uiProfile';
+import type { GlobalSearchHit, GlobalSearchScope } from '../composables/useFileApi';
 
 export type { UiProfile };
 
@@ -806,6 +807,67 @@ export interface ExplorerConfig {
      *  ONE subscriber (the mounted explorer) and overwrites it on remount. */
     onChange?: (cb: () => void) => void;
   };
+
+  /**
+   * #47 — the host holds several accounts at once (the desktop app's rail),
+   * and ⌘K's "Everywhere" group should search all of them.
+   *
+   * The explorer never talks to another account's server itself: it has no
+   * credential for one, and it must not be handed any. Every call that reaches
+   * another account goes through this hook, and the host answers it with the
+   * credential it already keeps for that account. Hits come back tagged with
+   * the account they belong to (`GlobalSearchHit.account`) and the palette
+   * draws one group per account under a badge, this mount's own first.
+   *
+   * Absent — the web admin, every embed, a desktop with one account — and the
+   * palette is exactly what it was: this account's hits, no badges.
+   */
+  accountSearch?: AccountSearchHook;
+}
+
+/** One signed-in account, as the palette's group badge draws it. */
+export interface SearchAccount {
+  /** The host's own id for the account; passed back on every hook call. */
+  id: string;
+  /** Short name on the badge — the server's brand name or its host. */
+  label: string;
+  /** Second line, quieter — typically the email signed in there. */
+  detail?: string;
+  /** The account's colour on the host (the rail avatar's), for the badge dot. */
+  color?: string;
+}
+
+/** See `ExplorerConfig.accountSearch`. */
+export interface AccountSearchHook {
+  /** The account THIS explorer is mounted for — heads its own group. */
+  self: SearchAccount;
+  /** Every OTHER account signed in right now. Read on each query, so an
+   *  account added or signed out while the explorer is mounted counts. */
+  others: () => SearchAccount[] | Promise<SearchAccount[]>;
+  /** `/api/files/search` on that account's server, with its credential. */
+  search: (
+    accountId: string,
+    query: string,
+    opts: { limit: number; scope: GlobalSearchScope },
+  ) => Promise<GlobalSearchHit[]>;
+  /**
+   * Open another account's hit — the host switches to that account. The hit
+   * arrives ADDRESSED (`name://rel`, as a listing row carries it): the host
+   * never re-derives where a file is.
+   */
+  open: (accountId: string, item: SearchHitItem) => void | Promise<void>;
+  /** Download another account's hit. Absent: its rows offer no Download. */
+  download?: (accountId: string, item: SearchHitItem) => void | Promise<void>;
+  /** Drag another account's hit out to the OS. Absent: its rows do not drag. */
+  dragStart?: (accountId: string, items: SearchHitItem[]) => void | Promise<unknown>;
+}
+
+/** A search hit, addressed — the `{path, basename, type}` a listing row hands
+ *  the drag-out hook, with `path` = `name://rel`. */
+export interface SearchHitItem {
+  path: string;
+  basename: string;
+  type: 'file' | 'dir';
 }
 
 /** Component emits — the parent listens for these events. */

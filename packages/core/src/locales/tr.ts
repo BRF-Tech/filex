@@ -1329,6 +1329,19 @@ export const tr: Record<string, string> = {
   'storages.fields.tls': 'FTPS (açık AUTH TLS)',
   'storages.fields.url': 'Temel URL',
   'storages.fields.user': 'Kullanıcı',
+  'storages.fields.s3AttemptTimeout': 'Deneme zaman aşımı (saniye)',
+  'storages.fields.s3MaxAttempts': 'İstek başına deneme sayısı',
+  'storages.fields.s3TotalTimeout': 'Vazgeçme süresi (saniye)',
+  'storages.fieldHelp.s3AttemptTimeout': 'Tek bir denemenin depodan bir yaşam belirtisi için bekleyebileceği süre: bağlanma, TLS el sıkışması, istek gönderildikten sonraki cevap ve cevabın her yeni parçası. İlerleyen bir aktarım, süresi ne olursa olsun hiçbir zaman kesilmez; deponun almayı bıraktığı bir yükleme 60 saniye sonra, bu değer daha uzunsa bu kadar sonra kesilir. Kopyalama ve yeniden adlandırma cevap için 10 dakikaya kadar bekler, çünkü depo bunları ancak kopya bittiğinde cevaplar.',
+  'storages.fieldHelp.s3MaxAttempts': 'Hata geçebilecek türdeyse bir isteğin toplamda kaç kez deneneceği: ağ hatası, zaman aşımı, 5xx cevabı, hız sınırlaması. 1 yeniden denemeyi kapatır. Bir ret (403, bulunmayan bir kova, çözümlenmeyen bir sunucu adı) hiçbir zaman yeniden denenmez.',
+  'storages.fieldHelp.s3TotalTimeout': 'İlk denemeden itibaren bu kadar saniye içinde bitemeyecek yeni bir deneme başlatılmaz; böylece çalışmayan bir depoya yükleme ya da listeleme, kesintiyi bu süre içinde bildirir. Sürmekte olan bir aktarım kesilmez. Zaman aşımına uğrayan bir istek ancak bu değer deneme zaman aşımının en az iki katıysa yeniden denenir.',
+  'storages.fields.attemptTimeout': 'Deneme zaman aşımı (saniye)',
+  'storages.fields.maxAttempts': 'İstek başına deneme sayısı',
+  'storages.fields.totalTimeout': 'Vazgeçme süresi (saniye)',
+  'storages.fieldHelp.attemptTimeout': 'Tek bir denemenin sunucudan bir yaşam belirtisi için bekleyebileceği süre: bağlanma, oturum açma, her isteğin cevabı ve bir aktarımın her yeni parçası. İlerleyen bir aktarım, süresi ne olursa olsun hiçbir zaman kesilmez; sunucunun almayı bıraktığı bir yükleme 60 saniye sonra, bu değer daha uzunsa bu kadar sonra kesilir.',
+  'storages.fieldHelp.webdavAttemptTimeout': 'Tek bir denemenin sunucudan bir yaşam belirtisi için bekleyebileceği süre: bağlanma, oturum açma, her isteğin cevabı ve bir aktarımın her yeni parçası. İlerleyen bir aktarım, süresi ne olursa olsun hiçbir zaman kesilmez; sunucunun almayı bıraktığı bir yükleme 60 saniye sonra, bu değer daha uzunsa bu kadar sonra kesilir. Kopyalama, taşıma ve silme cevap için 10 dakikaya kadar bekler, çünkü sunucu bunları ancak iş bittiğinde cevaplar.',
+  'storages.fieldHelp.maxAttempts': 'Hata geçebilecek türdeyse bir isteğin toplamda kaç kez deneneceği: bağlantı reddedilir ya da kopar, cevap zamanında gelmez, sunucu şu an hizmet veremediğini söyler (5xx). 1 yeniden denemeyi kapatır. Bir ret (yanlış parola, bulunmayan bir klasör, doğrulanamayan bir sertifika) hiçbir zaman yeniden denenmez; gönderilmeye başlamış bir yükleme de yeniden denenmez.',
+  'storages.fieldHelp.totalTimeout': 'İlk denemeden itibaren bu kadar saniye içinde bitemeyecek yeni bir deneme başlatılmaz; böylece çalışmayan bir sunucu bu süre içinde bildirilir. Sürmekte olan bir aktarım kesilmez. Zaman aşımına uğrayan bir istek ancak bu değer deneme zaman aşımının en az iki katıysa yeniden denenir.',
 
 
   /* === gezinti:g1 — gezinti paneli (SideNav) === */

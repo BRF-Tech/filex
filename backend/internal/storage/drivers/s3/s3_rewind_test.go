@@ -41,7 +41,7 @@ func flakyS3(t *testing.T, fail int32, attempts *int32, got *[]byte) *Driver {
 			credentials.NewStaticCredentialsProvider("fake", "fake", ""),
 		),
 		// The production retryer, so the test measures the budget we ship.
-		awsconfig.WithRetryer(newRetryer),
+		awsconfig.WithRetryer(func() aws.Retryer { return newRetryer(defaultPolicy()) }),
 	)
 	require.NoError(t, err)
 

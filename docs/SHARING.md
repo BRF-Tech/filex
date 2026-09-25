@@ -34,6 +34,17 @@ link is opened by strangers on whatever browser they have — and anything that
 is not a browser navigating
 (`curl -O`, wget, a backup script) still gets the **bytes**, not a page.
 
+⚠ **Not a share: download tickets.** Two other kinds of credential-free URL
+exist, and neither is a share: the one-off archive of a selection (`/z/…`, from
+**Download** on several rows) and the one-file link the web app puts on a file
+you drag out onto your desktop (the same `/z/…`). They are not listed under
+**Shares** and cannot be revoked there, because there is nothing left to revoke
+by the time you could: they work once, for minutes (a drag link for one minute
+at most), only for what you selected, and a drag link is checked again against
+*your* permissions at the moment it is used. Each drag-out download is in the
+Audit log. To give someone a file, make a share link — a ticket you copy out of
+your browser is already spent or about to be.
+
 - [Share links (download)](#share-links-download)
 - [File requests (upload / file-drop)](#file-requests-upload--file-drop)
 - [Emailing a link](#emailing-a-link)

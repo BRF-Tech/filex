@@ -151,3 +151,63 @@ func indexOf(lines []string, want string) int {
 	}
 	return -1
 }
+
+// #72: the policy badge said the saved policy ("installs patches") on an
+// install that cannot apply anything by itself. The status now carries what
+// the install does (behavior) and why that is less than the policy
+// (policy_limit), worked out on the server; the policy stays as it was saved.
+func TestUpdateStatus_EffectivePolicyPerInstall(t *testing.T) {
+	patch := update.Release{Version: "v0.7.6", AutoOK: true}
+	type effective struct {
+		Policy      string `json:"policy"`
+		Behavior    string `json:"behavior"`
+		PolicyLimit string `json:"policy_limit"`
+	}
+	read := func(t *testing.T, inst update.Install) effective {
+		t.Helper()
+		h, _ := checkedStatus(t, inst, "", patch)
+		rec := httptest.NewRecorder()
+		h.Status(rec, httptest.NewRequest(http.MethodGet, "/api/admin/update", nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		var e effective
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &e))
+		return e
+	}
+
+	for _, tc := range []struct {
+		name     string
+		inst     update.Install
+		behavior string
+		limit    string
+	}{
+		{"homebrew", brewCask, "announce", "package"},
+		{"package, manager unknown", update.Install{Mode: update.ModePackage}, "announce", "package"},
+		{"container", update.Install{Mode: update.ModeDocker}, "announce", "container"},
+		{"binary", update.Install{Mode: update.ModeBinary}, "patch", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := read(t, tc.inst)
+			assert.Equal(t, "patch", e.Policy, "the saved policy is reported as saved")
+			assert.Equal(t, tc.behavior, e.Behavior)
+			assert.Equal(t, tc.limit, e.PolicyLimit)
+		})
+	}
+}
+
+// Checking switched off: whatever the policy says, nothing happens, and the
+// status says so instead of repeating the policy.
+func TestUpdateStatus_CheckingOffOverridesThePolicy(t *testing.T) {
+	svc := update.New(update.Config{
+		Enabled:        false,
+		Policy:         update.PolicyPatch,
+		CurrentVersion: "v0.7.6",
+		Install:        update.Install{Mode: update.ModeBinary},
+	})
+	rec := httptest.NewRecorder()
+	handlers.NewUpdate(svc).Status(rec, httptest.NewRequest(http.MethodGet, "/api/admin/update", nil))
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, "patch", body["policy"])
+	assert.Equal(t, "off", body["behavior"])
+	assert.Equal(t, "disabled", body["policy_limit"])
+}

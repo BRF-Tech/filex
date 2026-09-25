@@ -7,6 +7,7 @@ package sync_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,29 +26,45 @@ import (
 	"github.com/brf-tech/filex/backend/internal/testutil/dbtest"
 )
 
-// racingStore lets another writer win the insert of one path: the first
-// CreateNode for it writes the row through the real store, then fails the
-// caller's insert the way the unique index does.
+// racingStore lets another writer win the insert of one path, the two ways
+// that happens (issue #70):
+//
+//   - inside the directory's transaction the insert is refused the way the
+//     unique index refuses it while another connection holds that key —
+//     nothing is written; the refused transaction is rolled back anyway;
+//   - then, applied again one entry at a time, the first CreateNode for it
+//     writes the row through the real store and fails the caller's insert the
+//     same way: the other writer committed between the lookup and the insert.
 type racingStore struct {
 	db.Store
-	path string
-	mu   gosync.Mutex
-	done bool
+	pool    *sql.DB
+	path    string
+	mu      gosync.Mutex
+	refused bool
+	done    bool
 }
+
+var errUnique = errors.New("UNIQUE constraint failed: nodes.storage_id, nodes.path_hash")
 
 func (r *racingStore) CreateNode(ctx context.Context, n *model.Node) (*model.Node, error) {
 	r.mu.Lock()
-	first := !r.done && n.Path == r.path
-	if first {
+	race := !r.done && n.Path == r.path
+	inTx := db.InTx(ctx, r.pool)
+	if race && inTx {
+		r.refused = true
+	} else if race {
 		r.done = true
 	}
 	r.mu.Unlock()
-	if first {
+	switch {
+	case race && inTx:
+		return nil, errUnique
+	case race:
 		winner := *n
 		if _, err := r.Store.CreateNode(ctx, &winner); err != nil {
 			return nil, err
 		}
-		return nil, errors.New("UNIQUE constraint failed: nodes.storage_id, nodes.path_hash")
+		return nil, errUnique
 	}
 	return r.Store.CreateNode(ctx, n)
 }
@@ -56,11 +73,13 @@ func (r *racingStore) CreateNode(ctx context.Context, n *model.Node) (*model.Nod
 // on with that writer's row and walks the folder.
 //
 // Break: drop the `raced` branch in catalogueEntry — the scan leaves
-// /yaris/icerik.txt and /yaris/alt/derin.txt out of the catalogue.
+// /yaris/icerik.txt and /yaris/alt/derin.txt out of the catalogue. Or, in
+// applyListing, return the transaction's error instead of applying the
+// directory again one entry at a time — the run fails.
 func TestFullScanWalksIntoAFolderAnotherWriterCreated(t *testing.T) {
 	ctx := context.Background()
-	_, raw := dbtest.NewTestDB(t)
-	store := &racingStore{Store: raw, path: "/yaris"}
+	pool, raw := dbtest.NewTestDB(t)
+	store := &racingStore{Store: raw, pool: pool, path: "/yaris"}
 	st, _, root := localStorage(t, raw)
 	writeUnder(t, root, "yaris/icerik.txt", "x")
 	writeUnder(t, root, "yaris/alt/derin.txt", "y")
@@ -71,7 +90,8 @@ func TestFullScanWalksIntoAFolderAnotherWriterCreated(t *testing.T) {
 	t.Cleanup(w.Stop)
 	require.NoError(t, w.Trigger(ctx, st.ID))
 
-	require.True(t, store.done, "the race was staged")
+	require.True(t, store.refused, "the directory's transaction lost the insert")
+	require.True(t, store.done, "and so did its entry applied on its own")
 	for _, p := range []string{"/yaris", "/yaris/icerik.txt", "/yaris/alt", "/yaris/alt/derin.txt", "/baska.txt"} {
 		assert.NotNil(t, node(t, raw, st.ID, p), "%s is catalogued", p)
 	}

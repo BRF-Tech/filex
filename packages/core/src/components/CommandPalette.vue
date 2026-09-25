@@ -20,11 +20,28 @@
  *      rendered as pure text nodes (no innerHTML).
  *   5. Saved searches — localStorage-backed (`filex.saved-searches`, max 10);
  *      "save current query" command + per-row delete.
+ *
+ * #47 — a hit is something to act on, not only to open:
+ *   6. Each hit row carries a Download button (`download-hit`) and drags out
+ *      (`drag-hit`, with the DragEvent). The palette only says WHICH hit; the
+ *      explorer answers through the same hooks a listing row uses, and
+ *      `hitCan` lets it withhold a verb it cannot serve for that hit.
+ *   7. Hits stamped with an `account` (a host with several accounts — the
+ *      desktop rail) are drawn one group per account under a badge, each
+ *      group capped on its own. Unstamped hits draw exactly as before.
+ *   8. A drag let go INSIDE the palette is swallowed (`drop-inside`): the
+ *      explorer's root turns an OS file drop into an UPLOAD, and the palette
+ *      sits inside that root.
+ *
+ * #71 — `warm-hit` when the pointer rests on / presses a draggable hit: the
+ *   explorer may need a server-minted link for the drag, and `dragstart` is
+ *   too late to ask (lib/dragOut createDragLinks).
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import type { LocaleCode } from '../types/ExplorerConfig';
+import type { LocaleCode, SearchAccount } from '../types/ExplorerConfig';
 import type { FileNode, ViewMode } from '../types/FileNode';
 import type { GlobalSearchHit } from '../composables/useFileApi';
+import { groupHitsByAccount } from '../lib/searchHit';
 import { matchedInContent, snippetSegments } from '../lib/snippet';
 import { actionIconSvg } from '../lib/actionIcons';
 import { fileIconTile } from '../lib/fileIcons';
@@ -52,6 +69,13 @@ const props = defineProps<{
    * behaviour every other caller has had: a blank palette.
    */
   initialQuery?: string;
+  /**
+   * #47 — may this hit be downloaded / dragged out? Absent = yes to both.
+   * The explorer knows what a hit's account and this host can do (a folder
+   * cannot ride the browser's single-file drag; another account's hit needs
+   * the host's hook); the palette only draws the answer.
+   */
+  hitCan?: (hit: GlobalSearchHit, action: 'download' | 'drag') => boolean;
 }>();
 
 const emit = defineEmits<{
@@ -66,6 +90,13 @@ const emit = defineEmits<{
   (e: 'go-up'): void;
   /* bul:s3 — an "everywhere" hit was chosen. */
   (e: 'open-hit', hit: GlobalSearchHit): void;
+  /* #47 — the hit's Download button / a drag started on its row / a drag let
+     go inside the palette (swallowed here — see the file header, point 8). */
+  (e: 'download-hit', hit: GlobalSearchHit): void;
+  (e: 'drag-hit', hit: GlobalSearchHit, ev: DragEvent): void;
+  (e: 'drop-inside'): void;
+  /* #71 — the pointer rests on / presses a draggable hit. */
+  (e: 'warm-hit', hit: GlobalSearchHit): void;
   /* wiring:int — settings surfaces reachable from anywhere via the palette */
   (e: 'open-theme'): void;
   (e: 'open-shortcut-settings'): void;
@@ -87,7 +118,13 @@ type PaletteItem =
   | { kind: 'file'; id: string; label: string; icon: string; node: FileNode }
   | { kind: 'command'; id: string; label: string; icon: string; command: string }
   /* bul:s3 — everywhere hit / saved search / save-current-query. */
-  | { kind: 'hit'; id: string; label: string; icon: string; hit: GlobalSearchHit; crumb: string; inContent: boolean; snippet: string }
+  | {
+      kind: 'hit'; id: string; label: string; icon: string; hit: GlobalSearchHit; crumb: string; inContent: boolean; snippet: string;
+      /* #47 — the account badge drawn ABOVE this row (first row of its group only). */
+      groupHead?: SearchAccount;
+      canDownload: boolean;
+      canDrag: boolean;
+    }
   | { kind: 'saved'; id: string; label: string; icon: string; query: string }
   | { kind: 'save'; id: string; label: string; icon: string; query: string };
 
@@ -221,7 +258,9 @@ function scheduleEverywhere(q: string) {
     try {
       const hits = await fn(q);
       if (seq !== everywhereSeq) return; // stale response — a newer query won
-      everywhere.value = Array.isArray(hits) ? hits.slice(0, EVERYWHERE_LIMIT) : [];
+      // #47 — capped per ACCOUNT in hitItems (groupHitsByAccount), not here: a
+      // flat cut would let the first account's eight rows hide every other.
+      everywhere.value = Array.isArray(hits) ? hits : [];
     } catch {
       if (seq === everywhereSeq) everywhere.value = [];
     } finally {
@@ -244,18 +283,66 @@ function hitCrumb(h: GlobalSearchHit): string {
   return parent || '/';
 }
 
-const hitItems = computed<HitItem[]>(() =>
-  everywhere.value.map((h) => ({
-    kind: 'hit' as const,
-    id: `hit:${h.storage_id ?? ''}:${h.path ?? ''}:${h.id ?? ''}`,
-    label: String(h.name ?? h.path ?? ''),
-    icon: '', // hit rows draw their real tile — see iconHtml()
-    hit: h,
-    crumb: hitCrumb(h),
-    inContent: matchedInContent(h.matched),
-    snippet: typeof h.snippet === 'string' ? h.snippet : '',
-  })),
-);
+/* #47 — flattened in DRAWN order: group by group, so the keyboard's ↑/↓ and
+   the rows on screen walk the same sequence. */
+const hitItems = computed<HitItem[]>(() => {
+  const can = props.hitCan;
+  const out: HitItem[] = [];
+  for (const group of groupHitsByAccount(everywhere.value, EVERYWHERE_LIMIT)) {
+    group.hits.forEach((h, i) => {
+      out.push({
+        kind: 'hit' as const,
+        // The account is part of the key: two accounts can both hold node 7
+        // at `a.txt` on storage 1.
+        id: `hit:${h.account?.id ?? ''}:${h.storage_id ?? ''}:${h.path ?? ''}:${h.id ?? ''}`,
+        label: String(h.name ?? h.path ?? ''),
+        icon: '', // hit rows draw their real tile — see iconHtml()
+        hit: h,
+        crumb: hitCrumb(h),
+        inContent: matchedInContent(h.matched),
+        snippet: typeof h.snippet === 'string' ? h.snippet : '',
+        groupHead: i === 0 ? group.account : undefined,
+        canDownload: can ? can(h, 'download') : true,
+        canDrag: can ? can(h, 'drag') : true,
+      });
+    });
+  }
+  return out;
+});
+
+/* === #47 — hit verbs ==================================================== */
+
+function downloadHit(it: HitItem) {
+  if (!it.canDownload) return;
+  emit('download-hit', it.hit);
+}
+
+function warmHit(it: HitItem) {
+  if (it.canDrag) emit('warm-hit', it.hit);
+}
+
+function onHitDragStart(it: HitItem, ev: DragEvent) {
+  if (!it.canDrag) {
+    ev.preventDefault();
+    return;
+  }
+  emit('drag-hit', it.hit, ev);
+}
+
+/**
+ * Everything dragged over the palette stops here. The explorer's root owns
+ * `dragenter`/`dragover`/`drop` for uploads, and the palette is inside it: a
+ * hit dragged out through the desktop shell is an OS FILE drag, so letting it
+ * bubble would light the upload overlay and, on release, upload the shell's
+ * stand-in copy into whatever folder is open behind the palette.
+ */
+function onBackdropDragOver(ev: DragEvent) {
+  ev.preventDefault();
+}
+function onBackdropDrop(ev: DragEvent) {
+  ev.preventDefault();
+  emit('drop-inside');
+}
 
 /* === bul:s3 — saved searches (localStorage) ============================= */
 
@@ -450,6 +537,10 @@ onBeforeUnmount(() => {
       class="fe-modal__backdrop fe-cmdp__backdrop"
       role="presentation"
       @click="emit('close')"
+      @dragenter.stop="onBackdropDragOver"
+      @dragover.stop="onBackdropDragOver"
+      @dragleave.stop
+      @drop.stop="onBackdropDrop"
     >
       <div
         class="fe-cmdp"
@@ -526,34 +617,67 @@ onBeforeUnmount(() => {
             <div v-if="everywhereLoading && !hitItems.length" class="fe-cmdp__loading">
               {{ t('palette.searching') }}
             </div>
-            <button
-              v-for="(it, i) in hitItems"
-              :key="it.id"
-              type="button"
-              class="fe-cmdp__item fe-cmdp__item--hit"
-              :class="{ 'is-active': hitOffset + i === active }"
-              role="option"
-              :aria-selected="hitOffset + i === active"
-              @mouseenter="active = hitOffset + i"
-              @click="choose(it)"
-            >
-              <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons + lib/fileIcons -->
-              <span class="fe-cmdp__icon" aria-hidden="true" v-html="iconHtml(it)"></span>
-              <span class="fe-cmdp__hitbody">
-                <span class="fe-cmdp__hitline">
-                  <span class="fe-cmdp__label"><bdi>{{ it.label }}</bdi></span>
-                  <span v-if="it.inContent" class="fe-cmdp__badge">{{ t('search.in_content') }}</span>
+            <template v-for="(it, i) in hitItems" :key="it.id">
+              <!-- #47 — one badge per signed-in account, above its first row. -->
+              <div
+                v-if="it.groupHead"
+                class="fe-cmdp__acct"
+                data-testid="palette-account-group"
+                :data-account="it.groupHead.id"
+              >
+                <span
+                  class="fe-cmdp__acct-dot"
+                  aria-hidden="true"
+                  :style="it.groupHead.color ? { background: it.groupHead.color } : undefined"
+                ></span>
+                <span class="fe-cmdp__acct-label"><bdi>{{ it.groupHead.label }}</bdi></span>
+                <span v-if="it.groupHead.detail" class="fe-cmdp__acct-detail"><bdi>{{ it.groupHead.detail }}</bdi></span>
+              </div>
+              <!-- A div, not a button: the row now holds its own Download button,
+                   and a button inside a button is not HTML (same shape as the
+                   saved-search rows below). -->
+              <div
+                class="fe-cmdp__item fe-cmdp__item--hit"
+                :class="{ 'is-active': hitOffset + i === active }"
+                role="option"
+                tabindex="-1"
+                :aria-selected="hitOffset + i === active"
+                :data-account="it.hit.account?.id"
+                :draggable="it.canDrag ? 'true' : 'false'"
+                @mouseenter="active = hitOffset + i; warmHit(it)"
+                @pointerdown="warmHit(it)"
+                @click="choose(it)"
+                @keydown.enter.prevent="choose(it)"
+                @dragstart="onHitDragStart(it, $event)"
+              >
+                <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons + lib/fileIcons -->
+                <span class="fe-cmdp__icon" aria-hidden="true" v-html="iconHtml(it)"></span>
+                <span class="fe-cmdp__hitbody">
+                  <span class="fe-cmdp__hitline">
+                    <span class="fe-cmdp__label"><bdi>{{ it.label }}</bdi></span>
+                    <span v-if="it.inContent" class="fe-cmdp__badge">{{ t('search.in_content') }}</span>
+                  </span>
+                  <span v-if="it.crumb" class="fe-cmdp__crumb" :title="it.crumb">{{ it.crumb }}</span>
+                  <!-- Snippet: «»-highlights become <mark> via TEXT segments — never innerHTML. -->
+                  <span v-if="it.snippet" class="fe-cmdp__snippet">
+                    <template v-for="(seg, si) in snippetSegments(it.snippet)" :key="si">
+                      <mark v-if="seg.match" class="fe-cmdp__mark">{{ seg.text }}</mark>
+                      <template v-else>{{ seg.text }}</template>
+                    </template>
+                  </span>
                 </span>
-                <span v-if="it.crumb" class="fe-cmdp__crumb" :title="it.crumb">{{ it.crumb }}</span>
-                <!-- Snippet: «»-highlights become <mark> via TEXT segments — never innerHTML. -->
-                <span v-if="it.snippet" class="fe-cmdp__snippet">
-                  <template v-for="(seg, si) in snippetSegments(it.snippet)" :key="si">
-                    <mark v-if="seg.match" class="fe-cmdp__mark">{{ seg.text }}</mark>
-                    <template v-else>{{ seg.text }}</template>
-                  </template>
-                </span>
-              </span>
-            </button>
+                <button
+                  v-if="it.canDownload"
+                  type="button"
+                  class="fe-cmdp__hitact"
+                  data-testid="palette-hit-download"
+                  :title="t('ctx.download')"
+                  :aria-label="t('ctx.download')"
+                  draggable="false"
+                  @click.stop="downloadHit(it)"
+                ><!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons --><span aria-hidden="true" v-html="actionIconSvg('download')"></span></button>
+              </div>
+            </template>
           </template>
 
           <!-- bul:s3 — saved searches -->
