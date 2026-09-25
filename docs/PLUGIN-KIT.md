@@ -3,8 +3,9 @@
 This is the author's side of [APP-PLUGINS.md](APP-PLUGINS.md): the manifest,
 the exports filex calls, the host functions it offers, the screens it can
 draw for you, and a complete example. The Go SDK is `pkg/pluginkit` in the
-filex repository; any language that compiles to WebAssembly with WASI
-preview 1 can speak the same ABI (the tables below are the whole contract).
+filex repository; a language with an Extism PDK can speak the same ABI (the
+tables below are the whole contract; see [Other languages](#other-languages)
+for what has been measured).
 
 ## The shape of an app
 
@@ -68,8 +69,13 @@ func init() {
 }
 ```
 
-The test fixture `backend/internal/wasmplugin/testdata/echo` is a complete
-app that exercises every host function; copy it to start.
+The fastest start is the template repository,
+[BRF-Tech/filex-app-template](https://github.com/BRF-Tech/filex-app-template):
+a small working app (a menu action, the dialog it opens and a details-panel
+section, in English and Turkish), its tests against `plugintest`, a
+reproducible build that stamps `wasm.sha256`, and a release workflow. The
+test fixture `backend/internal/wasmplugin/testdata/echo` exercises every host
+function.
 
 ## The manifest (`filex-app.json`)
 
@@ -1124,3 +1130,13 @@ Extism memory pointer each (JSON, except the two framed chunk functions:
 JSON, `file_write` takes `[handle u64 LE][bytes]`). Any Extism PDK (Rust,
 JavaScript, Zig, C, …) can implement it; the Go SDK is simply the one filex
 ships and tests.
+
+Measured on v0.43.0: a Rust app on `extism-pdk` 1.4, built for
+`wasm32-unknown-unknown` (no WASI), exporting `describe` and `action_run` and
+calling `file_open` / `file_read` / `file_create` / `file_write` /
+`file_close`, installs through the permission review and runs from the file
+menu, a multi-megabyte input read chunk by chunk —
+[`examples/rust-minimal`](https://github.com/BRF-Tech/filex-app-template/tree/main/examples/rust-minimal)
+in the template. No other language has been tried yet, and neither have
+screens (`view_event`) outside Go; without the Go SDK there is no
+`plugintest` either, so such an app is tested by installing it.

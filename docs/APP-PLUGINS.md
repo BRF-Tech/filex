@@ -911,7 +911,8 @@ and [The public surface](BACKEND.md#the-public-surface) for the shapes.
 permission, the screen catalogue, [public links end to end](PLUGIN-KIT.md#public-links-end-to-end),
 and [a test kit](PLUGIN-KIT.md#testing-with-plugintest) that runs before
 `plugin.wasm` exists — all in stock Go. The two apps above are complete,
-readable examples.
+readable examples; to start your own, copy the template repository
+[BRF-Tech/filex-app-template](https://github.com/BRF-Tech/filex-app-template).
 
 ## Troubleshooting
 
