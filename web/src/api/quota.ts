@@ -1,3 +1,4 @@
+import type { MeasuredDrive } from '@brftech/filex-core';
 import { api } from './client';
 
 // Backend `internal/quota.Snapshot`. Note: percent_used is 0..100 (not 0..1)
@@ -13,6 +14,14 @@ export const quotaApi = {
   async me(): Promise<QuotaSnapshot> {
     const res = await api.get<QuotaSnapshot>('/files/quota/me');
     return res.data;
+  },
+
+  // How full each drive the caller can open is — RBAC-filtered server-side
+  // (handlers/quota_storages.go). The top bar's chip prints their total for a
+  // person without a quota (core `storageLine`).
+  async storages(): Promise<MeasuredDrive[]> {
+    const res = await api.get<{ storages?: MeasuredDrive[] }>('/files/quota/storages');
+    return Array.isArray(res.data?.storages) ? res.data.storages : [];
   },
 
   // ── koru:k3 — admin quota surface (Users → edit) ─────────────────

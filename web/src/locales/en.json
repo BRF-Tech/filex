@@ -1433,6 +1433,8 @@
     "unlimited": "Unlimited",
     "tooltip": "{used} of {limit} used ({percent})",
     "unlimitedTooltip": "{used} used · unlimited",
+    "unlimitedPartialTooltip": "at least {used} used · unlimited",
+    "atLeast": "≥ {used}",
     "usedIs": "Used: {used}",
     "usedOf": "Used: {used} of {quota} ({percent})"
   },

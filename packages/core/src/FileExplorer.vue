@@ -25,7 +25,7 @@ import type {
   ArchiveCreateFormat,
 } from './types/FileNode';
 import { isExternalUsable } from './types/FileNode';
-import { useFileApi, type GlobalSearchHit, type ManagerResponse } from './composables/useFileApi';
+import { useFileApi, type GlobalSearchHit, type ManagerResponse, type QuotaSnapshot } from './composables/useFileApi';
 import {
   useUploadChunked,
   isStagedUnsupported,
@@ -99,6 +99,7 @@ import {
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
 /* /cila:c wiring */
 import { coverageByStorage, coverageNotice, type CatalogCoverage } from './lib/catalogCoverage';
+import { needsMeasuredDrives, storageLine, type MeasuredDrive } from './lib/storageLine'; /* surucu:d1 — which number the storage line prints */
 /* wiring:c1 — tema galerisi */
 import ThemeGallery from './components/ThemeGallery.vue';
 import {
@@ -2284,33 +2285,29 @@ function onInspectorShareCreated(payload: { path: string; url: string }) {
  * every surface that has a person behind it draws the same line — this is the
  * shell, not a profile. `quotaMe()` answers null for a server without the
  * route, and null renders nothing at all.
+ *
+ * ⚠ WHICH number the line prints is `lib/storageLine`'s decision, not this
+ * function's. It used to print `used_bytes` for everybody — the person's
+ * upload counter (`SUM(nodes.size) WHERE owner_id = me`, and the upload path
+ * is the only one that sets an owner) — under "Storage", in the sentence
+ * Home's card uses for a drive's size. Measured on a production install
+ * (2026-09-25): card 245.3 GB, line 523.5 MB. Now a person with a quota sees
+ * their share of it; everybody else sees the drives the panel lists, from the
+ * same `homeStorages` the Home cards are drawn from, and the server is asked
+ * only for the drives the host sent no size for (the desktop app sends names
+ * only).
  */
-const quotaSnapshot = ref<{ used: number; total: number; unlimited: boolean } | null>(null);
+const quotaMine = ref<QuotaSnapshot | null>(null);
+const quotaDrives = ref<MeasuredDrive[] | null>(null);
+const quotaSnapshot = computed(() => storageLine(quotaMine.value, homeStorages.value, quotaDrives.value));
 async function loadQuota() {
   if (!identitySurfaces.value) {
-    quotaSnapshot.value = null;
+    quotaMine.value = null;
     return;
   }
   const q = await api.quotaMe();
-  if (!q) {
-    quotaSnapshot.value = null;
-    return;
-  }
-  const unlimited = !!q.unlimited || q.quota_bytes <= 0;
-  // ⚠ No ceiling AND nothing counted = nothing to say, so say nothing.
-  //
-  // Measured, not guessed: `used_bytes` is `SUM(nodes.size) WHERE owner_id = me`
-  // and `nodes.owner_id` is set by the UPLOAD path only — it is nil for every
-  // file a storage sync discovered (handlers/shared.go). On an install whose
-  // drives were mounted rather than uploaded into, the honest figure is
-  // therefore "0 B", and a line reading "0 B used" under a drive visibly full
-  // of files reads as a broken widget, not as a fact about quota. With a quota
-  // set the line still earns its place — the ceiling is real and uploads count
-  // against it — so only the no-quota-no-usage case is dropped.
-  quotaSnapshot.value =
-    unlimited && q.used_bytes <= 0
-      ? null
-      : { used: q.used_bytes, total: q.quota_bytes, unlimited };
+  quotaMine.value = q;
+  quotaDrives.value = needsMeasuredDrives(q, homeStorages.value) ? await api.storageUsage() : null;
 }
 
 /**

@@ -511,7 +511,10 @@ export interface ExplorerConfig {
     driver?: string;
     readOnly?: boolean;
     /** Bytes this storage holds, drawn as the caption on the Home storage
-     *  card. ⚠ It must be the same quantity for every caller who gets it. */
+     *  card, and summed into the storage line under the navigation for a
+     *  person without a quota (a storage left without it is measured by the
+     *  explorer itself, `GET /api/files/quota/storages`).
+     *  ⚠ It must be the same quantity for every caller who gets it. */
     usedBytes?: number;
   }>;
 
