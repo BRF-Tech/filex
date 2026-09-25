@@ -40,6 +40,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { DESKTOP, check, finish, sleep } from './lib/harness.mjs';
+import { activationWaitFactor, softActivation } from './lib/store-activation.mjs';
 
 if (process.platform !== 'win32') {
   // Not a skip: a Store package can only be installed on Windows, and a gate
@@ -116,6 +117,37 @@ async function cdpEval(port, expression) {
 
 let installLocation = '';
 let pfn = '';
+
+// The three checks that need Windows to activate the package (see
+// lib/store-activation.mjs for when a failure is only a warning).
+const SOFT = softActivation(process.env);
+const WAIT = activationWaitFactor(process.env);
+const softFailed = [];
+let activationFailed = false;
+function activationCheck(name, ok, detail = '') {
+  if (!ok) activationFailed = true;
+  if (ok || !SOFT) return check(name, ok, detail);
+  softFailed.push(name);
+  console.log(`WARN  ${name}${detail ? `  — ${detail}` : ''}  (activation on a CI runner; not a Store upload)`);
+  return false;
+}
+
+/** What a failed activation leaves behind — printed so the next red run says why. */
+function diagnoseActivation() {
+  const tryPs = (label, script) => {
+    try {
+      console.log(`--- ${label}\n${ps(script) || '(nothing)'}`);
+    } catch (e) {
+      console.log(`--- ${label}\n(could not read: ${String(e?.message ?? e).split('\n')[0]})`);
+    }
+  };
+  tryPs('session', `"interactive=$([Environment]::UserInteractive) session=$((Get-Process -Id $PID).SessionId) explorer=$((Get-Process explorer -ErrorAction SilentlyContinue | ForEach-Object SessionId) -join ',')"`);
+  tryPs('filex.exe processes of the variant', `Get-CimInstance Win32_Process -Filter "Name='filex.exe'" | Where-Object { $_.ExecutablePath -like (${q(installLocation)} + '*') } | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }`);
+  tryPs('package status', `Get-AppxPackage -Name ${q(VARIANT.identity)} | Select-Object Status, IsDevelopmentMode, SignatureKind | Format-List | Out-String`);
+  const logs = path.join(process.env.LOCALAPPDATA, 'Packages', pfn, 'LocalCache', 'Roaming', VARIANT.name, 'logs');
+  tryPs('app log (last 40 lines)', `if (Test-Path ${q(logs)}) { Get-ChildItem ${q(logs)} -Filter *.log | Sort-Object LastWriteTime | Select-Object -Last 1 | ForEach-Object { Get-Content $_.FullName -Tail 40 } } else { 'no log directory at ' + ${q(logs)} }`);
+}
+
 function killVariant() {
   if (!installLocation) return;
   ps(`Get-CimInstance Win32_Process -Filter "Name='filex.exe'" | Where-Object { $_.ExecutablePath -like (${q(installLocation)} + '*') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`);
@@ -170,13 +202,13 @@ try {
   const link = `${VARIANT.scheme}://ping?from=protocol`;
   ps(`Start-Process ${q(link)}`);
   let cmdline = '';
-  for (let i = 0; i < 40 && !cmdline; i++) {
+  for (let i = 0; i < 40 * WAIT && !cmdline; i++) {
     await sleep(500);
     cmdline = ps(`Get-CimInstance Win32_Process -Filter "Name='filex.exe'" | Where-Object { $_.ExecutablePath -like (${q(installLocation)} + '*') -and $_.CommandLine -like '*${VARIANT.scheme}://*' } | Select-Object -First 1 -ExpandProperty CommandLine`);
   }
   // Windows canonicalises the URI on the way (…//ping/?from=…): the sign-in
   // parser reads the host, so filex://auth/?… is the same link to it.
-  check('a protocol launch passes the link as argv[1]',
+  activationCheck('a protocol launch passes the link as argv[1]',
     /filex\.exe"\s+"filex-e2e:\/\/ping\/?\?from=protocol"\s*$/.test(cmdline), cmdline.replace(/^.*filex\.exe"/, 'filex.exe'));
   killVariant();
   await sleep(1500);
@@ -185,7 +217,7 @@ try {
   const port = 9300 + Math.floor(Math.random() * 90);
   ps(`Invoke-CommandInDesktopPackage -PackageFamilyName ${q(pfn)} -AppId 'filex' -Command ${q(path.join(installLocation, 'app', 'filex.exe'))} -Args '--remote-debugging-port=${port}'`);
   let state = null;
-  for (let i = 0; i < 60 && !state; i++) {
+  for (let i = 0; i < 60 * WAIT && !state; i++) {
     await sleep(500);
     try {
       state = await cdpEval(port, '(window.filexShell ?? window.filexApp).getState()');
@@ -193,7 +225,7 @@ try {
       /* not listening yet */
     }
   }
-  check('the app came up inside the package', !!state);
+  activationCheck('the app came up inside the package', !!state);
   if (state) {
     check('updates belong to the Microsoft Store', state.updateChannel === 'msstore' && state.update?.status === 'store', JSON.stringify(state.update));
     check('the login item is left to Windows Settings', state.launchAtLoginInOsSettings === true);
@@ -208,7 +240,8 @@ try {
 
   // ── 5. the startup task ─────────────────────────────────────────────
   const taskState = ps(`$k = 'HKCU:\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\SystemAppData\\' + ${q(pfn)} + '\\filexStartup'; if (Test-Path $k) { (Get-ItemProperty $k).State } else { 'missing' }`);
-  check('Windows registered the startup task, switched off', taskState === '0', `State=${taskState}`);
+  activationCheck('Windows registered the startup task, switched off', taskState === '0', `State=${taskState}`);
+  if (activationFailed) diagnoseActivation();
 } catch (e) {
   check('store-e2e ran to the end', false, String(e?.message ?? e));
 } finally {
@@ -225,5 +258,9 @@ try {
     console.log(`\n--keep: ${VARIANT.identity} stays installed from ${unpacked}`);
   }
   check('the real filex:// handler is untouched', realProtocolHandler() === handlerBefore, handlerBefore || '(none)');
+}
+if (softFailed.length) {
+  // GitHub turns this line into an annotation on the run.
+  console.log(`::warning title=Store package::${softFailed.length} activation check(s) did not pass on this runner (${softFailed.join('; ')}). Not a Store upload, so the release goes on; run \`pnpm e2e:store\` on a Windows desktop before submitting.`);
 }
 finish();
