@@ -62,7 +62,7 @@ Both Dockerfiles are multi-stage:
 1. `frontend-build` — node 20 + pnpm, builds packages + admin UI
 2. `embed-prep` — stages the dist files
 3. `backend-build` — golang 1.25, builds with `//go:embed` consuming the staged dist
-4. runtime — `alpine:3.20`; this is the only stage where slim and full differ.
+4. runtime — `alpine:3.24`; this is the only stage where slim and full differ.
    Both start `tini` as PID 1, which runs the entrypoint, which `exec`s filex —
    see [The init process](#the-init-process-pid-1)
 

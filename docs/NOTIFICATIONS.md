@@ -227,6 +227,8 @@ of them tickable on a target in **Admin → Webhooks**:
 | `file.trashed` | Soft delete — the file was moved into `.filex-trash/` and is restorable. |
 | `file.moved` | A file was moved or renamed. `meta.from` / `meta.to` carry both paths. |
 | `file.infected` | The async antivirus scan flagged a file; `meta.signature` names it. Quarantine into the trash is best-effort: `meta.quarantined` says whether it worked and `meta.trash_path` appears only when it did. |
+| `archive.created` | Background archive creation completed. The component file write does not also emit `file.uploaded`. |
+| `archive.extracted` | Archive extraction completed. One event describes the batch rather than emitting `file.uploaded` for every extracted member; `meta.count` carries the number of files. |
 | `share.created` | A public share link was created. |
 | `drop.received` | A file arrived through a public "request files" link. |
 | `comment.added` | Somebody commented on a file or folder. `meta` carries `comment_id` and the first 200 characters of the body. |
@@ -327,6 +329,8 @@ otherwise hit:
 | `file.deleted` | `dir` — the parent folder | A permanent removal leaves no row to select. |
 | `file.upload_failed` | `dir` — the parent folder | The bytes never landed; the folder they were headed for is where the user retries. |
 | `file.infected` | `trash` — the **original** path when it was quarantined; `file` — the original path when the driver had no move | Where the file actually is. |
+| `archive.created` | `file` — the new archive | Opens its folder with the archive selected. |
+| `archive.extracted` | `dir` — the extraction destination | Opens the folder containing the extracted members. |
 | `drop.received` | `dir` — the drop folder | A drop can carry several files, so there is no single row to select. |
 | `comment.added` | `file` **or** `dir` | Read from the node row's type — a comment can hang on a folder. |
 | `e2e.escrow_used` | `dir` — the encrypted folder | |

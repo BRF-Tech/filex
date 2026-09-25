@@ -9,7 +9,7 @@ import { useToastStore } from '@/stores/toast';
 import { useStorageDriversStore } from '@/stores/storageDrivers';
 import { extractError } from '@/api/client';
 import { StoragesApi } from '@/api/storages';
-import type { DiscoveredFolder, StorageDriver } from '@/api/types';
+import type { DiscoveredFolder, StorageDriver, SyncMode } from '@/api/types';
 import { secondsFromMinutes } from '@/lib/syncInterval';
 
 import Button from '@/components/ui/Button.vue';
@@ -19,6 +19,7 @@ import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
 import { DataTable, type DataColumn } from '@brftech/filex-core';
 import StorageDriverFields from '@/components/StorageDriverFields.vue';
+import StorageSyncMode from '@/components/StorageSyncMode.vue';
 
 const { t, te } = useI18n();
 const router = useRouter();
@@ -31,6 +32,8 @@ const name = ref('');
 const readOnly = ref(false);
 /** Poll cadence in minutes; '' = the server default. Seconds on the wire. */
 const syncIntervalMin = ref<number | ''>('');
+/** How the catalog is kept current (StorageSyncMode); the server default. */
+const syncMode = ref<SyncMode>('poll');
 const config = ref<Record<string, unknown>>({});
 const saving = ref(false);
 
@@ -65,10 +68,12 @@ function onDriverChange(d: StorageDriver) {
   // The scan settings are the exception: they belong to the storage, not
   // to the driver, and every driver has them.
   const kept: Record<string, unknown> = {};
-  for (const f of drivers.scanFields(d)) {
+  for (const f of [...drivers.scanFields(d), ...drivers.lazyFields(d)]) {
     if (config.value[f.key] !== undefined) kept[f.key] = config.value[f.key];
   }
   config.value = { ...drivers.defaults(d), ...kept };
+  // A mode the new driver does not offer would be refused on save.
+  if (syncMode.value === 'lazy' && drivers.lazyFields(d).length === 0) syncMode.value = 'poll';
   testResult.value = null;
   discovered.value = null;
   discoverError.value = '';
@@ -100,6 +105,7 @@ async function submit() {
       config: config.value,
       read_only: readOnly.value,
       sync_interval_s: secondsFromMinutes(syncIntervalMin.value),
+      sync_mode: syncMode.value,
     });
     toast.success(t('storages.createdOk'));
     router.push({ name: 'storages.edit', params: { id: created.id } });
@@ -282,6 +288,11 @@ async function createDiscovered() {
         :hint="t('storages.fields.syncIntervalHint')"
         placeholder="15"
         data-testid="storage-sync-interval"
+      />
+      <StorageSyncMode
+        v-model:mode="syncMode"
+        v-model:config="config"
+        :driver="driver"
       />
     </div>
 

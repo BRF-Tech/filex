@@ -26,6 +26,15 @@ const SIZE = 1024;
 // misdetect.
 const LINUX_SIZES = [16, 32, 48, 64, 128, 256, 512];
 
+const APPX_DIR = path.resolve(__dirname, '../build/appx');
+const APPX_SQUARE = {
+  'StoreLogo.png': 50,
+  'Square44x44Logo.png': 44,
+  'Square150x150Logo.png': 150,
+  'SmallTile.png': 71,
+  'LargeTile.png': 310,
+};
+
 app.commandLine.appendSwitch('disable-gpu');
 
 app.whenReady().then(async () => {
@@ -62,6 +71,27 @@ app.whenReady().then(async () => {
     fs.writeFileSync(f, image.resize({ width: s, height: s, quality: 'best' }).toPNG());
   }
   console.log(`wrote ${LINUX_SIZES.length} sizes to build/icons/ (${LINUX_SIZES.join(', ')})`);
+
+  // Microsoft Store (MSIX) tiles. ⚠ Without build/appx/ electron-builder puts
+  // its OWN sample logos into the package (vendor/appxAssets/SampleAppx.*):
+  // the Start menu, the taskbar and the Store would show electron-builder's
+  // placeholder instead of filex. The file names are the ones AppxTarget.js
+  // looks for.
+  fs.mkdirSync(APPX_DIR, { recursive: true });
+  for (const [name, s] of Object.entries(APPX_SQUARE)) {
+    fs.writeFileSync(path.join(APPX_DIR, name), image.resize({ width: s, height: s, quality: 'best' }).toPNG());
+  }
+  // The wide tile is the icon centred on a transparent 310×150, drawn by the
+  // same renderer rather than stretched.
+  win.setContentSize(310, 150);
+  await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html><meta charset="utf-8">
+    <style>html,body{margin:0;padding:0;background:transparent;width:310px;height:150px;
+    display:flex;align-items:center;justify-content:center}
+    svg{width:110px;height:110px;display:block}</style>${svg}`));
+  await new Promise((r) => setTimeout(r, 400));
+  fs.writeFileSync(path.join(APPX_DIR, 'Wide310x150Logo.png'),
+    (await win.webContents.capturePage({ x: 0, y: 0, width: 310, height: 150 })).toPNG());
+  console.log(`wrote ${Object.keys(APPX_SQUARE).length + 1} Store tiles to build/appx/`);
 
   win.destroy();
   app.exit(width >= 512 && height >= 512 ? 0 : 1);

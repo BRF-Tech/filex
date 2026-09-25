@@ -25,6 +25,26 @@ chmod +x filex && sudo mv filex /usr/local/bin/
 
 Or build from source: `cd backend && go build ./cmd/filex`.
 
+Or with a package manager — the CLI is plain **`filex`** in each (the desktop
+app is `filex-app`):
+
+```bash
+brew install brf-tech/filex/filex     # macOS and Linux — Homebrew tap BRF-Tech/homebrew-filex
+winget install BRFTech.filex          # Windows; puts `filex` on the PATH (open a new terminal)
+```
+
+On macOS the binary is not signed with an Apple Developer ID, so macOS may
+refuse its first run: allow it once in System Settings → Privacy & Security
+(*Open Anyway*). A new winget package waits for winget's review before it can
+be installed, so `winget install` works a few days after the first release
+that submits it.
+
+A binary installed this way upgrades itself with `filex self-update`
+([UPDATES.md](./UPDATES.md)). A filex that came from a package manager
+(Homebrew, winget, Snap) is upgraded by that package manager instead:
+`filex self-update` refuses there and prints the command to run — see
+[Package-manager installs](./UPDATES.md#package-manager-installs).
+
 ## Connecting
 
 Connection settings resolve in this order (first non-empty wins, per field):
@@ -309,3 +329,11 @@ Errors go to **stderr** and the process exits **1**. A `401` appends a hint:
 ```
 filex: HTTP 401: unauthorized — token missing/expired; run `filex client login`
 ```
+
+`filex sync run` has two statuses of its own, for a supervisor that acts on
+*why* it stopped ([Folder sync](SYNC.md#troubleshooting)):
+
+| Status | Meaning |
+|---|---|
+| `3` | The server refused the token (HTTP 401): sign in again rather than retry. |
+| `4` | At least one pair was skipped because another filex on this computer is syncing it; the other pairs ran. `--watch` never exits with it — it waits and takes the pair over. |

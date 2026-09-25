@@ -209,6 +209,8 @@ func TestDecide_EveryReasonIsInTheCatalogue(t *testing.T) {
 		decide(t, "v0.7.5", PolicyPatch, ModeBinary, rel("v1.0.0")),
 		decide(t, "v0.7.5", PolicyPatch, ModeBinary, rel("v0.8.0")),
 		decide(t, "v0.7.5", PolicyMinor, ModeBinary, rel("v0.8.0")),
+		decidePkg(t, "v0.7.5", PolicyPatch, ManagerWinget, rel("v0.7.6")),
+		decidePkg(t, "v0.7.5", PolicyPatch, "", rel("v0.7.6")),
 	}
 	en, tr := srvtext.Builtin("en"), srvtext.Builtin("tr")
 	for _, d := range cases {

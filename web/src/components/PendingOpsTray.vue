@@ -15,13 +15,12 @@
  */
 import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Copy, Move, Trash2, RotateCcw, X, AlertTriangle, Check } from 'lucide-vue-next';
+import { Archive, Copy, Move, Trash2, RotateCcw, X, AlertTriangle, Check } from 'lucide-vue-next';
 
 import { opPercent } from '@brftech/filex-core';
 import { usePendingOpsStore } from '@/stores/pendingOps';
 import { formatBytes } from '@/lib/format';
 import type { PendingOp } from '@/api/ops';
-import Button from '@/components/ui/Button.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 
 const { t, locale } = useI18n();
@@ -38,6 +37,7 @@ onBeforeUnmount(() => {
 const visibleItems = computed(() => store.items.slice().reverse());
 
 function iconFor(opType: string) {
+  if (opType === 'archive-create' || opType === 'archive-extract') return Archive;
   if (opType === 'move') return Move;
   if (opType === 'delete' || opType === 'trash-empty') return Trash2;
   return Copy;
@@ -45,6 +45,10 @@ function iconFor(opType: string) {
 
 function verbFor(opType: string): string {
   switch (opType) {
+    case 'archive-create':
+      return t('pendingOps.verb.archiveCreate');
+    case 'archive-extract':
+      return t('pendingOps.verb.archiveExtract');
     case 'move':
       return t('pendingOps.verb.move');
     case 'delete':
@@ -78,12 +82,15 @@ function progressLine(op: PendingOp): string {
     return t('pendingOps.progressBytesOpen', { done: formatBytes(bytesDone, locale.value) });
   }
   const percent = percentFor(op);
+  if ((op.op_type === 'archive-create' || op.op_type === 'archive-extract') && percent !== null) {
+    return t('pendingOps.progressPercent', { percent });
+  }
   if (percent === null) return t('pendingOps.working');
   return t('pendingOps.progress', { done: op.progress_done, total: op.progress_total, percent });
 }
 
 function isTerminal(status: string): boolean {
-  return status === 'done' || status === 'error';
+  return status === 'done' || status === 'error' || status === 'cancelled';
 }
 </script>
 
@@ -177,14 +184,11 @@ function isTerminal(status: string): boolean {
                 <RotateCcw class="h-3.5 w-3.5" />
               </button>
               <button
+                v-if="isTerminal(item.op.status) || item.op.cancellable"
                 type="button"
                 class="rounded p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                :title="
-                  isTerminal(item.op.status) ? t('pendingOps.dismiss') : t('pendingOps.hide')
-                "
-                :aria-label="
-                  isTerminal(item.op.status) ? t('pendingOps.dismiss') : t('pendingOps.hide')
-                "
+                :title="isTerminal(item.op.status) ? t('pendingOps.dismiss') : t('pendingOps.cancel')"
+                :aria-label="isTerminal(item.op.status) ? t('pendingOps.dismiss') : t('pendingOps.cancel')"
                 @click="
                   isTerminal(item.op.status) ? store.dismiss(item.op.id) : store.cancel(item.op.id)
                 "

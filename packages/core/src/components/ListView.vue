@@ -177,7 +177,8 @@ const emit = defineEmits<{
 
 const {
   t,
-  formatSize,
+  formatNodeSize,
+  nodeSizeHint,
   formatDate,
   formatDateFull,
   formatMonthYear,
@@ -568,8 +569,10 @@ const columns = computed<DataColumn<FileNode>[]>(() => [
     label: t('col.size'),
     sortable: true,
     class: 'fe-list__col--size',
-    format: (n) => formatSize(n.size),
-    title: () => undefined,
+    // A folder the catalog does not cover in full says so: "≥ 1.2 GB", or
+    // "—" when nothing below it is known (useLocale formatNodeSize).
+    format: (n) => formatNodeSize(n),
+    title: (n) => nodeSizeHint(n),
   },
   { id: 'star', label: t('col.star'), class: 'fe-list__col--star', headerLabel: false },
 ]);

@@ -153,3 +153,22 @@ func TestChangeLog_FilexsOwnDirectoriesAreNotAChange(t *testing.T) {
 		t.Fatal("a person's file leaving the listing must read as changed")
 	}
 }
+
+// A derived event is an aggregate or a catalogue refresh — the size refresher's
+// repaint, the lazy catalogue's first listing of a folder that was already on
+// disk — and never a change a sync client has to fetch: a desktop paired at
+// the root would walk its whole tree once per folder the lazy catalogue lists.
+//
+// Break: drop the `ev.Derived` early return in EmitChange.
+func TestChangeLog_DerivedEventsAreNotAChange(t *testing.T) {
+	l := NewChangeLog(16)
+	_, cur := l.ChangedSince(1, "", "")
+	l.EmitChange(1, "arsiv/2019", ChangeEvent{Action: "modify", Derived: true})
+	if changed, _ := l.ChangedSince(1, "", cur); changed {
+		t.Fatal("a derived event read as a change of the storage")
+	}
+	l.EmitChange(1, "arsiv/2019", ChangeEvent{Action: "modify"})
+	if changed, _ := l.ChangedSince(1, "", cur); !changed {
+		t.Fatal("the same folder's real change must count")
+	}
+}

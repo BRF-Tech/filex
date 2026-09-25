@@ -537,6 +537,30 @@ export function useLocale(
   }
 
   /**
+   * A listed item's size, the way every view draws it (list, inspector,
+   * multi-selection total).
+   *
+   * ⚠ `size_partial` is the server saying the catalog does not cover all of a
+   * folder yet (docs/LAZY-CATALOGUE.md): a lazily cataloged folder that is not
+   * cataloged below, or any folder while its storage's first sync runs. Its
+   * size is then a lower bound — "≥ 1.2 GB" — or, when nothing below it is
+   * known, not a number at all ("—"): printing "0 B" for a folder full of
+   * files nobody has cataloged yet would be a fact that is false. One helper,
+   * so the list and the inspector cannot disagree about it.
+   */
+  function formatNodeSize(n: { size?: number | null; size_partial?: boolean } | null | undefined): string {
+    if (!n) return formatSize(null);
+    if (!n.size_partial) return formatSize(n.size);
+    return typeof n.size === 'number' && n.size > 0 ? t('size.at_least', { size: formatSize(n.size) }) : '—';
+  }
+
+  /** The hover text of a size `formatNodeSize` drew as partial, or undefined. */
+  function nodeSizeHint(n: { size?: number | null; size_partial?: boolean } | null | undefined): string | undefined {
+    if (!n?.size_partial) return undefined;
+    return typeof n.size === 'number' && n.size > 0 ? t('size.partial_hint') : t('size.unknown_hint');
+  }
+
+  /**
    * Render a FileNode's basename with locale-aware overrides:
    *   - `.trash` directory → "Çöp Kutusu" / "Trash"
    *   - Trash entries are stored as `<Ymd-His>-<rand>__<original>` so
@@ -627,6 +651,8 @@ export function useLocale(
   return {
     t,
     formatSize,
+    formatNodeSize,
+    nodeSizeHint,
     formatDate,
     formatDateFull,
     formatMonthYear,

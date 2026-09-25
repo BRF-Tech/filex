@@ -38,6 +38,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   EMPTY_STATE,
   activeAccount,
+  keychain,
+  keychainRefusal,
   loadState,
   removeAccount,
   saveState,
@@ -47,10 +49,36 @@ import {
 } from './accounts.js';
 import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } from './browser-auth.js';
 import { failureOf, signInView, type SignInFailure } from './signin-flow.js';
+import { keychainAdvice, snapConnectCommand } from './keychain.js';
+import {
+  APPIMAGE_DESKTOP_ENTRY,
+  CURRENT_CHANNEL,
+  LEGACY_LINUX_DESKTOP_ENTRY,
+  appImageDesktopEntry,
+  defaultHandlerRoute as handlerRouteFor,
+  directCopyMarkers,
+  engineStateDir,
+  explorerVisibleRoot,
+  linuxDesktopEntry,
+  linuxSandbox,
+  retargetMimeapps,
+  storePageUrl,
+  userHome,
+  type DefaultHandlerRoute,
+} from './channel.js';
 import { DragOutCache, createPlaceholders, fulfilDrop, type DragItem } from './dragout.js';
 import { localDriveRoots, watchForDrop } from './dropwatch.js';
 import { log, logPath } from './log.js';
-import { loginItemExecutable, loginItemWrite, osWillLaunch, preferenceAfterStartup, type LoginItemReport } from './login-item.js';
+import {
+  LEGACY_LINUX_AUTOSTART_NAME,
+  LINUX_AUTOSTART_NAME,
+  legacyAutostartAction,
+  loginItemExecutable,
+  loginItemWrite,
+  osWillLaunch,
+  preferenceAfterStartup,
+  type LoginItemReport,
+} from './login-item.js';
 import { DesktopNotifier, opensInWindow, type NotificationRow } from './notifications.js';
 // ⚠⚠ The badge's rule comes from the WEB package, exactly as the click
 // destination (notificationTarget) and the sentence (notificationText) do:
@@ -155,6 +183,22 @@ if (portable.portable) {
   app.setPath('sessionData', dir);
 }
 
+// ─────────────────────────── Linux package identity ───────────────────────────
+//
+// Before anything asks the OS about us. Both are decided in src/channel.ts.
+if (process.platform === 'linux') {
+  // The desktop entry the package installed — what `xdg-settings` registers
+  // `filex://` against and what Wayland matches the window to. package.json's
+  // `desktopName` covers .deb/.rpm; a snap, a Flatpak and a bare AppImage go
+  // by other names.
+  process.env.CHROME_DESKTOP = linuxDesktopEntry(CURRENT_CHANNEL, process.env.APPIMAGE);
+  // The sync engine's state, where the channel needs it moved (a snap's
+  // revision-proof directory). Every engine invocation inherits process.env
+  // (src/sync.ts engineEnv). An explicit FILEX_SYNC_DIR still wins.
+  const stateDir = engineStateDir(CURRENT_CHANNEL, process.env);
+  if (stateDir && !process.env.FILEX_SYNC_DIR) process.env.FILEX_SYNC_DIR = stateDir;
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.join(__dirname, '..', 'app');
 const UI_ROOT = path.join(__dirname, '..', 'ui');
@@ -203,7 +247,8 @@ let dragPrepare: AbortController | null = null;
 /** The placeholder drag in flight: its watcher, and the transfer it becomes. */
 let dragDrop: { cancel: () => void; dir: string } | null = null;
 /** What the updater is doing, as far as the UI is concerned. */
-let updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error' | 'manual'; version?: string; percent?: number; error?: string; url?: string } = { status: 'idle' };
+// 'store': a store copy (src/channel.ts) — the store updates it, `url` is its page.
+let updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error' | 'manual' | 'store'; version?: string; percent?: number; error?: string; url?: string } = { status: 'idle' };
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -361,7 +406,19 @@ function windowGround(): string {
 
 function openShell(route: string, title: string, width = 720, height = 620): void {
   if (shellWindow && !shellWindow.isDestroyed()) {
-    shellWindow.loadURL(`app://shell/#${route}`);
+    // ⚠⚠ RELOAD when the window is already on this route — loading the same
+    // URL again no longer does. Up to Electron 31 (Chromium 126) `loadURL`
+    // of the page's own `#fragment` URL was a full reload; Electron 44 makes
+    // it a same-document navigation (measured: no did-finish-load, one
+    // did-navigate-in-page, page state intact), and with the hash unchanged
+    // no `hashchange` fires either. That is exactly the failed-sign-in path:
+    // handleDeepLink() records the failure and calls openShell('/connect') on
+    // a window that IS on /connect, so the page kept its old text and "that
+    // link was from an earlier attempt" / "this code cannot be used again"
+    // never appeared. signin-retry-e2e.mjs caught it (red on 44, green on 31).
+    const target = `app://shell/#${route}`;
+    if (shellWindow.webContents.getURL() === target) shellWindow.webContents.reload();
+    else void shellWindow.loadURL(target);
     shellWindow.setTitle(title);
     shellWindow.focus();
     return;
@@ -478,8 +535,8 @@ function route(): void {
 // missed the toast had no way to learn they had 40 unread rows.
 //
 // ⚠ The `99+` ceiling is the WEB badge's, not this one's: it is about how
-// much room a 16px circle has. macOS and Unity draw the number themselves and
-// are perfectly happy with 137, so `setBadgeCount` gets the real count
+// much room a 16px circle has. macOS draws the number itself and is
+// perfectly happy with 137, so `setBadgeCount` gets the real count
 // (`unreadBadgeCount`) while the tray tooltip — which is text we lay out
 // ourselves — gets the clamped label. One module decides both.
 
@@ -498,6 +555,9 @@ function paintUnread(): void {
   try {
     // ⚠ Windows has no dock badge: `setBadgeCount` is a no-op there rather
     // than an error, and the tray tooltip below is what that platform reads.
+    // Since Electron 44 the same holds on Linux: the one desktop that drew a
+    // launcher badge was Unity, Electron dropped Unity support and the call
+    // is macOS-only now — so Linux reads the tooltip too.
     app.setBadgeCount?.(unreadBadgeCount(count));
   } catch {
     /* a platform that will not take a badge still gets the tooltip */
@@ -692,6 +752,11 @@ function refreshTray(): void {
  *  manual code box) can show the reason inline instead of behind a modal. */
 async function completeAuth(state_: string, code: string): Promise<void> {
   if (!pendingAuth) throw new Error('no sign-in is waiting — start again');
+  // ⚠ Before the exchange, not at saveState: the exchange spends the one-time
+  // code, and a token fetched only to be refused storage would also sit in
+  // this process's state as a signed-in account until the app quits.
+  const k = keychain();
+  if (k !== 'ok') throw keychainRefusal(k);
   const attempt = pendingAuth;
   const { token, email } = await exchangeCode(attempt, state_, code);
   // Only clear the attempt once it actually worked: a mistyped code must leave
@@ -960,6 +1025,17 @@ function wireAutoUpdate(): void {
   // check; a machine told not to update must not phone home at all.
   if (!app.isPackaged || process.env.FILEX_NO_UPDATE === '1') return;
 
+  // ⚠⚠ A store copy is the store's to update, and this file must not even
+  // LOOK at the feed for one. electron-updater has no idea it is inside an
+  // MSIX package or a Flatpak: it would download the NSIS installer (or a
+  // .deb) and run it from inside the package — on Windows that installs a
+  // second copy into the package's private AppData, invisible to Settings and
+  // to the Store's own uninstall. See src/channel.ts.
+  if (CURRENT_CHANNEL) {
+    pushUpdateState({ status: 'store', url: storePageUrl(CURRENT_CHANNEL) });
+    return;
+  }
+
   if (manualUpdates) {
     // Same cadence as the real updater — but only ever LOOKING. No download
     // starts on a machine that cannot apply it.
@@ -1087,8 +1163,8 @@ function loginItemSpec(): { path: string; args: string[] } {
 
 /** Linux has no login-item API in Electron; XDG autostart is the equivalent.
  *  Without this the toggle is dead on every Linux build — silently. */
-function linuxAutostartFile(): string {
-  return path.join(app.getPath('home'), '.config', 'autostart', 'filex.desktop');
+function linuxAutostartFile(name = LINUX_AUTOSTART_NAME): string {
+  return path.join(app.getPath('home'), '.config', 'autostart', name);
 }
 
 function setLinuxAutostart(on: boolean): void {
@@ -1148,6 +1224,12 @@ function loginItemActive(): boolean {
 /** ⚠ Called from the Settings switch ONLY. Startup never writes the login
  *  item — see reconcileLoginItem(). */
 function setLoginItem(on: boolean): void {
+  // ⚠ The Store package has nowhere to write one: a Run value set from inside
+  // an MSIX package lands in the package's private registry hive, where the
+  // shell never looks (electron/electron#42016). Its login item is the
+  // startup task declared in build/appx-extensions.xml, switched on and off in
+  // Windows Settings — which is where Settings sends the user instead.
+  if (CURRENT_CHANNEL === 'msstore') return;
   if (process.platform === 'linux') {
     setLinuxAutostart(on);
     return;
@@ -1170,6 +1252,9 @@ function setLoginItem(on: boolean): void {
  * only thing that writes a login item.
  */
 function reconcileLoginItem(): void {
+  // The Store copy's login item belongs to Windows alone (see setLoginItem);
+  // there is no preference of ours to reconcile with it.
+  if (CURRENT_CHANNEL === 'msstore') return;
   const report = loginItemReport();
   const keep = preferenceAfterStartup(state.launchAtLogin, loginItemSupported(), report);
   if (keep === state.launchAtLogin) return;
@@ -1182,7 +1267,69 @@ function reconcileLoginItem(): void {
   }
 }
 
+/**
+ * The desktop app was the package `filex` until 0.43.x and is `filex-app`
+ * since (src/channel.ts → LINUX_APP_NAME). Two things the user set up under
+ * the old name would otherwise be lost without a word, at the first start of
+ * the renamed app:
+ *
+ *   - "Start when I sign in": `~/.config/autostart/filex.desktop` pointed at
+ *     the old binary and is not the file the app looks for any more — the
+ *     switch would read off and turn itself off (reconcileLoginItem). Moved
+ *     when it is ours (login-item.ts → legacyAutostartAction), left alone
+ *     when it is not.
+ *   - "Make filex the default": `mimeapps.list` names `filex.desktop`, which
+ *     left with the old package; a desktop skips a default whose entry is
+ *     gone. Retargeted to the new entry — only once no `filex.desktop` exists
+ *     anywhere a desktop looks, so an entry that is still installed (a
+ *     different program's) keeps what the user gave it.
+ *
+ * ⚠ Linux packages only (not a dev run, which would point the entry at the
+ * Electron binary; not a snap or Flatpak, which never had the old name and
+ * cannot reach the host's files), and never in a test run (ders #274).
+ */
+function migrateLegacyLinuxNames(): void {
+  if (process.platform !== 'linux' || !app.isPackaged || process.env.FILEX_NO_BROWSER === '1') return;
+  if (linuxSandbox(CURRENT_CHANNEL)) return;
+  const legacy = linuxAutostartFile(LEGACY_LINUX_AUTOSTART_NAME);
+  if (!process.env.APPIMAGE) {
+    const home = app.getPath('home');
+    const dataDirs = [
+      process.env.XDG_DATA_HOME || path.join(home, '.local', 'share'),
+      ...(process.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':'),
+    ].filter(Boolean);
+    const stillInstalled = dataDirs.some((d) => fs.existsSync(path.join(d, 'applications', LEGACY_LINUX_DESKTOP_ENTRY)));
+    const list = path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'mimeapps.list');
+    try {
+      const next = stillInstalled ? null : retargetMimeapps(fs.readFileSync(list, 'utf8'), LEGACY_LINUX_DESKTOP_ENTRY, LINUX_DESKTOP_ENTRY);
+      if (next != null) {
+        fs.writeFileSync(`${list}.filex-tmp`, next, 'utf8');
+        fs.renameSync(`${list}.filex-tmp`, list);
+        log('login', 'mimeapps.list: defaults that named the pre-rename entry now name the new one', { from: LEGACY_LINUX_DESKTOP_ENTRY, to: LINUX_DESKTOP_ENTRY });
+      }
+    } catch {
+      /* no mimeapps.list, or unreadable: nothing of ours to carry over */
+    }
+  }
+  let content: string | null = null;
+  try {
+    content = fs.readFileSync(legacy, 'utf8');
+  } catch {
+    return;
+  }
+  const action = legacyAutostartAction(content);
+  if (action === 'leave') return;
+  try {
+    if (action === 'move' && !fs.existsSync(linuxAutostartFile())) setLinuxAutostart(true);
+    fs.rmSync(legacy, { force: true });
+    log('login', `the pre-rename autostart entry was ${action === 'move' ? 'moved' : 'removed (it was switched off)'}`, { from: legacy });
+  } catch (e) {
+    log('login', 'could not carry over the pre-rename autostart entry', String((e as Error)?.message ?? e));
+  }
+}
+
 function publicState() {
+  const keychainNow = keychain();
   return {
     accounts: state.accounts.map(({ token, ...rest }) => rest), // never hand the token to a renderer
     activeId: state.activeId,
@@ -1241,6 +1388,22 @@ function publicState() {
     // A dev run deliberately refuses to write one (see setLoginItem), and the
     // settings panel has to say WHY rather than show a switch that does nothing.
     launchAtLoginSupported: loginItemSupported(),
+    // The Store copy's login item is a startup task Windows switches, not a
+    // switch of ours — Settings shows a way there instead (see setLoginItem).
+    launchAtLoginInOsSettings: CURRENT_CHANNEL === 'msstore',
+    // Which store updates this copy, if any: Settings names it.
+    updateChannel: CURRENT_CHANNEL,
+    // Whether an account may be stored at all, and if not what to do about it
+    // (src/keychain.ts). Anything but 'ok' and the sign-in window explains it
+    // instead of starting a sign-in it would have to throw away.
+    keychain: keychainNow,
+    keychainAdvice: keychainAdvice(keychainNow, process.platform, CURRENT_CHANNEL),
+    // The exact command for a snap (its name comes from snapd, not from us).
+    keychainCommand: CURRENT_CHANNEL === 'snap' ? snapConnectCommand(process.env) : null,
+    // The Store copy found the filex.sh copy installed as well — same
+    // accounts, same folders, two apps. Settings says so and offers the way
+    // to remove one (src/channel.ts → directCopyMarkers).
+    directCopyInstalled: CURRENT_CHANNEL === 'msstore' && directCopyMarkers(process.env).some((p) => fs.existsSync(p)),
     appVersion: app.getVersion(),
     update: updateState,
     // Set on a build that can never apply an update in place — an ad-hoc
@@ -1558,6 +1721,21 @@ async function pruneEmptyDirsUpTo(from: string, stopAt: string): Promise<void> {
  */
 let pickQueue: string[] | null = null;
 
+/**
+ * Where the last pick was made — the folder the user was looking AT, i.e. the
+ * parent of the one they chose.
+ *
+ * ⚠ Electron 43 changed what a dialog with no `defaultPath` does: it used to
+ * leave the start folder to the OS, which remembered where the user last was;
+ * it now opens in Downloads every time and the OS no longer tracks anything
+ * ("Dialog methods default to Downloads directory", breaking changes 43.0).
+ * The keep flow always passes a start folder; "add a synced folder" in
+ * Settings passes none, so without this every pick after the first would
+ * begin in Downloads again. Per session, like the OS memory it replaces for
+ * the common case of adding several folders in a row.
+ */
+let lastPickParent: string | undefined;
+
 async function pickDirectory(opts: { title?: string; buttonLabel?: string; defaultPath?: string } = {}): Promise<string | null> {
   const preset = process.env.FILEX_NO_BROWSER === '1' ? process.env.FILEX_TEST_PICK_DIR : undefined;
   if (preset) {
@@ -1568,11 +1746,17 @@ async function pickDirectory(opts: { title?: string; buttonLabel?: string; defau
     pickQueue ??= preset.split(path.delimiter).filter(Boolean);
     return pickQueue.length > 1 ? pickQueue.shift()! : (pickQueue[0] ?? null);
   }
-  const dialogOpts = { ...opts, properties: ['openDirectory', 'createDirectory'] as const };
+  const dialogOpts = {
+    ...opts,
+    defaultPath: opts.defaultPath ?? lastPickParent,
+    properties: ['openDirectory', 'createDirectory'] as const,
+  };
   const picked = mainWindow
     ? await dialog.showOpenDialog(mainWindow, { ...dialogOpts, properties: [...dialogOpts.properties] })
     : await dialog.showOpenDialog({ ...dialogOpts, properties: [...dialogOpts.properties] });
-  return picked.canceled ? null : (picked.filePaths[0] ?? null);
+  const dir = picked.canceled ? null : (picked.filePaths[0] ?? null);
+  if (dir) lastPickParent = path.dirname(dir);
+  return dir;
 }
 
 /** A native question, with the same test hook as the picker above: the index
@@ -1586,6 +1770,17 @@ async function askChoice(opts: Electron.MessageBoxOptions): Promise<number> {
   return response;
 }
 
+/** `~/filex/<host>`, in the home the user's file manager opens — not a
+ *  snap's private `HOME` (src/channel.ts → userHome). */
+function defaultSyncRoot(acc: Account): string {
+  const base = path.join(userHome(CURRENT_CHANNEL, process.env, app.getPath('home')), 'filex');
+  try {
+    return path.join(base, new URL(acc.serverUrl).hostname);
+  } catch {
+    return base;
+  }
+}
+
 /**
  * The account's mirror root, prompting on first use. The default —
  * `~/filex/<host>` — is pre-created so the dialog opens INSIDE it and a plain
@@ -1594,12 +1789,7 @@ async function askChoice(opts: Electron.MessageBoxOptions): Promise<number> {
  */
 async function ensureSyncRoot(acc: Account): Promise<string | null> {
   if (acc.syncRoot) return acc.syncRoot;
-  let def: string;
-  try {
-    def = path.join(app.getPath('home'), 'filex', new URL(acc.serverUrl).hostname);
-  } catch {
-    def = path.join(app.getPath('home'), 'filex');
-  }
+  const def = defaultSyncRoot(acc);
   await fs.promises.mkdir(def, { recursive: true });
   const dir = await pickDirectory({
     title: syncText('rootTitle'),
@@ -1797,9 +1987,10 @@ function pathsEqual(a: string, b: string): boolean {
 
 /** Where an edit goes when it cannot go home. Under userData, not the OS temp
  *  dir: a folder the system may empty is not a place to keep the only copy of
- *  someone's work. */
+ *  someone's work. The message names this path for the user to open, so on
+ *  the Store build it is where Explorer can see it (src/channel.ts). */
 function openWithRecoveryDir(): string {
-  return path.join(app.getPath('userData'), 'openwith-recovered');
+  return path.join(explorerVisibleRoot(CURRENT_CHANNEL, app.getPath('userData'), app.getPath('home')), 'openwith-recovered');
 }
 
 /** Documents arriving from any of the three OS routes land here. */
@@ -2397,22 +2588,57 @@ async function sweepOpenWith(): Promise<void> {
 //     protection to stop. So the honest move is one click away from the finish:
 //     open the OS's own Default apps page.
 //   Linux — `xdg-mime default` genuinely sets it, so the button does it.
+//     Except from inside a snap or a Flatpak, where it writes a mimeapps.list
+//     no desktop reads: there Settings explains the file manager's own "Open
+//     with" instead (src/channel.ts → defaultHandlerRoute).
 //   macOS — `LSSetDefaultRoleHandlerForContentType` would do it, but Electron
 //     exposes no binding for it and this app ships no native module. Finder's
 //     "Change All…" is the real answer, so the button says so.
 
-/** The desktop entry name the .deb/AppImage install, and therefore xdg-mime,
- *  knows this app by. Mirrors `linux.executableName` in electron-builder.yml. */
-const LINUX_DESKTOP_ENTRY = 'filex.desktop';
+/** The desktop entry name the .deb/.rpm install (or the AppImage writes), and
+ *  therefore xdg-mime, knows this app by (src/channel.ts → linuxDesktopEntry). */
+const LINUX_DESKTOP_ENTRY = linuxDesktopEntry(CURRENT_CHANNEL, process.env.APPIMAGE);
 
-function defaultHandlerRoute(): 'settings' | 'xdg' | 'manual' {
-  if (process.platform === 'win32') return 'settings';
-  if (process.platform === 'linux') return 'xdg';
-  return 'manual';
+/**
+ * The AppImage's `filex://` registration: its own desktop entry
+ * (`$XDG_DATA_HOME/applications/filex-appimage.desktop`, pointing at the
+ * running image, with the link and the document types the packages declare),
+ * then `xdg-mime default` for the scheme.
+ *
+ * ⚠ Not `app.setAsDefaultProtocolClient`: that runs `xdg-settings`, which
+ * refuses an entry whose Exec path is quoted (see appImageDesktopEntry) — an
+ * image in "~/My Apps" would register nothing. `xdg-mime default` writes the
+ * same mimeapps.list line and never reads Exec. (Measured on the bare
+ * AppImage before this: no entry, no default — `gio mime
+ * x-scheme-handler/filex` answered "No default applications".)
+ * ⚠ Only from the real registration path: a test run (FILEX_NO_BROWSER)
+ * never reaches it, like every other OS registration here.
+ */
+function registerAppImage(appImage: string): void {
+  const dataHome = process.env.XDG_DATA_HOME || path.join(app.getPath('home'), '.local', 'share');
+  const file = path.join(dataHome, 'applications', APPIMAGE_DESKTOP_ENTRY);
+  const scheme = `x-scheme-handler/${DEEP_LINK_SCHEME}`;
+  const types = [...OFFICE_EXTENSIONS.map((e) => OFFICE_MIME_TYPES[e]).filter(Boolean), scheme] as string[];
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, appImageDesktopEntry(appImage, types), 'utf8');
+  } catch (e) {
+    log('link', 'could not write the AppImage desktop entry; filex:// links will not reach this copy', String((e as Error)?.message ?? e));
+    return;
+  }
+  execFile('xdg-mime', ['default', APPIMAGE_DESKTOP_ENTRY, scheme], (err, _out, stderr) => {
+    if (err) log('link', 'xdg-mime could not make this AppImage the filex:// handler', (stderr || err.message).trim());
+  });
+}
+
+function defaultHandlerRoute(): DefaultHandlerRoute {
+  return handlerRouteFor(process.platform, CURRENT_CHANNEL);
 }
 
 async function makeFilexTheDefault(): Promise<{ route: string; ok: boolean; detail?: string }> {
   const route = defaultHandlerRoute();
+  // Settings shows no button on this route; a call is a stale window.
+  if (route === 'linux-manual') return { route, ok: false };
   if (route === 'settings') {
     // ms-settings: is a real OS handler, so this one does open — unlike the
     // app:// and blob: URLs openOutward() refuses.
@@ -2458,6 +2684,11 @@ function wireIpc(): void {
   ipcMain.handle('state:get', () => publicState());
 
   ipcMain.handle('auth:begin', (_e, serverUrl: string) => {
+    // ⚠ Refused before the browser opens: a sign-in whose token could not be
+    // stored is a round trip through the browser that ends in an error. The
+    // window already says why (publicState().keychain); this is the guard.
+    const k = keychain();
+    if (k !== 'ok') throw keychainRefusal(k);
     pendingAuth = beginBrowserAuth(serverUrl);
     signInFailure = null;
     // The URL is always handed back: the waiting screen shows it so a user
@@ -2721,6 +2952,18 @@ function wireIpc(): void {
       const finish = (via: string) => {
         if (!settled) { settled = true; resolve({ via }); }
       };
+      // ⚠ Electron 44 rebuilt `clipboard` on the W3C Clipboard API: writeText
+      // returns a Promise now. Resolving the share before it settles would
+      // report "copied" for a write that may have failed, and a rejection
+      // nobody awaits surfaces in the process-wide unhandledRejection handler
+      // instead of at the caller. The choice is claimed SYNCHRONOUSLY (so the
+      // menu-close callback below cannot turn a completed pick into an
+      // AbortError while the write is in flight); the answer waits for the write.
+      const copy = (textToCopy: string, via: string) => {
+        if (settled) return;
+        settled = true;
+        clipboard.writeText(textToCopy).then(() => resolve({ via }), reject);
+      };
       const menu = Menu.buildFromTemplate([
         {
           label: data?.title ? `Share “${data.title}”` : 'Share link',
@@ -2729,11 +2972,11 @@ function wireIpc(): void {
         { type: 'separator' },
         {
           label: 'Copy link',
-          click: () => { clipboard.writeText(url || body); finish('clipboard'); },
+          click: () => copy(url || body, 'clipboard'),
         },
         {
           label: 'Copy message with link',
-          click: () => { clipboard.writeText(body); finish('clipboard-full'); },
+          click: () => copy(body, 'clipboard-full'),
         },
         { type: 'separator' },
         {
@@ -2764,6 +3007,8 @@ function wireIpc(): void {
   // "Check now" from Settings — the same check the timer runs.
   ipcMain.handle('update:check', () => {
     if (!app.isPackaged || process.env.FILEX_NO_UPDATE === '1') return publicState();
+    // A store copy has no check of its own to run; Settings offers the store page.
+    if (CURRENT_CHANNEL) return publicState();
     if (manualUpdates) {
       void checkFeedForManualUpdate();
       return publicState();
@@ -2775,8 +3020,28 @@ function wireIpc(): void {
 
   // Opens the manual download in the browser. Only meaningful on a build that
   // cannot swap itself; the URL comes from the feed, never the renderer.
+  // On a store copy the same button opens the store's page for filex.
   ipcMain.handle('update:download', () => {
-    if (updateState.status === 'manual' && updateState.url) void shell.openExternal(updateState.url);
+    if ((updateState.status === 'manual' || updateState.status === 'store') && updateState.url) {
+      void shell.openExternal(updateState.url);
+    }
+    return publicState();
+  });
+
+  // The Store copy's "Start when I sign in" lives in Windows Settings → Apps →
+  // Startup (the startup task in build/appx-extensions.xml). A fixed URL from
+  // here, never one from the renderer.
+  ipcMain.handle('login:osSettings', () => {
+    if (CURRENT_CHANNEL === 'msstore') void shell.openExternal('ms-settings:startupapps');
+    return publicState();
+  });
+
+  // Windows' installed-apps list, where the filex.sh copy is removed. The app
+  // does not run that copy's uninstaller itself: launched from inside the
+  // package, its registry clean-up would land in the package's private hive
+  // and leave the real uninstall entry behind.
+  ipcMain.handle('app:osAppsSettings', () => {
+    if (CURRENT_CHANNEL === 'msstore') void shell.openExternal('ms-settings:appsfeatures');
     return publicState();
   });
 
@@ -3199,14 +3464,7 @@ function wireIpc(): void {
   ipcMain.handle('sync:setRoot', async (_e, accountId: string) => {
     const acc = state.accounts.find((a) => a.id === accountId);
     if (!acc) throw new Error('unknown account');
-    let def = acc.syncRoot;
-    if (!def) {
-      try {
-        def = path.join(app.getPath('home'), 'filex', new URL(acc.serverUrl).hostname);
-      } catch {
-        def = path.join(app.getPath('home'), 'filex');
-      }
-    }
+    const def = acc.syncRoot ?? defaultSyncRoot(acc);
     await fs.promises.mkdir(def, { recursive: true });
     const newRoot = await pickDirectory({
       title: syncText('rootTitle'),
@@ -3453,12 +3711,33 @@ if (!app.requestSingleInstanceLock()) {
       if (process.argv.length >= 2) {
         app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME, process.execPath, [path.resolve(process.argv[1])]);
       }
+    } else if (CURRENT_CHANNEL === 'msstore') {
+      // Declared in the package manifest (build/appx-extensions.xml). A
+      // runtime registration from inside the package "will return true for all
+      // calls but the registry key it sets won't be accessible by other
+      // applications" (Electron's own documentation) — a success that did
+      // nothing, so it is not made.
+    } else if (linuxSandbox(CURRENT_CHANNEL)) {
+      // Declared by the desktop entry the store installs (electron-builder.yml
+      // `linux.mimeTypes` → `MimeType=…x-scheme-handler/filex;`), which the
+      // host indexes like any other. A registration from inside the sandbox
+      // cannot change the host's default (src/channel.ts → linuxSandbox).
+    } else if (process.platform === 'linux' && process.env.APPIMAGE) {
+      // A bare AppImage has no desktop entry on the system for the link to
+      // name; it writes its own (src/channel.ts → appImageDesktopEntry).
+      registerAppImage(process.env.APPIMAGE);
     } else {
       app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
     }
 
     registerAppProtocol();
     state = loadState();
+    {
+      // Said once, at start: the sign-in window explains it to the user, and
+      // this is what a bug report carries (src/keychain.ts).
+      const k = keychain();
+      if (k !== 'ok') log('keychain', 'no usable OS keychain — accounts are neither read nor stored', { state: k });
+    }
     wireAuthHeaderInjection();
     // The supervisor keeps a `filex sync run --watch` alive per account. It is
     // started here, not when the Sync folders window opens: syncing that only
@@ -3485,7 +3764,9 @@ if (!app.requestSingleInstanceLock()) {
     // temp dir: the point of keeping them is that the SECOND drag of the same
     // file is instant, and a folder the OS may empty at any moment cannot
     // promise that. Entries older than a week are swept here.
-    dragCache = new DragOutCache(path.join(app.getPath('userData'), 'drag-cache'));
+    // ⚠ Explorer reads these copies on the drop, so they sit where Explorer
+    // sees the same path — not in userData on the Store build (src/channel.ts).
+    dragCache = new DragOutCache(path.join(explorerVisibleRoot(CURRENT_CHANNEL, app.getPath('userData'), app.getPath('home')), 'drag-cache'));
     void dragCache.sweep();
     // "Open with filex" session records. Under userData for the same reason the
     // drag cache is: a folder the OS may empty at any moment is not a place to
@@ -3507,6 +3788,10 @@ if (!app.requestSingleInstanceLock()) {
     // install that MOVED (per-machine → per-user), the old entry points
     // elsewhere, the switch reads off, and one click in Settings writes the
     // new one.
+    // Before the preference is compared with the OS: an autostart entry
+    // still under the pre-rename name would read as "no login item" and
+    // switch the preference off (see migrateLegacyLinuxNames).
+    migrateLegacyLinuxNames();
     reconcileLoginItem();
     // A launch the user did not initiate stays in the tray. Opening a window at
     // sign-in — on top of whatever else the desktop is still restoring — is the

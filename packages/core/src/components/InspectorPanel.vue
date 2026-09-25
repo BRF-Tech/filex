@@ -182,7 +182,7 @@ const emit = defineEmits<{
   (e: 'plugin-open', payload: { plugin: string; req: { path: string; action?: string; view?: string } }): void;
 }>();
 
-const { t, formatSize, formatDate: formatDateOf, nodeDisplayName } = useLocale(
+const { t, formatSize, formatNodeSize, nodeSizeHint, formatDate: formatDateOf, nodeDisplayName } = useLocale(
   () => props.locale,
 );
 
@@ -209,6 +209,12 @@ const nodeId = computed<number | null>(() =>
 const multiTotal = computed(() =>
   props.nodes.reduce((acc, n) => acc + (typeof n.size === 'number' ? n.size : 0), 0),
 );
+/** The selection's total, as a size: a lower bound when any selected folder's
+ *  own size is one (`size_partial`, drawn by useLocale formatNodeSize). */
+const multiSize = computed(() => ({
+  size: multiTotal.value,
+  size_partial: props.nodes.some((n) => n.size_partial === true),
+}));
 const etag = computed<string | null>(() => {
   const v = single.value?.etag;
   return typeof v === 'string' && v !== '' ? v : null;
@@ -249,7 +255,7 @@ const headName = computed<string>(() => {
 
 /** The line under it — "Folder", "TypeScript · 4.8 KB", "12.4 MB in total". */
 const headCaption = computed<string>(() => {
-  if (isMulti.value) return formatSize(multiTotal.value);
+  if (isMulti.value) return formatNodeSize(multiSize.value);
   const n = single.value;
   if (n) {
     const kind = typeLabelFor(n, t);
@@ -798,7 +804,7 @@ watch(
         <dl v-if="isMulti" class="fe-inspector__meta">
           <div class="fe-inspector__row">
             <dt>{{ t('inspector.size') }}</dt>
-            <dd>{{ formatSize(multiTotal) }}</dd>
+            <dd :title="nodeSizeHint(multiSize)">{{ formatNodeSize(multiSize) }}</dd>
           </div>
         </dl>
 

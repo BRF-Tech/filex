@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.43.2"
+version: "0.44.0"
 releaseNotes: |-
-  filex v0.43.2 — 2026-09-24
-  • Container, Helm and app-store installs get 0.43.0's security fixes only with this release — upgrade promptly.
-  • The public repository no longer carries a storage credential.
-  • A test fixture no longer names the project's own servers.
-  • The export that builds the public tree refuses both.
-  • The container images build again, and a release can no longer publish without them.
+  filex v0.44.0 — 2026-09-25
+  • The desktop app and the CLI in package managers.
+  • An .rpm for Fedora and openSUSE
+  • A Microsoft Store (MSIX) build of the desktop app
+  • A privacy page, filex.sh/privacy
+  • A third install mode, package: filex installed by Homebrew, winget or Snap leaves its binary to the package manager.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

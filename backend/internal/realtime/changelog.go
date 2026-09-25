@@ -90,6 +90,13 @@ func (l *ChangeLog) EmitChange(storageID int64, dir string, ev ChangeEvent) {
 	if ownChange(dir, ev) {
 		return
 	}
+	// ⚠ A derived event is an aggregate or a catalogue refresh — the size
+	// refresher's repaint, the lazy catalogue's first listing of a folder
+	// that was already on disk — never a change a sync client has to fetch.
+	// The hub keeps it from recursive watchers for the same reason.
+	if ev.Derived {
+		return
+	}
 	e := changeEntry{dir: cleanChangeDir(dir), name: ev.Name, newName: ev.NewName}
 	l.mu.Lock()
 	defer l.mu.Unlock()

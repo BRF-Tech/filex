@@ -269,10 +269,10 @@ storage:
 |---|---|---|---|
 | `name` | string | — | Display name + top‑level folder label. Required. |
 | `driver` | string | — | `local` · `s3` · `sftp` · `webdav` · `ftp` · `smb`, or the name of an installed [plugin](PLUGINS.md). Required. |
-| `config` | object | `{}` | Per‑adapter settings (see [Adapters](#adapters)), plus `scan_exclude`, which every storage has — see [Scan exclusions](#scan-exclusions). |
+| `config` | object | `{}` | Per‑adapter settings (see [Adapters](#adapters)), plus `scan_exclude`, which every storage has — see [Scan exclusions](#scan-exclusions) — and, for a `lazy` storage, `lazy_fill` · `lazy_max_watches` · `lazy_watch_ttl` ([Lazy catalogue](#lazy-catalogue)). |
 | `mount_path` | string | `/` | Logical mount point inside filex. |
-| `sync_mode` | string | `poll` | `poll` · `fsnotify` (the local driver, **or a [plugin](PLUGINS.md) that streams its own changes**) · `ondemand`. Anything else is **rejected on write** — see [Modes](#sync). |
-| `sync_interval_s` | int (seconds) | `900` | Poll cadence — **Scan every (minutes)** on the storage form. **Values < 5 s are clamped to 15 min.** |
+| `sync_mode` | string | `poll` | `poll` · `fsnotify` (the local driver, **or a [plugin](PLUGINS.md) that streams its own changes**) · `ondemand` · `lazy` (local storages only — [Lazy catalogue](#lazy-catalogue)). Anything else is **rejected on write** — see [Modes](#sync). |
+| `sync_interval_s` | int (seconds) | `900` | Poll cadence — **Scan every (minutes)** on the storage form. On a `lazy` storage: how old an unwatched folder's listing may get before it is checked again. **Values < 5 s are clamped to 15 min.** |
 | `enabled` | bool | `true` | Disabled storages are hidden and not synced. |
 | `read_only` | bool | `false` | Block all writes to this mount. |
 | `rbac_enabled` | bool | `false` | When true, per‑user [RBAC](RBAC.md) grants gate access; when false the storage is visible to all authenticated users. |
@@ -700,8 +700,13 @@ uploaded straight to the S3 console).
   stale index.
 - **`ondemand`** — only syncs when explicitly triggered
   (`POST /api/admin/storages/{id}/sync`).
+- **`lazy`** — local storages only. No walk up front: the folder somebody
+  opens is listed straight from disk and catalogued first, and the rest is
+  catalogued by a slow background pass or only as people open it. See
+  [Lazy catalogue](#lazy-catalogue).
 
-Those three are the whole list, and the server enforces it: a `sync_mode` it
+The storage form offers the mode under **Sync mode** (`lazy` only for a driver
+that supports it). Those four are the whole list, and the server enforces it: a `sync_mode` it
 does not implement is refused when the storage is created or changed, with a
 message naming the modes that exist. It used to be stored as typed — a
 `fsnotifiy` typo saved happily and the storage quietly ran the poll loop, so
@@ -918,6 +923,53 @@ the scan stays out.
 
 You can watch runs at `GET /api/admin/storages/{id}/sync-runs` and detect drift
 with `GET /api/admin/storages/{id}/drift`.
+
+### Lazy catalogue
+
+*Issue [#45](https://github.com/BRF-Tech/filex/issues/45) — an idea by Alex
+(@ahjephson). The design, with every rule and its reason:
+[LAZY-CATALOGUE.md](LAZY-CATALOGUE.md).*
+
+Every other mode catalogues a storage by walking all of it before anything
+else happens, and keeps it current by walking all of it again. On a
+multi-terabyte NAS that is hours of disk I/O before the first folder is
+right. `sync_mode: lazy` (local storages only) turns that around:
+
+- **The folder somebody opens is listed straight from disk, at once**, with
+  what the catalogue already knows about its entries (owners, thumbnails,
+  tags) laid over it, and is catalogued first, in the background — it never
+  waits for anything else.
+- Opened folders are **watched** (fsnotify) for changes made outside filex,
+  within a budget: at most `lazy_max_watches` (default 1024) folders, and none
+  nobody has opened for `lazy_watch_ttl` minutes (default 60). A folder whose
+  watch goes is checked again the next time somebody opens it.
+- ⚠ **A folder nobody has visited is never treated as deleted.** Rows are only
+  removed from a folder that was just listed, completely, and only when each
+  missing entry is confirmed gone.
+
+Two behaviours, **Catalog behavior** on the storage form (`lazy_fill`):
+
+| | Click first, fill in the background — `background` (default) | Only on open — `on_open` |
+|---|---|---|
+| The rest of the tree | a slow background pass catalogues it, slowing down while people use the storage, honouring [scan exclusions](#scan-exclusions), and carrying on after a restart | never, until an administrator runs a full sync (**Sync now**, or **Catalog everything** on the explorer's notice) |
+| Search, folder sizes, drive usage, antivirus, tags | cover everything once the pass has finished; say so until then | cover the folders people opened, and say so |
+
+While a storage's catalogue does not cover all of it, the explorer shows one
+line above the listing and the search results saying so, a folder whose size
+leaves something out is drawn as `≥ 1.2 GB` (or `—` when nothing below it is
+catalogued yet), and Home's drive card says **at least … used**. The storage
+page shows the catalogue's progress, the background pass's state and the watch
+budget in use.
+
+A desktop [folder sync](SYNC.md) pair on a lazy storage gets its whole subtree
+catalogued, and walked again every **Scan every** interval while the desktop
+is connected, so changes made outside filex still reach it.
+
+⚠ **The first sync of any storage.** While any storage's first full sync has
+not finished (or, for `ondemand`, has never been run), a folder is listed from
+the storage with the catalogue laid over it too — a partly catalogued folder
+used to show only the entries the sync had reached. The explorer's notice says
+the same thing.
 
 ### Drift detection: what a replaced file looks like
 

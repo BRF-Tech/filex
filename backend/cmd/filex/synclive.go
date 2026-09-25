@@ -48,6 +48,10 @@ import (
 // the desktop app asks the person to reconnect instead of restarting it. And
 // with a --window, nothing talks to the server outside it — not a pass, not
 // the stream — while changes seen in the meantime wait for the window.
+//
+// ⚠ It syncs only the pairs whose lock it holds (synclock.go): a pair another
+// process on this computer is syncing — the desktop app's other copy, a
+// terminal — gets nothing from this loop until that process lets go.
 
 // Debounce. A change is answered after its source has been quiet for a moment,
 // and never later than liveMaxWait after the first change of a burst.
@@ -150,7 +154,15 @@ type liveLoop struct {
 	local    localSource
 	interval time.Duration
 	out      io.Writer
-	now      func() time.Time
+	// errOut is where a pair's failures go (stderr in production); nil = out.
+	errOut io.Writer
+	now    func() time.Time
+	// locker holds the lock of every pair this watcher syncs, for as long as
+	// it syncs it (synclock.go). nil = no locks held here; each pass then
+	// takes its own.
+	locker pairLocker
+	// lockGrace, lockRetryFast and lockRetry: see synclock.go; 0 = defaults.
+	lockGrace, lockRetryFast, lockRetry time.Duration
 	// localDown is set when there is no file-system watcher at all; every
 	// pair is then reported as left to the full check.
 	localDown error
@@ -158,8 +170,12 @@ type liveLoop struct {
 	remoteQuiet, localQuiet, maxWait time.Duration
 	raceRetry                        time.Duration
 
-	mu         sync.Mutex
+	mu sync.Mutex
+	// pairs are the pairs this watcher syncs; wanted is every pair it was
+	// asked to — pairs plus the ones another process holds (busy).
 	pairs      []filesync.Pair
+	wanted     []filesync.Pair
+	busy       map[string]*busyPair // only touched by the loop's goroutine
 	pend       map[string]*pendingWork
 	raceCount  map[string]int
 	reload     bool
@@ -203,6 +219,19 @@ func (l *liveLoop) init() {
 	if l.raceRetry == 0 {
 		l.raceRetry = liveRaceRetry
 	}
+	if l.errOut == nil {
+		l.errOut = l.out
+	}
+	if l.lockGrace == 0 {
+		l.lockGrace = lockGrace
+	}
+	if l.lockRetryFast == 0 {
+		l.lockRetryFast = lockRetryFast
+	}
+	if l.lockRetry == 0 {
+		l.lockRetry = lockRetry
+	}
+	l.busy = map[string]*busyPair{}
 	l.pend = map[string]*pendingWork{}
 	l.raceCount = map[string]int{}
 	l.pollOnly = map[string]bool{}
@@ -398,10 +427,17 @@ func (l *liveLoop) signedOut(err error) bool {
 	return true
 }
 
-// applyPairs installs a (re-)read pair list: roots for the stream, folders for
-// the file-system watcher, and a full pass for every pair not seen before —
-// or edited since (paused, moved, a hold confirmed or discarded).
-func (l *liveLoop) applyPairs(pairs []filesync.Pair) {
+// applyPairs installs a (re-)read pair list — the part of it this watcher can
+// lock (claim, synclock.go).
+func (l *liveLoop) applyPairs(wanted []filesync.Pair) {
+	l.install(l.claim(wanted))
+}
+
+// install makes pairs the pairs this watcher syncs: roots for the stream,
+// folders for the file-system watcher, and a full pass for every pair not
+// seen before — or edited since (paused, moved, a hold confirmed or
+// discarded), or just taken over from another process.
+func (l *liveLoop) install(pairs []filesync.Pair) {
 	l.mu.Lock()
 	known := map[string]filesync.Pair{}
 	for _, p := range l.pairs {
@@ -712,6 +748,12 @@ func (l *liveLoop) passCtx(ctx context.Context) (context.Context, context.Cancel
 // Run drives everything until ctx ends.
 func (l *liveLoop) Run(ctx context.Context) error {
 	l.init()
+	if l.locker != nil {
+		// The OS lets go when the process ends anyway; this is for a watcher
+		// that stops inside a process that goes on (tests, and whatever
+		// embeds the loop next).
+		defer l.locker.releaseAll()
+	}
 	pairs, err := l.loadPairs()
 	if err != nil {
 		return err
@@ -834,6 +876,12 @@ func (l *liveLoop) Run(ctx context.Context) error {
 		}
 
 		now := l.now()
+		lockDue := l.lockDue()
+		if !lockDue.IsZero() && !now.Before(lockDue) {
+			// A pair another process holds is due for another try.
+			l.retryLocks()
+			continue
+		}
 		if !now.Before(nextPoll) {
 			// pairs.json is edited by OTHER processes — the desktop app
 			// writes it while this watcher runs. Re-read it every lap, as
@@ -849,6 +897,9 @@ func (l *liveLoop) Run(ctx context.Context) error {
 		wait := nextPoll.Sub(now)
 		if !next.IsZero() && next.Sub(now) < wait {
 			wait = next.Sub(now)
+		}
+		if !lockDue.IsZero() && lockDue.Sub(now) < wait {
+			wait = lockDue.Sub(now)
 		}
 		if wait < time.Millisecond {
 			wait = time.Millisecond

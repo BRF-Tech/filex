@@ -65,7 +65,7 @@ func (Driver) Open(_ context.Context, dsn string) (*sql.DB, error) {
 
 // NewStore returns a Store backed by the given *sql.DB.
 func (Driver) NewStore(sqlDB *sql.DB) db.Store {
-	return &Store{db: sqlDB}
+	return newStore(sqlDB, false)
 }
 
 // NewMySQLStore returns the same Store in MySQL/MariaDB mode. The MySQL driver
@@ -73,7 +73,19 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 // column names are the same — and this flag covers the one construct where the
 // two dialects genuinely disagree. See upsert.
 func NewMySQLStore(sqlDB *sql.DB) db.Store {
-	return &Store{db: sqlDB, mysql: true}
+	return newStore(sqlDB, true)
+}
+
+func newStore(sqlDB *sql.DB, mysql bool) *Store {
+	s := &Store{db: sqlDB, mysql: mysql}
+	// The lazy catalogue's folder state (00059): written once in internal/db,
+	// with this engine's upsert and timestamp spelling. SQLite compares
+	// timestamps as text, so they are bound in CURRENT_TIMESTAMP's spelling.
+	s.CatalogueFolderSQL = &db.CatalogueFolderSQL{DB: sqlDB, Dialect: db.CatalogueDialect{
+		Upsert: s.upsert,
+		Time:   db.CatalogueTime,
+	}}
+	return s
 }
 
 // Store implements db.Store atop SQLite — and, through the MySQL driver, atop
@@ -83,6 +95,8 @@ type Store struct {
 	// mysql switches the handful of statements that cannot be written once for
 	// both engines. Everything else in this file is deliberately portable.
 	mysql bool
+	// The catalogue_folders methods (internal/db catalogue_folders_sql.go).
+	*db.CatalogueFolderSQL
 }
 
 // upsertClause matches SQLite's upsert tail so it can be swapped for MySQL's.

@@ -152,6 +152,7 @@ export type FolderView =
   | { kind: 'signed-out' }
   | { kind: 'starting' }
   | ({ kind: 'active' } & Omit<SyncActivity, 'pairId'>)
+  | { kind: 'busy'; detail: string }
   | { kind: 'window'; window: string }
   | { kind: 'error'; message: string }
   | { kind: 'watching' }
@@ -179,8 +180,14 @@ export function folderView(input: {
     const { pairId: _pairId, ...activity } = st.active;
     return { kind: 'active', ...activity };
   }
+  const view = pairView(st, input.pairId);
+  // Another filex on this computer syncs this folder (the other copy of this
+  // app, or the CLI). Before any error: nothing here runs for the folder, so
+  // an error left from before it was taken is not what is true of it now —
+  // and this is not a failure, the folder IS being synced.
+  if (st.running && view.busy) return { kind: 'busy', detail: view.busy.detail };
   // Its own error, or the engine's (which is every folder's).
-  const own = pairView(st, input.pairId).error;
+  const own = view.error;
   if (own) return { kind: 'error', message: own };
   if (st.waitingWindow && !windowContains(st.waitingWindow, input.minuteOfDay)) {
     return { kind: 'window', window: st.waitingWindow };

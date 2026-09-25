@@ -85,7 +85,20 @@ export interface StorageDriverDescriptor {
    * target is not scanned. Absent from a server older than v0.43.0.
    */
   scan_fields?: StorageField[];
+  /**
+   * The settings of sync_mode `lazy` (docs/LAZY-CATALOGUE.md), present only
+   * for a driver a storage may be cataloged lazily on (local). The form offers
+   * the mode only where they are. Kept in the same `config` map.
+   */
+  lazy_fields?: StorageField[];
 }
+
+/**
+ * How much of a storage its catalog covers (sync.CatalogueCoverage). The
+ * explorer's own copy of the shape — one type for both packages.
+ */
+export type { CatalogCoverage } from '@brftech/filex-core';
+import type { CatalogCoverage } from '@brftech/filex-core';
 
 export interface StorageRef {
   id: number;
@@ -112,7 +125,13 @@ export interface StorageRef {
   /** `push` is LEGACY: the server refuses it on write (nothing implements a
    *  push receiver) but still returns it for rows written before that check.
    *  It stays in the union so such a row types cleanly and renders a label. */
-  sync_mode?: 'poll' | 'fsnotify' | 'ondemand' | 'push';
+  sync_mode?: 'poll' | 'fsnotify' | 'ondemand' | 'lazy' | 'push';
+  /** Set while `stats` count only part of the storage: its catalog does not
+   *  cover all of it yet (a first sync, a lazily cataloged storage). */
+  coverage?: CatalogCoverage | null;
+  /** A lazily cataloged storage's engine: folders cataloged / waiting /
+   *  watched, the watch budget, the background pass. Storage page only. */
+  catalogue?: CatalogCoverage | null;
   // Cached stats (filled by backend, may be null right after creation)
   file_count?: number;
   total_bytes?: number;
@@ -173,7 +192,11 @@ export interface StorageCreateRequest {
   read_only?: boolean;
   rbac_enabled?: boolean;
   sync_interval_s?: number;
+  sync_mode?: SyncMode;
 }
+
+/** A sync mode an operator may choose (model.SyncModes). */
+export type SyncMode = 'poll' | 'fsnotify' | 'ondemand' | 'lazy';
 
 /** One folder under a probed root, with the root a storage on it would carry. */
 export interface DiscoveredFolder {
@@ -192,6 +215,9 @@ export interface StorageDiscoverResponse {
 export interface StorageUpdateRequest {
   name?: string;
   config?: Record<string, unknown>;
+  /** A legacy `push` row round-trips as it is (the Replica page sends the
+   *  whole row back); the storage form only ever sends a SyncMode. */
+  sync_mode?: SyncMode | 'push';
   enabled?: boolean;
   read_only?: boolean;
   rbac_enabled?: boolean;

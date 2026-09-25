@@ -148,6 +148,26 @@ func (h *Hub) Watching(c *Client) int {
 	return len(c.watches)
 }
 
+// WatchedRoots lists the folders of storageID that some client watches
+// recursively right now, each once, in normalizeDir form ("" is the storage
+// root, otherwise "/a/b"). A lazily catalogued storage keeps these subtrees
+// current, because a desktop sync pair mirrors every folder under its root
+// whether or not anybody opens it (internal/sync lazy.go).
+func (h *Hub) WatchedRoots(storageID int64) []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	seen := map[string]bool{}
+	var out []string
+	for _, w := range h.watches[storageID] {
+		if !seen[w.prefix] {
+			seen[w.prefix] = true
+			out = append(out, w.prefix)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // unwatchLocked drops every watch of c. Caller holds h.mu.
 func (h *Hub) unwatchLocked(c *Client) {
 	for _, w := range c.watches {

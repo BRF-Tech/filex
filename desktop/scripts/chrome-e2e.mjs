@@ -347,6 +347,47 @@ if (process.platform === 'win32') {
   check(`the run under test is ${packaged ? 'packaged' : 'unpackaged'}`, true,
     packaged ? 'driving an installed app' : 'driving the source tree');
 
+  // ⚠⚠ Put the OPERATOR's login item back afterwards. Every filex build writes
+  // the same Run value name (`electron.app.filex`) — the app under test and the
+  // one installed on this machine alike — so the packaged branch below first
+  // OVERWRITES the operator's entry with the build under test and then, turning
+  // it off, DELETES it: their installed filex silently stopped starting at
+  // sign-in. Measured 2026-09-24 (task #63, a packaged Electron 44 run): the
+  // value `…\Programs\filex\filex.exe --hidden` was gone after this suite.
+  // Snapshot both halves Windows keeps (the command, and Task Manager's
+  // enabled/disabled flag) and restore them exactly, on every way out.
+  const LOGIN_VALUE = 'electron.app.filex';
+  const LOGIN_KEYS = [
+    'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run',
+    'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run',
+  ];
+  const readLogin = (key) => {
+    try {
+      const out = execFileSync('reg', ['query', key, '/v', LOGIN_VALUE], { encoding: 'utf8' });
+      const m = new RegExp(`${LOGIN_VALUE.replace(/\./g, '\\.')}\\s+(REG_\\w+)\\s+(.*)`, 'i').exec(out);
+      return m ? { type: m[1], data: m[2].trim() } : null;
+    } catch {
+      return null;
+    }
+  };
+  const saved = LOGIN_KEYS.map((key) => ({ key, value: readLogin(key) }));
+  let restored = false;
+  const restoreLogin = () => {
+    if (restored) return;
+    restored = true;
+    for (const { key, value } of saved) {
+      try {
+        if (value) execFileSync('reg', ['add', key, '/v', LOGIN_VALUE, '/t', value.type, '/d', value.data, '/f'], { stdio: 'ignore' });
+        else execFileSync('reg', ['delete', key, '/v', LOGIN_VALUE, '/f'], { stdio: 'ignore' });
+      } catch {
+        /* nothing there to delete */
+      }
+    }
+  };
+  // Only a packaged run writes anything; an unpackaged one must leave the OS
+  // alone, and restoring there would itself be a write.
+  if (packaged) process.on('exit', restoreLogin);
+
   // Ask for it — through the same IPC the settings switch uses.
   const after = await win.evaluate(() => window.filexApp.setSettings({ launchAtLogin: true }));
 
@@ -369,6 +410,10 @@ if (process.platform === 'win32') {
     const off = await win.evaluate(() => window.filexApp.setSettings({ launchAtLogin: false }));
     check('turning it off removes the entry',
       off.launchAtLoginEffective === false && !/electron\.app\.filex/i.test(runKey()));
+    restoreLogin();
+    check("the operator's own login item is back as it was",
+      saved.every(({ key, value }) => JSON.stringify(readLogin(key)) === JSON.stringify(value)),
+      saved.map(({ value }) => value?.data ?? '(none)').join(' | '));
   } else {
     check('an unpackaged run reports the setting as unavailable', before.launchAtLoginEffective === false);
     check('…and asking for it still leaves the OS untouched', after.launchAtLoginEffective === false);

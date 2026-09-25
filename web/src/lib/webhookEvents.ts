@@ -23,6 +23,8 @@ export const WEBHOOK_EVENTS = [
   'file.deleted',
   'file.trashed',
   'file.moved',
+  'archive.created',
+  'archive.extracted',
   'share.created',
   'drop.received',
   'comment.added',

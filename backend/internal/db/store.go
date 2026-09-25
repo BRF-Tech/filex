@@ -120,6 +120,41 @@ type Store interface {
 	// storages list page so each row can show "N files, 1.2 GB" without
 	// the SPA looping every node row.
 	StorageStats(ctx context.Context, storageID int64) (fileCount int64, totalBytes int64, err error)
+
+	// ── Lazy catalogue: per-folder state (migration 00059) ──
+	//
+	// What a lazily catalogued storage knows about each of its folders
+	// (docs/LAZY-CATALOGUE.md). Paths are canonical ("/" for the root,
+	// "/a/b" below it) and keyed by pathkey.Hash like nodes.
+	//
+	// GetCatalogueFolder returns (nil, nil) when the folder has no row.
+	GetCatalogueFolder(ctx context.Context, storageID int64, pathHash string) (*model.CatalogueFolder, error)
+	// DiscoverCatalogueFolders records folders seen in a parent's listing as
+	// uncatalogued; a folder that already has a row keeps it untouched.
+	DiscoverCatalogueFolders(ctx context.Context, storageID int64, folders []model.CatalogueFolder) error
+	// RecordCatalogueFolder writes every column of one folder's row.
+	RecordCatalogueFolder(ctx context.Context, f *model.CatalogueFolder) error
+	// SetCatalogueFolderWatch records a watch placed (watchedAt set: state
+	// watched) or removed (nil: state catalogued) on a folder that has been
+	// catalogued. An uncatalogued or missing row is left alone.
+	SetCatalogueFolderWatch(ctx context.Context, storageID int64, pathHash string, watchedAt *time.Time, reconcileOnOpen bool) error
+	// TouchCatalogueFolderVisit stamps visited_at on an existing row.
+	TouchCatalogueFolderVisit(ctx context.Context, storageID int64, pathHash string, at time.Time) error
+	// ListCatalogueFolders returns the rows a filter selects: by default the
+	// shallowest first; with ReconciledBefore, catalogued (unwatched) rows
+	// oldest first.
+	ListCatalogueFolders(ctx context.Context, storageID int64, f model.CatalogueFolderFilter) ([]*model.CatalogueFolder, error)
+	// CountCatalogueFolders counts a storage's rows per state.
+	CountCatalogueFolders(ctx context.Context, storageID int64) (model.CatalogueCounts, error)
+	// ResetCatalogueWatches demotes every watched row to catalogued with
+	// reconcile_on_open set — the watches died with the previous process.
+	ResetCatalogueWatches(ctx context.Context, storageID int64) (int64, error)
+	// DeleteCatalogueFoldersUnder drops the folder's row and every row below
+	// it (the folder is gone from the storage).
+	DeleteCatalogueFoldersUnder(ctx context.Context, storageID int64, dir string) error
+	// HasUncataloguedUnder reports whether any folder strictly below dir is
+	// still uncatalogued ("/" asks about the whole storage).
+	HasUncataloguedUnder(ctx context.Context, storageID int64, dir string) (bool, error)
 	// SearchNodes returns up to `limit` live nodes of a storage whose NAME
 	// answers m — every word in it, compared through internal/namefold (see
 	// model.NameMatch) — ranked by m.Prefer before the LIMIT. It is the

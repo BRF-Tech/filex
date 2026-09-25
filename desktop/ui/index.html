@@ -121,6 +121,11 @@
       .row { display: flex; align-items: center; gap: var(--fe-gap-sm, 8px); }
       .muted { color: var(--fe-text-muted, GrayText); font-size: var(--fe-text-xs, 12px); }
       .err { color: var(--fe-danger, LinkText); font-size: var(--fe-text-sm, 12.5px); margin-top: 12px; min-height: 18px; }
+      .keychain { margin: 0 0 18px; padding: 12px 14px; border-radius: 8px; font-size: var(--fe-text-sm, 12.5px);
+        border: 1px solid var(--fe-danger, LinkText); color: var(--fe-text, CanvasText); }
+      .keychain strong { display: block; margin-bottom: 6px; color: var(--fe-danger, LinkText); }
+      .keychain code { display: block; margin-top: 8px; padding: 6px 8px; border-radius: 6px; user-select: all;
+        font-family: ui-monospace, monospace; background: var(--fe-bg-hover, Canvas); }
     </style>
   </head>
   <body>
@@ -160,6 +165,16 @@
                             'Bu giriş bağlantısı önceki bir denemeye aitti. Bu denemeyi tarayıcında tamamla ya da sana gösterdiği kodu yapıştır.'],
         'fail.spent':      ['Sign-in did not finish ({detail}). That code cannot be used again — start again in the browser.',
                             'Giriş tamamlanmadı ({detail}). O kod bir daha kullanılamaz — tarayıcıda yeniden başlat.'],
+        // No usable keychain (src/keychain.ts): the token would have nowhere
+        // safe to live, so sign-in does not start at all. The key after the dot
+        // is `state.keychainAdvice`, decided in the main process.
+        'keychain.title':  ['Your sign-in has nowhere safe to go', 'Oturumunu saklayacak güvenli bir yer yok'],
+        'keychain.linux-keyring': ['No keyring answered — neither GNOME Keyring nor KWallet. filex keeps your sign-in only in the keyring and will not write it to disk where anyone who can read the file could use it. Start or unlock your keyring (on a minimal desktop, install gnome-keyring), then restart filex.',
+                            'Hiçbir anahtarlık yanıt vermedi — ne GNOME Keyring ne KWallet. filex oturumunu yalnızca anahtarlıkta saklar; dosyayı okuyabilen herkesin kullanabileceği biçimde diske yazmaz. Anahtarlığını başlat ya da kilidini aç (yalın bir masaüstünde gnome-keyring paketini kur), sonra filex’i yeniden başlat.'],
+        'keychain.snap-connect': ['This snap is not connected to your keyring yet, and filex keeps your sign-in only there. Run this once in a terminal, then restart filex:',
+                            'Bu snap henüz anahtarlığına bağlı değil; filex oturumunu yalnızca orada saklar. Bir terminalde bunu bir kez çalıştır, sonra filex’i yeniden başlat:'],
+        'keychain.os-storage': ['This computer’s secure storage is not available, so filex cannot keep your sign-in. Once it is, restart filex.',
+                            'Bu bilgisayarın güvenli depolaması kullanılamıyor; filex oturumunu saklayamaz. Kullanılabilir olduğunda filex’i yeniden başlat.'],
       };
       function T(key, vars) {
         const entry = STRINGS[key];
@@ -184,14 +199,27 @@
 
       // ── Connect: the ONLY thing asked for is where the server is. Credentials
       //    are typed into the server's own login page, in the real browser.
+      // Why a sign-in cannot start here, when it cannot (publicState().keychain,
+      // decided in src/keychain.ts). A snap is told the one command that fixes
+      // it — its keyring plug does not connect by itself — spelled by the main
+      // process from the name snapd runs it under (keychainCommand).
+      function keychainNotice() {
+        const advice = state && state.keychainAdvice;
+        if (!advice) return '';
+        return `<div class="keychain" id="keychain"><strong>${esc(T('keychain.title'))}</strong>${esc(T('keychain.' + advice))}${
+          state.keychainCommand ? `<code>${esc(state.keychainCommand)}</code>` : ''}</div>`;
+      }
+
       function connectView() {
+        const blocked = !!(state && state.keychainAdvice);
         return `
           <h1>${esc(T('connect.title'))}</h1>
           <p class="sub">${esc(T('connect.sub'))}</p>
+          ${keychainNotice()}
           <label for="server">${esc(T('connect.label'))}</label>
           <input id="server" type="text" placeholder="https://app.filex.com" autofocus />
           <div class="row" style="margin-top:16px">
-            <button id="go">${esc(T('connect.go'))}</button>
+            <button id="go" ${blocked ? 'disabled' : ''}>${esc(T('connect.go'))}</button>
           </div>
           <div class="err" id="err"></div>
           <p class="muted" style="margin-top:18px">${esc(T('connect.note'))}</p>`;

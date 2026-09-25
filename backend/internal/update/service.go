@@ -17,9 +17,9 @@ import (
 // It is intentionally passive: Check() only LEARNS. Applying is a separate,
 // explicit call (Apply), so a bug in the checker can never move an install.
 type Service struct {
-	cfg    Config
-	client *http.Client
-	mode   InstallMode
+	cfg     Config
+	client  *http.Client
+	install Install
 
 	mu       sync.RWMutex
 	state    State
@@ -52,6 +52,10 @@ type Config struct {
 	StateDir string
 	// CurrentVersion is the running build (version.Version).
 	CurrentVersion string
+	// Install, when its Mode is set, is used instead of DetectInstall — for
+	// tests, which must never describe the machine they run on. The
+	// operator's switch is FILEX_INSTALL_MODE, which DetectInstall reads.
+	Install Install
 }
 
 // State is the cached result of the last check, persisted across restarts.
@@ -80,17 +84,25 @@ func New(cfg Config) *Service {
 	if cfg.Policy == "" {
 		cfg.Policy = PolicyManual
 	}
+	inst := cfg.Install
+	if inst.Mode == "" {
+		inst = DetectInstall()
+	}
 	s := &Service{
-		cfg:    cfg,
-		client: &http.Client{Timeout: 15 * time.Second},
-		mode:   DetectInstallMode(),
+		cfg:     cfg,
+		client:  &http.Client{Timeout: 15 * time.Second},
+		install: inst,
 	}
 	s.state = s.loadState()
 	return s
 }
 
-// Mode exposes the detected install mode (binary vs container).
-func (s *Service) Mode() InstallMode { return s.mode }
+// Mode exposes the detected install mode (binary, container, package).
+func (s *Service) Mode() InstallMode { return s.install.Mode }
+
+// Install exposes the whole detection: for a packaged install, which manager
+// owns the binary and the command that upgrades it.
+func (s *Service) Install() Install { return s.install }
 
 // Policy exposes the configured policy.
 func (s *Service) Policy() Policy { return s.cfg.Policy }
@@ -122,7 +134,8 @@ func (s *Service) Check(ctx context.Context) (Decision, error) {
 		Current:  cur,
 		Manifest: man,
 		Policy:   s.cfg.Policy,
-		Mode:     s.mode,
+		Mode:     s.install.Mode,
+		Manager:  s.install.Manager,
 		Now:      time.Now(),
 		Window:   s.cfg.Window,
 	})

@@ -22,6 +22,7 @@ import type {
   ViewMode,
   ClipboardState,
   Capabilities,
+  ArchiveCreateFormat,
 } from './types/FileNode';
 import { isExternalUsable } from './types/FileNode';
 import { useFileApi, type GlobalSearchHit, type ManagerResponse } from './composables/useFileApi';
@@ -67,7 +68,7 @@ import {
 import { attachViewPrefsHttp } from './lib/viewPrefsHttp';
 import { provideTableEnv } from './lib/tableEnv';
 import { gateOnService, isOfficeExt, legacyConvertGate } from './lib/serviceGate';
-import { opFailure } from './lib/errorWords';
+import { opFailure, sayFailure } from './lib/errorWords';
 import { resolveUiProfile } from './lib/uiProfile';
 import RecentlyOpened from './components/RecentlyOpened.vue';
 import {
@@ -96,6 +97,7 @@ import {
 } from './lib/advSearch' /* gorunum:v1-advsearch */;
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
 /* /cila:c wiring */
+import { coverageByStorage, coverageNotice, type CatalogCoverage } from './lib/catalogCoverage';
 /* wiring:c1 — tema galerisi */
 import ThemeGallery from './components/ThemeGallery.vue';
 import {
@@ -201,6 +203,9 @@ import {
 } from './lib/dragOut';
 
 import NewFolderModal from './modals/NewFolderModal.vue';
+import ArchiveCreateModal from './modals/ArchiveCreateModal.vue';
+import ArchiveExtractModal from './modals/ArchiveExtractModal.vue';
+import ArchivePasswordModal from './modals/ArchivePasswordModal.vue';
 import NewDocumentModal from './modals/NewDocumentModal.vue'; /* belge:n1 */
 import RenameModal from './modals/RenameModal.vue';
 import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
@@ -346,11 +351,16 @@ const pendingOps = usePendingOps(props.config, api, {
     opUndo.delete(op.id);
     /* "Empty the trash" says how it ended itself (emptyTrash below), and a
      * row somebody cancelled is not announced as done. */
-    if (op.op_type === 'trash-empty' || op.status === 'cancelled') {
+    if (op.op_type === 'trash-empty') {
       void load();
       return;
     }
-    if (op.status === 'error') {
+    if (op.status === 'cancelled') {
+      const message = op.op_type === 'archive-extract'
+        ? t('archive.extraction_cancelled', { count: op.progress_done })
+        : t('opc.status.aborted');
+      flashToast(message);
+    } else if (op.status === 'error') {
       // Said, not printed: the server's error text is English and sometimes
       // plumbing ("engine libreoffice is not installed on this host").
       flashToast(opFailure(op, t).text);
@@ -361,12 +371,16 @@ const pendingOps = usePendingOps(props.config, api, {
       flashToast(op.message || t('plugin.done', { label: pluginOpLabel(op) }));
     } else {
       const verb =
-        op.op_type === 'copy'
-          ? t('toast.copied')
-          : op.op_type === 'move'
-            ? t('toast.moved')
-            : t('toast.deleted');
-      flashToast(`${verb} (${op.progress_total})`);
+        op.op_type === 'archive-create'
+          ? t('archive.created')
+          : op.op_type === 'archive-extract'
+            ? t('archive.extraction_completed')
+            : op.op_type === 'copy'
+              ? t('toast.copied')
+              : op.op_type === 'move'
+                ? t('toast.moved')
+                : t('toast.deleted');
+      flashToast(op.op_type.startsWith('archive-') ? verb : `${verb} (${op.progress_total})`);
     }
     void load();
     void splitPaneRef.value?.reload(); /* wiring:d1 — refresh the secondary pane too */
@@ -450,6 +464,14 @@ const searchTruncated = ref(false);
  *  (handlers.Manager, managerSearchPage) — the page an older server's full
  *  answer is recognised by. */
 const MANAGER_SEARCH_PAGE = 250;
+/**
+ * How much of each storage its catalog covers, from the last response that
+ * said (`storage_info` on every listing and search — lib/catalogCoverage).
+ * Kept across loads: the content search (`/api/files/search`) does not carry
+ * it, and its banner still has to name a storage the catalog does not cover.
+ */
+const coverageMap = ref<Record<string, CatalogCoverage | null>>({});
+const catalogAllBusy = ref(false);
 // trashMode — true while viewing the filex trash (soft-deleted nodes from the
 // backend trash endpoint), entered by opening the virtual `.trash` row and
 // exited by any normal navigation (load() resets it). Replaces a brittle
@@ -1285,16 +1307,6 @@ async function onSurfaceOpen(plugin: string, req: { path: string; action?: strin
   await openAppTarget({ plugin, action: req.action, view: req.view, path: req.path });
 }
 
-/** Cancel from the operations center — the server stops the job. */
-async function onCancelPendingOp(id: number) {
-  try {
-    await api.opsCancel(id);
-    await pendingOps.poll();
-  } catch {
-    flashToast(t('plugin.cancel_failed'));
-  }
-}
-
 /**
  * "Open" on a finished job: go to the output's folder and select it. The
  * output is an adapter-qualified path (`docs://reports/nda-signed.pdf`); the
@@ -1633,6 +1645,45 @@ const showNewDocument = ref(false); /* belge:n1 */
 const showRename = ref(false);
 const showDelete = ref(false);
 const showPreview = ref(false);
+const showArchiveCreate = ref(false);
+const showArchiveExtract = ref(false);
+const showArchivePassword = ref(false);
+const archiveTargets = ref<FileNode[]>([]);
+const archiveTarget = ref<FileNode | null>(null);
+const archiveDestinationDir = ref('');
+const archiveBusy = ref(false);
+const archiveError = ref('');
+const archiveInPane = ref(false);
+const archivePasswordError = ref('');
+const archivePasswordAction = ref<{
+  target: FileNode;
+  dest: string;
+  inPane: boolean;
+} | null>(null);
+
+const archiveSuggestedName = computed(() => {
+  if (archiveTargets.value.length !== 1) return 'archive';
+  return archiveTargets.value[0]?.basename.replace(/\.[^.]+$/, '') || 'archive';
+});
+const ARCHIVE_CREATE_FORMATS: ArchiveCreateFormat[] = ['zip', '7z', 'tar', 'tar.gz', 'tar.bz2', 'tar.xz'];
+/* The formats THIS server can make (capabilities.archive): every one but a
+ * plain ZIP needs 7-Zip there, so a server without it offers ZIP alone. A
+ * server with no `archive` block predates archive creation: nothing is
+ * offered, and "Create archive…" is not in the menu. */
+const archiveAllowedFormats = computed<ArchiveCreateFormat[]>(() => {
+  const configured = capabilitiesData.value?.archive?.allowed_formats ?? [];
+  return configured.filter((format): format is ArchiveCreateFormat => ARCHIVE_CREATE_FORMATS.includes(format));
+});
+const archiveDefaultFormat = computed<ArchiveCreateFormat>(() => {
+  const configured = capabilitiesData.value?.archive?.default_format;
+  if (configured && archiveAllowedFormats.value.includes(configured)) return configured;
+  return archiveAllowedFormats.value.includes('7z') ? '7z' : archiveAllowedFormats.value[0] ?? 'zip';
+});
+const archiveEncryption = computed(() => capabilitiesData.value?.archive?.encryption !== false);
+const archiveSuggestedFolder = computed(() =>
+  (archiveTarget.value?.basename || 'archive')
+    .replace(/\.(tar\.(gz|bz2|xz)|zip|7z|rar|tgz|gz|bz2|xz)$/i, '') || 'archive',
+);
 const renameTarget = ref<FileNode | null>(null);
 /* Why the last rename did not happen, shown in the dialog. A failure used to be
  * only EMITTED, which the stock web app logs to the console: the dialog stayed
@@ -2364,7 +2415,16 @@ const homeLoading = ref(false);
  * pixels to the left is rendering that same array — a Home that asked for its
  * own copy could show a drive the panel beside it hides.
  */
-const homeStorages = computed(() => props.config.storages ?? []);
+/* A drive's figure is a lower bound while its catalog does not cover all of
+   it: the host says so (`usedPartial`, from the usage endpoint's `coverage`),
+   or else the last listing did (coverageMap). */
+const homeStorages = computed(() =>
+  (props.config.storages ?? []).map((s) =>
+    s.usedPartial !== undefined || !(s.name in coverageMap.value)
+      ? s
+      : { ...s, usedPartial: coverageMap.value[s.name] !== null },
+  ),
+);
 
 async function loadHome() {
   homeLoading.value = true;
@@ -2776,6 +2836,50 @@ function showToast(state: ToastState, ms: number) {
 function flashToast(msg: string) {
   showToast({ message: msg }, 2500);
 }
+
+/**
+ * The catalog-coverage strip over a listing and over search results
+ * (lib/catalogCoverage): what search, folder sizes and usage leave out, and
+ * why. Not over a view that is not a storage's (Home, Recent, the trash) or a
+ * dead link. A search typed at a storage's root spans every storage — the
+ * server's own rule (handlers.Manager vfSearch) — so it names each one that is
+ * not fully cataloged.
+ */
+const coverageShown = computed(() => {
+  if (navView.value || trashActive.value || notFoundPath.value) return null;
+  const searching = !!searchQuery.value;
+  const atStorageRoot = stripAdapter(dirname.value).replace(/^\/+|\/+$/g, '') === '';
+  return coverageNotice({
+    map: coverageMap.value,
+    adapter: adapter.value,
+    searching,
+    crossStorage: searching && atStorageRoot && Object.keys(coverageMap.value).length > 1,
+    admin: callerAdmin.value,
+  });
+});
+
+/**
+ * "Catalog everything" (an administrator, a storage cataloged only on open):
+ * the ordinary full sync of that storage, the one the admin panel's
+ * "Sync now" starts. The storage's id is asked for at click time — the
+ * listing carries names only, and nobody but an administrator needs the id.
+ */
+async function catalogAll(storage: string | undefined) {
+  if (!storage || catalogAllBusy.value) return;
+  catalogAllBusy.value = true;
+  try {
+    const base = connectionsBase(props.config);
+    const rows = await api.jsonFetch<Array<{ id: number; name: string }>>(`${base}/api/admin/storages`);
+    const row = Array.isArray(rows) ? rows.find((r) => r.name === storage) : undefined;
+    if (!row) throw new Error('no such storage');
+    await api.jsonFetch(`${base}/api/admin/storages/${row.id}/sync`, { method: 'POST' });
+    flashToast(t('coverage.catalog_started'));
+  } catch (err) {
+    flashToast(sayFailure(err, t('toast.failed'), { t, callerAdmin: callerAdmin.value }).text);
+  } finally {
+    catalogAllBusy.value = false;
+  }
+}
 function undoToast(message: string, undo: () => Promise<void>) {
   showToast({ message, actionLabel: t('toast.undo'), action: undo }, 8000);
 }
@@ -3019,6 +3123,7 @@ async function load(path?: string) {
     // it leaves the full-page guess the advanced search count always made.
     searchTruncated.value =
       !!searchQuery.value && advSearchTruncated(resp.files.length, MANAGER_SEARCH_PAGE, resp.truncated);
+    if (Array.isArray(resp.storage_info)) coverageMap.value = coverageByStorage(resp.storage_info);
     adapter.value = resp.adapter;
     dirname.value = resp.dirname;
     dirPerm.value = (resp.perm as string) || '';
@@ -4402,6 +4507,7 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
   }
   const isFile = single && sel[0]?.type === 'file';
   const tagsLabel = t('ctx.tags_menu');
+  const isArchive = single && isArchiveFile(sel[0]);
   const singleHasId = single && typeof sel[0]?.id === 'number';
   /* yildiz:s1 */
   const canStar = starableNodes(sel).length > 0;
@@ -4457,6 +4563,9 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
       hidden: !single || convertGate.hidden === true || !w || e2eActive.value /* wiring:e2 — convert is meaningless on ciphertext */,
       disabled: !isFile || convertGate.disabled === true,
     },
+    { key: 'archive-create', label: t('ctx.archive_create'), hidden: !any || (single && isArchive) || !w || e2eActive.value || archiveAllowedFormats.value.length === 0, disabled: !any },
+    { key: 'archive-extract', label: t('ctx.archive_extract'), hidden: !isArchive || !w || e2eActive.value, disabled: !isArchive },
+    { key: 'archive-extract-here', icon: 'archive-extract', label: t('archive.extract_here'), hidden: !isArchive || !w || e2eActive.value, disabled: !isArchive },
     /* tasi:m1 — VISIBLE and grey above a multi-selection, not gone. Sharing
        really is one item at a time (a share link addresses one node), and the
        row now says so in its tooltip; vanishing taught the reader that filex
@@ -4515,6 +4624,12 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
   ];
 }
 
+const ARCHIVE_EXTENSIONS = new Set(['zip', '7z', 'rar', 'tar', 'gz', 'tgz', 'bz2', 'tbz2', 'xz', 'txz']);
+
+function isArchiveFile(node: FileNode | undefined): boolean {
+  return !!node && node.type === 'file' && ARCHIVE_EXTENSIONS.has((node.extension || '').toLowerCase());
+}
+
 // toolbarActions — what the top toolbar shows. Mirrors the context menu so the
 // two stay identical for a selection; the empty/trash/virtual-root cases match
 // the context menu's special branches.
@@ -4524,7 +4639,7 @@ const toolbarActions = computed<ContextAction[]>(() => {
    * menu offers (`contextActions`, ctxMode 'pane'). The three special branches
    * below describe the MAIN listing's state — the trash, the multi-storage
    * root — and the split pane reaches neither through this computed. */
-  if (paneIsActive.value) return sel.length ? selectionActionList(sel) : [];
+  if (paneIsActive.value) return sel.length ? selectionActionList(sel).filter((a) => a.key !== 'archive-extract-here') : [];
   if (trashActive.value) {
     if (sel.length === 0) return [];
     return [
@@ -4537,7 +4652,7 @@ const toolbarActions = computed<ContextAction[]>(() => {
     return sel.length === 1 ? [{ key: 'open', label: t('ctx.open') }] : [];
   }
   if (sel.length === 0) return [];
-  return selectionActionList(sel);
+  return selectionActionList(sel).filter((a) => a.key !== 'archive-extract-here');
 });
 
 async function onContextAction(action: ContextAction, targets: FileNode[]) {
@@ -4606,6 +4721,32 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       break;
     case 'download':
       await downloadSelection(targets);
+      break;
+    case 'archive-create':
+      if (targets.length === 0) break;
+      archiveTargets.value = targets;
+      archiveInPane.value = actingInPane();
+      archiveDestinationDir.value = archiveInPane.value
+        ? qualify(splitPaneRef.value?.getPath() ?? '')
+        : qualify(currentPath.value);
+      archiveError.value = '';
+      showArchiveCreate.value = true;
+      break;
+    case 'archive-extract':
+      if (!targets[0] || !isArchiveFile(targets[0])) break;
+      archiveTarget.value = targets[0];
+      archiveInPane.value = actingInPane();
+      archiveDestinationDir.value = wireParent(targets[0].path);
+      archiveError.value = '';
+      showArchiveExtract.value = true;
+      break;
+    case 'archive-extract-here':
+      if (!targets[0] || !isArchiveFile(targets[0])) break;
+      archiveTarget.value = targets[0];
+      archiveInPane.value = actingInPane();
+      archiveDestinationDir.value = wireParent(targets[0].path);
+      archiveError.value = '';
+      await startArchiveExtraction(targets[0], archiveDestinationDir.value, archiveInPane.value);
       break;
     /* tasi:m1 — the same dialog, twice; only `mode` differs. */
     case 'move-to':
@@ -4911,6 +5052,152 @@ async function onDocumentCreated(file: { path: string; name: string; ext: string
   showPreview.value = true;
   emit('file-opened', { path: node.path, basename: node.basename });
   void markRecent(node);
+}
+
+function archiveRequestCode(err: unknown): string | undefined {
+  const detail = (err as { detail?: string })?.detail;
+  if (!detail) return undefined;
+  try {
+    return (JSON.parse(detail) as { code?: string }).code;
+  } catch {
+    return undefined;
+  }
+}
+
+function archiveRequestError(err: unknown): string {
+  const detail = (err as { detail?: string })?.detail;
+  if (detail) {
+    try {
+      const body = JSON.parse(detail) as { code?: string; error?: string };
+      const byCode: Record<string, string> = {
+        PASSWORD_REQUIRED: 'archive.password_required',
+        BAD_PASSWORD: 'archive.bad_password',
+        TARGET_EXISTS: 'archive.target_exists',
+        PASSWORD_CHARSET: 'archive.password_charset',
+        UNSUPPORTED_FORMAT: 'archive.error_unsupported',
+        ARCHIVE_LIMIT_EXCEEDED: 'archive.error_limit',
+        PROVIDER_UNAVAILABLE: 'archive.error_unavailable',
+      };
+      if (body.code && byCode[body.code]) return t(byCode[body.code]);
+      if (body.error) return body.error;
+    } catch {
+      // The common API wrapper still supplies a friendly status message.
+    }
+  }
+  return (err as Error)?.message || t('toast.failed');
+}
+
+async function submitArchiveCreate(value: {
+  name: string;
+  format: ArchiveCreateFormat;
+  password?: string;
+  encrypt_filenames: boolean;
+  compression: number;
+  solid?: boolean;
+  dictionary_size_mb?: number;
+}) {
+  archiveBusy.value = true;
+  archiveError.value = '';
+  try {
+    const { op } = await api.archiveCreate({
+      dest: wireJoin(archiveDestinationDir.value, value.name),
+      sources: archiveTargets.value.map((node) => node.path),
+      format: value.format,
+      password: value.password,
+      encrypt_filenames: value.encrypt_filenames,
+      compression: value.compression,
+      solid: value.solid,
+      dictionary_size_mb: value.dictionary_size_mb,
+    });
+    pendingOps.register(op);
+    showArchiveCreate.value = false;
+    flashToast(t('archive.queued'));
+  } catch (err) {
+    archiveError.value = archiveRequestError(err);
+    emit('error', { message: archiveError.value, context: { op: 'archive-create' } });
+  } finally {
+    archiveBusy.value = false;
+  }
+}
+
+async function startArchiveExtraction(
+  target: FileNode,
+  dest: string,
+  inPane: boolean,
+  password?: string,
+) {
+  archiveBusy.value = true;
+  archiveError.value = '';
+  try {
+    const result = await api.archiveExtract(target.path, {
+      dest,
+      password,
+    });
+    showArchiveExtract.value = false;
+    showArchivePassword.value = false;
+    archivePasswordAction.value = null;
+    archivePasswordError.value = '';
+    if (result.op) {
+      pendingOps.register(result.op);
+      flashToast(t('archive.extraction_queued'));
+      return;
+    }
+    if (inPane) await splitPaneRef.value?.reload();
+    else await load();
+    flashToast(t('archive.extracted', { count: result.count ?? 0 }));
+  } catch (err) {
+    const code = archiveRequestCode(err);
+    if (code === 'PASSWORD_REQUIRED' || code === 'BAD_PASSWORD') {
+      archivePasswordAction.value = { target, dest, inPane };
+      archivePasswordError.value = code === 'BAD_PASSWORD' ? t('archive.bad_password') : '';
+      showArchiveExtract.value = false;
+      showArchivePassword.value = true;
+      return;
+    }
+    const message = archiveRequestError(err);
+    if (showArchivePassword.value) archivePasswordError.value = message;
+    else if (showArchiveExtract.value) archiveError.value = message;
+    /* "Extract here" opens no dialog, so an error written into one was never
+     * seen: a refused archive (a link inside, too large, a format this server
+     * cannot read) looked like a click that did nothing. */
+    else showToast({ message }, 6000);
+  } finally {
+    archiveBusy.value = false;
+  }
+}
+
+async function submitArchiveExtract(value: { folder: string }) {
+  const target = archiveTarget.value;
+  if (!target) return;
+  await startArchiveExtraction(
+    target,
+    wireJoin(archiveDestinationDir.value, value.folder),
+    archiveInPane.value,
+  );
+}
+
+async function submitArchivePassword(password: string) {
+  const action = archivePasswordAction.value;
+  if (!action) return;
+  archivePasswordError.value = '';
+  await startArchiveExtraction(action.target, action.dest, action.inPane, password);
+}
+
+function closeArchivePassword() {
+  showArchivePassword.value = false;
+  archivePasswordAction.value = null;
+  archivePasswordError.value = '';
+}
+
+async function cancelPendingOp(id: number) {
+  try {
+    await api.opsCancel(id);
+    await pendingOps.poll();
+  } catch (err) {
+    const op = pendingOps.ops.value.find((candidate) => candidate.id === id);
+    const archive = op?.op_type === 'archive-create' || op?.op_type === 'archive-extract';
+    flashToast(archive ? archiveRequestError(err) : t('plugin.cancel_failed'));
+  }
 }
 
 async function submitNewFolder(name: string) {
@@ -7271,6 +7558,26 @@ function closeRecoveryKey() {
       role="status"
     >{{ t('search.truncated') }}</div>
 
+    <!-- The catalog does not cover all of this storage yet (a first sync, a
+         lazily cataloged storage): search, folder sizes and usage leave part
+         of it out, and this says so and why (lib/catalogCoverage). -->
+    <div
+      v-if="coverageShown"
+      class="fe-coverage"
+      role="status"
+      data-testid="catalog-coverage"
+    >
+      <span class="fe-coverage__text">{{ t(coverageShown.key, coverageShown.vars) }}</span>
+      <button
+        v-if="coverageShown.offerCatalogAll"
+        type="button"
+        class="fe-coverage__action"
+        data-testid="catalog-coverage-all"
+        :disabled="catalogAllBusy"
+        @click="catalogAll(coverageShown.storage)"
+      >{{ t('coverage.catalog_all') }}</button>
+    </div>
+
     <!-- Live presence: who else is viewing this folder (empty → nothing shown).
          When the live socket is unavailable the same strip carries a small
          degraded-connection badge instead (presence is empty in fallback);
@@ -7854,8 +8161,8 @@ function closeRecoveryKey() {
       :center="opsCenter"
       :output-mode-of="pluginOutputModeOf"
       :caller-admin="callerAdmin"
+      @cancel="cancelPendingOp"
       @dismiss="(id) => pendingOps.dismiss(id)"
-      @cancel="onCancelPendingOp"
       @open="onOpenOpOutput"
     />
 
@@ -7937,6 +8244,39 @@ function closeRecoveryKey() {
       @submit="submitNewFolder"
       @encrypted="showNewFolder = false; showEncFolder = true /* wiring:e2 */"
     />
+    <ArchiveCreateModal
+      :open="showArchiveCreate"
+      :locale="locale"
+      :count="archiveTargets.length"
+      :suggested-name="archiveSuggestedName"
+      :default-format="archiveDefaultFormat"
+      :allowed-formats="archiveAllowedFormats"
+      :encryption="archiveEncryption"
+      :busy="archiveBusy"
+      :request-error="archiveError"
+      @close="showArchiveCreate = false"
+      @submit="submitArchiveCreate"
+    />
+    <ArchiveExtractModal
+      :open="showArchiveExtract"
+      :locale="locale"
+      :archive-name="archiveTarget?.basename || ''"
+      :suggested-folder="archiveSuggestedFolder"
+      :busy="archiveBusy"
+      :error="archiveError"
+      @close="showArchiveExtract = false"
+      @submit="submitArchiveExtract"
+    />
+    <ArchivePasswordModal
+      :open="showArchivePassword"
+      :locale="locale"
+      :archive-name="archivePasswordAction?.target.basename || archiveTarget?.basename || ''"
+      :busy="archiveBusy"
+      :error="archivePasswordError"
+      @close="closeArchivePassword"
+      @submit="submitArchivePassword"
+    />
+
     <!-- tasi:m1 — "Şuraya taşı…" / "Şuraya kopyala…". ONE dialog for both, and
          the same one anything else that has to ask for a folder mounts (the
          new-document flow does): a second private folder browser is how two

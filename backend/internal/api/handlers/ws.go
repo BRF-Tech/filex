@@ -55,7 +55,15 @@ type WS struct {
 	// on a single-tenant install; attaching that unconditionally would take
 	// every embedded client on every single-tenant install off the air.
 	MultiTenant bool
+	// Lazy, when wired, is told about every accepted recursive watch: a
+	// desktop sync pair on a lazily catalogued storage needs its whole subtree
+	// in the catalogue, because the upload precondition it sends is judged
+	// against catalogue rows (docs/LAZY-CATALOGUE.md). nil changes nothing.
+	Lazy LazyCatalogue
 }
+
+// AttachLazy wires the lazy catalogue.
+func (h *WS) AttachLazy(l LazyCatalogue) { h.Lazy = l }
 
 // AttachPublicURLConfigured records whether PublicURL was chosen rather than
 // defaulted. ⚠ Kept out of NewWS deliberately: every test constructs a WS with
@@ -452,6 +460,11 @@ func (h *WS) handleWatch(ctx context.Context, client *realtime.Client, paths []s
 		accepted = append(accepted, raw)
 	}
 	h.Hub.Watch(client, roots)
+	if h.Lazy != nil {
+		for _, root := range roots {
+			h.Lazy.CatalogueSubtree(root.StorageID, root.Dir)
+		}
+	}
 	frame, err := json.Marshal(map[string]any{"type": "watching", "roots": accepted, "errors": errs})
 	if err != nil {
 		return

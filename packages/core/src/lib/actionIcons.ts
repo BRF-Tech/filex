@@ -66,6 +66,12 @@ const GLYPHS: Record<string, string> = {
     '<path d="M9.5 4.5v5"/>',
   preview: EYE,
   download: TRAY + '<path d="M12 4v11.5"/><path d="M7.5 11L12 15.5 16.5 11"/>',
+  'archive-create':
+    '<path d="M5 8.5h14v11H5z"/><path d="M4 4h16v4.5H4z"/>' +
+    '<path d="M12 11v5"/><path d="M9.5 13.5h5"/>',
+  'archive-extract':
+    '<path d="M5 8.5h14v11H5z"/><path d="M4 4h16v4.5H4z"/>' +
+    '<path d="M12 10.5v6"/><path d="M9.5 14l2.5 2.5 2.5-2.5"/>',
   upload:
     '<path d="M4.5 15.5v3A2 2 0 0 0 6.5 20.5h11a2 2 0 0 0 2-2v-3"/>' +
     '<path d="M12 15.5V4"/><path d="M7.5 8.5L12 4l4.5 4.5"/>',

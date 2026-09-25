@@ -1,7 +1,6 @@
 package update
 
 import (
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -40,7 +39,10 @@ func ParsePolicy(s string) Policy {
 }
 
 // InstallMode is how this filex was installed, which decides whether it can
-// replace itself at all.
+// replace itself at all. It answers "who owns the binary on disk?" — filex,
+// an image, or a package manager — and stays a small closed set: the policy
+// and the admin page branch on it, while WHICH package manager (install.go)
+// only changes the command an operator is shown.
 type InstallMode string
 
 const (
@@ -51,29 +53,19 @@ const (
 	// `docker compose up` and the version silently reverts. Container installs
 	// get instructions (or an external updater), never a self-apply.
 	ModeDocker InstallMode = "docker"
+	// ModePackage — a package manager (Homebrew, winget, Snap) owns the
+	// binary. filex does not replace it either: the manager's record would
+	// still name the old version, its next upgrade would write over whatever
+	// filex put there, and a snap's squashfs is read-only to begin with. The
+	// manager's own upgrade command is the instruction.
+	ModePackage InstallMode = "package"
 )
 
-// DetectInstallMode inspects the runtime. FILEX_INSTALL_MODE overrides it for
-// setups the heuristics cannot see (e.g. a binary inside a container image
-// that is intentionally managed as a binary).
-func DetectInstallMode() InstallMode {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("FILEX_INSTALL_MODE"))) {
-	case "binary":
-		return ModeBinary
-	case "docker", "container":
-		return ModeDocker
-	}
-	if _, err := os.Stat("/.dockerenv"); err == nil {
-		return ModeDocker
-	}
-	if b, err := os.ReadFile("/proc/1/cgroup"); err == nil {
-		s := string(b)
-		if strings.Contains(s, "docker") || strings.Contains(s, "containerd") || strings.Contains(s, "kubepods") {
-			return ModeDocker
-		}
-	}
-	return ModeBinary
-}
+// DetectInstallMode inspects the runtime (see DetectInstall).
+// FILEX_INSTALL_MODE overrides it for setups the heuristics cannot see (e.g. a
+// binary inside a container image that is intentionally managed as a binary,
+// or a distribution package whose unit file sets `package`).
+func DetectInstallMode() InstallMode { return DetectInstall().Mode }
 
 // CanSelfApply reports whether this install may replace its own binary.
 func (m InstallMode) CanSelfApply() bool { return m == ModeBinary }
@@ -136,6 +128,9 @@ type Input struct {
 	Manifest *Manifest
 	Policy   Policy
 	Mode     InstallMode
+	// Manager is the package manager of a ModePackage install, named in the
+	// reason; empty when it is not known.
+	Manager PackageManager
 	// Now and Window gate automatic application to a maintenance window. A zero
 	// Window means "any time".
 	Now    time.Time
@@ -147,8 +142,8 @@ type Input struct {
 //  1. Nothing newer → none.
 //  2. Below a release's MinVersion → instruct (must step through).
 //  3. Major move → instruct, always. A major is a decision, not an event.
-//  4. Cannot self-apply (docker) → instruct for anything it would otherwise
-//     have applied, confirm stays confirm.
+//  4. Cannot self-apply (docker, package manager) → instruct, for anything it
+//     would otherwise have applied as well as for what it would have offered.
 //  5. Patch: auto when the policy allows AND the release is auto_ok AND no
 //     migration is involved; otherwise confirm.
 //  6. Minor: auto only under PolicyMinor and only when Current.Major > 0 —
@@ -193,7 +188,7 @@ func Decide(in Input) Decision {
 	switch {
 	case auto && !in.Mode.CanSelfApply():
 		d.Action = ActionInstruct
-		d.because(why{key: "container", en: "container install cannot replace its own image — use an external updater or upgrade manually"})
+		d.because(cannotApply(in))
 	case auto:
 		d.Action = ActionAuto
 		d.because(reason)
@@ -205,6 +200,20 @@ func Decide(in Input) Decision {
 		d.because(reason)
 	}
 	return d
+}
+
+// cannotApply is why an install that would take this release by itself does
+// not: the image, or the package manager, owns the binary.
+func cannotApply(in Input) why {
+	if in.Mode == ModePackage {
+		if name := in.Manager.Label(); name != "" {
+			return why{key: "package", vars: map[string]string{"manager": name},
+				en: "installed with " + name + " — upgrade it with " + name + ", which keeps track of the installed version"}
+		}
+		return why{key: "package_unknown",
+			en: "installed by a package manager — upgrade it there, so the package manager keeps track of the installed version"}
+	}
+	return why{key: "container", en: "container install cannot replace its own image — use an external updater or upgrade manually"}
 }
 
 // autoAllowed answers "may this move happen without asking?" plus the reason,

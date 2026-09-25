@@ -16,22 +16,46 @@ panel, and the app links out to it in your browser.
 
 ## Install
 
+### With a package manager
+
+The package managers install the same app and keep it updated themselves (the
+app then leaves updating to them). The desktop app is **`filex-app`** in every
+one of them; plain `filex` is the [CLI](CLI.md).
+
+| Platform | Command | Notes |
+|---|---|---|
+| Ubuntu and other Linux with snapd | `sudo snap install filex-app` | Also in Ubuntu's App Center — search for *filex*. The sign-in is stored in your keyring once the snap may reach it: `sudo snap connect filex-app:password-manager-service` (the app says so when it is needed). |
+| macOS 13+ (Apple Silicon) | `brew install brf-tech/filex/filex-app` | Homebrew tap [`BRF-Tech/homebrew-filex`](https://github.com/BRF-Tech/homebrew-filex). The first launch is blocked once, as below: the app is not signed with a Developer ID. |
+| Windows 10/11 | `winget install BRFTech.filex-app` | The same per-user installer as the download below. A new package waits for winget's review before it can be installed, so this works a few days after the first release that submits it. |
+
+### Download
+
 | Platform | File | What it does |
 |---|---|---|
 | Windows 10/11 (64-bit) | [`filex-desktop-x64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x64.exe) | Installer. Installs for **your user only** (`%LOCALAPPDATA%\Programs\filex`) — no administrator rights, and the app can replace its own files, which is what lets it update itself quietly. Adds a Start-menu entry. |
 | Windows 10/11 (64-bit) | [`filex-desktop-portable-x64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-portable-x64.exe) | **Portable** — nothing is installed. Double-click it wherever it is: a USB stick, `Downloads`, a work machine you may not install software on. It keeps its files in a `filex-data` folder beside itself. See [Portable](#portable-windows) below. |
 | Linux (any, 64-bit) | [`filex-desktop-x86_64.AppImage`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x86_64.AppImage) | **Portable** — no installation. `chmod +x` and run. |
-| Debian / Ubuntu | [`filex-desktop-amd64.deb`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-amd64.deb) | System-wide install, appears in your applications menu. |
-| macOS 12+ (Apple Silicon) | [`filex-desktop-arm64.dmg`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-arm64.dmg) | Drag to *Applications*. **Unsigned** — see the first-launch note below. Intel Macs: no build; the web app works there. |
+| Debian / Ubuntu | [`filex-desktop-amd64.deb`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-amd64.deb) | System-wide install (package `filex-app`), appears in your applications menu. |
+| Fedora / openSUSE | [`filex-desktop-x86_64.rpm`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x86_64.rpm) | The same, as an RPM (package `filex-app`). |
+| macOS 13+ (Apple Silicon) | [`filex-desktop-arm64.dmg`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-arm64.dmg) | Drag to *Applications*. **Unsigned** — see the first-launch note below. Intel Macs: no build; the web app works there. |
 
 ```bash
 # Debian / Ubuntu
 sudo apt install ./filex-desktop-amd64.deb
 
+# Fedora / openSUSE
+sudo dnf install ./filex-desktop-x86_64.rpm     # openSUSE: sudo zypper install ./filex-desktop-x86_64.rpm
+
 # Anything else
 chmod +x filex-desktop-x86_64.AppImage
 ./filex-desktop-x86_64.AppImage
 ```
+
+On Linux the installed app's command is **`filex-app`** — `filex` is the
+[CLI](CLI.md). Up to 0.43.x the desktop package itself was called `filex` and
+took that command; installing a newer .deb or .rpm replaces it in one step, and
+the app carries over its *Start when I sign in* entry and the default-app
+choices made under the old name.
 
 ```powershell
 # Windows, nothing installed: put the .exe where you want it and run it.
@@ -254,7 +278,7 @@ filex* has the button that gets you to it.
 | | What the button does | What it cannot do |
 |---|---|---|
 | **Windows** | Opens the OS's own **Default apps** page, where you pick filex for the type. | Set the default for you. Since Windows 10 the `UserChoice` registry key is protected by a hash over the extension, your account's SID and a Microsoft salt; an application cannot write it, and forging that hash is exactly what the protection exists to stop. An installer that appears to manage it is either overwriting the plain `.docx` ProgId behind your back or tampering. |
-| **Linux** | Runs `xdg-mime default filex.desktop …` for these types — which genuinely sets the default. | — |
+| **Linux** | Runs `xdg-mime default filex-app.desktop …` for these types — which genuinely sets the default. (A snap cannot reach your desktop's settings; Settings explains the file manager's *Open with* instead.) | — |
 | **macOS** | Explains where: Finder → **Get Info** → *Open with* → filex → **Change All…** | Set it for you. The API exists (`LSSetDefaultRoleHandlerForContentType`) but Electron exposes no binding for it, and filex ships no native code. |
 
 On macOS filex registers with rank *Alternate* on purpose: it appears in the
@@ -433,8 +457,12 @@ estimate after the first few seconds of transfer, from the average rate so far
 > fast (the numbers are in [Folder sync](SYNC.md#how-fast-a-change-arrives)).
 > Under each synced folder the app says how changes reach it — *Live*,
 > *Polling* (the server cannot announce changes; they arrive with the
-> 30-second check) or *Offline*. The engine's rules below apply unchanged: the
-> first pass deletes nothing.
+> 30-second check) or *Offline*. A folder that another filex on this computer
+> is already syncing — a second copy of the app, or `filex sync run` in a
+> terminal — says *Another filex on this computer is syncing this folder*; this
+> copy leaves it alone and takes it over when that one stops
+> ([why](SYNC.md#one-engine-per-folder-on-this-computer)). The engine's rules
+> below apply unchanged: the first pass deletes nothing.
 
 ---
 

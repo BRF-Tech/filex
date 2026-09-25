@@ -148,13 +148,18 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
 # ---------------------------------------------------------------------------
 # Stage 4: Runtime with full thumbnail toolchain
 # ---------------------------------------------------------------------------
-FROM alpine:3.20
+FROM alpine:3.24
 
 # Single apk layer — keeps the Docker layer cache friendly when nothing in
 # the dep list changes between builds.
 #   ca-certificates / tzdata / su-exec — base runtime niceties.
 #   tini                                — PID 1: reaps orphaned processes
 #                                         (see ENTRYPOINT below).
+#   7zip                                — 7z/RAR/xz and encrypted ZIP archive
+#                                         operations. ⚠ 25.01 or newer: filex
+#                                         refuses older ones (archivecli), and
+#                                         Alpine 3.22's 24.09 has the ZIP/RAR5
+#                                         and symlink CVEs fixed in 25.00/25.01.
 #   ffmpeg                              — video thumbnails (1st keyframe).
 #   ghostscript + poppler-utils         — PDF → JPEG (page 1). gs preferred,
 #                                         pdftoppm as fallback (matches
@@ -175,6 +180,7 @@ RUN apk --no-cache add \
         tzdata \
         su-exec \
         tini \
+        '7zip>=25.01-r0' \
         ffmpeg \
         imagemagick \
         ghostscript \

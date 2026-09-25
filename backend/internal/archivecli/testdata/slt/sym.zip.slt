@@ -1,0 +1,36 @@
+Path = target.txt
+Folder = -
+Size = 7
+Packed Size = 7
+Modified = 2026-09-24 21:38:32
+Created = 
+Accessed = 
+Attributes =  -rw-r--r--
+Encrypted = -
+Comment = 
+CRC = E2EBB28C
+Method = Store
+Characteristics = UT:MA:1 ux
+Host OS = Unix
+Version = 10
+Volume Index = 0
+Offset = 0
+
+Path = sym
+Folder = -
+Size = 21
+Packed Size = 21
+Modified = 2026-09-24 21:38:32
+Created = 
+Accessed = 
+Attributes =  lrwxrwxrwx
+Encrypted = -
+Comment = 
+CRC = 6E79ACE7
+Method = Store
+Characteristics = UT:MA:1 ux
+Host OS = Unix
+Version = 10
+Volume Index = 0
+Offset = 75
+

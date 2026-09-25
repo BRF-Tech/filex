@@ -7,8 +7,15 @@ import "errors"
 // `filex sync run --watch` and needs to tell "the server no longer accepts
 // this account's token" (ask the person to reconnect; never restart the
 // watcher with the same token) from any other failure (restart, retry).
+//
+// exitPairBusy is a one-shot `filex sync run` that skipped at least one pair
+// because another process on this computer holds its lock (filesync
+// lock.go) — the desktop app, or a second copy of it, is syncing that folder.
+// The other pairs did run. `--watch` never exits with it: it waits for the
+// lock instead.
 const (
 	exitSignedOut = 3
+	exitPairBusy  = 4
 )
 
 // exitError carries a process exit status alongside the error main prints.

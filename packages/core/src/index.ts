@@ -32,6 +32,17 @@ export { default as StarButton } from './components/StarButton.vue';
 export { default as TagPicker } from './components/TagPicker.vue';
 export { default as TagKindIcon } from './components/TagKindIcon.vue';
 export { tagItemsOf, tagKey, isTagKind, type TagItem, type TagKind } from './lib/tags';
+export {
+  coverageByStorage,
+  coverageMessage,
+  coverageNotice,
+  coveragePercent,
+  incomplete as coverageIncomplete,
+  type CatalogCoverage,
+  type CoverageNotice,
+  type CoverageReason,
+  type StorageInfo,
+} from './lib/catalogCoverage';
 // tablo:t3 — the row's ONE action control ("Actions" / "Aksiyon"). DataTable
 // draws it for every table (`rowActions`); it stays exported for a host that
 // needs the same control outside a table. A second menu built beside
@@ -332,6 +343,10 @@ export type { NavApp } from './components/SideNav.vue';
  * explorer's operations center and a host's own tray (the admin app's). */
 export { opPercent } from './lib/opProgress';
 export type { OpProgressLike } from './lib/opProgress';
+
+/* #48 — how an archive format is written (ZIP, TAR.GZ, 7z), for the explorer's
+ * create dialog and a host's own archive settings alike. */
+export { archiveFormatLabel } from './lib/archiveFormats';
 
 /* tasi:m1 — "download the selection as one archive". Exported so a host that
  * draws its own selection bar gets the real two-step flow (authorized mint,

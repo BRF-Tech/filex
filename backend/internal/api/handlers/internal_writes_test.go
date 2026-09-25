@@ -23,8 +23,10 @@ package handlers_test
 // shows no error where a person looks — the edit just never comes back.
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -205,15 +207,37 @@ func TestInternalDirs_PeopleCannotWriteThere(t *testing.T) {
 	status, body = fxPost(t, f.URL+"/api/files/archive/extract", tok, map[string]any{"storage_id": f.StA.ID, "path": "Documents/bundle.zip", "dest": ".filex-open"})
 	assertReserved(t, "extracting into the work area", status, body)
 	status, body = fxPost(t, f.URL+"/api/files/archive/extract", tok, map[string]any{"storage_id": f.StA.ID, "path": "Documents/bundle.zip", "dest": "Unpacked"})
-	require.Equal(t, http.StatusOK, status, "an ordinary extraction: %s", body)
+	require.Equal(t, http.StatusAccepted, status, "an ordinary extraction: %s", body)
+	f.drainOps(t)
 	assert.FileExists(t, filepath.Join(f.RootA, "Unpacked", "ok.txt"), "the ordinary member was not extracted")
 	for _, planted := range []string{".versions/evil.txt", "sub/.keepdir", ".filex-open/a1b2c3d4e5f6-x.docx"} {
 		assert.NoFileExists(t, filepath.Join(f.RootA, "Unpacked", filepath.FromSlash(planted)), "extraction wrote %s", planted)
+	}
+	// The same members in a .tar.gz take the other extraction path (#48's,
+	// through a private workspace): it must judge every member the same way.
+	fxUpload(t, f.URL, tok, "alpha://Documents", "bundle.tar.gz", string(buildTarGz(t, map[string]string{
+		"ok.txt":                          "fine",
+		".versions/evil.txt":              "planted history",
+		"sub/.keepdir":                    "",
+		".filex-open/a1b2c3d4e5f6-x.docx": "planted copy",
+	})))
+	status, body = fxPost(t, f.URL+"/api/files/archive/extract", tok, map[string]any{"storage_id": f.StA.ID, "path": "Documents/bundle.tar.gz", "dest": "UnpackedTar"})
+	require.Equal(t, http.StatusAccepted, status, "an ordinary .tar.gz extraction: %s", body)
+	f.drainOps(t)
+	assert.FileExists(t, filepath.Join(f.RootA, "UnpackedTar", "ok.txt"), "the ordinary member was not extracted")
+	for _, planted := range []string{".versions/evil.txt", "sub/.keepdir", ".filex-open/a1b2c3d4e5f6-x.docx"} {
+		assert.NoFileExists(t, filepath.Join(f.RootA, "UnpackedTar", filepath.FromSlash(planted)), ".tar.gz extraction wrote %s", planted)
 	}
 	status, body = fxPost(t, f.URL+"/api/files/archive/add", tok, map[string]any{"storage_id": f.StA.ID, "path": ".filex-open/a.zip", "files": []map[string]string{{"source": "Documents/Plan notes.txt", "name": "p.txt"}}})
 	assertReserved(t, "an archive created in the work area", status, body)
 	status, body = fxPost(t, f.URL+"/api/files/archive/add", tok, map[string]any{"storage_id": f.StA.ID, "path": "Documents/b.zip", "files": []map[string]string{{"source": ".versions/1", "name": "v.txt"}}})
 	assertReserved(t, "an archive packing a version snapshot", status, body)
+	// #48's create door, the same two ways: the archive it writes, and every
+	// file it packs.
+	status, body = fxPost(t, f.URL+"/api/files/archive/create", tok, map[string]any{"storage_id": f.StA.ID, "dest": ".filex-open/c.zip", "format": "zip", "sources": []string{"alpha://Documents/Plan notes.txt"}})
+	assertReserved(t, "an archive created in the work area (create)", status, body)
+	status, body = fxPost(t, f.URL+"/api/files/archive/create", tok, map[string]any{"dest": "alpha://Documents/c.zip", "format": "zip", "sources": []string{"alpha://.versions/1"}})
+	assertReserved(t, "an archive packing a version snapshot (create)", status, body)
 
 	// ── AI surface: a reserved member of an ordinary destination ─────────
 	fxUpload(t, f.URL, tok, "alpha://Documents", "agent.zip", string(zipBytes))
@@ -286,6 +310,21 @@ func TestInternalDirs_AppOutputCannotBeNamedLikeFilexOwn(t *testing.T) {
 	rel, err := h.CommitSibling(ctx, f.StA.ID, "", "out.pdf", strings.NewReader("x"), 1, nil)
 	require.NoError(t, err, "precondition: an ordinary output is written")
 	assert.Equal(t, "out.pdf", rel)
+}
+
+func buildTarGz(t *testing.T, members map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	for name, content := range members {
+		require.NoError(t, tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(content))}))
+		_, err := io.WriteString(tw, content)
+		require.NoError(t, err)
+	}
+	require.NoError(t, tw.Close())
+	require.NoError(t, gw.Close())
+	return buf.Bytes()
 }
 
 func buildZip(t *testing.T, members map[string]string) []byte {

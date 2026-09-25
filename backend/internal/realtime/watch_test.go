@@ -245,3 +245,25 @@ func TestWatchReplaceAndUnsubscribe(t *testing.T) {
 		t.Fatalf("hub still holds %d storage watch lists", left)
 	}
 }
+
+// WatchedRoots is how a lazily catalogued storage learns which subtrees a
+// desktop mirrors right now: every live recursive root once, and nothing
+// after the client lets go.
+func TestWatchedRootsListsTheLiveRootsOnce(t *testing.T) {
+	h := fastHub()
+	a := NewClient(1, "engine-a", 8)
+	b := NewClient(2, "engine-b", 8)
+	h.Watch(a, []WatchRoot{{StorageID: 1, Dir: "proj"}, {StorageID: 1, Dir: "/docs/"}, {StorageID: 2, Dir: "x"}})
+	h.Watch(b, []WatchRoot{{StorageID: 1, Dir: "proj"}, {StorageID: 1, Dir: ""}})
+	if got := fmt.Sprint(h.WatchedRoots(1)); got != "[ /docs /proj]" {
+		t.Fatalf("storage 1 roots: %s", got)
+	}
+	if got := fmt.Sprint(h.WatchedRoots(2)); got != "[/x]" {
+		t.Fatalf("storage 2 roots: %s", got)
+	}
+	h.Watch(a, nil)
+	h.Watch(b, nil)
+	if got := h.WatchedRoots(1); len(got) != 0 {
+		t.Fatalf("a released watch is still listed: %v", got)
+	}
+}

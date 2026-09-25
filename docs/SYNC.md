@@ -143,6 +143,32 @@ it. The same holds for the server side: a folder that could not be **listed**
 (a timeout, a proxy error) fails the run instead of reading as deleted — only a
 folder the server says does not exist is skipped.
 
+### One engine per folder on this computer
+
+Two engines on the same pair at once — the desktop app and `filex sync run` in
+a terminal, or two copies of the desktop app (an installed one and the
+Microsoft Store one sign in with the same accounts) — would each plan from the
+history the other is about to overwrite: files uploaded twice, conflict copies
+out of nothing, a delete carried to the side that did not ask for it. So every
+run holds an **operating-system lock** on its pair
+(`~/.filex/sync/locks/<pair-id>.lock`; `LockFileEx` on Windows, `flock`
+elsewhere) and a pair another process holds is left alone:
+
+- `filex sync run` says `pair-1: lock: busy — another filex on this computer is
+  syncing this pair (process 1234, …)`, syncs the other pairs, and exits with
+  **status 4**.
+- `filex sync run --watch` holds its pairs' locks for as long as it syncs them.
+  A busy pair gets no pass and no watches; the watcher keeps asking (every few
+  seconds — no server traffic) and takes the pair over, with a full pass, as
+  soon as the other process stops: `pair-1: lock: acquired`. The desktop app
+  shows the busy state under that folder instead of an error, and does not
+  restart anything.
+
+The lock belongs to the process: when it ends — quit, crashed or killed — the
+operating system lets go, so there is never a stale lock to delete. The
+`.lock` files themselves stay (they are a few bytes); deleting one does not
+free a pair, and is not needed.
+
 ### Deletions are recoverable for 30 days
 
 Anything sync removes **from your machine** is moved aside, not deleted:
@@ -493,11 +519,21 @@ you — see above.
 could not be listed, so the run stopped rather than treat the folder as gone.
 It is retried on the next round.
 
+**"pair-1: lock: busy — another filex on this computer is syncing this pair".**
+Another process on this machine is syncing that folder right now — usually the
+desktop app, or a second copy of it — and the process it names is the one.
+Nothing was touched; see [One engine per folder on this
+computer](#one-engine-per-folder-on-this-computer). Let that one do it, or stop
+it (in the desktop app: *Pause sync*, or quit it) and run again; a `--watch`
+takes over by itself. In the desktop app the folder says *Another filex on
+this computer is syncing this folder*.
+
 **The watcher stopped: "signed out: the server no longer accepts this token
 (HTTP 401)".** The token was revoked (or has expired), and a watcher that kept
 retrying it would only fill the server's log. `filex sync run` stops at the
-first 401 with **exit status 3** — every other failure exits 1 — so a
-supervisor can tell "sign in again" from "try again". Sign in again
+first 401 with **exit status 3** — a pair skipped as busy exits 4, every
+other failure 1 — so a supervisor can tell "sign in again" from "try again".
+Sign in again
 (`filex client login`, or *Reconnect* in the desktop app) and start it again.
 A stop request (Ctrl-C, SIGTERM) cancels the run in flight cleanly: the
 checkpoint is written, so the next run resumes where this one stopped.

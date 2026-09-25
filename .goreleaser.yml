@@ -97,6 +97,106 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
+# ── Package managers: the CLI as `filex` ─────────────────────────────────
+#
+# Names (Burak, 2026-09-25): the CLI is plain `filex` in every package
+# manager — the command's own name — and the desktop app is `filex-app`
+# (desktop/scripts/pkg-manifests.mjs publishes that one after the installers
+# are built). Homebrew's own rule for an app beside a same-named tool is the
+# `-app` suffix (tailscale/tailscale-app, ollama/ollama-app).
+#
+# ⚠ Both blocks publish only from GitHub Actions (release.yml passes the
+# deploy key and the token); the GitLab release job runs with --skip=publish. And both skip
+# themselves when their token is not there — an unset variable in a template
+# would otherwise fail the whole release, binaries and all.
+#
+# ⚠ `brews` (formulas) is deprecated for pre-built binaries; casks are what
+# Homebrew wants for them. A cask's download is quarantined on macOS, and the
+# binary is not signed with a Developer ID (no Developer ID — Burak's call), so
+# the caveat says how to let it through. Removing the quarantine for people
+# (the documented xattr hook) is what Homebrew declines to make easy, and its
+# legacy postflight block is deprecated for third-party taps.
+homebrew_casks:
+  - name: filex
+    ids:
+      - filex                     # the tar.gz archives, not the 185 MB bare binaries
+    binaries:
+      - filex
+    directory: Casks
+    homepage: "https://filex.sh/"
+    description: "Self-hosted file manager: server, folder sync and CLI in one binary"
+    caveats: |
+      On macOS: filex is not signed with an Apple Developer ID, so macOS may
+      refuse to run it the first time. Allow it once in System Settings →
+      Privacy & Security ("Open Anyway"), then run the command again.
+    commit_author:
+      name: filex release
+      email: hello@brf.sh
+    skip_upload: '{{ if envOrDefault "HOMEBREW_TAP_DEPLOY_KEY" "" }}auto{{ else }}true{{ end }}'
+    repository:
+      owner: BRF-Tech
+      name: homebrew-filex
+      branch: main
+      # A deploy key with write access to the tap and nothing else (added
+      # 2026-09-25, "filex release pipeline"); the private half lives only in
+      # this repository's HOMEBREW_TAP_DEPLOY_KEY secret. Rotating it = a new
+      # key pair, swap the deploy key and the secret.
+      git:
+        url: "git@github.com:BRF-Tech/homebrew-filex.git"
+        private_key: '{{ envOrDefault "HOMEBREW_TAP_DEPLOY_KEY" "" }}'
+
+winget:
+  - name: filex                   # also the Moniker: `winget install filex`
+    package_identifier: BRFTech.filex
+    package_name: filex
+    # What Apps & features shows for filex's own installers (the desktop NSIS
+    # writes "BRF Tech" from package.json's author).
+    publisher: BRF Tech
+    publisher_url: "https://github.com/BRF-Tech"
+    publisher_support_url: "https://github.com/BRF-Tech/filex/issues"
+    privacy_url: "https://filex.sh/privacy/"
+    homepage: "https://filex.sh/"
+    license: MIT
+    license_url: "https://github.com/BRF-Tech/filex/blob/main/LICENSE"
+    copyright: "© BRF Tech"
+    short_description: "filex server, folder sync and command-line client in one binary"
+    release_notes_url: "{{ .ReleaseURL }}"
+    tags:
+      - file-manager
+      - file-sync
+      - self-hosted
+      - webdav
+      - sftp
+      - s3
+      - cli
+    # ⚠ No `additional_locales`: goreleaser (v2.18) copies `Moniker` into the
+    # extra locale manifest, which the schema allows only in the default one —
+    # `winget validate` answers "Unknown field. [Moniker]" (measured on a
+    # snapshot build, 2026-09-25). The desktop app's manifests carry tr-TR.
+    # The Windows zip: winget installs it as a portable package and puts a
+    # `filex` command on the PATH. The desktop app adds nothing to the PATH
+    # (NSIS and MSIX alike), so the two never shadow each other.
+    ids:
+      - filex
+    commit_author:
+      name: filex release
+      email: hello@brf.sh
+    # Pinned, because release.yml's "Did the CLI reach winget" step looks the
+    # pull request up by exactly this title.
+    commit_msg_template: "New version: {{ .PackageIdentifier }} {{ .Version }}"
+    skip_upload: '{{ if envOrDefault "WINGET_TOKEN" "" }}auto{{ else }}true{{ end }}'
+    repository:
+      # The fork the pull request comes from: the account that owns WINGET_TOKEN.
+      owner: brkfun
+      name: winget-pkgs
+      token: '{{ envOrDefault "WINGET_TOKEN" "" }}'
+      pull_request:
+        enabled: true
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot+{{.ShortCommit}}"
 

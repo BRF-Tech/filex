@@ -7,10 +7,15 @@
 //
 // Everything worth reading later goes through here: one line per step, to
 // `<userData>/logs/filex-desktop.log`, and to stdout as well for a dev run.
+// (`~/.filex/desktop/logs` on the Store build — Settings opens the folder in
+// Explorer, and Explorer cannot see the package's redirected AppData; see
+// src/channel.ts.)
 
 import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+
+import { CURRENT_CHANNEL, explorerVisibleRoot } from './channel.js';
 
 /** Rotate at this size, keeping one previous file. Two megabytes is thousands
  *  of lines — long enough to hold a whole session, small enough to attach to a
@@ -22,7 +27,7 @@ let file: string | null = null;
 function logFile(): string | null {
   if (file) return file;
   try {
-    const dir = path.join(app.getPath('userData'), 'logs');
+    const dir = path.join(explorerVisibleRoot(CURRENT_CHANNEL, app.getPath('userData'), app.getPath('home')), 'logs');
     fs.mkdirSync(dir, { recursive: true });
     file = path.join(dir, 'filex-desktop.log');
     return file;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import {
@@ -16,7 +16,7 @@ import { useStoragesStore } from '@/stores/storages';
 import { useStorageDriversStore } from '@/stores/storageDrivers';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
-import type { DriftReport, StorageRef, SyncRun } from '@/api/types';
+import type { DriftReport, StorageRef, SyncMode, SyncRun } from '@/api/types';
 import { formatBytes, formatDate, formatDuration, formatNumber, formatRelative } from '@/lib/format';
 import { minutesFromSeconds, secondsFromMinutes } from '@/lib/syncInterval';
 
@@ -29,6 +29,8 @@ import Spinner from '@/components/ui/Spinner.vue';
 import { DataTable, StorageTags, type DataColumn } from '@brftech/filex-core';
 import { syncStateLabel, syncTone } from '@/lib/syncTone';
 import StorageDriverFields from '@/components/StorageDriverFields.vue';
+import StorageSyncMode from '@/components/StorageSyncMode.vue';
+import StorageCatalogStatus from '@/components/StorageCatalogStatus.vue';
 
 const { t, locale } = useI18n();
 const route = useRoute();
@@ -49,6 +51,8 @@ const readOnly = ref(false);
 const rbacEnabled = ref(false);
 /** Poll cadence in minutes; '' = the server default. Seconds on the wire. */
 const syncIntervalMin = ref<number | ''>('');
+/** How the catalog is kept current (StorageSyncMode). */
+const syncMode = ref<SyncMode | 'push' | ''>('');
 const config = ref<Record<string, unknown>>({});
 /** The storage's scan settings (issue #44), kept in the same config map. */
 const scanFields = computed(() => drivers.scanFields(item.value?.driver));
@@ -95,6 +99,7 @@ async function load() {
     readOnly.value = s.read_only;
     rbacEnabled.value = s.rbac_enabled ?? false;
     syncIntervalMin.value = minutesFromSeconds(s.sync_interval_s);
+    syncMode.value = s.sync_mode ?? '';
     config.value = { ...(s.config ?? {}) };
     await Promise.allSettled([loadRuns(), loadDrift()]);
   } catch (e: unknown) {
@@ -104,6 +109,37 @@ async function load() {
     loading.value = false;
   }
 }
+
+/**
+ * The lazy catalog's block, refreshed on its own (every few seconds while the
+ * background pass works), never through load(), which would overwrite a form
+ * somebody is in the middle of editing.
+ */
+async function refreshCatalogue() {
+  try {
+    const s = await StoragesApi.get(id.value);
+    if (item.value) {
+      item.value = {
+        ...item.value,
+        catalogue: s.catalogue,
+        coverage: s.coverage,
+        stats: s.stats,
+        last_sync_at: s.last_sync_at,
+      };
+    }
+  } catch {
+    // The next tick tries again; the block keeps what it showed.
+  }
+}
+let catalogueTimer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  catalogueTimer = setInterval(() => {
+    if (item.value?.catalogue && !item.value.catalogue.complete) void refreshCatalogue();
+  }, 5000);
+});
+onUnmounted(() => {
+  if (catalogueTimer) clearInterval(catalogueTimer);
+});
 
 async function loadRuns() {
   runsLoading.value = true;
@@ -134,9 +170,12 @@ async function save() {
       read_only: readOnly.value,
       rbac_enabled: rbacEnabled.value,
       sync_interval_s: secondsFromMinutes(syncIntervalMin.value),
+      // A legacy `push` row keeps what it has: the server refuses to write it.
+      ...(syncMode.value && syncMode.value !== 'push' ? { sync_mode: syncMode.value } : {}),
       config: config.value,
     });
     item.value = updated;
+    void refreshCatalogue();
     toast.success(t('storages.updatedOk'));
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
@@ -369,6 +408,11 @@ onMounted(load);
         placeholder="15"
         data-testid="storage-sync-interval"
       />
+      <StorageSyncMode
+        v-model:mode="syncMode"
+        v-model:config="config"
+        :driver="item.driver"
+      />
       <hr class="divider" />
       <StorageDriverFields
         v-model="config"
@@ -428,6 +472,28 @@ onMounted(load);
         </div>
       </div>
     </form>
+
+    <section
+      v-if="item.catalogue"
+      class="card"
+    >
+      <header class="card-header flex items-center justify-between">
+        <h2 class="text-sm font-semibold">
+          {{ t('storages.catalog.title') }}
+        </h2>
+        <Button
+          variant="ghost"
+          size="xs"
+          :aria-label="t('common.refresh')"
+          @click="refreshCatalogue"
+        >
+          <RefreshCcw class="h-3.5 w-3.5" />
+        </Button>
+      </header>
+      <div class="card-body">
+        <StorageCatalogStatus :catalogue="item.catalogue" />
+      </div>
+    </section>
 
     <section class="card">
       <header class="card-header flex items-center justify-between">

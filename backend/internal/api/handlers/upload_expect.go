@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
 // ── conditional uploads ─────────────────────────────────────────────────
@@ -70,7 +72,22 @@ func listingMtimeMillis(n *model.Node) (int64, bool) {
 // storageID. An empty expect always holds. A malformed one never does — a
 // client that asked for a check must not get an unchecked write because it
 // spelled the check wrong.
-func uploadExpectHolds(ctx context.Context, store db.Store, storageID int64, rel, expect string) bool {
+//
+// ⚠ The catalogue is not the only thing a listing is built from any more. A
+// folder the catalogue cannot vouch for — a storage whose first scan is still
+// running, a lazily catalogued folder nobody has had catalogued yet
+// (docs/LAZY-CATALOGUE.md) — is listed from the storage itself, so the client
+// may have planned from the DRIVER's size and date. resolve (optional) lets
+// the check ask the storage too:
+//
+//   - `none` also requires that nothing is at rel on the storage: a file that
+//     is there but has no row would otherwise be replaced by a write that asked
+//     for an empty spot. A storage that cannot answer does not block it.
+//   - `<size>:<mtime>` that does not match the row (or finds no row) holds when
+//     it matches the file on the storage exactly — which is what the client
+//     saw, and what is there now. A row that matches is still enough on its
+//     own, so a driver whose dates differ from the catalogue's changes nothing.
+func uploadExpectHolds(ctx context.Context, store db.Store, resolve func(int64) (storage.Driver, error), storageID int64, rel, expect string) bool {
 	expect = strings.TrimSpace(expect)
 	if expect == "" {
 		return true
@@ -81,7 +98,11 @@ func uploadExpectHolds(ctx context.Context, store db.Store, storageID int64, rel
 		n = nil
 	}
 	if expect == uploadExpectNone {
-		return n == nil
+		if n != nil {
+			return false
+		}
+		obj, known := statOnStorage(ctx, resolve, storageID, clean)
+		return !known || obj == nil
 	}
 	sizeStr, modStr, ok := strings.Cut(expect, ":")
 	if !ok {
@@ -89,11 +110,41 @@ func uploadExpectHolds(ctx context.Context, store db.Store, storageID int64, rel
 	}
 	size, err1 := strconv.ParseInt(sizeStr, 10, 64)
 	mod, err2 := strconv.ParseInt(modStr, 10, 64)
-	if err1 != nil || err2 != nil || n == nil || n.Type == model.NodeTypeDirectory {
+	if err1 != nil || err2 != nil {
 		return false
 	}
-	got, _ := listingMtimeMillis(n)
-	return n.Size == size && got == mod
+	if n != nil {
+		if n.Type == model.NodeTypeDirectory {
+			return false
+		}
+		if got, _ := listingMtimeMillis(n); n.Size == size && got == mod {
+			return true
+		}
+	}
+	obj, known := statOnStorage(ctx, resolve, storageID, clean)
+	return known && obj != nil && obj.Kind == storage.KindFile && obj.Size == size && obj.Mtime.UnixMilli() == mod
+}
+
+// statOnStorage asks the storage what is at rel. known is false when it could
+// not say (no resolver, no driver, an error other than "not found"); obj is nil
+// when it said "nothing".
+func statOnStorage(ctx context.Context, resolve func(int64) (storage.Driver, error), storageID int64, rel string) (obj *storage.Object, known bool) {
+	if resolve == nil {
+		return nil, false
+	}
+	drv, err := resolve(storageID)
+	if err != nil || drv == nil {
+		return nil, false
+	}
+	o, err := drv.Stat(ctx, strings.TrimPrefix(rel, "/"))
+	switch {
+	case err == nil:
+		return &o, true
+	case errors.Is(err, storage.ErrNotFound):
+		return nil, true
+	default:
+		return nil, false
+	}
 }
 
 // writePreconditionFailed answers a refused conditional upload.

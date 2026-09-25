@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/brf-tech/filex/backend/internal/archivecli"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/multioidc"
 	"github.com/brf-tech/filex/backend/internal/capability"
@@ -48,6 +49,9 @@ type Capabilities struct {
 	// nothing, which is what every test that builds this handler by hand gets.
 	Tenants      tenanturl.Resolver
 	PublicURLSet bool
+	// Archive publishes the non-sensitive creation policy used by the explorer
+	// so the create dialog honours the operator's configured default.
+	Archive *archivecli.Service
 }
 
 // NewCapabilities constructs a Capabilities handler.
@@ -145,6 +149,33 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	// instead of letting someone pick "30 days" and get 7.
 	if h.Store != nil {
 		merged["share_max_ttl_days"] = share.NewService(h.Store).MaxTTLDays(r.Context())
+	}
+	if h.Archive != nil {
+		// ⚠ What this server can MAKE, not only what the policy allows: every
+		// format but a plain ZIP needs 7-Zip, and so does a password. Offering
+		// 7z on a server without it (the slim image, a desktop install) let
+		// the dialog be filled in and then fail with PROVIDER_UNAVAILABLE.
+		policy := h.Archive.Policy(r.Context())
+		seven := h.Archive.SevenZipAvailable(r.Context())
+		formats := make([]string, 0, len(policy.AllowedFormats))
+		for _, f := range policy.AllowedFormats {
+			if seven || f == "zip" {
+				formats = append(formats, f)
+			}
+		}
+		def := policy.DefaultFormat
+		if !containsString(formats, def) {
+			def = ""
+			if len(formats) > 0 {
+				def = formats[0]
+			}
+		}
+		merged["archive"] = map[string]any{
+			"enabled":         policy.Enabled,
+			"default_format":  def,
+			"allowed_formats": formats,
+			"encryption":      seven,
+		}
 	}
 
 	// Who is asking — a person, or an integration (migration 00030)?

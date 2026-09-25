@@ -238,6 +238,35 @@ var (
 	}, []string{"plugin"})
 )
 
+// ── lazy catalogue (sync_mode lazy, issue #45) ─────────────────────────────
+//
+// "How far has the catalogue come, and is the watch budget full?" — the two
+// questions an operator of a large lazily catalogued storage asks.
+var (
+	// LazyFolders is how many folders of a storage are in each catalogue
+	// state: uncatalogued (the filler's work list), catalogued, watched.
+	LazyFolders = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "filex", Name: "lazy_folders",
+		Help: "Folders of a lazily catalogued storage per catalogue state (uncatalogued, catalogued, watched).",
+	}, []string{"storage", "state"})
+	// LazyWatches is how many fsnotify watches the storage holds right now.
+	LazyWatches = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "filex", Name: "lazy_watches",
+		Help: "Visited folders currently watched for changes on a lazily catalogued storage.",
+	}, []string{"storage"})
+	// LazyReconciles counts folder reconciles by what asked for them: open,
+	// watch, fill, refresh, pair.
+	LazyReconciles = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "filex", Name: "lazy_reconciles_total",
+		Help: "Folder reconciles of the lazy catalogue, by reason (open, watch, fill, refresh, pair).",
+	}, []string{"storage", "reason"})
+	// LazyHeldBack counts deletions the per-folder guard refused to make.
+	LazyHeldBack = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "filex", Name: "lazy_held_back_total",
+		Help: "Catalogue deletions the lazy catalogue's per-folder guard held back.",
+	}, []string{"storage"})
+)
+
 func init() {
 	Registry.MustRegister(
 		StagedInFlight, StagedBytes, StagedBegun, StagedBytesStaged,
@@ -248,6 +277,7 @@ func init() {
 		CacheEvents, CacheBytes,
 		QuotaUsageBytes, QuotaAccountedBytes,
 		PluginOps, PluginOpDuration, PluginInFlight, PluginRestarts, PluginUp,
+		LazyFolders, LazyWatches, LazyReconciles, LazyHeldBack,
 		throughputCollector{},
 		// Go runtime + process metrics: goroutines, heap, GC pause, open FDs.
 		// Free, and the first thing anyone wants when "filex is slow".

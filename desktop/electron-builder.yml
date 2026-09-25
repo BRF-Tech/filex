@@ -53,16 +53,37 @@ files:
 artifactName: ${productName}-desktop-${arch}.${ext}
 
 linux:
+  # The downloads on the GitHub Release. The snap is NOT here: it is built on
+  # its own (`pnpm dist:snap`, see `snap:` below) because it goes to the Snap
+  # Store, whose confinement and updates are a different product.
   target:
     - AppImage
     - deb
+    # Fedora / openSUSE. Like the .deb it carries `resources/package-type`, so
+    # electron-updater's RpmUpdater updates it from the filex.sh feed (pkexec +
+    # dnf / zypper / rpm). fpm needs `rpmbuild` on the build machine — CI
+    # installs the `rpm` package for it.
+    - rpm
   category: Utility
   # Required by the deb target; without it electron-builder refuses to build.
   maintainer: BRF Tech <security@brf.sh>
-  # The binary users actually type, and what the Debian package is named after.
-  # Defaults to the npm name otherwise, which would be "@brftech/filex-desktop"
-  # — not a legal Debian package name.
-  executableName: filex
+  # The binary users actually type, and what the desktop entry, the icon and
+  # the snap are named after. Defaults to the npm name otherwise, which would be
+  # "@brftech/filex-desktop" — not a legal Debian package name.
+  #
+  # ⚠⚠ `filex-app`, not `filex` (decision 2026-09-25): `filex` is the CLI, on
+  # every platform and in every package manager. Until 0.43.x this package was
+  # called `filex` and put /usr/bin/filex on PATH — the CLI's command, so which
+  # of the two a terminal ran depended on PATH order. The window, the menu entry
+  # and the tray still say "filex" (productName); only the Linux command and
+  # package names changed. Upgrading from the old package: `deb:`/`rpm:` below;
+  # the user's autostart entry and defaults: main.ts → migrateLegacyLinuxNames.
+  # src/channel.ts → LINUX_APP_NAME must say the same (a test holds them equal).
+  executableName: filex-app
+  # ⚠ The .deb/.rpm PACKAGE name is a separate setting (`deb.packageName`,
+  # `rpm.packageName` below): electron-builder takes it from the npm name, and
+  # for a scoped one (`@brftech/…`) from productName — `filex` — NOT from
+  # executableName.
   # ── "Open with filex" ───────────────────────────────────────────────
   # The office documents this app can open. desktop/src/openwith.ts
   # (OFFICE_EXTENSIONS / OFFICE_MIME_TYPES) is the source; a YAML file cannot
@@ -89,6 +110,24 @@ linux:
     - application/vnd.oasis.opendocument.spreadsheet
     - application/vnd.oasis.opendocument.presentation
     - application/rtf
+    # ── filex:// — the browser sign-in hands the code back on it ──────
+    # The one entry here that is not a document type: `x-scheme-handler/filex`
+    # in the desktop entry is how a Linux desktop learns who opens filex://
+    # links — the .deb's, the .rpm's, the AppImage's embedded one and the
+    # snap's alike. Without it NOTHING on Linux handled the link: measured on
+    # the v0.43.0 .deb, `xdg-mime query default x-scheme-handler/filex` was
+    # empty before and after a launch (the app's own runtime registration named
+    # `@brftech/filex-desktop.desktop`, a file nothing installs — see
+    # `desktopName` in package.json). Sign-in worked only by pasting the code.
+    #
+    # ⚠⚠ Here, NOT as `linux.protocols` — which is the documented way and does
+    # the same, but electron-builder 24.13.3 appends the scheme to THIS list
+    # object once per target it builds (LinuxTargetHelper pushes onto
+    # `asArray(mimeTypes)`, the config's own array): measured `…filex;` twice
+    # in the .deb and three times in the .rpm of one `dist:linux`. The
+    # extension-list test skips `x-scheme-handler/*`; test/
+    # linux-desktop-entry.test.ts keeps the scheme here and `protocols` out.
+    - x-scheme-handler/filex
 win:
   target:
     # The installed app: Start menu entry, per-user, updates itself silently.
@@ -189,6 +228,135 @@ nsis:
   # `/allusers`, which is why its updates asked for elevation.)
   perMachine: false
   allowElevation: false
+
+# ── Microsoft Store (MSIX) ───────────────────────────────────────────
+# Built on its own, never by `dist:win`: `pnpm dist:store` → `--win appx`. The
+# package goes to Partner Center, NOT to the filex.sh feed — the Store signs it
+# (no certificate of ours involved), hosts it, and updates it. The app notices
+# it is a Store copy (process.windowsStore, src/channel.ts) and leaves updating
+# to the Store.
+#
+# ⚠⚠ identityName, publisher and publisherDisplayName are the values Partner
+# Center shows under Product management → Product identity once the name is
+# reserved, character for character (case and punctuation included). The
+# placeholders below build a package that installs for a local test (signed
+# with a matching self-signed certificate) and that the Store would refuse.
+appx:
+  identityName: BRFTeknoloji.filex
+  publisher: CN=BRF Teknoloji
+  publisherDisplayName: BRF Teknoloji
+  # Required as soon as the identity comes from Partner Center: those names
+  # usually start with a digit, and electron-builder refuses an Application.Id
+  # that does ("AppX Application.Id can't start with numbers").
+  applicationId: filex
+  displayName: filex
+  # Tiles are drawn on the Start menu's own background.
+  backgroundColor: transparent
+  languages:
+    - en-US
+    - tr-TR
+  # The link, "Open with filex" and the login item — see the file.
+  customExtensionsPath: build/appx-extensions.xml
+
+# The Store version (0.43.1 → 1.0.4301.0), the uap3/uap10 namespaces and the
+# Windows range, rewritten after electron-builder writes the manifest. Read the
+# script before changing the version scheme: the Store refuses any package that
+# is not higher than the last one.
+appxManifestCreated: scripts/appx-manifest.cjs
+
+# ── Upgrading from the package that was called `filex` (≤ 0.43.x) ────
+# A different package NAME is a different package to dpkg and rpm: without
+# these, `apt install ./filex-desktop-amd64.deb` next to the old one fails on
+# the files both put under /opt/filex, and the old one would never go away.
+# Conflicts + Replaces (deb) / Conflicts + Obsoletes (rpm, fpm's `--replaces`)
+# make the new package take the old one's place in the same transaction.
+#
+# ⚠⚠ VERSION-BOUNDED, on purpose: `filex` is the CLI's name from now on, and
+# the day the CLI ships as a package called `filex`, an unbounded Replaces
+# would uninstall it. Only the desktop builds that carried the name — every
+# version before the first `filex-app` release — are replaced. 0.44.0 is that
+# release; if the rename ships in a 0.43.x, lower both bounds to that version
+# (test/linux-desktop-entry.test.ts checks they are above package.json's).
+#
+# ⚠ `packageName` too, per target (`linux:` does not take it in electron-builder
+# 24): without it the package is still named `filex` after productName.
+# Measured: with only executableName changed, the new .deb said
+# `Package: filex`, and `apt install` upgraded the old package in place
+# ("Unpacking filex (0.43.1) over (0.43.0)") — the CLI's name still taken.
+#
+# `afterRemove` — the .deb's postrm and the .rpm's %postun, per target (again
+# not a `linux:` key). electron-builder's own passes the wrong path to
+# `update-alternatives --remove` and runs on upgrades too: on Fedora
+# `dnf remove filex-app` failed the scriptlet and left /usr/bin/filex-app
+# dangling (measured). See the file.
+deb:
+  packageName: filex-app
+  afterRemove: build/linux/after-remove.tpl
+  fpm:
+    - "--conflicts=filex (<< 0.44.0)"
+    - "--replaces=filex (<< 0.44.0)"
+rpm:
+  packageName: filex-app
+  afterRemove: build/linux/after-remove.tpl
+  fpm:
+    - "--conflicts=filex < 0.44.0"
+    - "--replaces=filex < 0.44.0"
+
+# ── Snap Store ───────────────────────────────────────────────────────
+# Built on its own, never by `dist:linux`: `pnpm dist:snap` → `--linux snap`.
+# The package goes to the Snap Store (`snapcraft upload` in CI, when the
+# credentials exist) and is attached to the GitHub Release as well. snapd
+# updates it; the app recognises a snap (SNAP + SNAP_NAME, src/channel.ts) and
+# never wires its own updater there.
+#
+# What a STRICT snap changes, and where the app answers it (src/channel.ts):
+#   - HOME is `~/snap/filex-app/<rev>`: the default filex folder comes from
+#     SNAP_REAL_HOME (userHome), the sync engine's state from SNAP_USER_COMMON
+#     (engineStateDir) — the real `~/.filex` is a hidden directory the `home`
+#     interface does not reach.
+#   - The desktop entry snapd installs is `filex-app_filex-app.desktop`
+#     (linuxDesktopEntry); `filex://` and "Open with" come from it, and
+#     Settings explains the file manager's "Open with" instead of running
+#     `xdg-mime` in the sandbox (defaultHandlerRoute).
+#   - No keyring until `password-manager-service` is connected: the app then
+#     refuses to store the sign-in and says which command connects it
+#     (src/keychain.ts).
+snap:
+  # ⚠ core20, explicitly — the base electron-builder's prebuilt snap TEMPLATE
+  # is made for (Electron runtime libraries from the `gnome-3-28-1804` content
+  # snap). It needs no snapcraft on the build machine (the package is
+  # assembled with mksquashfs), which is what lets an ordinary Ubuntu CI
+  # runner and a plain Docker build produce it. core22/core24 need snapcraft
+  # in LXD or multipass, and a proper core24 snap (the `gnome` extension) only
+  # comes with electron-builder 26 — move to `base: core24` together with that
+  # upgrade, not before. Written out so a newer electron-builder with another
+  # default does not change the base silently.
+  base: core20
+  confinement: strict
+  grade: stable
+  summary: Your filex server's files in a window, with folder sync
+  # snapd starts `~/snap/filex-app/current/.config/autostart/filex-app.desktop`
+  # (`<snap name>.desktop`) at sign-in, with the arguments on its Exec line.
+  # Inside the snap HOME is `~/snap/filex-app/<rev>`, so the file "Start when
+  # I sign in" already writes (`$HOME/.config/autostart/filex-app.desktop`,
+  # login-item.ts → LINUX_AUTOSTART_NAME) is exactly that file, `--hidden`
+  # included; test/linux-desktop-entry.test.ts keeps the names equal.
+  autoStart: true
+  plugs:
+    # electron-builder's list: desktop, desktop-legacy, home, x11, wayland,
+    # unity7 (the tray's StatusNotifier), browser-support, network, gsettings,
+    # audio-playback, pulseaudio, opengl. `home` connects by itself on classic
+    # distributions.
+    - default
+    # The keyring (libsecret over D-Bus). Does NOT connect by itself: until it
+    # is (`snap connect filex-app:password-manager-service`, or a store
+    # auto-connect grant) Chromium falls back to `basic_text` and the app
+    # refuses to store the sign-in, saying why.
+    - password-manager-service
+    # Folders under /media, /run/media and /mnt. Also manual until granted.
+    - removable-media
+  # Same fixed-name rule as every other artifact (see artifactName above).
+  artifactName: ${productName}-desktop-${arch}.${ext}
 
 # ── auto-update feed ─────────────────────────────────────────────────
 # Generic (a plain static directory), NOT the GitHub provider: this repo's

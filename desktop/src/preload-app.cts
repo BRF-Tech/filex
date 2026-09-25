@@ -63,6 +63,10 @@ contextBridge.exposeInMainWorld('filexApp', {
   // Only meaningful on a macOS build that cannot swap itself (ad-hoc seal):
   // opens the feed's dmg in the browser instead of pretending to self-update.
   downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  // The Store build only: its login item is switched in Windows Settings.
+  openStartupSettings: () => ipcRenderer.invoke('login:osSettings'),
+  // The Store build only: where the filex.sh copy is removed.
+  openAppsSettings: () => ipcRenderer.invoke('app:osAppsSettings'),
 
   /** Backs the navigator.share polyfill the page installs. See main.ts. */
   share: (data: unknown) => ipcRenderer.invoke('app:share', data),

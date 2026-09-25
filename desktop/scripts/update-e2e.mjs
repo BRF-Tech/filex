@@ -9,11 +9,24 @@
 // Run (needs a packaged app):
 //   FILEX_APP_BINARY=…\filex.exe FILEX_EMAIL=… FILEX_PASSWORD=… node scripts/update-e2e.mjs
 
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { check, finish, launchApp, signIn, sleep } from './lib/harness.mjs';
+
+/** Whether a staged filex installer is running (by image name, this user). */
+async function installerRunning() {
+  await sleep(2000); // an on-quit install would be spawned in this window
+  try {
+    const out = execFileSync('tasklist', ['/FI', 'IMAGENAME eq filex-desktop-x64.exe', '/FO', 'CSV', '/NH'],
+      { encoding: 'utf8' });
+    return /filex-desktop-x64\.exe/i.test(out);
+  } catch {
+    return false;
+  }
+}
 
 // ── how the update is APPLIED (source guards — no app needed) ────────
 //
@@ -124,7 +137,29 @@ check('…downloaded it', u.status === 'ready',
   u.status === 'error' ? `hata: ${u.error}` : `durum=${u.status} %${u.percent ?? '?'}`);
 check('…and reports the version it staged', u.version === FAKE, String(u.version));
 
-await app.close();
+// ⚠⚠ NEVER `app.close()` here. A staged update installs ON QUIT
+// (`autoInstallOnAppQuit`), so a graceful close runs the 9.9.9 "update" — the
+// installer built from this tree — silently, with --updated. That installer
+// targets the OPERATOR's per-user install (%LOCALAPPDATA%\Programs\filex, found
+// through their HKCU uninstall entry), and before replacing it, electron-builder's
+// NSIS template runs `taskkill /f /im filex.exe` for the current user — their
+// running app and its sync engine included. Measured 2026-09-24: both an
+// Electron 31 and an Electron 44 run left `filex-desktop-x64.exe --updated /S`
+// running from filex-updater-e2e\pending (one for 12 minutes, until killed);
+// the operator's app happened to survive. A hard kill skips every quit hook,
+// so nothing is installed; /T takes the renderers and the sync engine with it.
+const pid = app.process().pid;
+try {
+  execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+} catch {
+  /* already gone */
+}
+const cacheDir = path.join(process.env.LOCALAPPDATA ?? '', 'filex-updater-e2e');
+check('closing the suite installed nothing (the staged installer never ran)',
+  !(await installerRunning()), 'filex-desktop-x64.exe --updated is running — kill it by PID');
+// The downloaded installer is this suite's own artifact: leave nothing staged
+// that a later run of the same packaged copy would pick up and apply.
+if (process.env.LOCALAPPDATA) fs.rmSync(cacheDir, { recursive: true, force: true });
 server.close();
 restore();
 finish();

@@ -68,7 +68,12 @@ func (Driver) Open(_ context.Context, dsn string) (*sql.DB, error) {
 
 // NewStore returns a Store backed by the given *sql.DB.
 func (Driver) NewStore(sqlDB *sql.DB) db.Store {
-	return &Store{db: sqlDB}
+	return &Store{db: sqlDB, CatalogueFolderSQL: &db.CatalogueFolderSQL{DB: sqlDB, Dialect: db.CatalogueDialect{
+		// The lazy catalogue's folder state (00059), written once in
+		// internal/db: $N placeholders and real timestamps are all that differ.
+		Placeholders: db.DollarPlaceholders,
+		Time:         db.PlainTime,
+	}}}
 }
 
 // Store implements db.Store atop Postgres.
@@ -79,6 +84,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 // will recognize.
 type Store struct {
 	db *sql.DB
+	// The catalogue_folders methods (internal/db catalogue_folders_sql.go).
+	*db.CatalogueFolderSQL
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }

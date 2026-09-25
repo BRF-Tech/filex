@@ -40,6 +40,18 @@ export interface VisibleStorage {
   usedBytes?: number;
   /** Files held by this storage, when the server reported one (admin only). */
   fileCount?: number;
+  /**
+   * `usedBytes` counts only part of the storage: the server sent `coverage`
+   * beside the figure (its catalog does not cover all of it yet — a first
+   * sync, a lazily cataloged storage). Home draws it as a lower bound.
+   */
+  usedPartial?: boolean;
+}
+
+/** The server's `coverage` beside a size figure says the figure is partial. */
+function partial(coverage: unknown): boolean {
+  const c = coverage as { complete?: unknown } | null | undefined;
+  return !!c && typeof c === 'object' && c.complete !== true;
 }
 
 /** GET headers that carry whatever this SPA is authenticating with. */
@@ -63,6 +75,7 @@ export function fromAdminStorages(items: readonly StorageRef[]): VisibleStorage[
     readOnly: s.read_only,
     usedBytes: s.stats?.total_size_bytes ?? s.total_bytes,
     fileCount: s.stats?.file_count ?? s.file_count,
+    usedPartial: partial(s.coverage),
   }));
 }
 
@@ -108,19 +121,20 @@ export function withStorageUsage(
 ): VisibleStorage[] {
   const rows = (body as { storages?: unknown })?.storages;
   if (!Array.isArray(rows)) return [...storages];
-  const byName = new Map<string, { used?: number; files?: number }>();
+  const byName = new Map<string, { used?: number; files?: number; partial: boolean }>();
   for (const r of rows) {
-    const row = r as { name?: unknown; used_bytes?: unknown; file_count?: unknown };
+    const row = r as { name?: unknown; used_bytes?: unknown; file_count?: unknown; coverage?: unknown };
     if (typeof row?.name !== 'string' || row.name === '') continue;
     byName.set(row.name, {
       used: typeof row.used_bytes === 'number' && row.used_bytes >= 0 ? row.used_bytes : undefined,
       files: typeof row.file_count === 'number' && row.file_count >= 0 ? row.file_count : undefined,
+      partial: partial(row.coverage),
     });
   }
   return storages.map((s) => {
     const hit = byName.get(s.name);
     if (!hit || hit.used === undefined) return { ...s };
-    return { ...s, usedBytes: hit.used, fileCount: hit.files ?? s.fileCount };
+    return { ...s, usedBytes: hit.used, fileCount: hit.files ?? s.fileCount, usedPartial: hit.partial };
   });
 }
 

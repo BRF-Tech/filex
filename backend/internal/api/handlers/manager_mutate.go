@@ -766,7 +766,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		// before the snapshot and the write — so the window in which a
 		// concurrent save can slip between the check and the bytes is as
 		// narrow as this handler can make it.
-		if !uploadExpectHolds(r.Context(), h.Store, current.ID, fullRel, expect) {
+		if !uploadExpectHolds(r.Context(), h.Store, h.StorageResolver, current.ID, fullRel, expect) {
 			_ = src.Close()
 			writePreconditionFailed(w)
 			return

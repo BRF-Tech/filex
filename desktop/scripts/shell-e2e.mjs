@@ -13,7 +13,7 @@
 import path from 'node:path';
 import {
   REPO, STORAGE,
-  api, check, finish, launchApp, signIn, skipTour, tickRow,
+  api, check, connectScreen, finish, launchApp, signIn, skipTour, tickRow,
 } from './lib/harness.mjs';
 
 const { app } = await launchApp();
@@ -24,9 +24,9 @@ let seedToken = null;
 
 try {
   // ── sign in ───────────────────────────────────────────────────────
-  const connect = await app.firstWindow();
-  await connect.waitForLoadState('domcontentloaded');
-  check('starts on the connect screen', await connect.locator('#server').isVisible());
+  // Waits for the form rather than sampling it — see connectScreen().
+  const { connect, shown } = await connectScreen(app);
+  check('starts on the connect screen', shown);
   check('the connect screen offers nothing but connecting',
     (await connect.locator('nav').count()) === 0,
     'accounts + sync + settings belong in the app window');

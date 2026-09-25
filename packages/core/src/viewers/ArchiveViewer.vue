@@ -1,19 +1,23 @@
 <script setup lang="ts">
 /**
- * ArchiveViewer — minimal zip / archive contents preview.
+ * ArchiveViewer — read-only preview of an archive's contents, browsed like a
+ * folder (a breadcrumb, folders first), for every format the server reads.
  *
  * Hits the configured archive-list endpoint (`archiveListUrl`, default
- * `POST /api/files/archive/list`) with the adapter-qualified path
- * and renders the member list as a flat table (name, size, mtime).
- * Read-only — extraction is exposed elsewhere (context menu / actions
- * panel). The viewer's job is just "what's inside?" so the user can
- * decide whether to extract or download.
+ * `POST /api/files/archive/list`) with the adapter-qualified path. An
+ * encrypted archive answers PASSWORD_REQUIRED / BAD_PASSWORD and the shared
+ * password dialog asks; the listing it unlocks is remembered for the session
+ * (`archivePreviewCache`). Extraction is exposed elsewhere (context menu /
+ * actions panel): the viewer's job is just "what's inside?".
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 import DataTable, { type DataColumn } from '../components/DataTable.vue';
 import { useLocale } from '../composables/useLocale';
+import type { LocaleCode } from '../types/ExplorerConfig';
+import type { ArchivePreviewCache } from '../lib/archivePreviewCache';
+import ArchivePasswordModal from '../modals/ArchivePasswordModal.vue';
 
 interface ArchiveEntry {
   name: string;
@@ -22,14 +26,19 @@ interface ArchiveEntry {
   is_dir?: boolean;
 }
 
-const props = defineProps<{
+interface ArchiveRow extends ArchiveEntry {
+  displayName: string;
+  fullPath: string;
+}
+
+const props = withDefaults(defineProps<{
   url: string;
   filePath?: string;
   ext: string;
-  t?: (key: string, vars?: Record<string, string | number>) => string;
   /** The interface language — the size column is written the way it writes
    *  numbers ("1,96 KB"), like every other size in the product. */
-  locale?: string;
+  locale?: LocaleCode;
+  t?: (key: string, vars?: Record<string, string | number>) => string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
   /** ⚠ Where to ask. This used to be the literal '/api/files/archive/list',
@@ -38,11 +47,19 @@ const props = defineProps<{
    *  every other call in the package honoured the configured base. The default
    *  keeps a same-origin install working unchanged. */
   archiveListUrl?: string;
-}>();
+  archivePreviewCache?: ArchivePreviewCache;
+}>(), {
+  locale: 'en',
+});
 
+const emit = defineEmits<{ (e: 'close'): void }>();
 const entries = ref<ArchiveEntry[]>([]);
+const currentDir = ref('');
 const loading = ref(true);
 const error = ref<string | null>(null);
+const password = ref('');
+const passwordNeeded = ref(false);
+const passwordError = ref('');
 
 /** ⚠ `vars` go THROUGH `t()`, not into a `.replace()` afterwards: `t()` is what
  *  picks the singular (`viewer.archive.entries_one`) from the count, and it can
@@ -63,14 +80,21 @@ function fmtSize(n: number): string {
 async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
+  passwordError.value = '';
   entries.value = [];
-  // The viewer is mounted with the resolved file path. Hit the API
-  // endpoint with the same adapter-qualified path the preview URL
-  // points at — the backend resolves storage + relative path itself.
   if (!props.filePath) {
     error.value = tt('viewer.archive.error', 'Could not read archive contents.');
     loading.value = false;
     return;
+  }
+  if (!password.value) {
+    const cached = props.archivePreviewCache?.recall(props.filePath);
+    if (cached) {
+      entries.value = cached;
+      passwordNeeded.value = false;
+      loading.value = false;
+      return;
+    }
   }
   try {
     const res = await fetch(props.archiveListUrl || '/api/files/archive/list', {
@@ -80,7 +104,7 @@ async function load(): Promise<void> {
         'Content-Type': 'application/json',
         ...(props.authHeaders ? await props.authHeaders() : {}),
       },
-      body: JSON.stringify({ path: props.filePath }),
+      body: JSON.stringify({ path: props.filePath, password: password.value || undefined }),
     });
     if (!res.ok) {
       /* ⚠ Never the raw status. This printed "503 Service Unavailable" (or a
@@ -89,10 +113,21 @@ async function load(): Promise<void> {
        * the HTTP layer instead of what happened. The server's reason, when it
        * sent one we know, becomes a sentence; anything else is the generic
        * "could not read the archive". */
-      throw new ArchiveError(await archiveErrorText(res));
+      const body = await res.json().catch(() => ({})) as { code?: string; error?: string };
+      if (body.code === 'PASSWORD_REQUIRED' || body.code === 'BAD_PASSWORD') {
+        props.archivePreviewCache?.forget(props.filePath);
+        passwordNeeded.value = true;
+        passwordError.value = body.code === 'BAD_PASSWORD'
+          ? tt('archive.bad_password', 'The archive password is incorrect.')
+          : '';
+        return;
+      }
+      throw new ArchiveError(archiveErrorText(res.status, body.code ?? body.error ?? ''));
     }
     const body = (await res.json()) as { entries?: ArchiveEntry[] };
     entries.value = body.entries ?? [];
+    if (password.value) props.archivePreviewCache?.remember(props.filePath, entries.value);
+    passwordNeeded.value = false;
   } catch (err) {
     error.value =
       err instanceof ArchiveError ? err.message : tt('viewer.archive.error', 'Could not read archive contents.');
@@ -105,25 +140,16 @@ async function load(): Promise<void> {
  *  network, a JSON parse) reads as the generic sentence. */
 class ArchiveError extends Error {}
 
-async function archiveErrorText(res: Response): Promise<string> {
-  let code = '';
-  try {
-    const body = (await res.json()) as { error?: unknown; code?: unknown };
-    code = String(body?.code ?? body?.error ?? '');
-  } catch {
-    /* not JSON — the generic sentence below */
-  }
+function archiveErrorText(status: number, code: string): string {
   if (/not a zip|unsupported|not supported|format/i.test(code)) {
     return tt('viewer.archive.unsupported', 'This kind of archive cannot be listed here. Download it to see what is inside.');
   }
-  if (res.status === 413 || /too large|too big/i.test(code)) {
+  if (status === 413 || /too large|too big/i.test(code)) {
     return tt('viewer.archive.too_large', 'This archive is too large to list here. Download it to see what is inside.');
   }
   return tt('viewer.archive.error', 'Could not read archive contents.');
 }
 
-onMounted(load);
-watch(() => props.filePath, load);
 
 /**
  * The entries, in THE table (DataTable — the explorer's own). ⚠ It used to be
@@ -134,7 +160,7 @@ watch(() => props.filePath, load);
  * to be sorted by size and have its Name column widened exactly the way the
  * folder it came from does.
  */
-const columns = computed<DataColumn<ArchiveEntry>[]>(() => [
+const columns = computed<DataColumn<ArchiveRow>[]>(() => [
   {
     id: 'name',
     label: tt('viewer.name', 'Name'),
@@ -155,8 +181,6 @@ const columns = computed<DataColumn<ArchiveEntry>[]>(() => [
   },
 ]);
 
-const totalSize = computed(() => entries.value.reduce((sum, e) => sum + (e.size || 0), 0));
-const fileCount = computed(() => entries.value.filter((e) => !e.is_dir).length);
 
 /* === ikon:emoji — the fallback screen's mark ==========================
  * Every viewer opened its "cannot show this" / "still loading" screen with a
@@ -165,14 +189,66 @@ const fileCount = computed(() => entries.value.filter((e) => !e.is_dir).length);
  * the person just clicked is wearing, so the fallback is recognisably about
  * that file — and "loading" is the stroked ring, spun by CSS, because no
  * still picture can say "still going". */
+function submitPassword(value: string) {
+  password.value = value;
+  void load();
+}
+
+onMounted(load);
+watch(() => props.filePath, () => {
+  currentDir.value = '';
+  password.value = '';
+  passwordNeeded.value = false;
+  void load();
+});
+
+const totalSize = computed(() => entries.value.reduce((sum, entry) => sum + (entry.size || 0), 0));
+const fileCount = computed(() => entries.value.filter((entry) => !entry.is_dir).length);
+
+function cleanPath(value: string): string {
+  return value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+}
+
+const visibleEntries = computed<ArchiveRow[]>(() => {
+  const rows = new Map<string, ArchiveRow>();
+  for (const entry of entries.value) {
+    const fullPath = cleanPath(entry.name);
+    if (!fullPath || (currentDir.value && !fullPath.startsWith(currentDir.value))) continue;
+    const rest = currentDir.value ? fullPath.slice(currentDir.value.length) : fullPath;
+    if (!rest) continue;
+    const slash = rest.indexOf('/');
+    if (slash >= 0) {
+      const displayName = rest.slice(0, slash);
+      const dirPath = `${currentDir.value}${displayName}`;
+      if (!rows.has(dirPath)) {
+        rows.set(dirPath, { name: dirPath, fullPath: dirPath, displayName, size: 0, is_dir: true });
+      }
+      continue;
+    }
+    rows.set(fullPath, { ...entry, name: fullPath, fullPath, displayName: rest });
+  }
+  return [...rows.values()].sort((a, b) => {
+    if (!!a.is_dir !== !!b.is_dir) return a.is_dir ? -1 : 1;
+    return a.displayName.localeCompare(b.displayName, undefined, { numeric: true, sensitivity: 'base' });
+  });
+});
+
+const breadcrumbs = computed(() => {
+  const parts = cleanPath(currentDir.value).split('/').filter(Boolean);
+  return parts.map((name, index) => ({ name, path: `${parts.slice(0, index + 1).join('/')}/` }));
+});
+
+function openRow(row: ArchiveRow) {
+  if (row.is_dir) currentDir.value = `${cleanPath(row.fullPath)}/`;
+
+}
 const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ext }));
 
-/** A row inside the archive, drawn the way the listing draws the same kind. */
-function entryTile(e: ArchiveEntry): string {
-  const name = e.name || '';
+function entryTile(entry: ArchiveEntry): string {
+  const name = entry.name || '';
   const dot = name.lastIndexOf('.');
   return fileIconTile({
-    type: e.is_dir ? 'dir' : 'file',
+    type: entry.is_dir ? 'dir' : 'file',
     extension: dot > 0 ? name.slice(dot + 1) : '',
     basename: name,
   });
@@ -181,7 +257,12 @@ function entryTile(e: ArchiveEntry): string {
 
 <template>
   <div class="filex-viewer-archive">
-    <div v-if="error" class="filex-viewer-fallback">
+    <div v-if="passwordNeeded" class="filex-viewer-fallback">
+      <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
+      <span class="filex-viewer-fallback__icon" aria-hidden="true" v-html="actionIconSvg('lock')"></span>
+      <p>{{ tt('archive.password_required', 'This archive requires a password.') }}</p>
+    </div>
+    <div v-else-if="error" class="filex-viewer-fallback">
       <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
       <span class="filex-viewer-fallback__icon" aria-hidden="true" v-html="typeTile"></span>
       <p>{{ error }}</p>
@@ -201,6 +282,13 @@ function entryTile(e: ArchiveEntry): string {
       <p>{{ tt('viewer.archive.empty', 'Archive is empty.') }}</p>
     </div>
     <div v-else class="filex-viewer-archive__pane">
+      <nav class="filex-viewer-archive__crumbs" :aria-label="tt('viewer.archive.location', 'Archive location')">
+        <button type="button" @click="currentDir = ''">{{ tt('viewer.archive.root', 'Archive') }}</button>
+        <template v-for="crumb in breadcrumbs" :key="crumb.path">
+          <span aria-hidden="true">›</span>
+          <button type="button" @click="currentDir = crumb.path">{{ crumb.name }}</button>
+        </template>
+      </nav>
       <div class="filex-viewer-archive__summary">
         <!-- ⚠ The count is IN the message ("{n} files"). A `{{ fileCount }}`
              printed in front of it read "3 3 files". -->
@@ -210,20 +298,31 @@ function entryTile(e: ArchiveEntry): string {
       <DataTable
         table-id="viewer.archive"
         :columns="columns"
-        :rows="entries"
-        :row-key="(e: ArchiveEntry) => e.name"
-        :row-attrs="(e: ArchiveEntry) => ({ 'data-dir': e.is_dir ? '1' : '0' })"
+        :rows="visibleEntries"
+        :row-key="(e: ArchiveRow) => e.fullPath"
+        :row-attrs="(e: ArchiveRow) => ({ 'data-dir': e.is_dir ? '1' : '0', onDblclick: () => openRow(e) })"
       >
         <template #cell-name="{ row }">
           <!-- ikon:emoji — the same tile the listing draws for the same kind
                of file, so an archive's contents and the folder it came from
                read as one product. -->
-          <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons -->
-          <span class="filex-viewer-archive__icon" aria-hidden="true" v-html="entryTile(row)"></span>
-          <span class="fe-list__cell-text">{{ row.name }}</span>
+          <button type="button" class="filex-viewer-archive__entry" :disabled="!row.is_dir" @click="openRow(row)">
+            <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons -->
+            <span class="filex-viewer-archive__icon" aria-hidden="true" v-html="entryTile(row)"></span>
+            <span class="fe-list__cell-text">{{ row.displayName }}</span>
+          </button>
         </template>
       </DataTable>
     </div>
+    <ArchivePasswordModal
+      :open="passwordNeeded"
+      :locale="props.locale"
+      :archive-name="(props.filePath || '').split('/').pop() || ''"
+      :busy="loading"
+      :error="passwordError"
+      @close="emit('close')"
+      @submit="submitPassword"
+    />
   </div>
 </template>
 
@@ -281,4 +380,10 @@ function entryTile(e: ArchiveEntry): string {
   display: block;
   margin-bottom: 12px;
 }
+.filex-viewer-archive__crumbs { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; color: var(--fe-text-muted, #5a6475); }
+.filex-viewer-archive__crumbs button { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.filex-viewer-archive__crumbs button:hover { background: var(--fe-bg-elev, #f7f8fa); color: var(--fe-text, #1a1e27); }
+.filex-viewer-archive__entry { display: inline-flex; align-items: center; max-width: 100%; border: 0; background: transparent; color: inherit; font: inherit; padding: 0; text-align: start; }
+.filex-viewer-archive__entry:not(:disabled) { cursor: pointer; }
+.filex-viewer-archive__entry:disabled { opacity: 1; }
 </style>

@@ -77,6 +77,7 @@ export interface EndpointMap {
   capabilities: string | null;
   archiveList: string | null;
   archiveExtract: string | null;
+  archiveCreate: string | null;
   archiveAdd: string | null;
   copy: string | null;
   moveAsync: string | null;
@@ -132,6 +133,7 @@ export interface ExplorerConfig {
 
   archiveList?: string;
   archiveExtract?: string;
+  archiveCreate?: string;
   archiveAdd?: string;
 
   /** Recursive S3-side copy with "-copy" collision suffix (async). */
@@ -707,6 +709,13 @@ export interface ExplorerConfig {
      * about the person under a label about the drive.
      */
     usedBytes?: number;
+    /**
+     * `usedBytes` counts only part of the storage: its catalog does not cover
+     * all of it yet (the server's `coverage` beside the figure —
+     * lib/catalogCoverage). The card then draws it as a lower bound. Absent:
+     * the explorer uses what the last listing said about the storage.
+     */
+    usedPartial?: boolean;
   }>;
 
   /**

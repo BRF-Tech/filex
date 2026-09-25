@@ -22,11 +22,14 @@
 //           <pair>: ~ …                                   raced: both versions kept next pass
 //           <pair>: local: poll-only — <code> — <detail>  local file-system watching unavailable
 //           <pair>: local: watched                        …available again
+//           <pair>: lock: busy — <detail>                 another process on this computer syncs the pair
+//           <pair>: lock: acquired                        …not any more: this engine syncs it now
 //           live: connected|polling|offline — …           how SERVER changes reach the engine
 //           sync: waiting for the sync window W           outside --window: nothing runs
 //           sync: the sync window W closed; …             a pass the window cut short
 //   stderr  <pair>: ! <action error>                      one action of a pass failed
 //           <pair>: note: …                               worth reading in a terminal, not an error
+//           <pair>: lock: busy — <detail>                 (a one-shot run) the same as on stdout
 //           <pair>: <error>                               the pass could not run
 //           filex: <error>                                the command itself stopped (main.go)
 //           anything else (cobra's "Error: …")            not about one pair
@@ -65,6 +68,18 @@ export interface LocalNote {
   detail: string | null;
 }
 
+/**
+ * Another process on this computer holds the pair's lock — the other copy of
+ * this app (an installed one and the Microsoft Store one both sign in with the
+ * same accounts), or `filex sync run` in a terminal — so this engine leaves the
+ * pair alone. The engine keeps trying and takes the pair over by itself once
+ * that process stops (backend/cmd/filex/synclock.go); nothing is restarted
+ * here. detail is the engine's words, naming the other process when it can.
+ */
+export interface PairBusy {
+  detail: string;
+}
+
 /** One pair's health, as its card shows it. */
 export interface PairHealth {
   /** Its last failure — until a later pass of the SAME pair completes clean. */
@@ -72,6 +87,8 @@ export interface PairHealth {
   /** The last thing the engine did for this pair (progress or result). */
   line: string | null;
   local: LocalNote | null;
+  /** Set while another process syncs this pair (see PairBusy). */
+  busy: PairBusy | null;
 }
 
 export type SyncPhase = 'inventory' | 'plan' | 'transfer' | 'settling';
@@ -153,6 +170,7 @@ export function pairView(st: SyncStatus, pairId: string): PairHealth {
     error: h?.error ?? st.lastError,
     line: h?.line ?? null,
     local: h?.local ?? null,
+    busy: h?.busy ?? null,
   };
 }
 
@@ -206,6 +224,8 @@ export function markExited(st: SyncStatus, code: number | null, stopping: boolea
   st.running = false;
   st.active = null;
   st.live = null;
+  // A pair this engine was waiting for is not being waited for any more.
+  for (const h of Object.values(st.pairs)) h.busy = null;
   if (code === SIGNED_OUT_EXIT) {
     st.signedOut = true;
     st.lastError = st.lastError ?? 'signed out: the server no longer accepts this token (HTTP 401)';
@@ -268,7 +288,7 @@ function transferActivity(pairId: string, detail: string): SyncActivity {
 function health(st: SyncStatus, pairId: string): PairHealth {
   let h = st.pairs[pairId];
   if (!h) {
-    h = { error: null, line: null, local: null };
+    h = { error: null, line: null, local: null, busy: null };
     st.pairs[pairId] = h;
   }
   return h;
@@ -287,6 +307,7 @@ const progressRe = /^(inventory|plan|transfer|settling): (.*)$/;
 // error TEXT comes on stderr, which may be read before or after this line.
 const summaryRe = /^(?:already in step$|\d+\/\d+ done\b(.*)$)/;
 const localRe = /^local: (?:(watched)|poll-only — (too-large|unavailable)(?: — (.*))?)$/;
+const lockRe = /^lock: (?:(acquired)|busy(?: — (.*))?)$/;
 const holdRe = /^hold: (\d+)\b/;
 const windowWaitRe = /^sync: waiting for the sync window (\S+)$/;
 const windowClosedRe = /^sync: the sync window (\S+) closed\b/;
@@ -302,6 +323,16 @@ export function absorbLine(st: SyncStatus, line: string, isErr: boolean, now = n
   const t = line.trim();
   if (!t) return;
   const p = pairOf(t);
+
+  // Whose pair it is — on either pipe (a watcher says it on stdout, a one-shot
+  // run on stderr). ⚠ Before the error branch: a busy pair is not a failing
+  // one, and its line must not become the folder's error.
+  const lk = p ? lockRe.exec(p.rest) : null;
+  if (p && lk) {
+    health(st, p.id).busy = lk[1] ? null : { detail: lk[2] ?? '' };
+    if (st.active?.pairId === p.id) st.active = null;
+    return;
+  }
 
   if (isErr) {
     if (isUnauthorizedLine(t)) st.signedOut = true;
@@ -358,6 +389,9 @@ export function absorbLine(st: SyncStatus, line: string, isErr: boolean, now = n
   if (!p.rest.startsWith('~ ')) h.line = p.rest;
 
   const pr = progressRe.exec(p.rest);
+  // A pass of this pair ran here: whatever held it before, this engine holds
+  // it now (`lock: acquired` says so first; this does not depend on it).
+  if (pr || summaryRe.test(p.rest)) h.busy = null;
   if (pr) {
     st.waitingWindow = null; // a pass started: we are inside the window
     st.active =

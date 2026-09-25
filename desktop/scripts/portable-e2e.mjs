@@ -111,7 +111,17 @@ check(
   const exe = path.join(stick, 'filex.exe');
   fs.copyFileSync(PORTABLE_EXE, exe);
 
-  const stub = spawn(exe, [], { stdio: 'ignore' });
+  // ⚠⚠ FILEX_NO_BROWSER is set HERE, not left to whoever runs the suite. This
+  // stub is the one launch in the suites that does not go through
+  // harness.mjs launchApp (which sets it), and without it the packaged app does
+  // what a packaged app does at start: `setAsDefaultProtocolClient('filex')`,
+  // pointing the operator's HKCU\Software\Classes\filex at this throwaway copy
+  // in %TEMP% — the next browser sign-in of the app they actually use would
+  // then start the test copy (or nothing, once %TEMP% is cleaned).
+  const stub = spawn(exe, [], {
+    stdio: 'ignore',
+    env: { ...process.env, FILEX_NO_BROWSER: '1', FILEX_NO_UPDATE: '1' },
+  });
   // ⚠ Killed by PID, and only this one. `taskkill /IM filex.exe` would take
   // down everything else on the machine with that name — the operator's own
   // app, and any other agent's run. /T because the stub is the parent of the

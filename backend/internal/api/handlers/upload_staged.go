@@ -481,7 +481,11 @@ func (h *StagedUpload) Commit(w http.ResponseWriter, r *http.Request) {
 	// taken at COMMIT: that is the moment the file is replaced, and on a large
 	// upload it can be minutes after the client last looked. A failed row stays
 	// committable, so a refusal here costs no bytes.
-	if !uploadExpectHolds(r.Context(), h.Store, row.StorageID, row.StorageKey, r.URL.Query().Get("expect")) {
+	var resolve func(int64) (storage.Driver, error)
+	if h.Manager != nil {
+		resolve = h.Manager.StorageResolver
+	}
+	if !uploadExpectHolds(r.Context(), h.Store, resolve, row.StorageID, row.StorageKey, r.URL.Query().Get("expect")) {
 		writePreconditionFailed(w)
 		return
 	}

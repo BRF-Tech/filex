@@ -29,7 +29,7 @@ export interface LoginItemReport {
   launchItems?: ReadonlyArray<{ enabled?: boolean }>;
   /** macOS 13+: 'enabled' | 'requires-approval' | 'not-registered' | 'not-found'. */
   status?: string;
-  /** Linux: `~/.config/autostart/filex.desktop` exists. */
+  /** Linux: `~/.config/autostart/filex-app.desktop` exists. */
   autostartFile?: boolean;
 }
 
@@ -103,4 +103,55 @@ export function loginItemWrite(
 ): { openAtLogin: boolean; enabled?: boolean; path?: string; args?: string[] } {
   if (platform === 'win32') return { openAtLogin: on, enabled: on, path: spec.path, args: spec.args };
   return { openAtLogin: on };
+}
+
+// ─────────────────────────── Linux autostart file ───────────────────────────
+
+/**
+ * The XDG autostart file "Start when I sign in" writes, in
+ * `~/.config/autostart/`. ⚠ A snap's `autostart:` (electron-builder writes
+ * `<snap name>.desktop`) must be this exact name: snapd launches the file of
+ * that name from the snap's own `$HOME/.config/autostart`, which is where
+ * this one lands inside a snap. test/linux-desktop-entry.test.ts holds the two
+ * equal.
+ */
+export const LINUX_AUTOSTART_NAME = 'filex-app.desktop';
+
+/** The name it had while the desktop app was called `filex` (≤ 0.43.x). */
+export const LEGACY_LINUX_AUTOSTART_NAME = 'filex.desktop';
+
+/**
+ * What to do with a `~/.config/autostart/filex.desktop` found at start, now
+ * that the file is called `filex-app.desktop`.
+ *
+ * Left alone it would either keep starting the OLD path — gone with the old
+ * package, so nothing starts — or, being unknown to the app, read as "no
+ * login item", and preferenceAfterStartup would quietly switch "Start when I
+ * sign in" off: a choice the user made, lost to a rename.
+ *
+ *   move   ours and enabled: write the new file (current executable), delete this
+ *   drop   ours, but switched off in the desktop's startup settings
+ *          (`Hidden=true` / `X-GNOME-Autostart-enabled=false`): delete it; the
+ *          preference follows the OS and reads off, which is what the user chose
+ *   leave  not ours — another program may well be called filex — or unreadable
+ *
+ * "Ours" is what setLinuxAutostart wrote, field for field: `Name=filex`, our
+ * Comment, and an Exec that starts a `filex` binary or an AppImage with
+ * `--hidden`. Anything else is somebody else's file and is not touched.
+ */
+export function legacyAutostartAction(content: string | null): 'move' | 'drop' | 'leave' {
+  if (content == null) return 'leave';
+  const lines = content.split(/\r?\n/).map((l) => l.trim());
+  if (lines[0] !== '[Desktop Entry]') return 'leave';
+  const field = (k: string) => lines.find((l) => l.startsWith(k + '='))?.slice(k.length + 1);
+  if (field('Name') !== 'filex' || field('Comment') !== 'Keep your folders in sync') return 'leave';
+  const exec = field('Exec');
+  if (!exec) return 'leave';
+  // `"<path>" --hidden`, as written; the path unquoted for the check.
+  const m = /^"([^"]+)"\s+(.*)$/.exec(exec) ?? /^(\S+)\s+(.*)$/.exec(exec);
+  if (!m || !m[2].split(/\s+/).includes('--hidden')) return 'leave';
+  const base = m[1].split('/').pop() ?? '';
+  if (base !== 'filex' && !/\.appimage$/i.test(base)) return 'leave';
+  const off = field('Hidden') === 'true' || field('X-GNOME-Autostart-enabled') === 'false';
+  return off ? 'drop' : 'move';
 }

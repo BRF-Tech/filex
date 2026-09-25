@@ -42,6 +42,15 @@ type updateStatusResponse struct {
 	Instructions    []string        `json:"instructions,omitempty"`
 	LastApplied     string          `json:"last_applied,omitempty"`
 	LastApplyError  string          `json:"last_apply_error,omitempty"`
+
+	// PackageManager and PackageManagerName say who owns a mode=package
+	// binary (homebrew / winget / snap, and the name a person writes);
+	// UpgradeCommand is that manager's command for this install. All three
+	// are empty for other modes, and the manager is empty when
+	// FILEX_INSTALL_MODE=package was set without anything detectable.
+	PackageManager     string `json:"package_manager,omitempty"`
+	PackageManagerName string `json:"package_manager_name,omitempty"`
+	UpgradeCommand     string `json:"upgrade_command,omitempty"`
 }
 
 type updateRelease struct {
@@ -94,8 +103,8 @@ func (h *Update) Check(w http.ResponseWriter, r *http.Request) {
 }
 
 // Apply installs the pending release. Refused with 409 when the install cannot
-// replace itself (container) — a permanent condition the UI turns into
-// instructions, and 409 keeps it distinct from a transient 5xx.
+// replace itself (container, package manager) — a permanent condition the UI
+// turns into instructions, and 409 keeps it distinct from a transient 5xx.
 func (h *Update) Apply(w http.ResponseWriter, r *http.Request) {
 	if !requireSupertenant(w, r, updateIsInstanceWide) {
 		return
@@ -116,9 +125,9 @@ func (h *Update) Apply(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "already up to date"})
 		return
 	}
-	if !h.svc.Mode().CanSelfApply() {
+	if refusal := h.svc.Install().Refusal(); refusal != nil {
 		writeJSON(w, http.StatusConflict, map[string]any{
-			"error":        update.ErrNotSelfApplicable.Error(),
+			"error":        refusal.Error(),
 			"instructions": h.instructions(d),
 		})
 		return
@@ -143,14 +152,14 @@ func (h *Update) status(lang string) updateStatusResponse {
 	if h.svc == nil {
 		resp.Reason = srvtext.Text(lang, "server.update.reason.disabled", nil)
 		resp.Policy = string(update.PolicyOff)
-		resp.Mode = string(update.DetectInstallMode())
+		describeInstall(&resp, update.DetectInstall())
+		resp.CanSelfApply = false // no updater, nothing to apply with
 		return resp
 	}
 	st := h.svc.State()
 	resp.Enabled = h.svc.Enabled()
 	resp.Policy = string(h.svc.Policy())
-	resp.Mode = string(h.svc.Mode())
-	resp.CanSelfApply = h.svc.Mode().CanSelfApply()
+	describeInstall(&resp, h.svc.Install())
 	resp.RestartRequired = h.svc.RestartRequired()
 	resp.CheckError = st.LastError
 	resp.LastApplied = st.LastApplied
@@ -179,6 +188,18 @@ func (h *Update) status(lang string) updateStatusResponse {
 	return resp
 }
 
+// describeInstall fills what the page needs to know about how filex was
+// installed. can_self_apply is only ever true for a plain binary.
+func describeInstall(resp *updateStatusResponse, inst update.Install) {
+	resp.Mode = string(inst.Mode)
+	resp.CanSelfApply = inst.Mode.CanSelfApply()
+	if inst.Mode == update.ModePackage {
+		resp.PackageManager = string(inst.Manager)
+		resp.PackageManagerName = inst.Manager.Label()
+		resp.UpgradeCommand = inst.UpgradeCommand()
+	}
+}
+
 // instructions renders the copy-paste upgrade steps for this install shape.
 // Generated server-side because only the server knows how it was installed —
 // the UI should render text, not guess a deployment model.
@@ -186,6 +207,10 @@ func (h *Update) instructions(d update.Decision) []string {
 	ver := strings.TrimSpace(d.Target.Version)
 	if ver == "" {
 		ver = "<version>"
+	}
+	backup := d.Step == update.StepMajor || d.Target.Migrations
+	if h.svc != nil && h.svc.Mode() == update.ModePackage {
+		return packageInstructions(h.svc.Install(), backup)
 	}
 	if h.svc != nil && h.svc.Mode() == update.ModeDocker {
 		image := d.Target.Image
@@ -198,7 +223,7 @@ func (h *Update) instructions(d update.Decision) []string {
 			"docker compose pull filex",
 			"docker compose up -d",
 		}
-		if d.Step == update.StepMajor || d.Target.Migrations {
+		if backup {
 			steps = append([]string{"# back up your database and data directory first"}, steps...)
 		}
 		return steps
@@ -212,6 +237,30 @@ func (h *Update) instructions(d update.Decision) []string {
 	}
 	steps = append(steps, "# or download manually for "+runtime.GOOS+"/"+runtime.GOARCH+" and restart the service")
 	return steps
+}
+
+// packageInstructions are the steps for a binary a package manager owns: its
+// own upgrade command, never `filex self-update`. The manager replaces the
+// file, not the process, so a restart follows; and the snapshot a self-upgrade
+// takes before a schema change does not happen here, so the backup is asked
+// for in words.
+func packageInstructions(inst update.Install, backup bool) []string {
+	var steps []string
+	if backup {
+		steps = append(steps, "# back up your database and data directory first")
+	}
+	cmd := inst.UpgradeCommand()
+	switch {
+	case cmd == "":
+		steps = append(steps, "# upgrade filex with the package manager that installed it")
+	case inst.Manager == update.ManagerWinget:
+		// Windows will not let a package manager delete or overwrite an
+		// executable that is running.
+		steps = append(steps, "# stop filex first: a running filex.exe cannot be replaced", cmd)
+	default:
+		steps = append(steps, cmd)
+	}
+	return append(steps, "# then restart filex, so the new version is the one running")
 }
 
 // reasonVars fills a decision's placeholders for lang: the policy is named by

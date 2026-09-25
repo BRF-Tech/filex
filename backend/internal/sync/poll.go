@@ -275,23 +275,8 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *wa
 		}
 		return 0, err
 	}
+	markerFirst(objs)
 	count := 0
-	/* wiring:e2 — the encrypted-folder marker is catalogued FIRST, before any
-	   sibling in this directory. "Is this folder encrypted?" is a DB-ROW
-	   lookup (e2e.FindRoot asks for the marker's node), so until that row
-	   exists every sibling row created here starts a content-extraction job
-	   that reads UnderEncrypted as false, indexes the plaintext and records
-	   the fingerprint — permanently, it never retries. Ordering is the
-	   driver's: os.ReadDir is sorted and `-` (0x2D) sorts before `.` (0x2E),
-	   and object stores promise nothing. walk runs once per directory, so
-	   this covers every depth — and the copy mirror, which walks too. */
-	for i, o := range objs {
-		if o.Name == e2e.MarkerName && o.Kind != storage.KindDirectory {
-			objs[0], objs[i] = objs[i], objs[0]
-			break
-		}
-	}
-	/* /wiring:e2 */
 	for _, obj := range objs {
 		select {
 		case <-ctx.Done():
@@ -321,207 +306,259 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *wa
 		if s.rule.Skips(obj.Path) {
 			continue
 		}
-		hash := pathkey.Hash(s.storage.ID, obj.Path)
-		existing, _ := s.store.GetNodeByPath(ctx, s.storage.ID, hash)
-		if existing == nil {
-			// ⚠⚠ There may still be a TRASHED row at this path -- not the
-			// everyday deletion (that row was retagged into `.filex-trash`,
-			// which we no longer walk), but the rows soft-deleted where they
-			// stood: the tombstone pass's own SoftDeleteNode, and the error
-			// branches in applyDBMove / SyncHardDelete.
-			//
-			// This used to clear deleted_at and carry on, on the theory that
-			// UNIQUE(storage_id, path_hash) left no other way to catalogue the
-			// object. Migration 00032 made that index live-only, so there is
-			// now a better answer, and reviving was always the wrong one:
-			// bytes that reappear at a path are NOT the file that was deleted
-			// there. Someone restored something out of band, or a new file
-			// landed with an old name. Reviving the row hands the new bytes
-			// another file's identity, version history, comments and shares,
-			// and -- because nothing downstream sees a new file -- means
-			// nothing ever looks at them again.
-			//
-			// So: leave the trashed row in the trash (still restorable, still
-			// on the retention clock) and catalogue what is really there as a
-			// NEW node, which is indexed and treated as new everywhere else.
-			if trashed, _ := s.store.GetNodeByPathIncludingDeleted(ctx, s.storage.ID, hash); trashed != nil && trashed.DeletedAt != nil {
-				slog.Info("sync: an object reappeared where a trashed row still sits; catalogueing it as a new file",
-					slog.Int64("trashed_node", trashed.ID),
-					slog.String("path", obj.Path),
-					slog.String("storage", s.storage.Name))
-			}
-			n := &model.Node{
-				StorageID:    s.storage.ID,
-				ParentID:     parent,
-				Name:         obj.Name,
-				Path:         obj.Path,
-				PathHash:     hash,
-				StorageKey:   obj.Path,
-				Type:         model.NodeType(string(obj.Kind)),
-				Size:         obj.Size,
-				Mime:         obj.Mime,
-				Etag:         obj.Etag,
-				BackendMtime: timePtr(obj.Mtime),
-				SyncState:    model.SyncStateSynced,
-			}
-			switch obj.Kind {
-			case storage.KindDirectory:
-				n.Type = model.NodeTypeDirectory
-				// A folder row's size is the RECURSIVE total RecomputeFolderSizes
-				// caches, never the directory entry's own few kilobytes. RunOnce
-				// recomputes right after the walk; CatalogueTree (the copy
-				// mirror) does not, so the entry size would stand until then.
-				n.Size = 0
-			case storage.KindSymlink:
-				// ⚠⚠ This branch used to be absent, and the `else` below typed
-				// every non-directory NodeTypeFile — symlink rows included. It
-				// was not harmless bookkeeping: measured on a root holding a
-				// link to a file outside it, the row was created as a file, the
-				// antivirus queue was handed it, and the scanner READ the bytes
-				// on the other end. Out-of-root content was being virus-scanned,
-				// content-indexed, version-tracked and quota-counted, because
-				// every one of those gates asks `Type == NodeTypeFile`.
-				//
-				// After v0.43.0 a driver reports KindSymlink only for something
-				// the caller may NOT open — out of the root with following off,
-				// broken, or a remote link the driver will not resolve — so the
-				// honest type is the one that keeps all four gates shut.
-				n.Type = model.NodeTypeSymlink
-			default:
-				n.Type = model.NodeTypeFile
-			}
-			created, err := s.store.CreateNode(ctx, n)
-			wasRepair := false
-			if err != nil {
-				// ⚠⚠ A LIVE row may already sit at (storage, parent, name)
-				// carrying a DIFFERENT path — what a folder move that did not
-				// carry its subtree leaves behind (issue #21). The unique
-				// index refuses the insert, and the walk used to give up:
-				// every pass, for every file under the renamed folder, while
-				// the tombstone pass moved the stale rows into the trash. The
-				// operator saw `duplicate key value violates unique constraint
-				// idx_nodes_storage_parent_name` a hundred times and their
-				// files in the bin.
-				//
-				// That row is the same object by definition — one directory,
-				// one name — so the honest repair is to point it at the path
-				// the storage actually has, in place, keeping its id, its
-				// shares, its comments and its version history.
-				if repaired := s.repairStalePath(ctx, parent, obj, hash); repaired != nil {
-					created, err, wasRepair = repaired, nil, true
-				} else {
-					slog.Warn("sync: create node failed", slog.String("path", obj.Path), slog.String("err", err.Error()))
-					/* wiring:e2 — a marker that was LISTED but whose row did not
-					   land abandons this directory for this pass. Downstream,
-					   "no marker row" and "the marker row failed" are the same
-					   thing, and carrying on indexes plaintext for good; an
-					   uncatalogued folder is repaired by the next pass. */
-					if obj.Name == e2e.MarkerName && obj.Kind != storage.KindDirectory {
-						slog.Warn("sync: leaving a directory uncatalogued this pass, its encrypted-folder marker row could not be written",
-							slog.String("path", p), slog.String("storage", s.storage.Name))
-						c.partial = true
-						return count, nil
-					}
-					/* /wiring:e2 */
-					continue
-				}
-			}
-			if wasRepair {
-				c.updated++
+		n, descend, abandon := s.catalogueEntry(ctx, p, parent, obj, c)
+		if abandon {
+			c.partial = true
+			return count, nil
+		}
+		if n == nil {
+			continue
+		}
+		count++
+		if descend && guard.Enter(obj, depth+1) {
+			cn, err := s.walk(ctx, obj.Path, &n.ID, c, list, guard, depth+1)
+			if err == nil {
+				count += cn
 			} else {
-				c.added++
-			}
-			count++
-			if s.index != nil {
-				_ = s.index.IndexNode(ctx, created)
-			}
-			// A file nobody wrote through filex, catalogued for the first
-			// time. This — not the drift branch below — is the first import
-			// of an existing storage, and the reason the hook exists.
-			s.enqueueScan(ctx, created)
-			if obj.Kind == storage.KindDirectory && guard.Enter(obj, depth+1) {
-				cn, err := s.walk(ctx, obj.Path, &created.ID, c, list, guard, depth+1)
-				if err == nil {
-					count += cn
-				} else {
-					c.partial = true
-				}
-			}
-		} else {
-			// existing. A row whose staged upload never flipped to stored is
-			// settled first when the object is demonstrably its bytes; then
-			// the row is updated if the backend's copy drifted from it.
-			unstored := isUnstored(existing)
-			settled := unstored && s.settleTransfer(ctx, existing, obj)
-			drifted := false
-			switch {
-			case unstored && !settled:
-				// ⚠ Seen, and nothing else. An unstored row describes the upload
-				// that was COMMITTED, not whatever sits at its key — the version
-				// an in-flight overwrite is replacing, a partial write, nothing
-				// related. Writing that object's size and time over the row
-				// would show the wrong file, and would erase the evidence
-				// settleTransfer reads: the next pass would take the wrong
-				// object for the upload.
-				_ = s.store.TouchNodeSeen(ctx, existing.ID)
-			case objectDrift(existing, obj):
-				// An object store's listing carries no mime at all. The row's
-				// came from sniffing the bytes at upload, and a listing with
-				// nothing to say about it must not erase it.
-				mime := obj.Mime
-				if mime == "" {
-					mime = existing.Mime
-				}
-				if err := s.store.UpdateNodeMeta(ctx, existing.ID, obj.Size, mime, obj.Etag, obj.Mtime); err == nil {
-					drifted = true
-				}
-			default:
-				_ = s.store.TouchNodeSeen(ctx, existing.ID)
-				// Backfill a missing backend_mtime for nodes first synced by an
-				// older version (before mtime was recorded on insert). Without
-				// this, files whose content never drifts keep a null date
-				// forever, so their folders never get a "last activity" date
-				// after an upgrade. One cheap write per node, only while null.
-				if existing.BackendMtime == nil && !obj.Mtime.IsZero() {
-					_ = s.store.SetNodeMtime(ctx, existing.ID, timePtr(obj.Mtime))
-				}
-			}
-			if settled {
-				c.reconciled++
-			}
-			if settled || drifted {
-				c.updated++
-			}
-			// ⚠ Only a DRIFTED or a SETTLED file is re-read here. The walk
-			// sees every object on every pass, so hanging a scan off "the walk
-			// saw it" would re-scan the whole storage every sync interval,
-			// forever. Content that has not changed has already been scanned
-			// by the pass that first catalogued it — except a settled upload's:
-			// the post-transfer hooks that scan it never ran.
-			//
-			// The row is re-read once and shared by both consumers: `existing`
-			// still carries the PRE-drift size, and the scanner's size ceiling
-			// has to be applied to the bytes that are actually there.
-			if (drifted || settled) && (s.index != nil || s.avScan != nil) {
-				if fresh, _ := s.store.GetNode(ctx, existing.ID); fresh != nil {
-					if s.index != nil {
-						_ = s.index.IndexNode(ctx, fresh)
-					}
-					s.enqueueScan(ctx, fresh)
-				}
-			}
-			count++
-			if existing.Type == model.NodeTypeDirectory && guard.Enter(obj, depth+1) {
-				cn, err := s.walk(ctx, obj.Path, &existing.ID, c, list, guard, depth+1)
-				if err == nil {
-					count += cn
-				} else {
-					c.partial = true
-				}
+				c.partial = true
 			}
 		}
 	}
+	s.dirListed(ctx, p, len(objs))
 	return count, nil
+}
+
+// markerFirst moves the encrypted-folder marker to the front of a listing.
+// Every consumer of a listing calls it once per directory: the walk (so every
+// depth, and the copy mirror, which walks too) and the lazy catalogue's
+// folder reconcile.
+func markerFirst(objs []storage.Object) {
+	/* wiring:e2 — the encrypted-folder marker is catalogued FIRST, before any
+	   sibling in its directory. "Is this folder encrypted?" is a DB-ROW
+	   lookup (e2e.FindRoot asks for the marker's node), so until that row
+	   exists every sibling row created here starts a content-extraction job
+	   that reads UnderEncrypted as false, indexes the plaintext and records
+	   the fingerprint — permanently, it never retries. Ordering is the
+	   driver's: os.ReadDir is sorted and `-` (0x2D) sorts before `.` (0x2E),
+	   and object stores promise nothing. */
+	for i, o := range objs {
+		if o.Name == e2e.MarkerName && o.Kind != storage.KindDirectory {
+			objs[0], objs[i] = objs[i], objs[0]
+			return
+		}
+	}
+	/* /wiring:e2 */
+}
+
+// catalogueEntry applies ONE listed entry of directory p to the catalogue —
+// what the walk does for every object it sees, minus the descent — and returns
+// the entry's row, whether a walk should descend into it, and whether the
+// whole directory has to be abandoned for this pass (an encrypted-folder
+// marker whose row could not be written).
+//
+// It is the one per-entry rule of the catalogue: the full walk, the copy
+// mirror (CatalogueTree) and the lazy catalogue's folder reconcile all come
+// through here, so a fix to how an object becomes a row cannot reach one of
+// them and miss the others. n is nil when the entry could not be recorded.
+func (s *storageSyncer) catalogueEntry(ctx context.Context, p string, parent *int64, obj storage.Object, c *walkCounts) (n *model.Node, descend, abandon bool) {
+	hash := pathkey.Hash(s.storage.ID, obj.Path)
+	if existing, _ := s.store.GetNodeByPath(ctx, s.storage.ID, hash); existing != nil {
+		s.refreshEntry(ctx, existing, obj, c)
+		return existing, existing.Type == model.NodeTypeDirectory, false
+	}
+	// ⚠⚠ There may still be a TRASHED row at this path -- not the
+	// everyday deletion (that row was retagged into `.filex-trash`,
+	// which we no longer walk), but the rows soft-deleted where they
+	// stood: the tombstone pass's own SoftDeleteNode, and the error
+	// branches in applyDBMove / SyncHardDelete.
+	//
+	// This used to clear deleted_at and carry on, on the theory that
+	// UNIQUE(storage_id, path_hash) left no other way to catalogue the
+	// object. Migration 00032 made that index live-only, so there is
+	// now a better answer, and reviving was always the wrong one:
+	// bytes that reappear at a path are NOT the file that was deleted
+	// there. Someone restored something out of band, or a new file
+	// landed with an old name. Reviving the row hands the new bytes
+	// another file's identity, version history, comments and shares,
+	// and -- because nothing downstream sees a new file -- means
+	// nothing ever looks at them again.
+	//
+	// So: leave the trashed row in the trash (still restorable, still
+	// on the retention clock) and catalogue what is really there as a
+	// NEW node, which is indexed and treated as new everywhere else.
+	if trashed, _ := s.store.GetNodeByPathIncludingDeleted(ctx, s.storage.ID, hash); trashed != nil && trashed.DeletedAt != nil {
+		slog.Info("sync: an object reappeared where a trashed row still sits; catalogueing it as a new file",
+			slog.Int64("trashed_node", trashed.ID),
+			slog.String("path", obj.Path),
+			slog.String("storage", s.storage.Name))
+	}
+	row := &model.Node{
+		StorageID:    s.storage.ID,
+		ParentID:     parent,
+		Name:         obj.Name,
+		Path:         obj.Path,
+		PathHash:     hash,
+		StorageKey:   obj.Path,
+		Type:         model.NodeType(string(obj.Kind)),
+		Size:         obj.Size,
+		Mime:         obj.Mime,
+		Etag:         obj.Etag,
+		BackendMtime: timePtr(obj.Mtime),
+		SyncState:    model.SyncStateSynced,
+	}
+	switch obj.Kind {
+	case storage.KindDirectory:
+		row.Type = model.NodeTypeDirectory
+		// A folder row's size is the RECURSIVE total RecomputeFolderSizes
+		// caches, never the directory entry's own few kilobytes. RunOnce
+		// recomputes right after the walk; CatalogueTree (the copy
+		// mirror) does not, so the entry size would stand until then.
+		row.Size = 0
+	case storage.KindSymlink:
+		// ⚠⚠ This branch used to be absent, and the `else` below typed
+		// every non-directory NodeTypeFile — symlink rows included. It
+		// was not harmless bookkeeping: measured on a root holding a
+		// link to a file outside it, the row was created as a file, the
+		// antivirus queue was handed it, and the scanner READ the bytes
+		// on the other end. Out-of-root content was being virus-scanned,
+		// content-indexed, version-tracked and quota-counted, because
+		// every one of those gates asks `Type == NodeTypeFile`.
+		//
+		// After v0.43.0 a driver reports KindSymlink only for something
+		// the caller may NOT open — out of the root with following off,
+		// broken, or a remote link the driver will not resolve — so the
+		// honest type is the one that keeps all four gates shut.
+		row.Type = model.NodeTypeSymlink
+	default:
+		row.Type = model.NodeTypeFile
+	}
+	created, err := s.store.CreateNode(ctx, row)
+	wasRepair := false
+	if err != nil {
+		// ⚠⚠ A LIVE row may already sit at (storage, parent, name)
+		// carrying a DIFFERENT path — what a folder move that did not
+		// carry its subtree leaves behind (issue #21). The unique
+		// index refuses the insert, and the walk used to give up:
+		// every pass, for every file under the renamed folder, while
+		// the tombstone pass moved the stale rows into the trash. The
+		// operator saw `duplicate key value violates unique constraint
+		// idx_nodes_storage_parent_name` a hundred times and their
+		// files in the bin.
+		//
+		// That row is the same object by definition — one directory,
+		// one name — so the honest repair is to point it at the path
+		// the storage actually has, in place, keeping its id, its
+		// shares, its comments and its version history.
+		if repaired := s.repairStalePath(ctx, parent, obj, hash); repaired != nil {
+			created, wasRepair = repaired, true
+		} else if raced, _ := s.store.GetNodeByPath(ctx, s.storage.ID, hash); raced != nil {
+			// ⚠⚠ Somebody else wrote this very row between our lookup and
+			// our insert: a folder reconcile of the lazy catalogue — which
+			// runs beside a full scan by design — or a write through filex
+			// that landed mid-walk. It is the row we were about to create,
+			// so carry on with it exactly as if the lookup had found it.
+			//
+			// Giving up here used to mean NOT DESCENDING into a folder whose
+			// row the other writer created: everything below it that the
+			// other writer had not catalogued yet was left out of the pass,
+			// and a full scan finished with a hole in its catalogue.
+			s.refreshEntry(ctx, raced, obj, c)
+			return raced, raced.Type == model.NodeTypeDirectory, false
+		} else {
+			slog.Warn("sync: create node failed", slog.String("path", obj.Path), slog.String("err", err.Error()))
+			/* wiring:e2 — a marker that was LISTED but whose row did not
+			   land abandons this directory for this pass. Downstream,
+			   "no marker row" and "the marker row failed" are the same
+			   thing, and carrying on indexes plaintext for good; an
+			   uncatalogued folder is repaired by the next pass. */
+			if obj.Name == e2e.MarkerName && obj.Kind != storage.KindDirectory {
+				slog.Warn("sync: leaving a directory uncatalogued this pass, its encrypted-folder marker row could not be written",
+					slog.String("path", p), slog.String("storage", s.storage.Name))
+				return nil, false, true
+			}
+			/* /wiring:e2 */
+			return nil, false, false
+		}
+	}
+	if wasRepair {
+		c.updated++
+	} else {
+		c.added++
+	}
+	if s.index != nil {
+		_ = s.index.IndexNode(ctx, created)
+	}
+	// A file nobody wrote through filex, catalogued for the first
+	// time. This — not the drift branch below — is the first import
+	// of an existing storage, and the reason the hook exists.
+	s.enqueueScan(ctx, created)
+	return created, obj.Kind == storage.KindDirectory, false
+}
+
+// refreshEntry is catalogueEntry for an entry that already has a row. A row
+// whose staged upload never flipped to stored is settled first when the
+// object is demonstrably its bytes; then the row is updated if the backend's
+// copy drifted from it.
+func (s *storageSyncer) refreshEntry(ctx context.Context, existing *model.Node, obj storage.Object, c *walkCounts) {
+	unstored := isUnstored(existing)
+	settled := unstored && s.settleTransfer(ctx, existing, obj)
+	drifted := false
+	switch {
+	case unstored && !settled:
+		// ⚠ Seen, and nothing else. An unstored row describes the upload
+		// that was COMMITTED, not whatever sits at its key — the version
+		// an in-flight overwrite is replacing, a partial write, nothing
+		// related. Writing that object's size and time over the row
+		// would show the wrong file, and would erase the evidence
+		// settleTransfer reads: the next pass would take the wrong
+		// object for the upload.
+		_ = s.store.TouchNodeSeen(ctx, existing.ID)
+	case objectDrift(existing, obj):
+		// An object store's listing carries no mime at all. The row's
+		// came from sniffing the bytes at upload, and a listing with
+		// nothing to say about it must not erase it.
+		mime := obj.Mime
+		if mime == "" {
+			mime = existing.Mime
+		}
+		if err := s.store.UpdateNodeMeta(ctx, existing.ID, obj.Size, mime, obj.Etag, obj.Mtime); err == nil {
+			drifted = true
+		}
+	default:
+		_ = s.store.TouchNodeSeen(ctx, existing.ID)
+		// Backfill a missing backend_mtime for nodes first synced by an
+		// older version (before mtime was recorded on insert). Without
+		// this, files whose content never drifts keep a null date
+		// forever, so their folders never get a "last activity" date
+		// after an upgrade. One cheap write per node, only while null.
+		if existing.BackendMtime == nil && !obj.Mtime.IsZero() {
+			_ = s.store.SetNodeMtime(ctx, existing.ID, timePtr(obj.Mtime))
+		}
+	}
+	if settled {
+		c.reconciled++
+	}
+	if settled || drifted {
+		c.updated++
+	}
+	// ⚠ Only a DRIFTED or a SETTLED file is re-read here. The walk
+	// sees every object on every pass, so hanging a scan off "the walk
+	// saw it" would re-scan the whole storage every sync interval,
+	// forever. Content that has not changed has already been scanned
+	// by the pass that first catalogued it — except a settled upload's:
+	// the post-transfer hooks that scan it never ran.
+	//
+	// The row is re-read once and shared by both consumers: `existing`
+	// still carries the PRE-drift size, and the scanner's size ceiling
+	// has to be applied to the bytes that are actually there.
+	if (drifted || settled) && (s.index != nil || s.avScan != nil) {
+		if fresh, _ := s.store.GetNode(ctx, existing.ID); fresh != nil {
+			if s.index != nil {
+				_ = s.index.IndexNode(ctx, fresh)
+			}
+			s.enqueueScan(ctx, fresh)
+		}
+	}
 }
 
 // enqueueScan hands a node the walk has just catalogued (or just found

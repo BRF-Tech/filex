@@ -12,7 +12,10 @@ app adds the five things a browser tab cannot do:
 2. **A durable session, kept out of plaintext.** Sign-in happens in your real
    browser (PKCE, `src/browser-auth.ts`), and the resulting token is stored
    through the OS keychain (`safeStorage`). If the keychain is unavailable the
-   app **refuses to store the token** rather than writing it to disk.
+   app **refuses to store the token** rather than writing it to disk — and says
+   so on the sign-in window before a sign-in starts, not after the browser
+   round trip (`src/keychain.ts`; on Linux Chromium's `basic_text` fallback
+   counts as no keychain).
 3. **Folder sync in the background, live.** `filex sync run --watch` runs per
    account, supervised by the app and shipped inside it (`build/bin/filex`), so
    the app and a terminal act on one implementation and one pairing file. The
@@ -52,6 +55,8 @@ bundled CLI also mounts a real drive letter (`filex mount Z:`, needs the free
 |------|------|
 | `src/main.ts` | Electron main: windows, tray, `app://` protocol, IPC, updates, login item |
 | `src/accounts.ts` | Accounts + settings, `safeStorage`-encrypted at `<userData>/desktop-state.bin` |
+| `src/keychain.ts` | Whether that store may be written at all, and what the sign-in window advises when not. No Electron import |
+| `src/channel.ts` | Who installed this copy (Microsoft Store, snap, Flatpak, AUR, or a direct download) and everything that follows from it: who updates it, a snap's real home and engine state, the Linux desktop entry. No Electron import |
 | `src/browser-auth.ts` | Browser sign-in (PKCE) + deep-link/manual code exchange |
 | `src/sync.ts` | Supervises one `filex sync run --watch` per account; pairs, trash, status |
 | `src/openwith.ts` | "Open with filex", the parts that can lose a document: argv classification, local path → synced twin, scratch naming, the atomic write-back, the sweeps. No Electron import — that is what makes it testable |
@@ -77,14 +82,42 @@ pnpm run dev        # build, then run it
 
 # installers (unsigned)
 pnpm run dist:win        # installer + PORTABLE single .exe
-pnpm run dist:linux      # .deb + AppImage
+pnpm run dist:linux      # .deb + .rpm + AppImage (the .rpm needs rpmbuild: `apt install rpm`)
 pnpm run dist:mac        # .dmg + .zip — host arch (arm64 on Apple Silicon), ad-hoc sealed
+pnpm run dist:store      # Microsoft Store package (.appx) — Windows only; see "Microsoft Store"
+pnpm run dist:snap       # Snap Store .snap (strict, core20 template; no snapcraft needed)
 ```
+
+Linux packages are built on Linux; `electronuserland/builder` in Docker is
+enough for all four, the snap included.
 
 `FILEX_CLI_BIN=<path>` points `fetch-cli.mjs` at an already-built CLI instead of
 compiling one; give it a binary of the **same version** you are packaging, built
 without the embedded server UI (85 MB of admin SPA the app already ships in
 `app/`).
+
+The runtime is **Electron 44** (Node 24, Chromium 152), supported until
+2027-03-02 — [releases.electronjs.org/schedule](https://releases.electronjs.org/schedule)
+lists each major's end of life; only the latest three are patched.
+
+- ⚠ `pnpm install` does **not** download the Electron binary any more (since
+  Electron 42 there is no postinstall step). The first thing that needs it —
+  `pnpm run dev`, an e2e suite, `require('electron')` — fetches it, and
+  `node node_modules/electron/install.js` does it up front. (The package
+  declares `engines.node >= 22.12`; the download itself also ran on Node 20.20
+  when measured.) Packaging never touches it: electron-builder downloads its
+  own copy of the runtime, so `dist:*` builds on the Node 20 the release
+  workflow uses.
+- ⚠ To run the suites against the SOURCE tree on another Electron (an A/B
+  against the previous major, say), set `ELECTRON_OVERRIDE_DIST_PATH=<that
+  runtime's dist folder>`. Do not hand Playwright an `executablePath` for it:
+  that puts `--inspect` / `--remote-debugging-port` in front of the app path,
+  argv[1] stops being the app, and the app takes its own folder for a
+  document to open and never shows a window.
+- Moving to another major: read Electron's
+  [breaking changes](https://www.electronjs.org/docs/latest/breaking-changes)
+  for **every** major in between, and raise `target` in
+  `scripts/build-main.mjs` to the Node that release ships.
 
 ## Updates
 
@@ -104,9 +137,15 @@ Two things make that possible, and both are easy to undo by accident:
   update would stop at a UAC prompt. `electron-builder.yml` therefore pins
   `perMachine: false` + `allowElevation: false`.
 
-The feed is a plain static directory on filex.sh, not the GitHub provider: this
-repo's mirror is private, and that provider would need a token shipped inside
-the app. `FILEX_NO_UPDATE=1` turns the whole thing off.
+The feed is a plain static directory on filex.sh, not the GitHub provider: when
+it was chosen this repo's mirror was private, and that provider would need a
+token shipped inside the app. `FILEX_NO_UPDATE=1` turns the whole thing off.
+
+**A store copy never touches the feed** (Microsoft Store, Flatpak, snap —
+`src/channel.ts`). The store replaces the package itself; electron-updater does
+not know it is inside one and would download the NSIS installer (or a `.deb`)
+and run it from within the package. Settings says which store updates the copy
+and offers its page instead.
 
 **Two builds can never apply an update in place** — the ad-hoc sealed macOS app
 (see *Signing*) and the Windows portable `.exe` (see below). They take the same
@@ -115,6 +154,95 @@ wired at all, so nothing is downloaded that could not be applied, and the same
 cadence reads the static feed directly and reports an honest
 `status: 'manual'` with a **Download** button. The failure this replaces is a
 Settings card stuck at "Checking…" forever, waiting on an updater nobody wired.
+
+## Channels: who installs it, who updates it
+
+**Names.** On Linux the desktop app is **`filex-app`** — the command
+(`/usr/bin/filex-app`), the .deb/.rpm package, the desktop entry, the snap and
+the AUR package (`filex-app-bin`). **`filex` is the CLI**, everywhere. The
+window, the menu entry and the tray still say "filex", and the download files
+keep their `filex-desktop-*` names on every platform. Until 0.43.x the Linux
+desktop package was called `filex` and put `/usr/bin/filex` on PATH — the
+CLI's command.
+
+| Channel | Built by | Published to | Updated by |
+|---|---|---|---|
+| Windows installer | `dist:win` | GitHub Release + feed | the app, silently |
+| Windows portable `.exe` | `dist:win` | GitHub Release | nobody: Settings offers the download |
+| Microsoft Store | `dist:store` | Partner Center | the Store |
+| AppImage | `dist:linux` | GitHub Release + feed | the app |
+| `.deb` / `.rpm` (`filex-app`) | `dist:linux` | GitHub Release + feed | the app, through `pkexec` and dpkg / dnf / zypper (a password prompt) |
+| Snap `filex-app` | `dist:snap` | Snap Store + GitHub Release | snapd |
+| AUR `filex-app-bin` | `packaging/aur` (from the Release `.deb`) | AUR | pacman / the AUR helper |
+| macOS `.dmg` / `.zip` | `dist:mac` | GitHub Release + feed | nobody until signed (see *Signing*) |
+
+`src/channel.ts` recognises a copy that something else updates
+(`process.windowsStore`, snapd's `SNAP` + `SNAP_NAME`, `FLATPAK_ID`, and the
+`aur` the PKGBUILD writes into `resources/package-type`) and never wires the
+updater there: Settings names who keeps the copy current and opens its page.
+
+**Upgrading from the package called `filex` (≤ 0.43.x).** The new .deb/.rpm
+`Conflicts`/`Replaces` (rpm: `Obsoletes`) the old one — bounded to
+`filex (<< 0.44.0)`, so a future CLI package named `filex` is never touched —
+and `apt`/`dnf` swap them in one step. At its first start the renamed app
+carries over what the user set up under the old name
+(`main.ts` → `migrateLegacyLinuxNames`): an autostart entry it wrote
+(`~/.config/autostart/filex.desktop` → `filex-app.desktop`; somebody else's
+file of that name is left alone), and "make filex the default" choices in
+`mimeapps.list` (`filex.desktop` → `filex-app.desktop`, once no
+`filex.desktop` is installed anywhere).
+
+**Snap** `filex-app` (strict confinement, `base: core20` — electron-builder's
+template; core24 arrives with electron-builder 26):
+
+- `HOME` inside a snap is `~/snap/filex-app/<revision>`. The default filex
+  folder is built from the real home (`SNAP_REAL_HOME`), so it is
+  `~/filex/<host>` as everywhere else. The sync engine's state is
+  `~/snap/filex-app/common/sync` (`SNAP_USER_COMMON` → `FILEX_SYNC_DIR`): the
+  real `~/.filex` is a hidden directory the `home` interface does not reach.
+  ⚠ A terminal `filex sync` outside the snap therefore does not see the snap's
+  pairings.
+- Two plugs do not connect by themselves: `snap connect
+  filex-app:password-manager-service` (the keyring; until then the sign-in
+  window says so — with the command spelled from the snap's own name — and
+  does not start a sign-in) and `snap connect filex-app:removable-media`
+  (folders under `/media`, `/run/media`, `/mnt`).
+- `filex://` and "Open with" come from the desktop entry snapd installs
+  (`filex-app_filex-app.desktop`). "Make filex the default" cannot reach the
+  desktop from inside the snap, so Settings explains the file manager's *Open
+  with* instead of offering the button.
+- "Start when I sign in" writes
+  `~/snap/filex-app/current/.config/autostart/filex-app.desktop` — exactly the
+  file snapd's `autostart:` launches, `--hidden` included.
+- Chromium's own sandbox is off (`--no-sandbox`, electron-builder's default
+  under strict confinement); the confinement is the sandbox.
+- snapd holds a refresh of a running app back for up to 14 days, and filex
+  usually runs in the tray: a snap update lands on quit, or when that runs out.
+
+**AppImage** installs nothing, so at each start it writes a hidden
+`~/.local/share/applications/filex-appimage.desktop` pointing at itself and
+makes it the `filex://` handler with `xdg-mime` — the only way the browser can
+hand the sign-in back to a bare image. `TryExec` makes desktops ignore the
+entry once the image is deleted. (The name did not follow the rename: the image
+rewrites that very file at every start, and a new name would leave the old one
+behind, still claiming the link.)
+
+**Publishing (maintainer, once):**
+
+- Snap Store: a Snapcraft (Ubuntu One) account with 2FA → `snapcraft register
+  filex-app` (names are reviewed by hand, up to two working days) → `snapcraft
+  export-login --snaps=filex-app --acls=package_access,package_push,package_update,package_release
+  --expires=<date> creds.txt` → the file's content as the repository secret
+  `SNAPCRAFT_STORE_CREDENTIALS`. Auto-connecting the two plugs above is a
+  separate request on the Snapcraft forum (store-requests, a week's vote).
+- AUR: an aur.archlinux.org account with its own SSH key → run
+  `packaging/aur/update-pkgbuild.sh <version>` (the committed PKGBUILD is a
+  template with SKIP checksums until the first `filex-app` release) and push
+  `PKGBUILD` + `.SRCINFO` to `ssh://aur@aur.archlinux.org/filex-app-bin.git`
+  once → the private key as the secret `AUR_SSH_PRIVATE_KEY`.
+- The release job uploads the snap and pushes the PKGBUILD when those secrets
+  exist; without them it attaches the files to the Release and says in the
+  run summary what it did not publish.
 
 ## Portable (Windows)
 
@@ -215,11 +343,51 @@ matters when working on this code:
   **`rank: Alternate`** for the same reason; Linux uses `linux.mimeTypes` (not
   `fileAssociations`, which would also ship our own `<mime-type>` XML
   redeclaring types shared-mime-info already defines).
-- **The extension list lives in three places** — `OFFICE_EXTENSIONS` in
+- **The extension list lives in five places** — `OFFICE_EXTENSIONS` in
   `src/openwith.ts`, `mac.fileAssociations` + `linux.mimeTypes` in
-  `electron-builder.yml`, and `build/installer.nsh`. A YAML file and an NSIS
-  script cannot import TypeScript; widening one without the others gives an app
-  that offers to open a type it then refuses.
+  `electron-builder.yml`, `build/installer.nsh` and `build/appx-extensions.xml`
+  (Microsoft Store). YAML, NSIS and XML cannot import TypeScript; widening one
+  without the others gives an app that offers to open a type it then refuses.
+  `test/extension-lists.test.ts` fails when they disagree.
+
+## Microsoft Store
+
+`pnpm run dist:store` builds `release/filex-desktop-x64.appx` for Partner Center.
+The Store signs it (no certificate of ours), hosts it and updates it; Store
+installs get no SmartScreen warning. The NSIS installer and the portable `.exe`
+stay on filex.sh for machines without the Store. Listing text, certification
+notes and the IARC answers: `store/microsoft/listing.md`. CI leg (not yet in
+the public workflow): `../packaging/ci/release-desktop-store.patch`.
+
+- **Version.** The Store refuses a first number of 0 and keeps the fourth for
+  itself, so the package carries a mapping that `scripts/appx-manifest.cjs`
+  (the `appxManifestCreated` hook) writes into the manifest only: `0.43.1` →
+  `1.0.4301.0`, and from filex `1.1.0` on the two numbers are equal. ⚠ filex
+  never ships a `1.0.x` — it would sort below every 0.x already in the Store.
+  The app itself keeps reporting its real version.
+- **Identity.** `appx.identityName`, `publisher` and `publisherDisplayName`
+  in `electron-builder.yml` must be Partner Center's *Product identity* values,
+  character for character. The committed ones are placeholders.
+- **Nothing is registered at runtime.** Registry writes from inside a package
+  land in its private hive, so the `filex://` link, "Open with filex" and the
+  login item are declared in `build/appx-extensions.xml`. The login item is a
+  startup task, off until the user turns it on in Windows Settings → Apps →
+  Startup (Settings sends them there); it passes `--hidden`, like the NSIS
+  build's Run entry. ⚠ No `--` inside an XML comment in that file: makeappx
+  rejects the whole manifest.
+- **AppData is redirected.** New files under AppData go to the package's
+  private LocalCache, which Explorer cannot see. The drag-out copies, the log
+  folder and rescued edits therefore live under `~/.filex/desktop` on this
+  build; everything only the app reads stays in userData.
+- **Two copies.** A package reads the real AppData for a file it has no
+  private copy of, so a Store copy on a machine that still has the NSIS install
+  shares its accounts and folders. Settings says so and points at Windows'
+  installed-apps list.
+- `pnpm run e2e:store` (Windows, Developer Mode) installs an e2e *variant* —
+  own identity, own `filex-e2e://` scheme, own userData name, so it cannot touch
+  a real installation — and checks it as a Store copy: manifest, a cold
+  protocol launch, the running app's channel, AppData redirection, the startup
+  task. The variant is removed afterwards.
 
 ## Security posture (do not loosen)
 
@@ -231,7 +399,8 @@ expose the narrowest surface that works. Tokens live in the OS keychain.
 
 Releases are **unsigned** by design for now — Windows SmartScreen and macOS
 Gatekeeper will warn. A code-signing certificate is a separate, paid decision,
-not a defect.
+not a defect. The one signed Windows build is the Microsoft Store package, and
+Microsoft signs it (see *Microsoft Store*).
 
 macOS specifics, because the failure mode there is not a warning but a wall:
 
@@ -277,6 +446,19 @@ macOS specifics, because the failure mode there is not a warning but a wall:
   (`PORTABLE_ARTIFACT` in `main.ts`) to link a manual download, and
   `portable-e2e.mjs` asserts the two agree — a rename breaks a test rather than
   somebody's browser.
+- **The .deb/.rpm package name is not `executableName`.** For a scoped npm
+  name electron-builder names the package after productName (`filex`), so
+  `deb.packageName`/`rpm.packageName` say `filex-app` explicitly — without them
+  the renamed build was still `Package: filex` and `apt` upgraded the old one
+  in place.
+- **A URL scheme goes in `linux.mimeTypes`, not `linux.protocols`.**
+  electron-builder 24 appends a protocol's scheme to the mimeTypes list once
+  per target: `x-scheme-handler/filex` came out twice in the .deb, three times
+  in the .rpm.
+- **The after-remove script is ours** (`build/linux/after-remove.tpl`).
+  electron-builder's gives `update-alternatives --remove` the link instead of
+  the target and runs on upgrades too: on Fedora `dnf remove` failed the
+  scriptlet and left `/usr/bin/filex-app` dangling.
 
 ## End-to-end suites
 

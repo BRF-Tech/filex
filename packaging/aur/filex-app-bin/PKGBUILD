@@ -1,0 +1,67 @@
+# Maintainer: BRF Teknoloji <security@brf.sh>
+#
+# filex desktop app (`filex-app`), repackaged from the .deb on the GitHub
+# Release — hence `-bin` (the AUR's rule for a package built from a prebuilt
+# artefact). `filex` is the CLI's name; the desktop app is `filex-app` in every
+# package manager.
+#
+# ⚠ Do not edit pkgver/sha256sums by hand: packaging/aur/update-pkgbuild.sh
+# sets them from the released .deb and regenerates .SRCINFO beside this file.
+# The AUR accepts a push only when both are in the commit.
+#
+# ⚠ Until the first release that ships `filex-app` exists, pkgver names it and
+# the checksums are SKIP: this file is a template, not something to push. The
+# release job runs update-pkgbuild.sh for its tag before it pushes, and the
+# push step refuses a PKGBUILD that still says SKIP.
+
+pkgname=filex-app-bin
+pkgver=0.44.0
+pkgrel=1
+pkgdesc='filex desktop app: your filex server in a window, with browser sign-in and background folder sync'
+arch=('x86_64')
+url='https://filex.sh'
+license=('MIT')
+# What the .deb depends on (electron-builder's list), in Arch's names — plus
+# alsa-lib, which Electron links against and the .deb takes for granted.
+depends=('gtk3' 'libnotify' 'nss' 'libxss' 'libxtst' 'xdg-utils' 'at-spi2-core'
+         'util-linux-libs' 'libsecret' 'alsa-lib')
+optdepends=('gnome-keyring: keeps the sign-in (KWallet works too); without a keyring filex refuses to store it'
+            'libappindicator-gtk3: tray icon on desktops without StatusNotifier support')
+provides=('filex-app')
+conflicts=('filex-app')
+# The Electron binaries are shipped as built; stripping them breaks nothing
+# useful and costs time, and a debug split of a prebuilt app has no symbols.
+options=('!strip' '!debug')
+# The URL names the tag, so the file behind it never changes even though its
+# name carries no version (the Release keeps fixed names for its download links).
+source=("filex-desktop-${pkgver}-amd64.deb::https://github.com/BRF-Tech/filex/releases/download/v${pkgver}/filex-desktop-amd64.deb"
+        "LICENSE-${pkgver}::https://raw.githubusercontent.com/BRF-Tech/filex/v${pkgver}/LICENSE")
+noextract=("filex-desktop-${pkgver}-amd64.deb")
+sha256sums=('SKIP'
+            'SKIP')
+
+package() {
+  bsdtar -xOf "filex-desktop-${pkgver}-amd64.deb" 'data.tar.*' | bsdtar -xf - -C "${pkgdir}"
+
+  # A release from before the rename carries /opt/filex/filex, and the link
+  # below would dangle: refuse rather than install a package with no command.
+  if [ ! -x "${pkgdir}/opt/filex/filex-app" ]; then
+    error "v${pkgver} predates the filex-app rename (no /opt/filex/filex-app in its .deb)"
+    return 1
+  fi
+
+  # ⚠⚠ The .deb's updater markers must not survive into a pacman package.
+  # `package-type` says `deb`, and electron-updater would answer it with
+  # `pkexec dpkg -i` — on Arch, "Neither dpkg nor apt command found" at every
+  # check. `aur` tells the app pacman owns this install: it never checks the
+  # feed, and Settings says the AUR keeps it up to date (src/channel.ts).
+  local res="${pkgdir}/opt/filex/resources"
+  rm -f "${res}/app-update.yml"
+  printf 'aur\n' > "${res}/package-type"
+
+  # The .deb creates /usr/bin/filex-app in its postinst (update-alternatives).
+  install -d "${pkgdir}/usr/bin"
+  ln -s /opt/filex/filex-app "${pkgdir}/usr/bin/filex-app"
+
+  install -Dm644 "LICENSE-${pkgver}" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

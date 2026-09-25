@@ -148,7 +148,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
 # ---------------------------------------------------------------------------
 # Stage 4: Runtime — the binary's own needs, nothing more
 # ---------------------------------------------------------------------------
-FROM alpine:3.20
+FROM alpine:3.24
 
 #   ca-certificates — outbound TLS (S3, WebDAV, OIDC, update checks).
 #   tzdata          — local-time rendering and scheduled jobs.

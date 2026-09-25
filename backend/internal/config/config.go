@@ -111,29 +111,30 @@ type Config struct {
 	// ⚠ Losing it makes every credential sealed under it unusable; they must be
 	// re-issued. It is not a password to rotate casually — treat it like the
 	// database, because losing one is as bad as losing the other.
-	SecretKey        string       `yaml:"secret_key"`
-	Log              LogConfig    `yaml:"log"`
-	DB               DBConfig     `yaml:"db"`
-	Auth             AuthConfig   `yaml:"auth"`
-	ExternalServices ExtServices  `yaml:"external_services"`
-	Sync             SyncConfig   `yaml:"sync"`
-	Thumbs           ThumbsConfig `yaml:"thumbs"`
-	Search           SearchConfig `yaml:"search"`
-	CORS             CORSConfig   `yaml:"cors"`
-	Queue            QueueConfig  `yaml:"queue"`
-	Ops              OpsConfig    `yaml:"ops"`
-	Notify           NotifyConfig `yaml:"notify"`
-	Demo             DemoConfig   `yaml:"demo"`
-	Sentry           SentryConfig `yaml:"sentry"`
-	Seed             SeedConfig   `yaml:"seed"`
-	DAV              DAVConfig    `yaml:"dav"`
-	S3               S3Config     `yaml:"s3"`
-	SFTP             SFTPConfig   `yaml:"sftp"`
-	FTPS             FTPSConfig   `yaml:"ftps"`
-	NFS              NFSConfig    `yaml:"nfs"`
-	Update           UpdateConfig `yaml:"update"`
-	Upload           UploadConfig `yaml:"upload"`
-	Cache            CacheConfig  `yaml:"cache"`
+	SecretKey        string        `yaml:"secret_key"`
+	Log              LogConfig     `yaml:"log"`
+	DB               DBConfig      `yaml:"db"`
+	Auth             AuthConfig    `yaml:"auth"`
+	ExternalServices ExtServices   `yaml:"external_services"`
+	Sync             SyncConfig    `yaml:"sync"`
+	Thumbs           ThumbsConfig  `yaml:"thumbs"`
+	Search           SearchConfig  `yaml:"search"`
+	CORS             CORSConfig    `yaml:"cors"`
+	Queue            QueueConfig   `yaml:"queue"`
+	Ops              OpsConfig     `yaml:"ops"`
+	Notify           NotifyConfig  `yaml:"notify"`
+	Demo             DemoConfig    `yaml:"demo"`
+	Sentry           SentryConfig  `yaml:"sentry"`
+	Seed             SeedConfig    `yaml:"seed"`
+	DAV              DAVConfig     `yaml:"dav"`
+	S3               S3Config      `yaml:"s3"`
+	SFTP             SFTPConfig    `yaml:"sftp"`
+	FTPS             FTPSConfig    `yaml:"ftps"`
+	NFS              NFSConfig     `yaml:"nfs"`
+	Update           UpdateConfig  `yaml:"update"`
+	Upload           UploadConfig  `yaml:"upload"`
+	Cache            CacheConfig   `yaml:"cache"`
+	Archive          ArchiveConfig `yaml:"archive"`
 	/* kimlik:e3 cloud */
 	Cloud CloudConfig `yaml:"cloud"`
 	// VersionsOnOverwrite installs the pre-write versioning guard. Default on.
@@ -152,6 +153,16 @@ type Config struct {
 	// refused (desktop sync, WebDAV, OnlyOffice saves, the browser) and the
 	// only other lever is an env var plus a restart.
 	VersionsFailOpen bool `yaml:"versions_fail_open"`
+}
+
+// ArchiveConfig contains only operator-owned process settings. User-facing
+// policy (enabled formats and resource limits) lives in the settings table so
+// the Archives admin page can change it live. Binary paths remain here because
+// allowing an HTTP caller to choose a program for filex to execute is remote
+// command execution by design.
+type ArchiveConfig struct {
+	SevenZipBin string `yaml:"sevenzip_bin"`
+	WorkDir     string `yaml:"work_dir"`
 }
 
 // CacheConfig — the local copy filex prepares for a big file that lives on a
@@ -867,6 +878,9 @@ func Load(path string) (Config, error) {
 	if cfg.Cache.Dir == "" {
 		cfg.Cache.Dir = filepath.Join(cfg.DataDir, "cache")
 	}
+	if cfg.Archive.WorkDir == "" {
+		cfg.Archive.WorkDir = filepath.Join(cfg.DataDir, "archive-work")
+	}
 	if cfg.Upload.ChunkSize <= 0 {
 		cfg.Upload.ChunkSize = 8 << 20
 	}
@@ -976,6 +990,12 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_UPLOAD_STAGING_DIR"); v != "" {
 		c.Upload.StagingDir = v
+	}
+	if v := os.Getenv("FILEX_ARCHIVE_7Z_BIN"); v != "" {
+		c.Archive.SevenZipBin = v
+	}
+	if v := os.Getenv("FILEX_ARCHIVE_WORK_DIR"); v != "" {
+		c.Archive.WorkDir = v
 	}
 	if v := os.Getenv("FILEX_UPLOAD_CHUNK_SIZE"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {

@@ -154,10 +154,27 @@ async function show(ev: { clientX: number; clientY: number }, nodes: FileNode[])
 function clampToViewport() {
   const el = menuEl.value;
   if (!el || typeof window === 'undefined') return;
+  /* Measure the natural height: drop a cap an earlier opening left behind. */
+  el.style.maxHeight = '';
+  el.style.overflowY = '';
   const rect = el.getBoundingClientRect();
   const margin = 8;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+  /* ⚠⚠ A menu taller than the window scrolls inside itself. Neither a flip nor
+   * a clamp can fit it, and without a height cap the items past the bottom edge
+   * are simply unreachable: installing a few apps (each adds its actions) put
+   * "Lock probe" below a 720px window and nothing could click it (0.44.0's gate
+   * run, spec 95, 2026-09-25). Set on the element here rather than in the
+   * template's :style, whose line the RTL audit allow-lists word for word. */
+  const room = vh - 2 * margin;
+  if (rect.height > room) {
+    el.style.maxHeight = room + 'px';
+    el.style.overflowY = 'auto';
+    y.value = margin;
+    x.value = openAlongInline(anchorX, rect.width, vw, dir.value, margin);
+    return;
+  }
   /* wiring:c4 — edge flip: overflowing the bottom/right edge re-anchors the
    * menu above/left of the cursor when there's room; clamping stays as the
    * fallback for tiny viewports. */

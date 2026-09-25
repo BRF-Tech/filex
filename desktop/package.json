@@ -1,13 +1,14 @@
 {
   "name": "@brftech/filex-desktop",
   "private": true,
-  "version": "0.43.2",
+  "version": "0.44.0",
   "description": "filex desktop — the filex explorer in a window, with browser sign-in, background folder sync and secure token storage",
   "author": "BRF Tech <security@brf.sh>",
   "license": "MIT",
   "homepage": "https://filex.sh",
   "type": "module",
   "main": "dist/main.js",
+  "desktopName": "filex-app.desktop",
   "scripts": {
     "sync-web": "node scripts/sync-web.mjs",
     "fetch-cli": "node scripts/fetch-cli.mjs",
@@ -19,6 +20,8 @@
     "dist:linux": "pnpm run build && node scripts/fetch-cli.mjs --platform linux && electron-builder --linux",
     "dist:win": "pnpm run build && node scripts/fetch-cli.mjs --platform win32 && electron-builder --win",
     "dist:mac": "pnpm run build && node scripts/fetch-cli.mjs --platform darwin && electron-builder --mac",
+    "dist:store": "pnpm run build && node scripts/fetch-cli.mjs --platform win32 && electron-builder --win appx",
+    "dist:snap": "pnpm run build && node scripts/fetch-cli.mjs --platform linux && electron-builder --linux snap --publish never",
     "clean": "rimraf dist app",
     "e2e:ui": "node scripts/ui-login-e2e.mjs",
     "e2e:signin-retry": "node scripts/signin-retry-e2e.mjs",
@@ -28,10 +31,11 @@
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "test:red": "node --experimental-strip-types scripts/openwith-red.mjs",
     "e2e:openwith": "node scripts/openwith-e2e.mjs",
-    "e2e:portable": "node scripts/portable-e2e.mjs"
+    "e2e:portable": "node scripts/portable-e2e.mjs",
+    "e2e:store": "node scripts/store-e2e.mjs"
   },
   "devDependencies": {
-    "electron": "^31.7.7",
+    "electron": "^44.4.5",
     "electron-builder": "^24.13.3",
     "esbuild": "^0.28.2",
     "rimraf": "^6.0.1",

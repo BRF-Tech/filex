@@ -13,7 +13,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { loginItemExecutable, loginItemWrite, osWillLaunch, preferenceAfterStartup } from '../src/login-item.ts';
+import {
+  LEGACY_LINUX_AUTOSTART_NAME,
+  LINUX_AUTOSTART_NAME,
+  legacyAutostartAction,
+  loginItemExecutable,
+  loginItemWrite,
+  osWillLaunch,
+  preferenceAfterStartup,
+} from '../src/login-item.ts';
 
 const SPEC = { path: 'C:\\Users\\ada\\AppData\\Local\\Programs\\filex\\filex.exe', args: ['--hidden'] };
 
@@ -86,4 +94,43 @@ test('the login item runs the portable exe or the AppImage, not the extraction',
   assert.equal(loginItemExecutable({}, tmp), tmp);
   assert.equal(loginItemExecutable({ PORTABLE_EXECUTABLE_FILE: 'D:/Apps/filex-portable.exe' }, tmp), 'D:/Apps/filex-portable.exe');
   assert.equal(loginItemExecutable({ APPIMAGE: '/home/a/filex.AppImage' }, '/tmp/.mount_x/filex'), '/home/a/filex.AppImage');
+});
+
+// ── Linux: the autostart entry across the rename to filex-app ──────────────
+
+/** Exactly what setLinuxAutostart (main.ts) wrote before the rename. */
+const legacyEntry = (exec: string, extra: string[] = []) =>
+  ['[Desktop Entry]', 'Type=Application', 'Name=filex', 'Comment=Keep your folders in sync',
+    `Exec=${exec}`, 'Terminal=false', 'X-GNOME-Autostart-enabled=true', ...extra, ''].join('\n');
+
+test('Linux: the autostart file is named after the app, and the pre-rename name is known', () => {
+  assert.equal(LINUX_AUTOSTART_NAME, 'filex-app.desktop');
+  assert.equal(LEGACY_LINUX_AUTOSTART_NAME, 'filex.desktop');
+});
+
+test('Linux: our pre-rename autostart entry is carried over — a .deb/.rpm or an AppImage', () => {
+  // Left behind, it would read as "no login item" and switch the preference off.
+  assert.equal(legacyAutostartAction(legacyEntry('"/opt/filex/filex" --hidden')), 'move');
+  assert.equal(legacyAutostartAction(legacyEntry('"/home/ada/Apps/filex-desktop-x86_64.AppImage" --hidden')), 'move');
+  assert.equal(legacyAutostartAction(legacyEntry('"/home/ada/My Apps/filex.AppImage" --hidden')), 'move');
+});
+
+test('Linux: ours but switched off in the desktop settings — removed, and the preference reads off', () => {
+  assert.equal(legacyAutostartAction(legacyEntry('"/opt/filex/filex" --hidden', ['Hidden=true'])), 'drop');
+  const off = legacyEntry('"/opt/filex/filex" --hidden').replace('X-GNOME-Autostart-enabled=true', 'X-GNOME-Autostart-enabled=false');
+  assert.equal(legacyAutostartAction(off), 'drop');
+});
+
+test("Linux: somebody else's filex.desktop is never touched", () => {
+  assert.equal(legacyAutostartAction(null), 'leave');
+  assert.equal(legacyAutostartAction(''), 'leave');
+  // Another program called filex, its own autostart entry.
+  assert.equal(legacyAutostartAction('[Desktop Entry]\nType=Application\nName=filex\nExec=/usr/local/bin/filex daemon\n'), 'leave');
+  // Our shape, but not our binary.
+  assert.equal(legacyAutostartAction(legacyEntry('"/usr/bin/some-other" --hidden')), 'leave');
+  // Our binary, but not the command we write (no --hidden: started by hand-made entry).
+  assert.equal(legacyAutostartAction(legacyEntry('"/opt/filex/filex"')), 'leave');
+  assert.equal(legacyAutostartAction(legacyEntry('"/opt/filex/filex" --minimized')), 'leave');
+  // Edited by the user (another comment): theirs now.
+  assert.equal(legacyAutostartAction(legacyEntry('"/opt/filex/filex" --hidden').replace('Keep your folders in sync', 'my sync')), 'leave');
 });

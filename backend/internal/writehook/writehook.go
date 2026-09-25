@@ -139,6 +139,19 @@ func OnFileWritten(ctx context.Context, storageID int64, node *model.Node, origi
 	}
 }
 
+// OnFileWrittenWithoutNotification keeps the non-notification half of the
+// post-write gate. Composite operations use it for their internal writes and
+// emit one operation-level event afterwards; an extraction of 500 files must
+// still scan all 500, but must not send 500 "new file" notifications.
+func OnFileWrittenWithoutNotification(ctx context.Context, node *model.Node) {
+	if node == nil || node.Type == model.NodeTypeDirectory {
+		return
+	}
+	if avEnqueue != nil && node.ID != 0 {
+		avEnqueue(context.WithoutCancel(ctx), node)
+	}
+}
+
 // OnFileSaved is OnFileWritten for a write that is one save inside an ONGOING
 // editing session: same event, DEBOUNCED scan.
 //

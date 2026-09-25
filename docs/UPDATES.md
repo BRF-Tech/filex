@@ -53,9 +53,12 @@ the exact commands for your install.
 | `FILEX_UPDATE_WINDOW` | – | Daily maintenance window for automatic upgrades, e.g. `03:00-05:00` (server local time). Empty = any time. |
 | `FILEX_UPDATE_INTERVAL` | `24h` | Time between checks. Values under `1h` are raised to `1h`. |
 | `FILEX_UPDATE_PRE_COMMAND` | – | Shell command run right before a self-upgrade (database dump for external engines). A non-zero exit **aborts** the upgrade. |
-| `FILEX_INSTALL_MODE` | auto-detected | `binary` or `docker`, when the detection is wrong for your setup. |
+| `FILEX_INSTALL_MODE` | auto-detected | `binary`, `docker` or `package` — or the package manager by name: `homebrew`, `winget`, `snap` — when the detection is wrong for your setup. See [Package-manager installs](#package-manager-installs). |
 
-The same keys exist in `config.yaml` under `update:`.
+The periodic-check settings also exist in `config.yaml` under `update:`
+(`enabled`, `policy`, `channel`, `manifest_url`, `window`, `interval`).
+`AUTO_UPGRADE`, `FILEX_UPDATE_PRE_COMMAND` and `FILEX_INSTALL_MODE` are read from
+the environment only.
 
 ### What the check sends
 
@@ -101,6 +104,63 @@ the last service that should hold it.
 
 ---
 
+## Package-manager installs
+
+When a package manager installed filex — Homebrew, winget or Snap — the package
+manager owns the binary, and filex leaves it alone: `filex self-update` refuses,
+and no update policy ever replaces it. Replacing it anyway would split the two
+records: the package manager would keep reporting the old version, and its next
+upgrade would write over whatever filex had put there (a snap's files are
+read-only to begin with). Upgrade with the package manager instead — filex
+tells you the command:
+
+| Installed with | How filex recognizes it | Upgrade command |
+|---|---|---|
+| Homebrew (cask) | the binary lives under `…/Caskroom/<token>/<version>/` | `brew upgrade --cask filex` |
+| Homebrew (formula) | the binary lives under `…/Cellar/<formula>/<version>/<dir>/` | `brew upgrade filex` |
+| winget | the binary lives under `…\WinGet\Packages\<id>_<source>\` — per user under `%LOCALAPPDATA%\Microsoft`, machine-wide under `%ProgramFiles%` | `winget upgrade BRFTech.filex` |
+| Snap | `SNAP` and `SNAP_NAME` are set **and** the binary lives under `$SNAP` | `snap refresh filex` |
+
+The name in the command is read from where the binary lives — the cask token,
+the formula, the winget package id, the snap instance — so a renamed or forked
+package is told the command for itself. What keeps the detection honest:
+
+- The path is judged after following links: `/opt/homebrew/bin/filex` and
+  `WinGet\Links\filex.exe` point into the layouts above.
+- Only the whole layout counts, never a similar name: `~/Cellar-backup/filex` is
+  a plain binary, and so is a `Cellar` folder without a version inside it.
+- `SNAP` alone is not enough. A terminal opened from another snap (the VS Code
+  snap's, for one) passes its own `SNAP` on to everything started in it, and a
+  plain filex started there must not be told to `snap refresh code`.
+- Inside a container the container wins: the image is what gets upgraded.
+
+What still works on such an install:
+
+```bash
+filex self-update --check    # reports the newest release, and:
+# upgrade: brew upgrade --cask filex
+```
+
+The admin page (**Ops → Updates**) shows the release, why filex is not taking it
+and the command, with no **Upgrade now** button. Two things filex would have
+done itself are yours now, and the instructions say so: a package manager
+replaces the file, not the running process, so **restart filex** afterwards (on
+Windows, stop it first — a running `filex.exe` cannot be replaced); and the
+database snapshot a self-upgrade takes before a schema change does not happen,
+so when a release changes the schema, **back up first**.
+
+**Packagers:** a distribution package whose layout filex does not recognize (a
+`.deb`, an `.rpm`, an AUR package) can declare itself with
+`FILEX_INSTALL_MODE=package` in the environment filex runs in — the service
+unit's `Environment=` covers the server's automatic updates; a `filex
+self-update` typed in a shell reads the shell's. filex then refuses to replace
+itself and tells the operator to upgrade with the package manager that installed
+it. `FILEX_INSTALL_MODE=homebrew|winget|snap` names the manager outright, and
+`FILEX_INSTALL_MODE=binary` turns all of this off — on a snap the replacement
+then fails anyway, because the files are read-only.
+
+---
+
 ## What "automatic" actually checks
 
 Before a patch is applied without asking, **all** of these must hold:
@@ -112,7 +172,8 @@ Before a patch is applied without asking, **all** of these must hold:
 3. Neither the target nor any release being skipped over carries a schema
    migration. A patch that changes the schema is a packaging mistake, and filex
    treats it as "not really a patch" and asks.
-4. The install can replace its own binary (not a container).
+4. The install can replace its own binary (not a container, not a package
+   manager's).
 5. The current time is inside `FILEX_UPDATE_WINDOW`, if one is set.
 
 Minor releases have one extra rule: while filex is on a `0.x` version, semver
@@ -121,7 +182,8 @@ even under `policy: minor`. That relaxes once the project reaches `1.0`.
 
 ## What an upgrade does, in order
 
-1. Refuse immediately if this install cannot replace itself.
+1. Refuse immediately if this install cannot replace itself (a container, or a
+   binary a package manager owns).
 2. Download the build for your OS/arch and verify its **SHA-256** against the
    manifest (which arrived over TLS).
 3. Unpack next to the current binary — same filesystem, so the final move is
@@ -249,6 +311,13 @@ POST /api/admin/update/check  → force a fetch, then return the status
 POST /api/admin/update/apply  → install the pending release
 ```
 
-`apply` answers `409` on a container install, with the instructions in the body.
-That is a permanent condition, not a transient failure — which is exactly why it
-is not a `5xx`.
+`apply` answers `409` on a container or package-manager install, with the
+instructions in the body. That is a permanent condition, not a transient
+failure — which is exactly why it is not a `5xx`.
+
+The status names the install: `mode` is `binary`, `docker` or `package`, and a
+`package` install also carries `package_manager` (`homebrew`, `winget`,
+`snap`), `package_manager_name` (the product name to show, e.g. `Homebrew`) and
+`upgrade_command` (e.g. `brew upgrade --cask filex`). The manager fields are
+absent when `FILEX_INSTALL_MODE=package` was set and nothing more could be
+detected.

@@ -1,0 +1,20 @@
+Path = sym
+Size = 21
+Packed Size = 32
+Modified = 2026-09-24 21:38:32.5357035
+Attributes = A lrwxrwxrwx
+CRC = 6E79ACE7
+Encrypted = -
+Method = LZMA2:12
+Block = 0
+
+Path = target.txt
+Size = 7
+Packed Size = 
+Modified = 2026-09-24 21:38:32.5357035
+Attributes = A -rw-r--r--
+CRC = E2EBB28C
+Encrypted = -
+Method = LZMA2:12
+Block = 0
+

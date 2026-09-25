@@ -968,6 +968,16 @@
         'set.autostart_sub':    ['Launches minimised to the tray.', 'Sistem tepsisine küçültülmüş olarak açılır.'],
         'set.autostart_dev':    ['Only the installed app can start at sign-in.',
                                  'Oturum açılışında yalnızca kurulu uygulama başlatılabilir.'],
+        'set.autostart_os':     ['Switched on and off in Windows Settings → Apps → Startup. When it is on, filex opens in the tray.',
+                                 'Windows Ayarlar → Uygulamalar → Başlangıç bölümünden açılıp kapatılır. Açıkken filex tepside başlar.'],
+        'set.autostart_open':   ['Open startup settings', 'Başlangıç ayarlarını aç'],
+        'set.other_copy':       ['filex is installed twice', 'filex iki kez kurulu'],
+        // ⚠ Both entries are called "filex" in Windows' list; the publisher is
+        // what tells them apart (NSIS: package.json author "BRF Tech", with the
+        // version in the name; Store: publisherDisplayName "BRF Teknoloji").
+        'set.other_copy_sub':   ['The copy downloaded from filex.sh is still on this computer. Both use the same accounts and folders, so you get two tray icons and every notification twice. In the installed apps list, remove "filex 0.…" published by BRF Tech; this Microsoft Store copy is the one published by BRF Teknoloji.',
+                                 'filex.sh\'tan indirilen kopya hâlâ bu bilgisayarda. İkisi aynı hesapları ve klasörleri kullandığı için iki tepsi simgesi görür, her bildirimi iki kez alırsınız. Yüklü uygulamalar listesinde yayımcısı BRF Tech olan "filex 0.…" kaydını kaldırın; bu Microsoft Store kopyasının yayımcısı BRF Teknoloji\'dir.'],
+        'set.other_copy_open':  ['Open installed apps', 'Yüklü uygulamaları aç'],
         'set.language':         ['Language', 'Dil'],
         'set.language_sub':     ['Applies to this window, the tray menu and the file list.',
                                  'Bu pencere, tepsi menüsü ve dosya listesi için geçerlidir.'],
@@ -987,6 +997,10 @@
                                  'Varsayılan uygulamayı yalnızca sen seçebilirsin; Windows bu izni uygulamalara vermez. Bu düğme o sayfayı açar.'],
         'ow.default_linux':     ['Sets filex as the default for these documents on this desktop.',
                                  'Bu masaüstünde bu belgeler için varsayılanı filex yapar.'],
+        // A snap or a Flatpak cannot change the desktop's defaults from inside
+        // its sandbox (src/channel.ts → defaultHandlerRoute): no button, the way.
+        'ow.default_linux_sandbox': ['This copy runs in a {store} sandbox, which cannot change your desktop’s defaults. Right-click a document in your file manager, choose Open With…, pick filex and set it as the default there.',
+                                 'Bu kopya {store} korumalı alanında çalışıyor ve masaüstünün varsayılanlarını değiştiremez. Dosya yöneticisinde bir belgeye sağ tıkla, Birlikte Aç…’ı seç, filex’i seçip orada varsayılan yap.'],
         'ow.default_mac':       ['macOS sets this in Finder — Get Info → Open with → Change All. This explains where.',
                                  'macOS bunu Finder’dan ayarlar — Bilgi Al → Şununla aç → Tümünü Değiştir. Bu düğme nereden yapılacağını anlatır.'],
         'ow.default_btn_win':   ['Open Default apps', 'Varsayılan uygulamaları aç'],
@@ -1017,6 +1031,10 @@
         'upd.portable_idea':    ['This portable copy does not update itself — there is nothing installed for an update to replace. Download a new .exe and put it over this one; the folder beside it keeps your accounts and settings.',
                                  'Bu taşınabilir kopya kendini güncellemez — güncellemenin değiştireceği kurulu bir şey yok. Yeni bir .exe indirip bunun üzerine koyun; yanındaki klasör hesaplarınızı ve ayarlarınızı korur.'],
         'upd.download':         ['Download', 'İndir'],
+        'upd.store':            ['{store} keeps this copy up to date', 'Bu kopyayı {store} güncel tutuyor'],
+        'upd.store_idea':       ['This copy was installed from {store}, and new versions arrive the same way — there is nothing to check or download here.',
+                                 'Bu kopya {store} üzerinden kuruldu; yeni sürümler de aynı yoldan gelir. Burada denetlenecek ya da indirilecek bir şey yok.'],
+        'upd.open_store':       ['Open store page', 'Mağaza sayfasını aç'],
         'upd.dev':              ['Only the installed app updates itself.',
                                  'Yalnızca kurulu uygulama kendini günceller.'],
         'set.portable':         ['Portable copy', 'Taşınabilir kopya'],
@@ -1044,6 +1062,11 @@
                                  'Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur — klasörde izlenemeyecek kadar çok öğe var'],
         'sync.local.unavailable': ['Changes made on this computer are found by the 30-second check — the folder cannot be watched',
                                  'Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur — klasör izlenemiyor'],
+        // Another process holds the folder's lock (FolderView 'busy' in
+        // src/sync-policy.ts): the other copy of this app, or the CLI. Not an
+        // error — the folder is being synced, just not by this copy.
+        'sync.busy':            ['Another filex on this computer is syncing this folder — this copy takes over when that one stops',
+                                 'Bu bilgisayardaki başka bir filex bu klasörü eşitliyor — o kapandığında bu kopya devralır'],
         'sync.paused':          ['paused — resume sync to continue', 'duraklatıldı — devam etmek için eşitlemeyi sürdür'],
         'sync.signed_out':      ['stopped — the server signed this account out; Reconnect to continue',
                                  'durdu — sunucu bu hesabın oturumunu kapattı; devam etmek için Yeniden bağlan'],
@@ -1637,9 +1660,15 @@
         return palette[h % palette.length];
       }
 
+      /** The supervisor's status per account id (the rail's dots, the folder
+       *  cards in Settings). */
+      function statusByAccount() {
+        return Object.fromEntries((state.syncStatuses || []).map((s) => [s.accountId, s]));
+      }
+
       function renderRail() {
         const rail = $('#rail');
-        const statusOf = Object.fromEntries((state.syncStatuses || []).map((s) => [s.accountId, s]));
+        const statusOf = statusByAccount();
         rail.innerHTML = '';
 
         // ⚠ No app mark here — the top bar carries it, with the wordmark.
@@ -1806,6 +1835,11 @@
             </div>
           </div></div>`).join('') : `<div class="empty">${esc(T('set.no_accounts'))}</div>`;
 
+        // ⚠ Its own lookup: `statusOf` lived in this function until 0.43.0
+        // moved it out, and the folder cards kept reading it — a
+        // ReferenceError on every render with a folder paired, so Settings
+        // never drew once anything synced.
+        const statusOf = statusByAccount();
         const pairs = state.syncFolders.length ? state.syncFolders.map((f) => {
           const acc = state.accounts.find((a) => a.id === f.accountId);
           const st = statusOf[f.accountId];
@@ -1820,12 +1854,15 @@
             case 'paused': line = T('sync.paused'); break;
             case 'signed-out': line = T('sync.signed_out'); cls = 'err'; break;
             case 'active': line = activityLine(v); cls = 'ok'; break;
+            case 'busy': line = T('sync.busy'); break;
             case 'window': line = T('sync.window_wait', { window: v.window.replace('-', '–') }); break;
             case 'error': line = v.message; cls = 'err'; break;
             case 'watching': line = T('sync.watching'); cls = 'ok'; break;
             case 'stopped': line = T('sync.stopped'); cls = 'err'; break;
           }
-          const syncing = st && st.running && v.kind !== 'paused' && v.kind !== 'signed-out';
+          // A busy folder is synced by ANOTHER process: how changes reach
+          // this copy's engine is not news about it.
+          const syncing = st && st.running && v.kind !== 'paused' && v.kind !== 'signed-out' && v.kind !== 'busy';
           const live = syncing && st.live ? T('sync.live.' + st.live) : '';
           // How changes made on THIS computer reach the engine — only said
           // when they cannot be watched and wait for the 30-second check.
@@ -1838,7 +1875,7 @@
               <div><code>${esc(f.remotePath)}</code></div>
               <div class="muted" style="overflow-wrap:anywhere">↔ ${esc(f.localPath)}</div>
               <div class="muted">${esc(acc ? acc.email : T('set.unknown_account'))}</div>
-              <div class="muted ${cls}" data-line>${esc(line)}</div>
+              <div class="muted ${cls}" data-line${v.kind === 'busy' ? ` data-busy title="${esc(v.detail)}"` : ''}>${esc(line)}</div>
               ${live ? `<div class="muted" data-live="${esc(st.live)}">${esc(live)}</div>` : ''}
               ${localNote ? `<div class="muted" data-local="${esc(h.local.code)}" title="${esc(h.local.detail || '')}">${esc(localNote)}</div>` : ''}
             </div>
@@ -1887,9 +1924,13 @@
                edited in the admin panel — the per-account "Admin panel ↗" link
                in the Accounts list above is that door.
                ⚠ Not a duplicate of the file list's own sidebar entry, which
-               opens the same component: `syncOverlays()` HIDES the explorer
+               opens the same component: syncOverlays() HIDES the explorer
                while Settings is open, so from this screen the sidebar cannot
-               be reached and this is the only door. -->
+               be reached and this is the only door.
+               ⚠ No backticks in this markup: it sits inside a template
+               literal, and one quoted name here ended the literal and took the
+               whole page's script down (v0.43.0-v0.43.2;
+               test/ui-syntax.test.ts). -->
           <div class="card"><div class="between">
             <div><div class="label">${esc(T('set.connections'))}</div>
               <div class="muted">${esc(T('set.connections_sub'))}</div></div>
@@ -1954,7 +1995,12 @@
           </div></div>
           ${toggle('bg', state.runInBackground, T('set.background'), T('set.background_sub'))}
           ${toggle('notifs', state.notifications !== false, T('set.notifications'), T('set.notifications_sub'))}
-          ${toggle('login-item', state.launchAtLogin, T('set.autostart'), T(
+          ${state.launchAtLoginInOsSettings ? `
+          <div class="card"><div class="between">
+            <div><div class="label">${esc(T('set.autostart'))}</div>
+              <div class="muted">${esc(T('set.autostart_os'))}</div></div>
+            <button id="login-item-os">${esc(T('set.autostart_open'))}</button>
+          </div></div>` : toggle('login-item', state.launchAtLogin, T('set.autostart'), T(
             // A dev run refuses to write a login item at all (it could only
             // register the bare electron binary), so the row says that rather
             // than offering a switch that silently does nothing.
@@ -1962,6 +2008,12 @@
             : state.launchAtLoginEffective === false && state.launchAtLogin
               ? 'set.autostart_refused' : 'set.autostart_sub'),
             state.launchAtLoginSupported === false)}
+          ${state.directCopyInstalled ? `
+          <div class="card"><div class="between">
+            <div><div class="label">${esc(T('set.other_copy'))}</div>
+              <div class="muted">${esc(T('set.other_copy_sub'))}</div></div>
+            <button id="other-copy-open">${esc(T('set.other_copy_open'))}</button>
+          </div></div>` : ''}
           ${portableCard()}
           ${openWithCard()}
           <h2>${esc(T('upd.title'))}</h2>
@@ -1998,9 +2050,13 @@
         if (!ow) return '';
         const route = ow.defaultRoute;
         const hint = route === 'settings' ? 'ow.default_win'
-          : route === 'xdg' ? 'ow.default_linux' : 'ow.default_mac';
+          : route === 'xdg' ? 'ow.default_linux'
+          : route === 'linux-manual' ? 'ow.default_linux_sandbox' : 'ow.default_mac';
+        // linux-manual has nothing a button could do — only the way to do it.
         const btn = route === 'settings' ? 'ow.default_btn_win'
-          : route === 'xdg' ? 'ow.default_btn_linux' : 'ow.default_btn_mac';
+          : route === 'xdg' ? 'ow.default_btn_linux'
+          : route === 'linux-manual' ? null : 'ow.default_btn_mac';
+        const store = STORE_NAMES[state.updateChannel] || 'store';
         const live = (ow.sessions || []).map((s) => `
           <div class="muted" style="overflow-wrap:anywhere">${esc(s.localPath)}</div>`).join('');
         return `
@@ -2013,10 +2069,10 @@
           </div>
           <div class="card"><div class="between">
             <div style="min-width:0">
-              <div class="muted">${esc(T(hint))}</div>
+              <div class="muted">${esc(T(hint, { store }))}</div>
               ${ow.lastError ? `<div class="err">${esc(ow.lastError)}</div>` : ''}
             </div>
-            <button id="ow-default">${esc(T(btn))}</button>
+            ${btn ? `<button id="ow-default">${esc(T(btn))}</button>` : ''}
           </div></div>
           ${live ? `<div class="card">
             <div class="label">${esc(T('ow.open_now'))}</div>${live}</div>` : ''}`;
@@ -2043,6 +2099,9 @@
           </div></div>`;
       }
 
+      /** The store behind each channel of src/channel.ts — product names, not translated. */
+      const STORE_NAMES = { msstore: 'Microsoft Store', flatpak: 'Flathub', snap: 'Snap Store', aur: 'AUR' };
+
       /** The update row: what the app knows, plus the one button that matters. */
       function updateCard() {
         const u = state.update || { status: 'idle' };
@@ -2054,6 +2113,16 @@
         // the mac one is about a missing signature, the portable one about
         // there being no installation to replace. See src/main.ts.
         const portable = state.updateManualReason === 'windows-portable';
+        // A store copy is updated by the store (src/channel.ts): the card says
+        // which, and its one button opens the store's page.
+        if (u.status === 'store') {
+          const store = STORE_NAMES[state.updateChannel] || 'Store';
+          return `<div class="card"><div class="between">
+              <div><div class="label">${esc(T('upd.store', { store }))}</div>
+                <div class="muted">${esc(T('upd.store_idea', { store }))}</div></div>
+              <button id="upd-download">${esc(T('upd.open_store'))}</button>
+            </div></div>`;
+        }
         let line = T('upd.current');
         if (!supported) line = T('upd.dev');
         else if (u.status === 'checking') line = T('upd.checking');
@@ -2184,10 +2253,16 @@
         if (updInstall) updInstall.addEventListener('click', () => window.filexApp.installUpdate());
         const updDownload = $('#upd-download', el);
         if (updDownload) updDownload.addEventListener('click', () => window.filexApp.downloadUpdate());
-        $('#login-item', el).addEventListener('click', async () => {
+        // Either the switch or, on the Store build, the way to Windows' own list.
+        const loginItem = $('#login-item', el);
+        if (loginItem) loginItem.addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ launchAtLogin: !state.launchAtLogin });
           renderSettings();
         });
+        const loginItemOs = $('#login-item-os', el);
+        if (loginItemOs) loginItemOs.addEventListener('click', () => window.filexApp.openStartupSettings());
+        const otherCopy = $('#other-copy-open', el);
+        if (otherCopy) otherCopy.addEventListener('click', () => window.filexApp.openAppsSettings());
         const owBtn = $('#ow-default', el);
         if (owBtn) owBtn.addEventListener('click', async () => {
           const r = await window.filexApp.openWithSetDefault();

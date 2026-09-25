@@ -33,6 +33,7 @@ import { fileIconTile } from '../lib/fileIcons';
 import { actionIconSvg } from '../lib/actionIcons';
 import { OFFICE_EXTS } from '../lib/serviceGate';
 import { requestFailure, sayFailure } from '../lib/errorWords';
+import { createArchivePreviewCache } from '../lib/archivePreviewCache';
 
 const props = defineProps<{
   open: boolean;
@@ -114,6 +115,7 @@ const emit = defineEmits<{
 }>();
 
 const { t, formatSize, formatDate, nodeDisplayName } = useLocale(() => props.locale);
+const archivePreviewCache = createArchivePreviewCache();
 
 function ext(f: FileNode | null): string {
   return (f?.extension || '').toLowerCase();
@@ -188,6 +190,15 @@ const VIEWER_MAP: Record<string, () => Promise<Component>> = {
   tsv: () => import('../viewers/CsvViewer.vue'),
 
   zip: () => import('../viewers/ArchiveViewer.vue'),
+  '7z': () => import('../viewers/ArchiveViewer.vue'),
+  rar: () => import('../viewers/ArchiveViewer.vue'),
+  tar: () => import('../viewers/ArchiveViewer.vue'),
+  gz: () => import('../viewers/ArchiveViewer.vue'),
+  tgz: () => import('../viewers/ArchiveViewer.vue'),
+  bz2: () => import('../viewers/ArchiveViewer.vue'),
+  tbz2: () => import('../viewers/ArchiveViewer.vue'),
+  xz: () => import('../viewers/ArchiveViewer.vue'),
+  txz: () => import('../viewers/ArchiveViewer.vue'),
 };
 
 type PreviewKind =
@@ -264,9 +275,10 @@ const viewerProps = computed(() => {
     // /api/files/archive/list handler falls back to storages[0] when
     // no adapter prefix is present — on multi-storage instances that
     // 500s for every non-default storage (sample.zip on fm s3-test).
-    if (e === 'zip' || e === 'rar' || e === '7z' || e === 'tar' || e === 'gz' || e === 'tgz') {
+    if (['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'tbz2', 'xz', 'txz'].includes(e)) {
       base.filePath = props.file.path;
       if (props.archiveListEndpoint) base.archiveListUrl = props.archiveListEndpoint;
+      base.archivePreviewCache = archivePreviewCache;
     }
   }
   if (e === 'drawio' || e === 'dio') {
@@ -1124,6 +1136,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('fullscreenchange', onFullscreenChange);
   disposeOnlyOfficeEditor();
   disposeMonaco();
+  archivePreviewCache.clear();
 });
 
 /**
@@ -1375,6 +1388,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
               v-bind="viewerProps"
               class="fe-preview__viewer"
               @fallback="onPdfFallback"
+              @close="emit('close')"
             />
           </template>
 

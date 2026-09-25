@@ -23,6 +23,8 @@ import (
 
 // ErrNotSelfApplicable is returned when the install cannot replace itself —
 // the container case. It is a permanent condition, not a transient failure.
+// A package-managed install answers with a *PackageManagedError, which is
+// also this error under errors.Is (see Install.Refusal).
 var ErrNotSelfApplicable = errors.New("this install cannot upgrade itself (container image is immutable); upgrade the image instead")
 
 // maxBinaryBytes caps the download. filex binaries are ~30 MB; 256 MB is a
@@ -41,7 +43,8 @@ func (s *Service) SetPreApply(fn PreApply) { s.preApply = fn }
 // supervisor to restart. The sequence is deliberately ordered so that every
 // failure mode leaves a WORKING install behind:
 //
-//  1. refuse outright on container installs (ghost-upgrade trap)
+//  1. refuse outright on container and package-manager installs (ghost-upgrade
+//     trap; a binary the package manager does not know about)
 //  2. download + SHA-256 verify (against the manifest, over TLS)
 //  3. unpack to a temp file NEXT TO the current binary (same filesystem, so
 //     the final move is atomic rather than a cross-device copy)
@@ -53,8 +56,8 @@ func (s *Service) SetPreApply(fn PreApply) { s.preApply = fn }
 //
 // Everything before step 6 is reversible by doing nothing.
 func (s *Service) Apply(ctx context.Context, target Release) error {
-	if !s.mode.CanSelfApply() {
-		return ErrNotSelfApplicable
+	if err := s.install.Refusal(); err != nil {
+		return err
 	}
 	asset, ok := target.AssetFor(runtime.GOOS, runtime.GOARCH)
 	if !ok {

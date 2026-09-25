@@ -154,6 +154,13 @@ type Engine struct {
 	StopOn func(error) bool
 	// Now is injectable for tests.
 	Now func() time.Time
+	// Lock is the pair's lock (Store.LockPair) when the caller holds it
+	// across passes — `filex sync run --watch` does, for as long as it syncs
+	// the pair. nil: each pass takes the lock itself and gives it back when
+	// it ends. Either way no pass runs without it: a pair another process on
+	// this computer is syncing fails the pass with a *BusyError before
+	// anything is read (lock.go).
+	Lock *PairLock
 	// beforeReplace is a test hook: it runs after a download reached its
 	// temporary file and immediately before the engine checks the local file
 	// is still the one it planned to replace — the window a person's save
@@ -246,6 +253,11 @@ func (e *Engine) remoteProgress(phase string) func(dirs, items int) {
 // raced the run (an edit saved while it was going) come back as a change
 // instead of vanishing into the baseline. See ledger.
 func (e *Engine) Run(ctx context.Context) (Result, error) {
+	release, err := e.holdLock()
+	if err != nil {
+		return Result{}, err
+	}
+	defer release()
 	if e.Pair.File {
 		return e.runFile(ctx)
 	}

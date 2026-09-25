@@ -14,7 +14,7 @@
 // Env: FILEX_SERVER, FILEX_EMAIL, FILEX_PASSWORD
 
 import path from 'node:path';
-import { REPO, SERVER, EMAIL, PASSWORD, check, finish, launchApp } from './lib/harness.mjs';
+import { REPO, SERVER, EMAIL, PASSWORD, check, connectScreen, finish, launchApp } from './lib/harness.mjs';
 
 /** Plays the browser's half: sign in, then complete the desktop hand-off. */
 async function browserHalf(authUrl) {
@@ -47,9 +47,9 @@ const { app } = await launchApp();
 
 try {
   // ── connect screen ────────────────────────────────────────────────
-  const connect = await app.firstWindow();
-  await connect.waitForLoadState('domcontentloaded');
-  check('starts on the connect screen', await connect.locator('#server').isVisible());
+  // Waits for the form rather than sampling it — see connectScreen().
+  const { connect, shown } = await connectScreen(app);
+  check('starts on the connect screen', shown);
   check('no password field anywhere in the app',
     (await connect.locator('input[type="password"]').count()) === 0,
     'sign-in belongs to the browser, so SSO installs work');

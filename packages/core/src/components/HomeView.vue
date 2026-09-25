@@ -46,6 +46,9 @@ export interface HomeStorage {
   readOnly?: boolean;
   /** Bytes this storage holds, when the server reported one. */
   usedBytes?: number;
+  /** The figure counts only part of the storage: its catalog does not cover
+   *  all of it yet (lib/catalogCoverage). Drawn as a lower bound. */
+  usedPartial?: boolean;
 }
 
 const props = defineProps<{
@@ -145,9 +148,12 @@ const storageTile = fileIconTile({ type: 'dir', mime_type: 'inode/storage' });
  * with the wrong size line says something false.
  */
 function storageCaption(s: HomeStorage): string {
-  return typeof s.usedBytes === 'number' && s.usedBytes >= 0
-    ? t('drive.storage.used_unlimited', { used: formatSize(s.usedBytes) })
-    : t('conn.guide.storage');
+  if (typeof s.usedBytes !== 'number' || s.usedBytes < 0) return t('conn.guide.storage');
+  // ⚠ A figure the catalog does not stand behind in full is a lower bound —
+  // "at least 1.2 GB used" — the same rule the listing's folder sizes follow.
+  return s.usedPartial
+    ? t('drive.storage.used_partial', { used: formatSize(s.usedBytes) })
+    : t('drive.storage.used_unlimited', { used: formatSize(s.usedBytes) });
 }
 
 /**
@@ -199,7 +205,11 @@ function openNode(n: FileNode) {
           <span class="fe-home__storage-tile" aria-hidden="true" v-html="storageTile"></span>
           <span class="fe-home__storage-main">
             <span class="fe-home__storage-label">{{ s.label || s.name }}</span>
-            <span class="fe-home__storage-meta">{{ storageCaption(s) }}</span>
+            <span
+              class="fe-home__storage-meta"
+              data-testid="home-storage-used"
+              :data-partial="s.usedPartial ? 'true' : undefined"
+            >{{ storageCaption(s) }}</span>
             <!-- A read-only mount says so on its card too (issue #30) — on a
                  line of its own, the panel's own mark (StorageTags, the one
                  read-only tag of every surface). ⚠ It used to be glued to

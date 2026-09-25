@@ -16,7 +16,7 @@ import Modal from '@/components/ui/Modal.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import { syncStateLabel, syncTone } from '@/lib/syncTone';
-import { StorageTags } from '@brftech/filex-core';
+import { StorageTags, coveragePercent } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
 const router = useRouter();
@@ -142,6 +142,19 @@ onMounted(load);
             s.last_sync_at
               ? t('dashboard.lastSyncAt', { when: formatRelative(s.last_sync_at, locale) })
               : t('storages.notYetSynced')
+          }}
+        </p>
+        <!-- A lazily cataloged storage says how far its catalog has come
+             (docs/LAZY-CATALOGUE.md); the storage page has the detail. -->
+        <p
+          v-if="s.catalogue && !s.catalogue.complete"
+          class="mt-1 text-xs text-zinc-500 dark:text-zinc-400"
+          data-testid="storage-catalog-line"
+        >
+          {{
+            s.catalogue.fill === 'on_open'
+              ? t('storages.catalog.listOnOpen')
+              : t('storages.catalog.listFilling', { pct: coveragePercent(s.catalogue) })
           }}
         </p>
         <p

@@ -11,7 +11,7 @@
 # ---------------------------------------------------------------------------
 # Stage 1: Stage embed assets straight from the host build tree
 # ---------------------------------------------------------------------------
-FROM alpine:3.20 AS embed-prep
+FROM alpine:3.24 AS embed-prep
 WORKDIR /tmp/embed
 COPY web/dist ./admin
 COPY packages/webcomponent/dist ./web
@@ -45,13 +45,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # ---------------------------------------------------------------------------
 # Stage 3: Runtime — full thumbnail toolchain (matches docker/Dockerfile)
 # ---------------------------------------------------------------------------
-FROM alpine:3.20
+FROM alpine:3.24
 
 RUN apk --no-cache add \
         ca-certificates \
         tzdata \
         su-exec \
         tini \
+        '7zip>=25.01-r0' \
         ffmpeg \
         ghostscript \
         poppler-utils \

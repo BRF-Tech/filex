@@ -51,6 +51,21 @@ func validateScanExclusions(st *model.Storage) error {
 	return err
 }
 
+// validateLazySettings refuses lazy catalogue settings that are out of range
+// (storage.ValidateLazyConfig), for a storage that is catalogued lazily.
+func validateLazySettings(st *model.Storage) error {
+	if st.SyncMode != model.SyncModeLazy {
+		return nil
+	}
+	cfg := map[string]any{}
+	if len(st.ConfigJSON) > 0 {
+		if err := json.Unmarshal(st.ConfigJSON, &cfg); err != nil {
+			return err
+		}
+	}
+	return storage.ValidateLazyConfig(cfg)
+}
+
 // refuseStorageConfig answers a storage configuration the handler will not
 // save: a machine code in `error` and, for the refusals a person can act on,
 // the sentence in `message` — in the reader's language, from the server
@@ -175,6 +190,12 @@ func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 		} `json:"stats"`
 		LastSyncState string `json:"last_sync_state,omitempty"`
 		LastSyncError string `json:"last_sync_error,omitempty"`
+		// Catalogue is a lazily catalogued storage's state (lazyCatalogue).
+		Catalogue *syncpkg.CatalogueCoverage `json:"catalogue,omitempty"`
+		// Coverage is set while the stats count only part of the storage —
+		// the same object drive usage carries (Worker.CatalogueCoverage), so
+		// Home draws an operator's figure and everybody else's the same way.
+		Coverage *syncpkg.CatalogueCoverage `json:"coverage,omitempty"`
 	}
 	enriched := make([]storageWithStats, 0, len(out))
 	for _, st := range out {
@@ -193,6 +214,10 @@ func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 		if run, err := h.Store.GetLastSyncRun(r.Context(), st.ID); err == nil && run != nil {
 			row.LastSyncState = run.Status
 			row.LastSyncError = run.Error
+		}
+		row.Catalogue = h.lazyCatalogue(r.Context(), st.ID)
+		if h.Worker != nil {
+			row.Coverage = h.Worker.CatalogueCoverage(r.Context(), st)
 		}
 		enriched = append(enriched, row)
 	}
@@ -224,13 +249,35 @@ func (h *Storages) Get(w http.ResponseWriter, r *http.Request) {
 			FileCount int64 `json:"file_count"`
 			TotalSize int64 `json:"total_size_bytes"`
 		} `json:"stats"`
+		// Catalogue, Coverage: see List.
+		Catalogue *syncpkg.CatalogueCoverage `json:"catalogue,omitempty"`
+		Coverage  *syncpkg.CatalogueCoverage `json:"coverage,omitempty"`
 	}
 	out := storageWithStats{Storage: st}
 	if c, sz, err := h.Store.StorageStats(r.Context(), st.ID); err == nil {
 		out.Stats.FileCount = c
 		out.Stats.TotalSize = sz
 	}
+	out.Catalogue = h.lazyCatalogue(r.Context(), st.ID)
+	if h.Worker != nil {
+		out.Coverage = h.Worker.CatalogueCoverage(r.Context(), st)
+	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// lazyCatalogue is the admin view of a lazily catalogued storage — folders
+// catalogued, pending and watched, the watch budget, the filler's state and
+// the deletions its guard held back (docs/LAZY-CATALOGUE.md). nil for every
+// other storage.
+func (h *Storages) lazyCatalogue(ctx context.Context, storageID int64) *syncpkg.CatalogueCoverage {
+	if h.Worker == nil {
+		return nil
+	}
+	cov, ok := h.Worker.CatalogueStatus(ctx, storageID)
+	if !ok {
+		return nil
+	}
+	return cov
 }
 
 // Create adds a new storage.
@@ -258,6 +305,16 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if st.SyncMode == "" {
 		st.SyncMode = model.SyncModePoll
+	}
+	// `lazy` is for local storages only (docs/LAZY-CATALOGUE.md); refused here
+	// with the reason, rather than stored and quietly polled.
+	if err := model.ValidateSyncModeFor(st.SyncMode, st.Driver); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := validateLazySettings(&st); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 	if st.SyncIntervalS == 0 {
 		st.SyncIntervalS = 900
@@ -326,6 +383,14 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateScanExclusions(cur); err != nil {
 		refuseStorageConfig(w, r, err)
+		return
+	}
+	if err := model.ValidateSyncModeFor(cur.SyncMode, cur.Driver); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := validateLazySettings(cur); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if err := h.Store.UpdateStorage(r.Context(), cur); err != nil {

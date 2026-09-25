@@ -165,6 +165,7 @@ async function router(at = '/dashboard'): Promise<Router> {
       // every test in the file for a reason that has nothing to do with
       // what they measure.
       { path: '/appearance', name: 'appearance', component: Blank },
+      { path: '/archives', name: 'archives', component: Blank },
       { path: '/protection', name: 'protection', component: Blank },
       { path: '/external', name: 'external', component: Blank },
       { path: '/replica', name: 'replica', component: Blank },

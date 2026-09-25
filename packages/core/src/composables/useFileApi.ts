@@ -21,6 +21,7 @@
  * thinks about CSRF vs Bearer vs Basic — it just calls `index(path)`.
  */
 
+import type { StorageInfo } from '../lib/catalogCoverage';
 import type { ExplorerConfig, AuthConfig, EndpointMap } from '../types/ExplorerConfig';
 import { resolveLocale } from '../locales/resolve';
 import { listingAddress } from '../lib/internalPaths';
@@ -36,6 +37,7 @@ import type {
   UploadLimits,
   Capabilities,
   ArchiveEntry,
+  ArchiveCreateFormat,
   TrashEntry,
 } from '../types/FileNode';
 import type {
@@ -49,14 +51,15 @@ import type {
 /** Server-side PendingOp DTO (mirror of Modules\FishApp\Models\PendingOp::toApiArray). */
 export interface PendingOpDto {
   id: number;
-  op_type: 'copy' | 'move' | 'delete';
-  status: 'pending' | 'running' | 'done' | 'error';
+  op_type: 'copy' | 'move' | 'delete' | 'archive-create' | 'archive-extract';
+  status: 'pending' | 'running' | 'cancelling' | 'done' | 'error' | 'cancelled';
   progress_total: number;
   progress_done: number;
   target_path: string | null;
   source_dir: string | null;
   source_count: number;
   error_message: string | null;
+  cancellable: boolean;
   started_at: string | null;
   finished_at: string | null;
   created_at: string | null;
@@ -94,6 +97,10 @@ export interface ManagerResponse {
    *  list is not the whole answer. Absent on other actions and on servers
    *  older than the flag. */
   truncated?: boolean;
+  /** Every storage the caller can open, with how much of it the catalog
+   *  covers (`coverage`, absent when all of it — lib/catalogCoverage). Absent
+   *  on servers older than the lazy catalog. */
+  storage_info?: StorageInfo[];
 }
 
 /** A single ACL grant row (RBAC permissions panel). */
@@ -256,6 +263,7 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     capabilities: derive(config.capabilities, '/api/files/capabilities'),
     archiveList: derive(config.archiveList, '/api/files/archive/list'),
     archiveExtract: derive(config.archiveExtract, '/api/files/archive/extract'),
+    archiveCreate: derive(config.archiveCreate, '/api/files/archive/create'),
     archiveAdd: derive(config.archiveAdd, '/api/files/archive/add'),
     copy: derive(config.copy, '/api/files/copy'),
     moveAsync: derive(config.moveAsync, '/api/files/move'),
@@ -979,14 +987,14 @@ export function useFileApi(config: ExplorerConfig) {
     return jsonFetch(url, { method: 'DELETE' });
   }
 
-  async function archiveList(path: string): Promise<{ entries: ArchiveEntry[] }> {
+  async function archiveList(path: string, password?: string): Promise<{ entries: ArchiveEntry[] }> {
     if (!endpoints.archiveList) throw new Error('archiveList endpoint not configured');
     const raw = await jsonFetch<{ entries: Array<{ name: string; size: number; is_dir: boolean; mtime?: number }> }>(
       endpoints.archiveList,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
+        body: JSON.stringify({ path, password }),
       },
     );
     return {
@@ -999,12 +1007,33 @@ export function useFileApi(config: ExplorerConfig) {
     };
   }
 
-  async function archiveExtract(path: string, members?: string[]): Promise<{ keys: string[]; count: number }> {
+  async function archiveExtract(
+    path: string,
+    options: { members?: string[]; password?: string; dest?: string } = {},
+  ): Promise<{ op?: PendingOpDto; keys?: string[]; count?: number }> {
     if (!endpoints.archiveExtract) throw new Error('archiveExtract endpoint not configured');
     return jsonFetch(endpoints.archiveExtract, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, members }),
+      body: JSON.stringify({ path, ...options }),
+    });
+  }
+
+  async function archiveCreate(payload: {
+    dest: string;
+    sources: string[];
+    format: ArchiveCreateFormat;
+    password?: string;
+    encrypt_filenames?: boolean;
+    compression?: number;
+    solid?: boolean;
+    dictionary_size_mb?: number;
+  }): Promise<{ op: PendingOpDto }> {
+    if (!endpoints.archiveCreate) throw new Error('archiveCreate endpoint not configured');
+    return jsonFetch(endpoints.archiveCreate, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
   }
 
@@ -1147,6 +1176,7 @@ export function useFileApi(config: ExplorerConfig) {
     revokeShare,
     archiveList,
     archiveExtract,
+    archiveCreate,
     archiveAdd,
     // Version history (koru:k1 inspector)
     listVersions,

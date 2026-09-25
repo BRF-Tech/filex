@@ -34,14 +34,12 @@ interface TrayItem {
   op: PendingOp;
   /** Wall-clock when the op flipped to a terminal state (done|error). */
   settledAt: number | null;
-  /** True once the op has been cancelled by the user. */
-  cancelled?: boolean;
   /** Polls in a row where we saw the op missing from the list. */
   missCount: number;
 }
 
 function isTerminal(s: PendingOp['status']): boolean {
-  return s === 'done' || s === 'error';
+  return s === 'done' || s === 'error' || s === 'cancelled';
 }
 
 export const usePendingOpsStore = defineStore('pending-ops', () => {
@@ -94,7 +92,7 @@ export const usePendingOpsStore = defineStore('pending-ops', () => {
     const nowTerminal = isTerminal(op.status);
     const settledAt = wasTerminal ? prev.settledAt : nowTerminal ? Date.now() : null;
     items.value = items.value.map((it, idx) =>
-      idx === i ? { op, settledAt, cancelled: prev.cancelled, missCount: 0 } : it,
+      idx === i ? { op, settledAt, missCount: 0 } : it,
     );
   }
 
@@ -139,7 +137,6 @@ export const usePendingOpsStore = defineStore('pending-ops', () => {
         // Sweep terminal rows past RETAIN_MS, and also drop active rows
         // that have missed two consecutive polls.
         .filter((it) => {
-          if (it.cancelled) return now - (it.settledAt ?? now) < RETAIN_MS;
           if (isTerminal(it.op.status)) {
             // Failed ops stick until dismissed; done ops fade out.
             if (it.op.status === 'error') return true;
@@ -172,18 +169,12 @@ export const usePendingOpsStore = defineStore('pending-ops', () => {
     stop();
   }
 
-  /**
-   * Best-effort cancel — flags the op locally as cancelled. The backend
-   * doesn't expose a cancel endpoint for ops yet, so we just hide the
-   * row; the worker will continue running until completion. Surface the
-   * UX honestly (button label clarifies "hide" vs "cancel" upstream).
-   */
-  function cancel(opId: number): void {
-    const i = items.value.findIndex((it) => it.op.id === opId);
-    if (i === -1) return;
-    items.value = items.value.map((it, idx) =>
-      idx === i ? { ...it, cancelled: true, settledAt: Date.now() } : it,
-    );
+  /** Request cooperative cancellation and keep polling through cleanup. */
+  async function cancel(opId: number): Promise<void> {
+    const op = await opsApi.cancel(opId);
+    upsert(op);
+    if (!isTerminal(op.status)) tracked.value.add(opId);
+    start();
   }
 
   /** Retry — re-track the op for a per-id poll. */

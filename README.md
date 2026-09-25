@@ -406,9 +406,19 @@ the web UI and the embeds render, not a separate half-copy:
   so deleting that folder leaves nothing of yours on a machine that is not yours — the
   trade is that it does not update itself.
 
-Installer, portable `.exe`, AppImage, `.deb` and `.dmg` are attached to the
+Or install it with your package manager:
+
+```bash
+winget install BRFTech.filex-app            # Windows 10/11
+brew install brf-tech/filex/filex-app       # macOS 13+ (Apple Silicon)
+sudo snap install filex-app                 # Ubuntu and other Linux with snapd
+```
+
+Installer, portable `.exe`, AppImage, `.deb`, `.rpm` and `.dmg` are also attached to the
 [latest release](https://github.com/BRF-Tech/filex/releases/latest) — not code-signed yet,
-so expect a SmartScreen prompt on Windows. Details: [docs/DESKTOP.md](docs/DESKTOP.md).
+so expect a SmartScreen prompt on Windows. A Microsoft Store build is on its way. Details:
+[docs/DESKTOP.md](docs/DESKTOP.md). The CLI alone: `brew install brf-tech/filex/filex` or
+`winget install BRFTech.filex` ([docs/CLI.md](docs/CLI.md)).
 
 The same binary is also a client for servers, scripts and headless machines:
 
@@ -521,6 +531,11 @@ of plugin, a storage backend: [docs/PLUGINS.md](docs/PLUGINS.md).
 - **A listing that behaves like a table** — resize a column, hide one, drag one to a new place; the table scrolls sideways rather than dropping a column when it runs out of room, and the actions column stays pinned to the right. Sort by name, type, date or size, in either direction, and **the grid and the list obey the same sort** — until this release "sorted by size" was a fact about one view, and switching views reordered the rows under you. Sorted by date, all three views group the rows under **Today · Yesterday · This week · This month** and then month by month, in **your** time zone rather than the browser's.
 - **A folder remembers how you left it** — optional, from user settings: the view mode and the sort of each folder you actually set up, kept **per person on the server** so they follow you to another machine and to the desktop app, and never leak to anyone else looking at the same folder. Off by default, in which case your last choice simply applies everywhere ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 - **Who owns a file** — every node carries its owner, the listing has an **Owner** column and the filter row an **Owner** entry, and quota counts against the owner rather than whoever last touched the file.
+- **Archives in every common format** — make, open and extract ZIP, 7z, TAR and its
+  gzip/bzip2/xz forms (RAR where the server's 7-Zip has it), with a password for ZIP and
+  7z, as a background job with progress. Links and devices inside an archive are refused
+  before anything is written, and size and entry limits stop an archive bomb at the
+  limit ([docs/ARCHIVES.md](docs/ARCHIVES.md)). Contributed by Alex (@ahjephson).
 - **Take a selection with you** — pick several files and folders and **Download** streams them as one archive, built on the fly: no temporary file is written into your storage, nothing is buffered in the tab, and a 700 MB archive costs the server under a megabyte of memory. **Move to** and **Copy to** open a folder chooser that spans every storage and refuses a destination you cannot write to — server-side, not just in the dialog.
 - **New document** — create a Word, Excel, PowerPoint or OpenDocument file, or any text or code format, from the **+ New** menu: name it, choose where it goes, and it opens in the editor that handles it. The templates are real, minimal, valid documents compiled into the binary, so this works on an install with no LibreOffice; a type this deployment could not then open is not offered in the first place, and the dialog says why.
 - **RBAC + item permissions** — roles, per-file/folder grants with inheritance, share invites by email (SMTP), grant-aware search and listings. **Shared with me** answers the reverse question from the recipient's side — what other people granted you, and which storages you reach only through a grant.
@@ -539,6 +554,7 @@ of plugin, a storage backend: [docs/PLUGINS.md](docs/PLUGINS.md).
 - **Replica + reconciliation** — primary→replica fan-out (mirror / append-only / skip per path-glob rule), read fallback, scheduled status report, one-click "Fix all".
 - **Persistent op queue** — restart-safe queue in your own database (SQLite / Postgres / MySQL) or in Redis, worker pool with retries + cancel + admin dashboard. Every driver orders by priority, so the antivirus scan for a file somebody just uploaded is served ahead of the twenty thousand a first import queued. Unset, the driver follows the database rather than defaulting to SQLite — pointing SQLite statements at a Postgres server is a syntax error on every poll and no job ever runs.
 - **DB-backed file tree** — listings come from the DB cache (1-5 ms), not the storage backend (~100 ms); a periodic sync catches out-of-band changes, by etag where the backend reports one and by size + modification time where it does not. A storage's **Paths to exclude from scanning** (`.*`, `downloads/incomplete/**`, `*.tmp`) keeps the parts of an existing tree filex has no use for out of the walk, the catalogue, the search index and the virus scanner — a cost control, not an access control ([docs/STORAGE.md](docs/STORAGE.md#scan-exclusions)).
+- **Lazy catalogue for big local trees** — `sync_mode: lazy` skips the walk up front: the folder you open is listed straight from disk at once and catalogued first, and the rest is catalogued by a slow background pass that yields to people (or only as folders are opened). Opened folders are watched within a budget, a folder nobody visited is never treated as deleted, and search, folder sizes and usage say plainly when they do not cover everything yet ([docs/STORAGE.md](docs/STORAGE.md#lazy-catalogue), [design](docs/LAZY-CATALOGUE.md)). Idea by Alex ([#45](https://github.com/BRF-Tech/filex/issues/45)).
 - **Viewers & editors** — image/video/audio, PDF, Markdown (split editor + preview), CSV, code (Monaco), Office via OnlyOffice, Drawio + Mermaid diagrams, 3D models.
 - **Universal converter (legacy side-car)** — an optional separate service that converted between document/image formats from the UI. It is **being retired** in favour of the [Convert app](#apps) above: filex offers it only when the app is not installed and the service is configured, never beside the app's own *Convert…*, and **External services** marks it as legacy. It, OnlyOffice and drawio are configured in the admin panel and apply to the running server, with no restart ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md), [docs/CONVERT-INTEGRATION.md](docs/CONVERT-INTEGRATION.md)).
 - **Notifications** — generic JSON webhooks (Slack/Discord-agnostic): any number of targets, each with its own signing secret and its own per-event subscription, plus an in-app bell with read/unread and a per-user mute matrix. The unread count is a **badge on the bell** — exact to 99, `99+` above, and on the desktop app's dock icon where the system has one — a row is clickable exactly when it has somewhere to go (a signature request opens the signing screen, not a notifications page), and **View all** opens every one of your notifications over the explorer, for everybody rather than only administrators. A write that **creates** a file and a write that **replaces** one are different events (`file.uploaded` / `file.updated`), and the ones an operator most wants on their own — an infected upload quarantined, a failed upload, an encrypted folder opened with its recovery key — are subscribable individually ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)).
@@ -634,6 +650,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 **Data & features** — [Sharing & file requests](docs/SHARING.md) ·
 [ShareX](docs/SHAREX.md) ·
 [Trash & versioning](docs/TRASH-VERSIONING.md) · [Protection](docs/PROTECTION.md) ·
+[Archives](docs/ARCHIVES.md) ·
 [E2E encryption](docs/E2E-ENCRYPTION.md) · [Search](docs/SEARCH.md) ·
 [Realtime & presence](docs/REALTIME.md) ·
 [Notifications](docs/NOTIFICATIONS.md) · [Thumbnails](docs/thumbnails.md) ·

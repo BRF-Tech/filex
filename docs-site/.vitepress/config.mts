@@ -119,6 +119,7 @@ export default defineConfig({
         collapsed: false,
         items: [
           { text: 'Storage', link: '/STORAGE' },
+          { text: 'Lazy catalogue', link: '/LAZY-CATALOGUE' },
           { text: 'Storage plugins', link: '/PLUGINS' },
           { text: 'Apps (app plugins)', link: '/APP-PLUGINS' },
           { text: 'Writing an app plugin', link: '/PLUGIN-KIT' },
@@ -131,6 +132,7 @@ export default defineConfig({
           { text: 'Thumbnails', link: '/thumbnails' },
           { text: 'Protection & Antivirus', link: '/PROTECTION' },
           { text: 'Trash & Versioning', link: '/TRASH-VERSIONING' },
+          { text: 'Archives', link: '/ARCHIVES' },
           { text: 'Realtime & presence', link: '/REALTIME' },
           { text: 'Notifications & Webhooks', link: '/NOTIFICATIONS' },
           { text: 'RBAC & Permissions', link: '/RBAC' },

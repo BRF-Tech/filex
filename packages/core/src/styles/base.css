@@ -213,6 +213,41 @@ filex-explorer {
   font-size: 0.8125rem;
 }
 
+/* The catalog does not cover all of this storage (lib/catalogCoverage): the
+   same quiet strip as a cut search, with room for one action. */
+.fe-coverage {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--fe-border, rgba(0, 0, 0, 0.06));
+  color: var(--fe-text-muted);
+  font-size: 0.8125rem;
+}
+.fe-coverage__text {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.fe-coverage__action {
+  flex: 0 0 auto;
+  padding: 0.125rem 0.625rem;
+  border: 1px solid var(--fe-border-strong);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text);
+  font: inherit;
+  cursor: pointer;
+}
+.fe-coverage__action:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+}
+.fe-coverage__action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* Initial-load spinner (shown until the first listing arrives). */
 .fe__loading {
   display: flex;
@@ -1163,7 +1198,7 @@ filex-explorer {
   border-radius: 0;
   box-shadow: none;
 }
-.fe-modal__card--chromeless .fe-modal__body {
+.fe-modal__card--chromeless > .fe-modal__body {
   flex: 1 1 auto;
   min-height: 0;
   padding: 0;
@@ -6568,7 +6603,7 @@ filex-explorer {
   border-radius: 0;
   box-shadow: none;
 }
-.fe-modal__card--fullbleed .fe-modal__body {
+.fe-modal__card--fullbleed > .fe-modal__body {
   flex: 1 1 auto;
   min-height: 0;
   padding: 0;
@@ -11365,6 +11400,16 @@ filex-explorer {
   font-size: var(--fe-text-sm);
   font-weight: 500;
   color: var(--fe-text-muted);
+}
+.fe-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.fe-checkbox input[type='checkbox'] {
+  flex: 0 0 auto;
+  margin: 0;
 }
 /* === /agent-fix2 === */
 

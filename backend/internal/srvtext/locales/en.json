@@ -195,6 +195,8 @@
   "server.update.reason.minor_needs_policy": "A minor release. The update policy (“{policy}”) installs patches only.",
   "server.update.reason.no_releases": "The release list has no versions in it.",
   "server.update.reason.not_auto_ok": "This release is not marked for automatic installation. Install it deliberately.",
+  "server.update.reason.package": "Installed with {manager}. Upgrade it with {manager}, so {manager} keeps track of the installed version.",
+  "server.update.reason.package_unknown": "Installed by a package manager. Upgrade it there, so the package manager keeps track of the installed version.",
   "server.update.reason.patch_auto": "A patch release. The update policy (“{policy}”) installs it automatically.",
   "server.update.reason.unhandled": "This kind of release is not handled automatically.",
   "server.update.reason.unparsable": "The newest release's version number could not be read.",

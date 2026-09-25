@@ -15,6 +15,7 @@ import (
 	"path"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -66,6 +67,11 @@ func seedE2eTree(t *testing.T) (fx *twoStorageFixture, storageID int64) {
 	alt := mkNode("alt", "/kasa/alt", model.NodeTypeDirectory, &kasa.ID)
 	mkNode("derin.txt", "/kasa/alt/derin.txt", model.NodeTypeFile, &alt.ID)
 	mkNode("acik", "/acik", model.NodeTypeDirectory, nil)
+	// The rows above stand for a catalogue a scan produced (none of them has
+	// bytes on disk). A storage whose first scan has not finished is listed
+	// from the disk with the catalogue overlaid (docs/LAZY-CATALOGUE.md), and
+	// that listing would rightly show none of them.
+	require.NoError(t, fx.store.UpdateStorageSyncCursor(ctx, st.ID, time.Now(), ""))
 
 	return fx, st.ID
 }

@@ -1,0 +1,55 @@
+        <!--
+          Microsoft Store (MSIX) registrations. electron-builder pastes this file
+          inside <Application><Extensions> (appx.customExtensionsPath); the uap3
+          and uap10 namespaces are added by scripts/appx-manifest.cjs.
+
+          An MSIX package cannot register anything at runtime: HKCU writes land in
+          the package's private hive, where no other app looks. So the three
+          things the other builds register as they run (the filex:// link, "Open
+          with filex", the login item) are declared here instead.
+        -->
+
+        <!-- The browser sign-in comes back through filex://. `Parameters`
+             passes the link as argv[1], exactly as the NSIS build's registry
+             command does, so classifyArgv (src/openwith.ts) reads both the same. -->
+        <uap3:Extension Category="windows.protocol">
+          <uap3:Protocol Name="filex" Parameters="&quot;%1&quot;">
+            <uap:DisplayName>filex</uap:DisplayName>
+          </uap3:Protocol>
+        </uap3:Extension>
+
+        <!-- "Open with filex". ⚠ An MSIX file-type registration only puts the
+             app in the "Open with" list — it never takes the default (Microsoft:
+             the app "appears in the suggested apps"), which is the same promise
+             build/installer.nsh keeps for the NSIS build.
+             ⚠ The extension list is OFFICE_EXTENSIONS (src/openwith.ts);
+             desktop/test/extension-lists.test.ts fails if the two disagree. -->
+        <uap3:Extension Category="windows.fileTypeAssociation">
+          <uap3:FileTypeAssociation Name="filex.office" Parameters="&quot;%1&quot;">
+            <uap:DisplayName>filex</uap:DisplayName>
+            <uap:SupportedFileTypes>
+              <uap:FileType>.docx</uap:FileType>
+              <uap:FileType>.doc</uap:FileType>
+              <uap:FileType>.xlsx</uap:FileType>
+              <uap:FileType>.xls</uap:FileType>
+              <uap:FileType>.pptx</uap:FileType>
+              <uap:FileType>.ppt</uap:FileType>
+              <uap:FileType>.odt</uap:FileType>
+              <uap:FileType>.ods</uap:FileType>
+              <uap:FileType>.odp</uap:FileType>
+              <uap:FileType>.rtf</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap3:FileTypeAssociation>
+        </uap3:Extension>
+
+        <!-- "Start when I sign in". Off until the user turns it on (filex's
+             default is off on every build). The parameter is HIDDEN_FLAG from
+             src/main.ts, the same flag the NSIS build's Run entry carries: a
+             launch nobody asked for stays in the tray. Toggled in Windows
+             Settings, Apps, Startup; see the Store branch of the login item in
+             main.ts.
+             ⚠ No double hyphen anywhere inside an XML comment, the flag's own
+             name included: makeappx rejects the whole manifest ("'>' expected"). -->
+        <desktop:Extension Category="windows.startupTask" Executable="app\filex.exe" EntryPoint="Windows.FullTrustApplication" uap10:Parameters="--hidden">
+          <desktop:StartupTask TaskId="filexStartup" Enabled="false" DisplayName="filex" />
+        </desktop:Extension>

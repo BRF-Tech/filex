@@ -104,6 +104,12 @@ func objectDrift(n *model.Node, obj storage.Object) bool {
 		Equal(obj.Mtime.UTC().Truncate(mtimeGranularity))
 }
 
+// ObjectDrift is objectDrift for the explorer's listing: a folder listed from
+// the disk with the catalogue overlaid (handlers/lazy_listing.go) shows the
+// disk's size and date for an entry whose row has drifted by exactly the rule
+// the scan updates rows by — so the listing and the next reconcile agree.
+func ObjectDrift(n *model.Node, obj storage.Object) bool { return objectDrift(n, obj) }
+
 // MultipartETag computes the S3-style multipart ETag of an io.Reader.
 // `partSize` should match the upload chunk size (default 8MB).
 //

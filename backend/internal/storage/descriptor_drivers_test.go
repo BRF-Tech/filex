@@ -290,3 +290,68 @@ func TestScanFieldsAreDescribedAndCollideWithNoDriver(t *testing.T) {
 		t.Error("ScanFields handed out its own slice")
 	}
 }
+
+// TestLazyFieldsAreDescribedAndCollideWithNoDriver: the lazy catalogue's
+// settings share the config map with the driver's keys and the scan's, so
+// neither may declare one, and they carry the same label/help/i18n contract.
+func TestLazyFieldsAreDescribedAndCollideWithNoDriver(t *testing.T) {
+	lazy := storage.LazyFields()
+	if len(lazy) != 3 {
+		t.Fatalf("lazy fields: %d", len(lazy))
+	}
+	for _, f := range lazy {
+		if f.Label == "" || f.I18nKey == "" || f.Help == "" || f.HelpI18nKey == "" {
+			t.Errorf("lazy field %q: needs Label, I18nKey, Help and HelpI18nKey", f.Key)
+		}
+		for _, name := range storage.Names() {
+			d, _ := storage.DescriptorFor(name)
+			for _, k := range d.Keys() {
+				if k == f.Key {
+					t.Errorf("driver %q declares %q, which is a lazy catalogue setting", name, k)
+				}
+			}
+		}
+		for _, s := range storage.ScanFields() {
+			if s.Key == f.Key {
+				t.Errorf("%q is both a scan and a lazy setting", f.Key)
+			}
+		}
+	}
+	lazy[0].Key = "edited"
+	if storage.LazyFields()[0].Key == "edited" {
+		t.Error("LazyFields handed out its own slice")
+	}
+}
+
+// ValidateLazyConfig holds the settings to the bounds the descriptor
+// advertises: the form's min/max are the API's.
+//
+// Break: make ValidateLazyConfig return nil at once.
+func TestValidateLazyConfig(t *testing.T) {
+	for _, c := range []struct {
+		cfg map[string]any
+		ok  bool
+	}{
+		{map[string]any{}, true},
+		{map[string]any{"lazy_fill": ""}, true},
+		{map[string]any{"lazy_fill": "background"}, true},
+		{map[string]any{"lazy_fill": "on_open"}, true},
+		{map[string]any{"lazy_fill": "sometimes"}, false},
+		{map[string]any{"lazy_fill": 3.0}, false},
+		{map[string]any{"lazy_max_watches": 1.0}, true},
+		{map[string]any{"lazy_max_watches": "250"}, true},
+		{map[string]any{"lazy_max_watches": ""}, true},
+		{map[string]any{"lazy_max_watches": 0.0}, false},
+		{map[string]any{"lazy_max_watches": 2.5}, false},
+		{map[string]any{"lazy_max_watches": "12abc"}, false},
+		{map[string]any{"lazy_max_watches": 1_000_001.0}, false},
+		{map[string]any{"lazy_watch_ttl": 10080.0}, true},
+		{map[string]any{"lazy_watch_ttl": 10081.0}, false},
+		{map[string]any{"lazy_watch_ttl": -1.0}, false},
+	} {
+		err := storage.ValidateLazyConfig(c.cfg)
+		if (err == nil) != c.ok {
+			t.Errorf("%v: err=%v, want ok=%v", c.cfg, err, c.ok)
+		}
+	}
+}

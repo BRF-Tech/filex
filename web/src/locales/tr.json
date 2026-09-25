@@ -140,6 +140,7 @@
     "themeDark": "Karanlık",
     "protection": "Koruma",
     "branding": "Kurumsal kimlik",
+    "archives": "Arşivler",
     "updates": "Güncellemeler",
     "connections": "Bağlantılar",
     "plugins": "Eklentiler",
@@ -204,7 +205,14 @@
       "fsnotify": "Canlı izleme",
       "poll": "Periyodik tarama",
       "ondemand": "İstek üzerine",
-      "push": "Desteklenmiyor (yoklamaya düşüyor)"
+      "push": "Desteklenmiyor (yoklamaya düşüyor)",
+      "lazy": "Tembel katalog"
+    },
+    "modeHelp": {
+      "poll": "filex, dışarıda yapılan değişiklikleri bulmak için her tarama aralığında deponun tamamını dolaşır.",
+      "fsnotify": "filex depoda dışarıda yapılan değişiklikleri izler ve her değişiklik dalgasından sonra depoyu yeniden dolaşır.",
+      "ondemand": "filex depoyu yalnız Şimdi senkronize et düğmesine bastığınızda dolaşır.",
+      "lazy": "Önceden dolaşma yok: birinin açtığı klasör doğrudan depodan listelenir ve ilk o kataloglanır. Kalanı arka planda ya da yalnız açıldıkça kataloglanır (aşağıda). Kimsenin izlemediği klasörler her tarama aralığında yeniden denetlenir."
     },
     "addNew": "Depo ekle",
     "newTitle": "Yeni depo ekle",
@@ -231,6 +239,10 @@
       "path": "Dizin yolu",
       "followSymlinks": "Bu klasörün dışına çıkan sembolik bağları izle",
       "scanExclude": "Taramadan hariç tutulacak yollar",
+      "syncMode": "Senkron modu",
+      "lazyFill": "Kataloglama davranışı",
+      "lazyMaxWatches": "İzlenen klasör (en çok)",
+      "lazyWatchTTL": "İzlemeyi bırak (açılmadan geçen dakika)",
       "endpoint": "Endpoint",
       "region": "Bölge",
       "bucket": "Kova",
@@ -264,6 +276,9 @@
       "path": "Sunucudaki dizin. Yoksa oluşturulur; filex asla / dizinini mount etmez.",
       "followSymlinks": "Bu klasörün İÇİNİ gösteren sembolik bağlar her zaman izlenir. Bu ayar yalnızca dışarıyı gösterenler içindir: kapalıyken listede neden açılamadıklarını söyleyen bir rozetle görünürler ve üzerlerinden açma, yazma ve silme yapılamaz; açıkken filex bağın ucundaki dosyaları deponun parçası sayar — indeksleme, virüs taraması, kota ve silme dâhil.",
       "scanExclude": "Her satıra bir desen yazın; desenler deponun köküne göre okunur. * bir adın içinde, ** istenen sayıda klasör boyunca eşleşir; içinde / olmayan bir desen o adı her derinlikte bulur (.* tüm gizli dosya ve klasörleri atlar). Tarama eşleşen bir klasörün içine girmez; eşleşen dosyalar kataloğa alınmaz, indekslenmez, küçük resimleri üretilmez ve virüs taramasından geçmez. Bu iş yükünü azaltır, erişim denetimi değildir: dosyalar depoda kalır ve yoluyla, WebDAV/SFTP üzerinden ve yapay zekâ araçlarıyla erişilebilir. Desen eklenmeden önce kataloğa girmiş olanlar olduğu gibi kalır.",
+      "lazyFill": "Önce tıklanan, arkada tamamlanan: birinin açtığı klasör ilk kataloglanır, yavaş bir arka plan geçişi kalanını kataloglar; böylece arama, klasör boyutları ve kullanım sonunda deponun tamamını kapsar. Yalnız açıldıkça: arka planda hiçbir şey çalışmaz. Yalnız açılan klasörler kataloglanır; arama, klasör boyutları ve kullanım yalnız bu klasörleri kapsadığını söyler. Şimdi senkronize et her şeyi bir kez kataloglar.",
+      "lazyMaxWatches": "Açılan klasörler, filex dışında yapılan değişiklikler için izlenir. Bu sayı aşılınca en uzun süredir açılmayan klasörün izlenmesi biter; biri onu yeniden açtığında klasör yeniden denetlenir.",
+      "lazyWatchTTL": "Bu süre boyunca kimsenin açmadığı bir klasörün izlenmesi biter. Biri onu yeniden açtığında klasör yeniden denetlenir.",
       "prefix": "Kova içindeki alt klasör. Zorunlu: filex kova kökünün sahipliğini asla almaz.",
       "root": "Arka uçtaki alt klasör. Zorunlu: filex hesabın kökünü asla mount etmez.",
       "region": "Boş bırakılırsa \"auto\" kullanılır.",
@@ -280,6 +295,33 @@
       "smbShare": "Sunucu adı olmadan yalnızca paylaşım adı: `\\\\nas\\media` değil, `media`.",
       "smbDomain": "Yalnızca Windows etki alanı hesabı için. NAS kullanıyorsanız boş bırakın.",
       "smbRoot": "Paylaşımın içindeki alt klasör. Paylaşımın tamamı için boş bırakın."
+    },
+    "lazyFill": {
+      "background": "Önce tıklanan, arkada tamamlanan",
+      "on_open": "Yalnız açıldıkça"
+    },
+    "catalog": {
+      "title": "Katalog",
+      "filling": "Arka plan geçişi şimdiye kadar bulunan klasörlerin {'%'}{pct} kadarını katalogladı. Geçiş bitince arama, klasör boyutları ve kullanım deponun tamamını kapsar.",
+      "complete": "Bu deponun bütün klasörleri kataloglandı.",
+      "onOpenHint": "Yalnız açılan klasörler kataloglanır. Şimdi senkronize et deponun tamamını bir kez kataloglar.",
+      "filler": "Arka plan geçişi",
+      "cataloged": "Kataloglanan klasör",
+      "pending": "Bekleyen klasör",
+      "watched": "İzlenen klasör",
+      "watchedOf": "{n} / {max}",
+      "heldBack": "Silmesi bekletilen klasör",
+      "heldBackHint": "Bu klasörlerde, filex'in katalogdan kendiliğinden çıkaracağından fazla dosya aynı anda kaybolmuş göründü; bu yüzden hiçbir şey çıkarılmadı. Sonraki bir denetim doğrulayana kadar bu klasörler doğrudan depodan listelenir.",
+      "listFilling": "Katalog: {'%'}{pct}",
+      "listOnOpen": "Klasörler açıldıkça kataloglanır",
+      "fillerState": {
+        "filling": "Kataloglanıyor",
+        "paused": "Yavaşladı, depo kullanılıyor",
+        "idle": "Bekliyor",
+        "converged": "Tamamlandı",
+        "refreshing": "İzlenmeyen klasörler yeniden denetleniyor",
+        "off": "Kapalı (yalnız açıldıkça)"
+      }
     },
     "actions": {
       "test": "Bağlantıyı test et",
@@ -757,6 +799,7 @@
     "noResults": "Eşleşen olay yok",
     "phrase": "{resource}: {verb}",
     "resource": {
+      "archives": "Arşiv ayarları",
       "ai_file": "Dosya (AI)",
       "ai_share": "Paylaşım bağlantısı (AI)",
       "ai_tokens": "API anahtarı",
@@ -804,6 +847,7 @@
     "verb": {
       "action": "değiştirildi",
       "archive_add": "arşive eklendi",
+      "archive_create": "arşiv oluşturuldu",
       "archive_extract": "arşiv açıldı",
       "create": "oluşturuldu",
       "delete": "silindi",
@@ -1215,6 +1259,8 @@
       "critical": "Kritik"
     },
     "kinds": {
+      "archive_extracted": "Arşiv çıkarıldı",
+      "archive_created": "Arşiv oluşturuldu",
       "file_uploaded": "Yeni dosya",
       "file_updated": "Dosya değişti",
       "file_upload_failed": "Yükleme başarısız",
@@ -1421,16 +1467,21 @@
       "copy": "Kopyalanıyor",
       "move": "Taşınıyor",
       "delete": "Siliniyor",
-      "trash": "Çöp kutusu boşaltılıyor"
+      "trash": "Çöp kutusu boşaltılıyor",
+      "archive": "Arşiv",
+      "archiveCreate": "Arşiv oluşturuluyor",
+      "archiveExtract": "Arşiv çıkarılıyor"
     },
     "progress": "{done} / {total} dosya · {'%'}{percent}",
+    "progressPercent": "{'%'}{percent}",
     "progressBytes": "{done} / {total} · {'%'}{percent}",
     "progressBytesOpen": "{done} taşındı",
     "working": "Sürüyor…",
     "failed": "İşlem başarısız",
     "retry": "Yeniden dene",
     "dismiss": "Kapat",
-    "hide": "Gizle"
+    "hide": "Gizle",
+    "cancel": "İptal et"
   },
   "duplicates": {
     "title": "Yinelenen dosyalar",
@@ -1467,6 +1518,8 @@
       "file_deleted": "Dosya kalıcı olarak silindi",
       "file_trashed": "Dosya çöpe taşındı",
       "file_moved": "Dosya taşındı veya yeniden adlandırıldı",
+      "archive_created": "Arşiv oluşturma tamamlandı",
+      "archive_extracted": "Arşiv çıkarma tamamlandı",
       "share_created": "Paylaşım bağlantısı oluşturuldu",
       "drop_received": "Herkese açık istek bağlantısından dosya alındı",
       "comment_added": "Bir dosyaya veya klasöre yorum eklendi",
@@ -1622,6 +1675,8 @@
     "willAutoApply": "Politika gereği kendiliğinden yüklenecek (bakım penceresinde)",
     "restartRequired": "{version} diske kuruldu, ama çalışan süreç hâlâ eski sürüm — etkinleşmesi için filex'i yeniden başlatın.",
     "howTo": "Nasıl yükseltilir",
+    "packageHowTo": "Bu filex'i {manager} kurdu; yükseltmesini de {manager} yapar. filex, bir paket yöneticisinin sahip olduğu ikili dosyayı değiştirmez.",
+    "packageHowToUnknown": "Bu filex'i bir paket yöneticisi kurdu; yükseltmeyi de onunla yapın. filex, bir paket yöneticisinin sahip olduğu ikili dosyayı değiştirmez.",
     "releaseNotes": "Sürüm notları",
     "includes": "Bu yükseltme şunları da kapsıyor",
     "security": "güvenlik",
@@ -1636,7 +1691,9 @@
     },
     "mode": {
       "binary": "ikili kurulum",
-      "docker": "container kurulumu"
+      "docker": "container kurulumu",
+      "package": "{manager} kurulumu",
+      "packageUnknown": "paket yöneticisi kurulumu"
     },
     "policyName": {
       "off": "kapalı",
@@ -2048,6 +2105,29 @@
       "title": "Günlük"
     }
   },
+  "archivesAdmin": {
+    "title": "Arşivler",
+    "subtitle": "Arşiv oluşturma, çıkarma, şifreleme ve güvenlik sınırlarını yapılandırın.",
+    "enabled": "Harici arşiv sağlayıcılarını etkinleştir",
+    "enabledHint": "7-Zip'i açar: 7z, XZ, RAR (bu 7-Zip okuyabiliyorsa) ve parolalı ZIP için ve düz ZIP dışındaki her arşivi oluşturmak için. Düz ZIP, TAR, TAR.GZ ve TAR.BZ2'yi filex kendisi okur.",
+    "formats": "Oluşturma biçimleri",
+    "defaultFormat": "Varsayılan biçim",
+    "maxEntries": "En fazla girdi",
+    "maxSize": "En fazla açılmış boyut (MiB)",
+    "timeout": "Komut zaman aşımı (saniye)",
+    "providers": "Sağlayıcılar",
+    "providersHint": "Kullanılabilirlik bu sunucuda algılanır.",
+    "binaryHint": "Çalıştırılabilir dosya yolları güvenlik açısından hassastır ve tarayıcıdan değil FILEX_ARCHIVE_7Z_BIN ile yapılandırılır.",
+    "test": "Şifrelemeyi sına",
+    "testOk": "Şifreli arşiv döngüsü başarıyla tamamlandı",
+    "testFailed": "Arşiv sağlayıcısı sınaması başarısız",
+    "providerBuiltin": "Yerleşik",
+    "providerSevenZip": "7-Zip",
+    "creates": "Oluşturur: {formats}",
+    "extracts": "Çıkarır: {formats}",
+    "sevenZipMissing": "Bu sunucuda 7-Zip {version} ya da daha yeni bir sürüm bulunamadı. Kurun ya da FILEX_ARCHIVE_7Z_BIN ile yerini gösterin.",
+    "saved": "Arşiv ayarları kaydedildi"
+  },
   "userSettings": {
     "title": "Ayarlar",
     "open": "Kullanıcı ayarları",
@@ -2128,6 +2208,8 @@
         "file_deleted": "Bir dosya kalıcı olarak silindiğinde",
         "file_trashed": "Bir dosya çöp kutusuna taşındığında",
         "file_moved": "Bir dosya taşındığında ya da adı değiştiğinde",
+        "archive_created": "Bir arşiv oluşturulduğunda",
+        "archive_extracted": "Bir arşiv çıkarıldığında",
         "share_created": "Biri paylaşım bağlantısı oluşturduğunda",
         "drop_received": "İstek bağlantısıyla bir dosya geldiğinde",
         "comment_added": "Biri bir dosyaya yorum yaptığında",

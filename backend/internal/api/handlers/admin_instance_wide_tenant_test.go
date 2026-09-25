@@ -44,6 +44,8 @@ var instanceWideRoutes = []struct {
 		map[string]any{"value": `{"v":"grid"}`}},
 	{"instance default folder view (batch)", http.MethodPatch, "/api/admin/settings",
 		map[string]any{"ui.default_folder_view": `{"v":"grid"}`}},
+	{"archive policy read", http.MethodGet, "/api/admin/archives", nil},
+	{"archive policy rewrite", http.MethodPatch, "/api/admin/archives", map[string]any{"enabled": false}},
 	// The shared document server + converter, and the JWT secret behind them.
 	{"external services read", http.MethodGet, "/api/admin/external", nil},
 	{"external services repoint", http.MethodPatch, "/api/admin/external/onlyoffice",
@@ -112,7 +114,7 @@ func TestInstanceWideAdmin_SupertenantStillPasses(t *testing.T) {
 	testutil.LoginAs(t, srv, client, email, password)
 
 	for _, path := range []string{
-		"/api/admin/protection", "/api/admin/external",
+		"/api/admin/protection", "/api/admin/archives", "/api/admin/external",
 		"/api/admin/auth-providers", "/api/admin/update", "/api/admin/providers",
 	} {
 		status, body := doJSON(t, client, http.MethodGet, srv.URL+path, nil)
@@ -137,7 +139,7 @@ func TestInstanceWideAdmin_SingleTenantAdminUnaffected(t *testing.T) {
 	testutil.LoginAs(t, srv, client, email, password)
 
 	for _, path := range []string{
-		"/api/admin/protection", "/api/admin/external",
+		"/api/admin/protection", "/api/admin/archives", "/api/admin/external",
 		"/api/admin/auth-providers", "/api/admin/update", "/api/admin/providers",
 	} {
 		status, body := doJSON(t, client, http.MethodGet, srv.URL+path, nil)

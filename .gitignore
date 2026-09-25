@@ -12,6 +12,8 @@
 /desktop/dist/
 /desktop/app/
 /desktop/release/
+# scripts/store-e2e.mjs builds its MSIX variant here
+/desktop/release-e2e/
 # The bundled sync engine, produced at package time by scripts/fetch-cli.mjs.
 # ⚠ ~150 MB, and on Linux it has no extension — the `*.exe` rule below does not
 # catch it, so a plain `git add` would push the blob into history.

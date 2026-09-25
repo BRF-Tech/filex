@@ -44,7 +44,13 @@ type Quota struct {
 
 	// usage memoises per-storage (files, bytes) for storageUsageTTL.
 	usage *storageUsageCache
+	// Lazy says when a storage's catalogue — and so its usage figure — covers
+	// only part of it (docs/LAZY-CATALOGUE.md). nil: a figure is a figure.
+	Lazy LazyCatalogue
 }
+
+// AttachLazy wires the catalogue-coverage source.
+func (h *Quota) AttachLazy(l LazyCatalogue) { h.Lazy = l }
 
 // NewQuota constructs the handler.
 func NewQuota(svc *quota.Service, store db.Store) *Quota {

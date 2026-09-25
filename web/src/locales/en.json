@@ -139,6 +139,7 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "protection": "Protection",
+    "archives": "Archives",
     "branding": "Branding",
     "updates": "Updates",
     "connections": "Connections",
@@ -204,7 +205,14 @@
       "fsnotify": "Live watch",
       "poll": "Periodic poll",
       "ondemand": "On demand",
-      "push": "Unsupported (polling)"
+      "push": "Unsupported (polling)",
+      "lazy": "Lazy catalog"
+    },
+    "modeHelp": {
+      "poll": "filex walks the whole storage once every scan interval to find changes made outside it.",
+      "fsnotify": "filex watches the storage for changes made outside it and walks it again after each burst of them.",
+      "ondemand": "filex walks the storage only when you press Sync now.",
+      "lazy": "No walk up front: the folder somebody opens is listed straight from the storage and cataloged first. The rest is cataloged in the background or only as people open it (below). Folders nobody is watching are checked again every scan interval."
     },
     "addNew": "Add storage",
     "newTitle": "Add new storage",
@@ -231,6 +239,10 @@
       "path": "Filesystem path",
       "followSymlinks": "Follow symlinks that leave this folder",
       "scanExclude": "Paths to exclude from scanning",
+      "syncMode": "Sync mode",
+      "lazyFill": "Catalog behavior",
+      "lazyMaxWatches": "Watched folders (at most)",
+      "lazyWatchTTL": "Stop watching after (minutes unopened)",
       "endpoint": "Endpoint",
       "region": "Region",
       "bucket": "Bucket",
@@ -264,6 +276,9 @@
       "path": "Directory on the server. It is created if missing; filex never mounts /.",
       "followSymlinks": "A symlink pointing INSIDE this folder is always followed. This governs only links pointing outside it: off, they are listed with a badge saying why they will not open, and cannot be opened, written to or deleted through; on, filex treats the linked files as part of the storage — including for indexing, virus scanning, quota and deletion.",
       "scanExclude": "One pattern per line, relative to the storage root: * matches within a name, ** any number of folders, and a pattern without a / matches that name at any depth (.* skips every hidden file and folder). The scan does not go into a matching folder, and matching files are not catalogued, indexed, thumbnailed or virus-scanned. This saves work; it is not access control — the files stay on the storage, reachable by path, over WebDAV/SFTP and through the AI tools. Anything catalogued before you add a pattern stays as it is.",
+      "lazyFill": "Click first, fill in the background: the folder somebody opens is cataloged first, and a slow background pass catalogs the rest, so search, folder sizes and usage end up covering the whole storage. Only on open: nothing runs in the background. Only the folders people open are cataloged, and search, folder sizes and usage say that they cover those folders only. Sync now catalogs everything once.",
+      "lazyMaxWatches": "Folders people open are watched for changes made outside filex. Past this many, the folder opened longest ago stops being watched and is checked again the next time somebody opens it.",
+      "lazyWatchTTL": "A folder nobody has opened for this long stops being watched. It is checked again the next time somebody opens it.",
       "prefix": "Sub-folder inside the bucket. Required: filex never takes ownership of the bucket root.",
       "root": "Sub-folder on the backend. Required: filex never mounts the account root.",
       "region": "Defaults to \"auto\" when left empty.",
@@ -280,6 +295,33 @@
       "smbShare": "The share name alone, without the server: `media`, not `\\\\nas\\media`.",
       "smbDomain": "Only for a Windows domain account. Leave empty for a NAS.",
       "smbRoot": "Sub-folder inside the share. Leave empty for the whole share."
+    },
+    "lazyFill": {
+      "background": "Click first, fill in the background",
+      "on_open": "Only on open"
+    },
+    "catalog": {
+      "title": "Catalog",
+      "filling": "The background pass has cataloged {pct}% of the folders found so far. Search, folder sizes and usage cover the whole storage once it finishes.",
+      "complete": "Every folder of this storage is cataloged.",
+      "onOpenHint": "Only the folders people open are cataloged. Sync now catalogs the whole storage once.",
+      "filler": "Background pass",
+      "cataloged": "Folders cataloged",
+      "pending": "Folders waiting",
+      "watched": "Watched folders",
+      "watchedOf": "{n} of {max}",
+      "heldBack": "Folders with deletions held back",
+      "heldBackHint": "In these folders more files seemed to vanish at once than filex is willing to remove from the catalog on its own, so nothing was removed. They are listed straight from the storage until a later check agrees.",
+      "listFilling": "Catalog: {pct}%",
+      "listOnOpen": "Cataloged as folders are opened",
+      "fillerState": {
+        "filling": "Cataloging",
+        "paused": "Slowed down, people are using the storage",
+        "idle": "Waiting",
+        "converged": "Done",
+        "refreshing": "Checking unwatched folders again",
+        "off": "Off (only on open)"
+      }
     },
     "actions": {
       "test": "Test connection",
@@ -757,6 +799,7 @@
     "noResults": "No matching events",
     "phrase": "{resource}: {verb}",
     "resource": {
+      "archives": "Archive settings",
       "ai_file": "File (AI)",
       "ai_share": "Share link (AI)",
       "ai_tokens": "API key",
@@ -804,6 +847,7 @@
     "verb": {
       "action": "changed",
       "archive_add": "added to archive",
+      "archive_create": "archive created",
       "archive_extract": "archive extracted",
       "create": "created",
       "delete": "deleted",
@@ -1215,6 +1259,8 @@
       "critical": "Critical"
     },
     "kinds": {
+      "archive_extracted": "Archive extracted",
+      "archive_created": "Archive created",
       "file_uploaded": "New file",
       "file_updated": "File changed",
       "file_upload_failed": "Upload failed",
@@ -1421,16 +1467,21 @@
       "copy": "Copying",
       "move": "Moving",
       "delete": "Deleting",
-      "trash": "Emptying the trash"
+      "trash": "Emptying the trash",
+      "archive": "Archive",
+      "archiveCreate": "Creating archive",
+      "archiveExtract": "Extracting archive"
     },
     "progress": "{done} / {total} files · {percent}%",
+    "progressPercent": "{percent}%",
     "progressBytes": "{done} of {total} · {percent}%",
     "progressBytesOpen": "{done} moved",
     "working": "Working…",
     "failed": "Operation failed",
     "retry": "Retry",
     "dismiss": "Dismiss",
-    "hide": "Hide"
+    "hide": "Hide",
+    "cancel": "Cancel"
   },
   "duplicates": {
     "title": "Duplicate files",
@@ -1467,6 +1518,8 @@
       "file_deleted": "File deleted permanently",
       "file_trashed": "File moved to the trash",
       "file_moved": "File moved or renamed",
+      "archive_created": "Archive creation completed",
+      "archive_extracted": "Archive extraction completed",
       "share_created": "Share link created",
       "drop_received": "File received through a public request link",
       "comment_added": "Comment added to a file or folder",
@@ -1622,6 +1675,8 @@
     "willAutoApply": "Will be applied automatically (inside the maintenance window)",
     "restartRequired": "{version} is installed on disk, but this process is still the old build — restart filex to activate it.",
     "howTo": "How to upgrade",
+    "packageHowTo": "{manager} installed this filex, so {manager} upgrades it too — filex does not replace a binary that a package manager owns.",
+    "packageHowToUnknown": "A package manager installed this filex, so upgrade it there — filex does not replace a binary that a package manager owns.",
     "releaseNotes": "Release notes",
     "includes": "This upgrade also includes",
     "security": "security",
@@ -1636,7 +1691,9 @@
     },
     "mode": {
       "binary": "binary install",
-      "docker": "container install"
+      "docker": "container install",
+      "package": "{manager} install",
+      "packageUnknown": "package-manager install"
     },
     "policyName": {
       "off": "off",
@@ -2048,6 +2105,29 @@
       "title": "Daily"
     }
   },
+  "archivesAdmin": {
+    "title": "Archives",
+    "subtitle": "Configure archive creation, extraction, encryption and safety limits.",
+    "enabled": "Enable external archive providers",
+    "enabledHint": "Turns on 7-Zip: for 7z, XZ, RAR (when this 7-Zip reads it) and password-protected ZIP, and for making any archive other than a plain ZIP. Plain ZIP, TAR, TAR.GZ and TAR.BZ2 are read by filex itself.",
+    "formats": "Creation formats",
+    "defaultFormat": "Default format",
+    "maxEntries": "Maximum entries",
+    "maxSize": "Maximum expanded size (MiB)",
+    "timeout": "Command timeout (seconds)",
+    "providers": "Providers",
+    "providersHint": "Availability is detected on this server.",
+    "binaryHint": "Executable paths are security-sensitive and are configured with FILEX_ARCHIVE_7Z_BIN, not through the browser.",
+    "test": "Test encryption",
+    "testOk": "Encrypted archive round trip succeeded",
+    "testFailed": "Archive provider test failed",
+    "providerBuiltin": "Built in",
+    "providerSevenZip": "7-Zip",
+    "creates": "Creates: {formats}",
+    "extracts": "Extracts: {formats}",
+    "sevenZipMissing": "7-Zip {version} or newer was not found on this server. Install it, or point FILEX_ARCHIVE_7Z_BIN at it.",
+    "saved": "Archive settings saved"
+  },
   "userSettings": {
     "title": "Settings",
     "open": "User settings",
@@ -2128,6 +2208,8 @@
         "file_deleted": "A file is deleted for good",
         "file_trashed": "A file goes to the trash",
         "file_moved": "A file is moved or renamed",
+        "archive_created": "An archive finishes being created",
+        "archive_extracted": "An archive finishes extracting",
         "share_created": "Someone creates a share link",
         "drop_received": "A file arrives through a request link",
         "comment_added": "Someone comments on a file",

@@ -23,6 +23,7 @@ are **file‑only** (noted below). Individual storages are **not** configured he
 - [Storage plugins](#storage-plugins)
 - [Storage sync](#storage-sync)
 - [Uploads (staged / resumable)](#uploads-staged--resumable)
+- [Archives](#archives)
 - [Antivirus (ClamAV)](#antivirus-clamav)
 - [Versioning on overwrite](#versioning-on-overwrite)
 - [Downloads from slow storage (prepared copies)](#downloads-from-slow-storage-prepared-copies)
@@ -524,6 +525,32 @@ do not set their own `sync_interval_s`. A storage that does set one wins.
 > nobody, while the real fallback was a hardcoded `15m` that happened to match
 > the documented default. It is wired up now.)
 
+### Lazy catalogue settings
+
+A local storage with `sync_mode: lazy` ([STORAGE.md → Lazy
+catalogue](STORAGE.md#lazy-catalogue), design in
+[LAZY-CATALOGUE.md](LAZY-CATALOGUE.md)) reads three more keys from its own
+`config`. They are per storage, not environment variables: the storage form
+draws them under **Sync mode** when *Lazy catalog* is chosen, and the admin API
+refuses a value outside its bounds (400).
+
+| Key | Default | Bounds | Meaning |
+|---|---|---|---|
+| `lazy_fill` | `background` | `background` · `on_open` | **Catalog behavior.** `background`: the folder somebody opens is catalogued first and a slow background pass catalogues the rest. `on_open`: only the folders people open are catalogued; search, folder sizes and usage say so. |
+| `lazy_max_watches` | `1024` | 1 – 1,000,000 | How many opened folders are watched for changes made outside filex. Past it, the folder opened longest ago stops being watched and is checked again the next time somebody opens it. |
+| `lazy_watch_ttl` | `60` | 1 – 10,080 (minutes) | A folder nobody has opened for this long stops being watched. |
+
+The storage's own `sync_interval_s` (**Scan every**) is how old an unwatched
+folder's listing may get before the background pass, or a connected desktop
+sync pair, checks it again.
+
+> ⚠ **Linux: the kernel's own watch limit.** Each watched folder is one inotify
+> watch, and `fs.inotify.max_user_watches` caps them for the whole user (8,192
+> on some distributions). When the kernel refuses one, filex logs it once and
+> treats the budget as full — nothing breaks, folders are simply checked on
+> open instead of watched. Raise the sysctl or lower `lazy_max_watches` if you
+> see that line.
+
 ---
 
 ## Uploads (staged / resumable)
@@ -564,6 +591,22 @@ An item inside another item of the same job (a file and its folder) is left to
 the folder, so the folder goes to the trash whole.
 
 ---
+## Archives
+
+Archive executable paths and the private workspace are process configuration;
+the live format and resource policy is managed under **Settings → Archives**.
+See [ARCHIVES.md](ARCHIVES.md) for the provider matrix and security model.
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_ARCHIVE_7Z_BIN` | `7zz` or `7z` on `PATH` | 7-Zip executable used for ZIP/7z/TAR creation, encryption and 7z/XZ extraction, and RAR extraction when that 7-Zip reads RAR (Alpine's package does not; see [ARCHIVES.md](ARCHIVES.md)). Plain ZIP and the TAR family are read by filex itself. Version 25.01 or newer is required. |
+| `FILEX_ARCHIVE_WORK_DIR` | `<data-dir>/archive-work` | Private local staging directory for provider input and output. Needs room for one archive's expanded size; fast local storage, preferably not the database's file system. |
+
+```yaml
+archive:
+  sevenzip_bin: /usr/local/bin/7zz
+  work_dir: /var/lib/filex/archive-work
+```
 
 ## Antivirus (ClamAV)
 
@@ -919,7 +962,7 @@ automatically, is in [UPDATES.md](./UPDATES.md).
 | `FILEX_UPDATE_WINDOW` | — | Daily maintenance window for automatic upgrades, e.g. `03:00-05:00` (server local time). Empty = any time. |
 | `FILEX_UPDATE_INTERVAL` | `24h` | Time between checks. Anything under `1h` is raised to `1h`. |
 | `FILEX_UPDATE_PRE_COMMAND` | — | Shell command run immediately before a self-upgrade (database dump for postgres/mysql). **A non-zero exit aborts the upgrade.** sqlite is snapshotted by filex itself with `VACUUM INTO`. |
-| `FILEX_INSTALL_MODE` | auto-detected | `binary` or `docker`, when detection is wrong for your setup. Container installs never self-apply — the image layer is immutable, so a replaced binary reverts at the next `up`. |
+| `FILEX_INSTALL_MODE` | auto-detected | `binary`, `docker` or `package` (or the package manager by name: `homebrew`, `winget`, `snap`), when detection is wrong for your setup. Container installs never self-apply — the image layer is immutable, so a replaced binary reverts at the next `up`. Package-manager installs never self-apply either — the manager owns the binary and upgrades it ([UPDATES.md](./UPDATES.md#package-manager-installs)). |
 | `FILEX_SYSTEMD_UNIT` | auto-detected | The unit `systemctl restart` is run against after a self-upgrade, e.g. `filex.service`. Consulted only when the process runs under systemd; left unset, the unit is read from `/proc/self/cgroup`. Set it when that detection names the wrong unit. |
 
 `FILEX_UPDATE_TARGET` is the one variable in this table filex **sets for you**

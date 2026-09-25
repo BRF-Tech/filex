@@ -24,6 +24,13 @@ export interface FileNode {
   extension?: string;
   /** Bytes. 0 = directory. */
   size?: number;
+  /**
+   * The folder's size leaves something out: the catalog does not cover all of
+   * it yet (a lazily cataloged folder, or any folder while its storage's first
+   * sync runs). `size` is then a lower bound, or unknown when 0. Draw it with
+   * useLocale `formatNodeSize`, never `formatSize` (docs/LAZY-CATALOGUE.md).
+   */
+  size_partial?: boolean;
   /** Unix ms (backend "last_modified"). */
   last_modified?: number;
   /** MIME. */
@@ -139,6 +146,8 @@ export interface NewDocType {
   requires?: 'onlyoffice' | 'drawio';
 }
 
+export type ArchiveCreateFormat = 'zip' | '7z' | 'tar' | 'tar.gz' | 'tar.bz2' | 'tar.xz';
+
 export interface Capabilities {
   /** Document types this build can create. Absent on a server older than the
    *  "New document" feature — hosts must treat that as "offer nothing". */
@@ -154,6 +163,16 @@ export interface Capabilities {
   /** Longest life a new share link may be given, in days (0 = no ceiling).
    *  Read by the share dialogs so they offer only expiries the server keeps. */
   share_max_ttl_days?: number;
+  /** Archive creation policy. Absent on servers older than archive providers.
+   *  `allowed_formats` is what this server can actually make (every format
+   *  but a plain ZIP needs 7-Zip there); empty means it can make none, and
+   *  `encryption` says whether a password can be set. */
+  archive?: {
+    enabled: boolean;
+    default_format: ArchiveCreateFormat | '';
+    allowed_formats: ArchiveCreateFormat[];
+    encryption?: boolean;
+  };
   /** Is the caller a person (`'user'` — a session OR their own API token) or an
    *  integration (`'app'` — a host proxy, a bot, an MCP client)? The explorer
    *  reads it to decide whether to draw the identity-bearing surfaces; see

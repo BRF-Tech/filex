@@ -1,12 +1,12 @@
 {
   "name": "@brftech/filex-admin",
   "private": true,
-  "version": "0.43.2",
+  "version": "0.44.0",
   "type": "module",
   "description": "filex web app — the Vue 3 SPA behind both /admin and the end-user /drive, embedded into the Go binary via go:embed",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "rimraf node_modules/.vite && vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
     "type-check": "vue-tsc --noEmit",

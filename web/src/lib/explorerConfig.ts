@@ -26,7 +26,7 @@ import type { AuthConfig } from '@brftech/filex-core';
 export const openTriggerSignal = ref(0);
 
 export function openTriggerPref(): 'single' | 'double' {
-  openTriggerSignal.value; // reactive dependency — see setOpenTriggerPref
+  void openTriggerSignal.value; // reactive dependency — see setOpenTriggerPref
   try {
     return localStorage.getItem('filex.openTrigger') === 'single' ? 'single' : 'double';
   } catch {

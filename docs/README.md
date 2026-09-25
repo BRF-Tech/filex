@@ -32,6 +32,10 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   OS, serve it with `local`, and the three traps that come with it
 - [Slow storage](STORAGE.md#slow-storage) — what is already cached, and what is
   actually worth tuning
+- [Lazy catalogue](LAZY-CATALOGUE.md) — `sync_mode: lazy` for big local
+  trees: list the opened folder from disk at once, catalogue it first, fill in
+  the rest in the background or only on open; the deletion-safety invariant,
+  the watch budget and what search, sizes and usage say meanwhile
 - [Usage & cost](USAGE.md) — reading the provider's own daily report, pricing it
   with a table you can edit, and the two rows that must never be added together
 - [Storage plugins](PLUGINS.md) — teaching filex a backend it does not ship:
@@ -124,6 +128,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Protection & antivirus](PROTECTION.md) — ClamAV scanning, through a local
   binary or a clamd daemon over TCP or a unix socket, plus the trash and version
   retention windows and the share-link life ceiling, behind one admin screen
+- [Archives](ARCHIVES.md) — ZIP/7z/TAR creation, multi-format extraction and encryption providers
 - [End‑to‑end encryption](E2E-ENCRYPTION.md) — client‑side WebCrypto folders;
   the server stores ciphertext and never receives a key. Recovery keys, optional
   operator key escrow, and exactly what each one can and cannot open

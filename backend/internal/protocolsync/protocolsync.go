@@ -188,7 +188,14 @@ func ParentOf(rel string) string {
 // It reports whether a row was actually written, so a caller with its own
 // eventing (the AI surface) can tell a bookkeeping miss from a success.
 func (s *Syncer) Write(ctx context.Context, st *model.Storage, rel string, size int64, mime string) bool {
-	return s.write(ctx, st, rel, size, mime, false)
+	return s.write(ctx, st, rel, size, mime, false, true)
+}
+
+// WriteWithoutNotification performs every write side effect except the
+// per-file event. Composite operations call it for their component files and
+// emit one meaningful completion event after the whole operation succeeds.
+func (s *Syncer) WriteWithoutNotification(ctx context.Context, st *model.Storage, rel string, size int64, mime string) bool {
+	return s.write(ctx, st, rel, size, mime, false, false)
 }
 
 // WriteSaved is Write for a write that is one save inside an ONGOING editing
@@ -201,10 +208,10 @@ func (s *Syncer) Write(ctx context.Context, st *model.Storage, rel string, size 
 // a burst of saves into one pass, and that trade only pays when more saves are
 // genuinely coming. A surface that writes a whole file once must call Write.
 func (s *Syncer) WriteSaved(ctx context.Context, st *model.Storage, rel string, size int64, mime string) bool {
-	return s.write(ctx, st, rel, size, mime, true)
+	return s.write(ctx, st, rel, size, mime, true, true)
 }
 
-func (s *Syncer) write(ctx context.Context, st *model.Storage, rel string, size int64, mime string, saved bool) bool {
+func (s *Syncer) write(ctx context.Context, st *model.Storage, rel string, size int64, mime string, saved, announce bool) bool {
 	defer s.recoverSync("write", st, rel)
 	clean := NormalizePath(rel)
 	// ⚠ Deferred so it fires on every path below, including the ones that give
@@ -217,6 +224,10 @@ func (s *Syncer) write(ctx context.Context, st *model.Storage, rel string, size 
 	node, kind, ok := s.WriteRows(ctx, st, rel, size, mime)
 	if !ok {
 		return false
+	}
+	if !announce {
+		writehook.OnFileWrittenWithoutNotification(ctx, node)
+		return true
 	}
 	if saved {
 		writehook.OnFileSaved(ctx, st.ID, node, s.Origin, kind)
@@ -549,6 +560,23 @@ func (s *Syncer) ReclaimDestination(ctx context.Context, storageID int64, dstCle
 // EnsureDirChain walks rel segment by segment, creating any missing dir rows,
 // and returns the leaf dir's node id (nil at storage root).
 func (s *Syncer) EnsureDirChain(ctx context.Context, st *model.Storage, rel string) (*int64, error) {
+	return s.ensureDirChain(ctx, st, rel, true)
+}
+
+// EnsureDirChainQuiet is EnsureDirChain without the "create" change frames.
+//
+// It is for a caller that records folders which were ALREADY on the storage —
+// the lazy catalogue giving an opened folder, and the folders above it, their
+// rows (internal/sync lazy.go). Nothing appeared in anybody's folder: the
+// explorer was already showing it from the disk listing, and a desktop mirror
+// told "create" for every catalogued ancestor would re-list its way up the
+// tree for nothing. The rows, the index and the unique-key race handling are
+// exactly EnsureDirChain's.
+func (s *Syncer) EnsureDirChainQuiet(ctx context.Context, st *model.Storage, rel string) (*int64, error) {
+	return s.ensureDirChain(ctx, st, rel, false)
+}
+
+func (s *Syncer) ensureDirChain(ctx context.Context, st *model.Storage, rel string, announce bool) (*int64, error) {
 	rel = NormalizePath(rel)
 	if rel == "" {
 		return nil, nil
@@ -591,6 +619,17 @@ func (s *Syncer) EnsureDirChain(ctx context.Context, st *model.Storage, rel stri
 			SyncState:  model.SyncStateSynced,
 		})
 		if err != nil || node == nil {
+			// ⚠ Another writer may have created this very row between the
+			// lookup above and the insert — the sync walk, a folder reconcile
+			// of the lazy catalogue, a second protocol write into the same new
+			// folder. The unique key refused ours; theirs is the row we
+			// wanted, so carry on down the chain with it rather than failing
+			// the write that only needed its parent to exist.
+			if raced, _ := s.Store.GetNodeByPath(ctx, st.ID, hash); raced != nil && raced.Type == model.NodeTypeDirectory {
+				id := raced.ID
+				parent = &id
+				continue
+			}
 			return nil, err
 		}
 		s.IndexNode(ctx, node)
@@ -598,9 +637,11 @@ func (s *Syncer) EnsureDirChain(ctx context.Context, st *model.Storage, rel stri
 		// client asked for it (MKCOL/mkdir) or it was implied by a write into
 		// a path whose parents had no rows yet. Announcing from here means
 		// Mkdir needs no emission of its own and cannot drift from Write's.
-		emitChange(st.ID, ParentOf(built), realtime.ChangeEvent{
-			Action: "create", Name: seg,
-		})
+		if announce {
+			emitChange(st.ID, ParentOf(built), realtime.ChangeEvent{
+				Action: "create", Name: seg,
+			})
+		}
 		id := node.ID
 		parent = &id
 	}

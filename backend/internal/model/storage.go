@@ -16,6 +16,11 @@ const (
 	SyncModePoll     SyncMode = "poll"     // periodic remote scan
 	SyncModeFSNotify SyncMode = "fsnotify" // local FS event-driven
 	SyncModeOnDemand SyncMode = "ondemand" // explicit user-triggered
+	// SyncModeLazy catalogues a LOCAL storage folder by folder: the folder
+	// somebody opens is listed from disk at once and catalogued first, the
+	// rest in the background (or only as people visit it). Issue #45; see
+	// docs/LAZY-CATALOGUE.md and internal/sync/lazy.go.
+	SyncModeLazy SyncMode = "lazy"
 
 	// SyncModePush was declared for "the backend pushes changes at us"
 	// (a webhook receiver) and NOTHING WAS EVER BUILT BEHIND IT. The sync
@@ -31,7 +36,7 @@ const (
 // SyncModes lists the modes the sync worker actually implements — the set an
 // operator may choose from. Order is the order they appear in the docs.
 func SyncModes() []SyncMode {
-	return []SyncMode{SyncModePoll, SyncModeFSNotify, SyncModeOnDemand}
+	return []SyncMode{SyncModePoll, SyncModeFSNotify, SyncModeOnDemand, SyncModeLazy}
 }
 
 // Implemented reports whether the sync worker has a branch for this mode.
@@ -40,7 +45,7 @@ func SyncModes() []SyncMode {
 // is happening.
 func (m SyncMode) Implemented() bool {
 	switch m {
-	case "", SyncModePoll, SyncModeFSNotify, SyncModeOnDemand:
+	case "", SyncModePoll, SyncModeFSNotify, SyncModeOnDemand, SyncModeLazy:
 		return true
 	default:
 		return false
@@ -65,6 +70,31 @@ func ValidateSyncMode(m SyncMode) error {
 		names = append(names, string(v))
 	}
 	return fmt.Errorf("invalid sync_mode %q (valid: %s)", string(m), strings.Join(names, ", "))
+}
+
+// LazyDrivers are the drivers a storage may be catalogued lazily on. The lazy
+// catalogue lists one directory at a time and watches visited folders with
+// fsnotify, both of which assume a local filesystem.
+var LazyDrivers = []string{"local"}
+
+// ValidateSyncModeFor is ValidateSyncMode plus the one rule that depends on the
+// driver: `lazy` is for local storages only. The admin API calls it on create
+// and update; a row written some other way falls back to polling at runtime,
+// with a warning (sync.Worker).
+func ValidateSyncModeFor(m SyncMode, driver string) error {
+	if err := ValidateSyncMode(m); err != nil {
+		return err
+	}
+	if m != SyncModeLazy {
+		return nil
+	}
+	for _, d := range LazyDrivers {
+		if d == driver {
+			return nil
+		}
+	}
+	return fmt.Errorf("sync_mode %q is only available on %s storages; a %q storage can use %q or %q",
+		string(SyncModeLazy), strings.Join(LazyDrivers, ", "), driver, string(SyncModePoll), string(SyncModeOnDemand))
 }
 
 // Storage is a configured backend (local FS / S3 / SFTP / WebDAV / …).

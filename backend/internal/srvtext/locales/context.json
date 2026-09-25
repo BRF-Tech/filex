@@ -136,6 +136,7 @@
     "server.app.wake.beyond": { "count": "how many tasks fall after this hour (they are asked for again later)" },
     "server.app.wake.refused": { "count": "how many tasks were refused", "reason": "the first refusal's reason, as the server's validation wrote it (English)" },
     "server.update.reason.below_minimum": { "version": "the oldest filex version this release can be upgraded from, e.g. 0.40.0" },
+    "server.update.reason.package": { "manager": "the package manager that installed filex: Homebrew, winget or Snap — a product name, written the same in every language" },
     "server.storage.scan_exclude_syntax": { "pattern": "the pattern (one line of the setting) as the administrator typed it" },
     "server.storage.scan_exclude_everything": { "pattern": "the pattern (one line of the setting) as the administrator typed it" },
     "server.storage.scan_exclude_limit": { "max": "the most patterns one storage may have (200)", "length": "the most characters one pattern may have (512)" }

@@ -20,7 +20,10 @@ rmSync('dist', { recursive: true, force: true });
 const common = {
   bundle: true,
   platform: 'node',
-  target: 'node20',
+  // The Node.js INSIDE Electron, not the one running this script: Electron 44
+  // ships Node 24 (31 shipped 20). Raise it together with the `electron`
+  // devDependency — releases.electronjs.org lists the Node of each release.
+  target: 'node24',
   external: ['electron'],
   logLevel: 'info',
 };

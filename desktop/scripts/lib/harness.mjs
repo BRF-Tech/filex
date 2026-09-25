@@ -93,6 +93,41 @@ export async function launchApp({ env = {}, lang = 'en-US', args = [], packagedO
 }
 
 /**
+ * The first window, and whether it came up on the connect screen.
+ *
+ * ⚠ WAITS for the server field instead of sampling it. ui/index.html draws its
+ * form only after `await filexShell.getState()` — an IPC round trip — so at
+ * DOMContentLoaded the field may not exist yet, and `isVisible()` (which never
+ * waits) answers false for a screen that appears a moment later. Electron 31
+ * happened to win that race; on Electron 44 `starts on the connect screen`
+ * went red in two suites while every later check on the same form passed.
+ */
+export async function connectScreen(app) {
+  const connect = await app.firstWindow();
+  await connect.waitForLoadState('domcontentloaded');
+  const shown = await connect.locator('#server')
+    .waitFor({ state: 'visible', timeout: 15_000 }).then(() => true, () => false);
+  return { connect, shown };
+}
+
+/**
+ * A window from `app.waitForEvent('window')`, once it has navigated to `url`.
+ *
+ * ⚠ The window event fires at CREATION, while the document is still Electron's
+ * blank one (url "" / origin "null"), and `waitForLoadState` on that blank
+ * page returns at once — so `win.url()` sampled right after is "". Electron 31
+ * usually had the first navigation committed by then; Electron 44 does not,
+ * and openwith-e2e reported "no editor window" for an editor that opened a
+ * moment later. Wait for the real URL before sampling anything. Does not
+ * throw on a timeout: the caller's own check reports what was there.
+ */
+export async function arrived(win, url, timeout = 30_000) {
+  await win.waitForURL(url, { timeout }).catch(() => {});
+  await win.waitForLoadState('domcontentloaded').catch(() => {});
+  return win;
+}
+
+/**
  * Plays the browser's half of the sign-in over HTTP and feeds the code back
  * through the app's own manual-entry box.
  *
@@ -138,11 +173,7 @@ export async function signIn(app, { label = 'filex desktop — e2e' } = {}) {
   await connect.locator('#code').fill(code);
   await connect.locator('#usecode').click().catch(() => {});
 
-  const win = await app.waitForEvent('window', { timeout: 60_000 });
-  // The window event fires at CREATION, while the document is still Electron's
-  // blank one (origin "null"). Wait for the real navigation before sampling.
-  await win.waitForURL(/^app:\/\/filex/, { timeout: 30_000 }).catch(() => {});
-  await win.waitForLoadState('domcontentloaded');
+  const win = await arrived(await app.waitForEvent('window', { timeout: 60_000 }), /^app:\/\/filex/);
 
   // ⚠⚠ Stop here if the window did not load. The preload runs on Chromium's
   // error page too, so `window.filexApp` exists there and no password field is

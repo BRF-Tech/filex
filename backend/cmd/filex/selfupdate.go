@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -19,8 +20,11 @@ import (
 // It deliberately works on installs where the SERVER would refuse to act on
 // its own — `--to` accepts a minor or major jump, because a person typing the
 // version has read the notes. What it will not do is pretend to work inside a
-// container: replacing a binary in an image layer reverts at the next `up`,
-// so that case fails loudly with the correct instructions instead.
+// container or under a package manager: replacing a binary in an image layer
+// reverts at the next `up`, and replacing one Homebrew, winget or Snap owns
+// leaves the manager recording the old version (then its next upgrade writes
+// over ours; a snap is read-only). Those cases fail loudly with the correct
+// command instead. `--check` still reports what is available.
 func selfUpdateCmd() *cobra.Command {
 	var (
 		to       string
@@ -63,7 +67,7 @@ func selfUpdateCmd() *cobra.Command {
 				}
 				fmt.Println()
 			}
-			fmt.Printf("install: %s\n", svc.Mode())
+			fmt.Println(installLine(svc.Install()))
 			if d.Reason != "" {
 				fmt.Printf("verdict: %s — %s\n", d.Action, d.Reason)
 			}
@@ -82,21 +86,17 @@ func selfUpdateCmd() *cobra.Command {
 			}
 
 			if checkOly {
+				if cmd := svc.Install().UpgradeCommand(); cmd != "" && d.Action != update.ActionNone {
+					fmt.Printf("upgrade: %s\n", cmd)
+				}
 				return nil
 			}
 			if d.Action == update.ActionNone && to == "" {
 				fmt.Println("nothing to do — already up to date")
 				return nil
 			}
-			if !svc.Mode().CanSelfApply() {
-				fmt.Fprintln(os.Stderr, "\n"+update.ErrNotSelfApplicable.Error())
-				fmt.Fprintln(os.Stderr, "\nUpgrade the image instead:")
-				image := d.Target.Image
-				if image == "" {
-					image = "ghcr.io/brf-tech/filex:" + firstNonEmpty(to, d.Target.Version)
-				}
-				fmt.Fprintf(os.Stderr, "  # docker-compose.yml: image: %s\n  docker compose pull filex\n  docker compose up -d\n", image)
-				return fmt.Errorf("cannot self-update in a container")
+			if err := refuseSelfUpdate(os.Stderr, svc.Install(), d, to); err != nil {
+				return err
 			}
 
 			target := d.Target
@@ -124,10 +124,53 @@ func selfUpdateCmd() *cobra.Command {
 			return nil
 		},
 	}
+	// A refusal (container, package manager) is a RUNTIME answer, not a
+	// misuse: printing the flag list under it reads as "you typed it wrong".
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true // main prints it once, as `filex: ...`
 	cmd.Flags().StringVar(&to, "to", "", "install this exact version (e.g. v0.8.0)")
 	cmd.Flags().BoolVar(&checkOly, "check", false, "only report what is available")
 	cmd.Flags().BoolVar(&force, "force", false, "apply even when the policy would only announce")
 	return cmd
+}
+
+// installLine is the "install:" line of the report: the mode, and for a
+// packaged install who owns it and the command that upgrades it.
+func installLine(inst update.Install) string {
+	line := "install: " + string(inst.Mode)
+	if inst.Mode != update.ModePackage {
+		return line
+	}
+	if name := inst.Manager.Label(); name != "" {
+		line += " (" + name
+		if cmd := inst.UpgradeCommand(); cmd != "" {
+			line += ": " + cmd
+		}
+		return line + ")"
+	}
+	return line + " (a package manager)"
+}
+
+// refuseSelfUpdate stops a self-update of an install that cannot replace its
+// own binary; nil for a plain binary. A packaged install is refused with the
+// manager's command in the error itself (main prints it as the last line,
+// where a person looks for what went wrong); a container gets the compose
+// steps written to w. The refusal does not depend on --force: that flag
+// overrides the POLICY, and no policy makes a package manager's file ours to
+// replace.
+func refuseSelfUpdate(w io.Writer, inst update.Install, d update.Decision, to string) error {
+	refusal := inst.Refusal()
+	if refusal == nil || inst.Mode == update.ModePackage {
+		return refusal
+	}
+	fmt.Fprintln(w, "\n"+refusal.Error())
+	fmt.Fprintln(w, "\nUpgrade the image instead:")
+	image := d.Target.Image
+	if image == "" {
+		image = "ghcr.io/brf-tech/filex:" + firstNonEmpty(to, d.Target.Version)
+	}
+	fmt.Fprintf(w, "  # docker-compose.yml: image: %s\n  docker compose pull filex\n  docker compose up -d\n", image)
+	return fmt.Errorf("cannot self-update in a container")
 }
 
 // resolveTarget finds an explicitly requested version in the manifest, so a

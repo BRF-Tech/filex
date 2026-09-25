@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -296,7 +297,12 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 			"walks a pair whose local tree changed unseen, retries what failed, and\n" +
 			"walks every pair at least every --full-every.\n\n" +
 			"The live state is printed as `live: connected|polling|offline — …`.\n" +
-			"A token the server refuses stops the command with exit status 3.",
+			"A token the server refuses stops the command with exit status 3.\n\n" +
+			"One engine per pair on this computer: a pair another filex is already\n" +
+			"syncing (the desktop app, a second copy of it, another terminal) is\n" +
+			"left alone and reported as `<pair>: lock: busy — …`. A single run skips\n" +
+			"it, syncs the rest and exits with status 4; --watch takes the pair over\n" +
+			"once the other process stops (`<pair>: lock: acquired`).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// A stop request (Ctrl-C, SIGTERM) cancels the pass in flight, which
@@ -355,9 +361,12 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 				return nil
 			}
 
+			// The pair locks --watch holds (synclock.go). A one-shot run holds
+			// none here: each pass takes its own pair's lock.
+			locks := newPairLocks(st)
 			engineFor := func(p filesync.Pair) *filesync.Engine {
 				eng := &filesync.Engine{Pair: p, API: apiAdapter{api}, Store: st, Transfers: transfers,
-					StopOn: cliclient.IsUnauthorized}
+					StopOn: cliclient.IsUnauthorized, Lock: locks.get(p.ID)}
 				// Progress prints even with --quiet. The desktop app starts
 				// this command with --quiet and mirrors the LAST stdout line
 				// into its panel; without these lines a big first sync spent
@@ -410,10 +419,14 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 					rctx, cancel = context.WithDeadline(ctx, win.closesAfter(nowFunc()))
 				}
 				defer cancel()
+				var busy []string
 				for _, p := range selected(pairs) {
 					if _, err := runPass(rctx, p, nil); err != nil {
 						if so := signedOut(err); so != nil {
 							return so
+						}
+						if errors.Is(err, filesync.ErrPairBusy) {
+							busy = append(busy, p.ID)
 						}
 					}
 					if rctx.Err() != nil {
@@ -423,9 +436,12 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 				if win != nil && ctx.Err() == nil && rctx.Err() != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "sync: the sync window %s closed; the rest continues when it opens\n", win)
 				}
+				if len(busy) > 0 {
+					return &exitError{code: exitPairBusy, err: errPairsBusy(busy)}
+				}
 				return nil
 			}
-			return runLive(ctx, cmd, st, api, selected, runPass, watchSettings{
+			return runLive(ctx, cmd, st, api, locks, selected, runPass, watchSettings{
 				interval: watch, watchMax: watchMax, fullEvery: fullEvery, window: win, live: live,
 			})
 		},
@@ -466,13 +482,17 @@ type watchSettings struct {
 	live bool
 }
 
-// runLive is `sync run --watch` (synclive.go).
+// runLive is `sync run --watch` (synclive.go). It holds the lock of every pair
+// it syncs in locks, which runPass hands to each pass (synclock.go).
 func runLive(ctx context.Context, cmd *cobra.Command, st *filesync.Store, api *cliclient.Client,
+	locks *pairLocks,
 	selected func([]filesync.Pair) []filesync.Pair,
 	runPass func(context.Context, filesync.Pair, []string) (filesync.Result, error),
 	ws watchSettings) error {
 	out := cmd.OutOrStdout()
 	loop := &liveLoop{
+		locker: locks,
+		errOut: cmd.ErrOrStderr(),
 		loadPairs: func() ([]filesync.Pair, error) {
 			all, err := st.LoadPairs()
 			if err != nil {
@@ -568,6 +588,13 @@ func newPassReporter(out, errOut io.Writer) *passReporter {
 }
 
 func (r *passReporter) pass(p filesync.Pair, targeted bool, res filesync.Result, err error) {
+	if errors.Is(err, filesync.ErrPairBusy) {
+		// Not a failure of the pair: another process on this computer is
+		// syncing it, and this pass touched nothing. Its own line, so the
+		// desktop app says so instead of showing an error (synclock.go).
+		fmt.Fprintf(r.errOut, "%s: %s\n", p.ID, lockBusyLine(err))
+		return
+	}
 	if err != nil {
 		r.failing[p.ID] = true
 		fmt.Fprintf(r.errOut, "%s: %v\n", p.ID, err)
@@ -579,6 +606,18 @@ func (r *passReporter) pass(p filesync.Pair, targeted bool, res filesync.Result,
 	if !quiet {
 		writeResult(r.out, r.errOut, p, res)
 	}
+}
+
+// errPairsBusy is the one-shot run's closing error when it skipped pairs
+// another process on this computer holds (exitPairBusy).
+func errPairsBusy(ids []string) error {
+	what, it := "1 pair was", "it"
+	if len(ids) > 1 {
+		what, it = fmt.Sprintf("%d pairs were", len(ids)), "them"
+	}
+	return fmt.Errorf("%s not synced (%s): another filex on this computer is syncing %s — "+
+		"run again once that one has stopped (in the desktop app: Pause sync, or quit it)",
+		what, strings.Join(ids, ", "), it)
 }
 
 // printResult is writeResult on a command's own streams.

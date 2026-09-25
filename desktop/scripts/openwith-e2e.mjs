@@ -30,7 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
-import { DESKTOP, REPO, EMAIL, PASSWORD, SERVER, check, finish, launchApp, signIn, sleep } from './lib/harness.mjs';
+import { DESKTOP, REPO, EMAIL, PASSWORD, SERVER, arrived, check, finish, launchApp, signIn, sleep } from './lib/harness.mjs';
 
 const require = createRequire(import.meta.url);
 const ELECTRON_BIN = require('electron'); // the package's main export IS the exe path
@@ -183,8 +183,7 @@ async function main() {
 
     const editorPromise = app.waitForEvent('window', { timeout: 60_000 });
     await openViaSecondInstance(profile, home, docPath);
-    const editor = await editorPromise;
-    await editor.waitForLoadState('domcontentloaded').catch(() => {});
+    const editor = await arrived(await editorPromise, /\/files\/edit/);
     const editorUrl = editor.url();
     check('a second instance carrying a path opened an editor window',
       editorUrl.includes('/files/edit'), editorUrl);
@@ -254,7 +253,14 @@ async function main() {
       (await listScratch()).length === 0, 40_000, 500);
     check('the scratch copy is gone after the editor closed', gone === true);
     const records = path.join(profile, 'openwith');
-    const left = fs.existsSync(records) ? fs.readdirSync(records).filter((f) => f.endsWith('.json')) : [];
+    const leftover = () => (fs.existsSync(records) ? fs.readdirSync(records).filter((f) => f.endsWith('.json')) : []);
+    // ⚠ Waited for, not sampled: finishOpenWith() removes the record AFTER the
+    // server has deleted the copy, so "the copy is gone" can be observed a
+    // moment before the record's own unlink — measured once on Electron 44
+    // (d3d91c3cd7cb.json still there at the first look).
+    await waitUntil('the session record to be removed', async () => leftover().length === 0, 5_000, 200)
+      .catch(() => {});
+    const left = leftover();
     check('the session record is gone too', left.length === 0, left.join(', '));
     check('the document still holds the edit', fs.readFileSync(docPath).equals(EDITED));
 
@@ -317,8 +323,7 @@ async function main() {
       fs.writeFileSync(twinDoc, ORIGINAL);
       const twinPromise = app.waitForEvent('window', { timeout: 60_000 });
       await openViaSecondInstance(profile, home, twinDoc);
-      const twinWin = await twinPromise;
-      await twinWin.waitForLoadState('domcontentloaded').catch(() => {});
+      const twinWin = await arrived(await twinPromise, /\/files\/edit/);
       const twinUrl = decodeURIComponent(twinWin.url());
       check('a document in a synced folder opens against its remote twin',
         twinUrl.includes('path=docs://Reports/Rapor.docx'), twinUrl);

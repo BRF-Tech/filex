@@ -39,11 +39,12 @@ import (
 // would be a lie. It is the same call the AI surface makes for a moved file
 // whose source was never catalogued, for the same reason.
 //
-// ⚠ One visible consequence, and it is the one a filex upload into the same
-// folder already has: a folder that had NO catalogued children was listed
-// straight from the storage (vfIndex's pre-sync hatch); with one row in it,
-// the listing is read from the catalogue until the next sync fills in the
-// rest. Recorded here because it looks like a bug the first time it is seen.
+// A folder whose first scan has not finished — or, on a lazy storage, that the
+// catalogue does not vouch for — is listed from the storage with the catalogue
+// overlaid (vfIndex → vfIndexMerged), so the row written here adds its id to
+// that listing and hides nothing else. (It used to be the other way round: one
+// row flipped a folder with no catalogued children from the storage's listing
+// to the catalogue's, and the rest of the folder vanished until the next sync.)
 func catalogueOnDemand(ctx context.Context, store db.Store, resolve func(int64) (storage.Driver, error),
 	sy *protocolsync.Syncer, storageID int64, rel string) (*model.Node, error) {
 	rel = strings.Trim(path.Clean("/"+strings.ReplaceAll(rel, "\\", "/")), "/")

@@ -37,6 +37,11 @@ import (
 // pair is a merge of both trees and must see all of them — and so does a pair
 // whose local folder is missing (the full pass owns that refusal).
 func (e *Engine) RunDirs(ctx context.Context, dirs []string) (Result, error) {
+	release, err := e.holdLock()
+	if err != nil {
+		return Result{}, err
+	}
+	defer release()
 	if e.Pair.File {
 		return e.runFile(ctx)
 	}

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   absorbLine,
+  anyError,
   LineReader,
   markExited,
   newStatus,
@@ -102,6 +103,48 @@ test('local watching state is per pair and clears when watching resumes', () => 
   out(st, 'pair-1: local: watched');
   assert.equal(pairView(st, 'pair-1').local, null);
   assert.equal(pairView(st, 'pair-1').line, null, 'a state line is not what the engine last DID');
+});
+
+// Another process on this computer holds a pair (backend/cmd/filex
+// synclock.go): the engine leaves it alone and says so, and takes it over by
+// itself when the other process stops. Not an error, and only that pair.
+test('a pair another filex syncs is busy — not failing — until this engine takes it', () => {
+  const st = newStatus('acc');
+  const detail = 'another filex on this computer is syncing this pair (process 4242, C:\\Program Files\\WindowsApps\\filex\\filex.exe)';
+  out(st, `pair-1: lock: busy — ${detail}`);
+  assert.deepEqual(pairView(st, 'pair-1').busy, { detail });
+  assert.equal(pairView(st, 'pair-1').error, null, 'busy is not an error');
+  assert.equal(anyError(st), false, 'and does not turn the rail dot red');
+  assert.equal(pairView(st, 'pair-2').busy, null, 'only that pair');
+  assert.equal(pairView(st, 'pair-1').line, null, 'a state line is not what the engine last DID');
+
+  out(st, 'pair-1: lock: acquired');
+  assert.equal(pairView(st, 'pair-1').busy, null);
+});
+
+test('a one-shot run says busy on stderr; it is still busy, not an error', () => {
+  const st = newStatus('acc');
+  err(st, 'pair-1: lock: busy — another filex on this computer is syncing this pair');
+  assert.deepEqual(pairView(st, 'pair-1').busy, { detail: 'another filex on this computer is syncing this pair' });
+  assert.equal(pairView(st, 'pair-1').error, null);
+  assert.equal(st.lastError, null);
+});
+
+test('a pass of the pair ends busy even without the acquired line', () => {
+  const st = newStatus('acc');
+  out(st, 'pair-1: lock: busy — another filex on this computer is syncing this pair');
+  out(st, 'pair-1: inventory: 3 item(s) here, listing the server…');
+  assert.equal(pairView(st, 'pair-1').busy, null);
+  out(st, 'pair-2: lock: busy — another filex on this computer is syncing this pair');
+  out(st, 'pair-2: already in step');
+  assert.equal(pairView(st, 'pair-2').busy, null);
+});
+
+test('a watcher that exits is not waiting for any pair', () => {
+  const st = newStatus('acc');
+  out(st, 'pair-1: lock: busy — another filex on this computer is syncing this pair');
+  markExited(st, 1, false);
+  assert.equal(pairView(st, 'pair-1').busy, null);
 });
 
 test('each pair shows its own last line', () => {

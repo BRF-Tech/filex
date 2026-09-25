@@ -55,7 +55,7 @@ func TestUpdateStatus_DisabledServiceStillReportsMode(t *testing.T) {
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	assert.Equal(t, false, body["enabled"])
-	assert.Contains(t, []any{"binary", "docker"}, body["mode"])
+	assert.Contains(t, []any{"binary", "docker", "package"}, body["mode"])
 }
 
 func TestUpdateCheck_DisabledDoesNotReachTheNetwork(t *testing.T) {

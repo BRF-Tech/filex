@@ -6,7 +6,8 @@
 //   POST /api/admin/update/apply  → { ok, applied, restart_required } | 409
 //
 // A 409 from /apply is not an error to shout about: it is the container case,
-// where filex cannot replace its own image. The payload then carries the
+// where filex cannot replace its own image, or the package-manager case
+// (Homebrew, winget, Snap own the binary). The payload then carries the
 // instructions to show instead.
 import { api } from './client';
 
@@ -29,9 +30,17 @@ export interface UpdateStatus {
   enabled: boolean;
   /** off | manual | patch | minor */
   policy: string;
-  /** binary | docker */
+  /** binary | docker | package */
   mode: string;
   can_self_apply: boolean;
+  /** mode=package: homebrew | winget | snap, or absent when the operator set
+   *  FILEX_INSTALL_MODE=package and nothing could be detected. */
+  package_manager?: string;
+  /** The manager's product name ("Homebrew") — the same in every language. */
+  package_manager_name?: string;
+  /** mode=package: the manager's command for this install, e.g.
+   *  `brew upgrade --cask filex`. */
+  upgrade_command?: string;
   /** A new binary is on disk but this process is still the old one. */
   restart_required: boolean;
   checked_at?: string;

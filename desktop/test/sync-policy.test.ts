@@ -131,7 +131,7 @@ const NOON = 12 * 60;
 // A status shaped exactly as the supervisor keeps it (src/syncstatus.ts):
 // errors live per pair, the engine's own in lastError.
 const running = (over: Partial<SyncStatus> = {}): SyncStatus => ({ ...newStatus('acc'), ...over });
-const failing = (pairId: string, error: string) => ({ [pairId]: { error, line: null, local: null } });
+const failing = (pairId: string, error: string) => ({ [pairId]: { error, line: null, local: null, busy: null } });
 
 test('the folder line: pause and sign-out come first', () => {
   const st = running({ pairs: failing('pair-1', 'boom'), lastError: 'boom' });
@@ -173,6 +173,24 @@ test('the folder line: "waiting for the window" only while the clock is outside 
 test('the folder line: a watcher that is gone without a word is "stopped"', () => {
   const st = running({ running: false });
   assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), { kind: 'stopped' });
+});
+
+// Another filex on this computer holds the folder (the other copy of this
+// app, or the CLI): the folder is being synced — not by this copy — and that is
+// what its line says, not an error left from before, and not "watching".
+test('the folder line: a folder another filex syncs says so, ahead of an old error', () => {
+  const detail = 'another filex on this computer is syncing this pair (process 42)';
+  const st = running({ pairs: { 'pair-1': { error: 'list docs://a: HTTP 502', line: null, local: null, busy: { detail } } } });
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
+    kind: 'busy', detail,
+  });
+  assert.deepEqual(folderView({ pairId: 'pair-2', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), { kind: 'watching' },
+    'only that folder');
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: true, signedOut: false, status: st, minuteOfDay: NOON }), { kind: 'paused' },
+    'a pause still comes first');
+  const gone = running({ running: false, pairs: st.pairs });
+  assert.notEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: gone, minuteOfDay: NOON }).kind, 'busy',
+    'a watcher that is gone is not waiting for anything');
 });
 
 test("the folder line carries the transfer's bytes and estimate through", () => {

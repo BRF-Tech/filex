@@ -37,6 +37,13 @@ type Worker struct {
 	// their own (FILEX_SYNC_INTERVAL).
 	fallback time.Duration
 
+	// emit is the realtime chain the lazy catalogue announces through
+	// (AttachEmitter); an *emitterBox, read at announce time.
+	emit atomic.Value
+	// pairRoots answers which folders of a storage a desktop sync pair
+	// mirrors right now (AttachPairRoots); a *pairRootsBox.
+	pairRoots atomic.Value
+
 	mu      sync.Mutex
 	cancels map[int64]context.CancelFunc // storageID → cancel
 	syncers map[int64]*storageSyncer
@@ -209,6 +216,11 @@ func (w *Worker) startOne(parent context.Context, st *model.Storage) {
 		rule:     ruleFor(st, cfg),
 		ctx:      ctx,
 		fallback: w.fallback,
+		emitter:  w.currentEmitter,
+		pairs:    w.currentPairRoots,
+		// A full scan of a lazy storage leaves its per-folder state as
+		// complete as the catalogue it rebuilt (dirListed).
+		recordFolders: st.SyncMode == model.SyncModeLazy,
 	}
 	w.mu.Lock()
 	w.cancels[st.ID] = cancel
@@ -241,6 +253,16 @@ type storageSyncer struct {
 	// reader that must not block (Worker.Running, the admin's 409).
 	runMu    sync.Mutex
 	inFlight atomic.Bool
+	// lazy is the running lazy catalogue of a `lazy` storage (nil
+	// otherwise); emitter returns the realtime chain it announces through.
+	lazy    lazyPointer
+	emitter func() ChangeEmitter
+	// pairs lists the folders of this storage a desktop sync pair mirrors
+	// (Worker.AttachPairRoots); the lazy catalogue keeps them current.
+	pairs func(storageID int64) []string
+	// recordFolders: the walk records every folder it lists in the lazy
+	// catalogue's per-folder state (dirListed).
+	recordFolders bool
 }
 
 // AbortedAtStartup is the error recorded on a sync_runs row the worker closes
@@ -323,6 +345,9 @@ func (s *storageSyncer) Loop() {
 	case model.SyncModeOnDemand:
 		// only Trigger() invocations.
 		<-s.ctx.Done()
+	case model.SyncModeLazy:
+		// folder by folder, as people open them (docs/LAZY-CATALOGUE.md).
+		s.loopLazy()
 	default:
 		// ⚠ The default is the poll loop, which is right for "poll" and for
 		// an unset mode — and is a silent lie for anything else. A row

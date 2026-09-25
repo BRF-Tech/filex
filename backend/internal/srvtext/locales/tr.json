@@ -185,6 +185,8 @@
   "server.update.reason.minor_needs_policy": "Ara sürüm. Güncelleme politikası (“{policy}”) yalnızca yamaları kurar.",
   "server.update.reason.no_releases": "Sürüm listesinde hiç sürüm yok.",
   "server.update.reason.not_auto_ok": "Bu sürüm kendiliğinden kurulmak üzere işaretlenmemiş. Bilerek kurun.",
+  "server.update.reason.package": "{manager} ile kuruldu. Kurulu sürümü {manager} takip edebilsin diye yükseltmeyi {manager} ile yapın.",
+  "server.update.reason.package_unknown": "Bir paket yöneticisiyle kuruldu. Kurulu sürümü paket yöneticisi takip edebilsin diye yükseltmeyi onunla yapın.",
   "server.update.reason.patch_auto": "Yama sürümü. Güncelleme politikası (“{policy}”) onu kendiliğinden kurar.",
   "server.update.reason.unhandled": "Bu tür bir sürüm kendiliğinden işlenmiyor.",
   "server.update.reason.unparsable": "En yeni sürümün numarası okunamadı.",

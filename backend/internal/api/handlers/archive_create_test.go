@@ -1,0 +1,452 @@
+package handlers_test
+
+import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"compress/gzip"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/brf-tech/filex/backend/internal/archivecli"
+	"github.com/brf-tech/filex/backend/internal/config"
+	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/testutil/archivetest"
+)
+
+func craftedZip(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, body := range files {
+		entry, err := zw.Create(name)
+		require.NoError(t, err)
+		_, err = entry.Write([]byte(body))
+		require.NoError(t, err)
+	}
+	require.NoError(t, zw.Close())
+	return buf.Bytes()
+}
+
+func waitForArchiveOp(t *testing.T, svc *ops.Service, id int64) *ops.Op {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		op, err := svc.Get(context.Background(), id)
+		require.NoError(t, err)
+		switch op.Status {
+		case ops.StatusOK, ops.StatusFailed, ops.StatusPartial, ops.StatusCancelled:
+			return op
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("archive operation %d did not finish (status %s)", id, op.Status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestArchiveCreateAndFirstClassExtract(t *testing.T) {
+	srv, client, store, tok := aiFixture(t)
+	seedFiles(t, client, srv.URL, tok, map[string]string{
+		"main://source/one.txt": "ONE",
+		"main://source/two.txt": "TWO",
+	})
+
+	resp := aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/create", tok, map[string]any{
+		"sources": []string{"main://source/one.txt"},
+		"dest":    "main://archives/bundle.rar",
+		"format":  "rar",
+	})
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	var unsupported map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&unsupported))
+	resp.Body.Close()
+	assert.Equal(t, "UNSUPPORTED_FORMAT", unsupported["code"])
+
+	resp = aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/create", tok, map[string]any{
+		"sources":  []string{"main://source/one.txt"},
+		"dest":     "main://archives/bundle.tar.gz",
+		"format":   "tar.gz",
+		"password": "not-supported",
+	})
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	var invalidOptions map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&invalidOptions))
+	resp.Body.Close()
+	assert.Equal(t, "INVALID_ARCHIVE_OPTIONS", invalidOptions["code"])
+
+	// 7-Zip encrypts a ZIP with printable ASCII only (E_INVALIDARG otherwise)
+	// and reads any password as one line: both are refused before staging.
+	for _, c := range []struct{ format, password string }{{"zip", "şifre"}, {"7z", "two\nlines"}} {
+		resp = aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/create", tok, map[string]any{
+			"sources":  []string{"main://source/one.txt"},
+			"dest":     "main://archives/secret." + c.format,
+			"format":   c.format,
+			"password": c.password,
+		})
+		require.Equal(t, http.StatusBadRequest, resp.StatusCode, c.format)
+		var charset map[string]string
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&charset))
+		resp.Body.Close()
+		assert.Equal(t, "PASSWORD_CHARSET", charset["code"], c.format)
+	}
+
+	// Disabling external command providers must not remove the safe built-in
+	// ZIP path that existing installations already rely on.
+	require.NoError(t, store.UpsertSetting(context.Background(), archivecli.SettingEnabled, "false"))
+
+	resp = aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/create", tok, map[string]any{
+		"sources": []string{"main://source/one.txt", "main://source/two.txt"},
+		"dest":    "main://archives/bundle.zip",
+		"format":  "zip",
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	code, raw := aiDownload(t, client, srv.URL, tok, "main://archives/bundle.zip")
+	require.Equal(t, http.StatusOK, code)
+	got := openZip(t, raw)
+	assert.Equal(t, "ONE", got["one.txt"])
+	assert.Equal(t, "TWO", got["two.txt"])
+
+	// Archive creation is not an overwrite operation. A retry or a second
+	// selection with the same suggested name must fail before replacing the
+	// existing archive, and must give the explorer a stable error to display.
+	resp = aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/create", tok, map[string]any{
+		"sources": []string{"main://source/one.txt"},
+		"dest":    "main://archives/bundle.zip",
+		"format":  "zip",
+	})
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+	var conflict map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&conflict))
+	resp.Body.Close()
+	assert.Equal(t, "TARGET_EXISTS", conflict["code"])
+
+	code, afterConflict := aiDownload(t, client, srv.URL, tok, "main://archives/bundle.zip")
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, raw, afterConflict, "a conflicting create must preserve the existing archive")
+
+	// Omitting dest is the API form of the explorer's "Extract here": members
+	// land beside the archive, with no automatically-created parent folder.
+	resp = aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/extract", tok, map[string]any{
+		"path": "main://archives/bundle.zip",
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+	code, extractedHere := aiDownload(t, client, srv.URL, tok, "main://archives/one.txt")
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "ONE", string(extractedHere))
+
+	// The explorer sends an adapter-qualified destination. The handler must
+	// resolve it back onto the archive's storage rather than writing a literal
+	// `main:` directory into that storage.
+	resp = aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/extract", tok, map[string]any{
+		"path": "main://archives/bundle.zip",
+		"dest": "main://restored/bundle",
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	code, body := aiDownload(t, client, srv.URL, tok, "main://restored/bundle/one.txt")
+	assert.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "ONE", string(body))
+}
+
+func TestArchiveCreateAndExtractRunThroughOperationsWorker(t *testing.T) {
+	srv, client, _, tok, opsSvc := aiFixtureWithOps(t)
+	seedFiles(t, client, srv.URL, tok, map[string]string{
+		"main://source/report.txt": "operation-backed archive",
+	})
+
+	resp := aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/create", tok, map[string]any{
+		"sources": []string{"main://source/report.txt"},
+		"dest":    "main://archives/report.zip",
+		"format":  "zip",
+	})
+	require.Equal(t, http.StatusAccepted, resp.StatusCode)
+	var created struct {
+		Op struct {
+			ID int64 `json:"id"`
+		} `json:"op"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+	resp.Body.Close()
+	createOp := waitForArchiveOp(t, opsSvc, created.Op.ID)
+	require.Equal(t, ops.StatusOK, createOp.Status, createOp.Error)
+	assert.Equal(t, 100, createOp.Total)
+	assert.Equal(t, 100, createOp.Done)
+
+	code, raw := aiDownload(t, client, srv.URL, tok, "main://archives/report.zip")
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "operation-backed archive", openZip(t, raw)["report.txt"])
+
+	resp = aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/extract", tok, map[string]any{
+		"path": "main://archives/report.zip",
+		"dest": "main://restored",
+	})
+	require.Equal(t, http.StatusAccepted, resp.StatusCode)
+	var extracted struct {
+		Op struct {
+			ID int64 `json:"id"`
+		} `json:"op"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&extracted))
+	resp.Body.Close()
+	extractOp := waitForArchiveOp(t, opsSvc, extracted.Op.ID)
+	require.Equal(t, ops.StatusOK, extractOp.Status, extractOp.Error)
+	assert.Equal(t, 1, extractOp.Total)
+	assert.Equal(t, 1, extractOp.Done)
+
+	code, body := aiDownload(t, client, srv.URL, tok, "main://restored/report.txt")
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "operation-backed archive", string(body))
+}
+
+func TestArchiveExtractRejectsUnsafeZipBeforeQueueing(t *testing.T) {
+	srv, client, _, tok, _ := aiFixtureWithOps(t)
+	raw := craftedZip(t, map[string]string{
+		"../escape.txt": "must never be written",
+		"safe.txt":      "the whole unsafe archive is rejected",
+	})
+	resp := aiReq(t, client, http.MethodPost, srv.URL+"/api/ai/upload", tok, map[string]any{
+		"path":           "main://archives/unsafe.zip",
+		"content_base64": base64.StdEncoding.EncodeToString(raw),
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	resp = aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/extract", tok, map[string]any{
+		"path": "main://archives/unsafe.zip",
+		"dest": "main://restored",
+	})
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	resp.Body.Close()
+	assert.Equal(t, "UNSUPPORTED_FORMAT", body["code"])
+
+	for _, target := range []string{"main://escape.txt", "main://restored/safe.txt"} {
+		code, _ := aiDownload(t, client, srv.URL, tok, target)
+		assert.Equal(t, http.StatusNotFound, code, "%s must not have been written", target)
+	}
+}
+
+func TestArchiveExtractRejectsZipLinkBeforeQueueing(t *testing.T) {
+	srv, client, _, tok, _ := aiFixtureWithOps(t)
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	header := &zip.FileHeader{Name: "outside.txt", Method: zip.Store}
+	header.SetMode(os.ModeSymlink | 0o777)
+	entry, err := zw.CreateHeader(header)
+	require.NoError(t, err)
+	_, err = entry.Write([]byte("../private/secret.txt"))
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+
+	resp := aiReq(t, client, http.MethodPost, srv.URL+"/api/ai/upload", tok, map[string]any{
+		"path":           "main://archives/link.zip",
+		"content_base64": base64.StdEncoding.EncodeToString(buf.Bytes()),
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	resp = aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/extract", tok, map[string]any{
+		"path": "main://archives/link.zip",
+		"dest": "main://restored",
+	})
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	resp.Body.Close()
+	assert.Equal(t, "UNSUPPORTED_FORMAT", body["code"])
+
+	code, _ := aiDownload(t, client, srv.URL, tok, "main://restored/outside.txt")
+	assert.Equal(t, http.StatusNotFound, code)
+}
+
+func TestArchiveExtractEnforcesPolicyBeforeQueueing(t *testing.T) {
+	srv, client, store, tok, _ := aiFixtureWithOps(t)
+	require.NoError(t, store.UpsertSetting(context.Background(), archivecli.SettingMaxEntries, "1"))
+	raw := craftedZip(t, map[string]string{"one.txt": "one", "two.txt": "two"})
+	resp := aiReq(t, client, http.MethodPost, srv.URL+"/api/ai/upload", tok, map[string]any{
+		"path":           "main://archives/too-many.zip",
+		"content_base64": base64.StdEncoding.EncodeToString(raw),
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	resp = aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/extract", tok, map[string]any{
+		"path": "main://archives/too-many.zip",
+		"dest": "main://restored",
+	})
+	require.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	resp.Body.Close()
+	assert.Equal(t, "ARCHIVE_LIMIT_EXCEEDED", body["code"])
+
+	for _, target := range []string{"main://restored/one.txt", "main://restored/two.txt"} {
+		code, _ := aiDownload(t, client, srv.URL, tok, target)
+		assert.Equal(t, http.StatusNotFound, code)
+	}
+}
+
+// uploadArchive puts raw bytes into the fixture storage through the AI surface.
+func uploadArchive(t *testing.T, client *http.Client, base, tok, target string, raw []byte) {
+	t.Helper()
+	resp := aiReq(t, client, http.MethodPost, base+"/api/ai/upload", tok, map[string]any{
+		"path":           target,
+		"content_base64": base64.StdEncoding.EncodeToString(raw),
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func extractStatus(t *testing.T, client *http.Client, base, tok, path, dest string) (int, map[string]any) {
+	t.Helper()
+	resp := aiReq(t, client, http.MethodPost, base+"/api/files/archive/extract", tok, map[string]any{"path": path, "dest": dest})
+	defer resp.Body.Close()
+	var body map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	return resp.StatusCode, body
+}
+
+// `tar czf` pipes through gzip, which then stores no file name, and the
+// server's temporary copy of the upload is called filex-arc-*.zip: 7-Zip
+// named the inner layer after THAT, no .tar file appeared, and every such
+// archive failed with 502 ARCHIVE_PROVIDER_FAILED. Found by the break tests.
+func TestArchiveExtractTarGzWithoutAStoredName(t *testing.T) {
+	srv, client, _, tok := aiFixture(t)
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "site/index.html", Typeflag: tar.TypeReg, Mode: 0o644, Size: 5}))
+	_, _ = tw.Write([]byte("hello"))
+	require.NoError(t, tw.Close())
+	require.NoError(t, gw.Close())
+	uploadArchive(t, client, srv.URL, tok, "main://archives/site.tar.gz", buf.Bytes())
+
+	status, body := extractStatus(t, client, srv.URL, tok, "main://archives/site.tar.gz", "main://restored")
+	require.Equal(t, http.StatusOK, status, "%v", body)
+	code, got := aiDownload(t, client, srv.URL, tok, "main://restored/site/index.html")
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "hello", string(got))
+}
+
+// A FIFO or a device in a tar has no "Symbolic Link" or "Hard Link" field in
+// 7-Zip's listing — only its mode says what it is — so the link check #48
+// added let it through to extraction. Refused before anything is queued.
+func TestArchiveExtractRejectsTarSpecialFilesBeforeQueueing(t *testing.T) {
+	srv, client, _, tok, _ := aiFixtureWithOps(t)
+	for _, typeflag := range []byte{tar.TypeFifo, tar.TypeChar, tar.TypeBlock} {
+		var buf bytes.Buffer
+		tw := tar.NewWriter(&buf)
+		require.NoError(t, tw.WriteHeader(&tar.Header{Name: "ok.txt", Typeflag: tar.TypeReg, Mode: 0o644, Size: 2}))
+		_, _ = tw.Write([]byte("ok"))
+		require.NoError(t, tw.WriteHeader(&tar.Header{Name: "special", Typeflag: typeflag, Mode: 0o644}))
+		require.NoError(t, tw.Close())
+		name := "main://archives/special-" + string(rune(typeflag)) + ".tar"
+		uploadArchive(t, client, srv.URL, tok, name, buf.Bytes())
+
+		status, body := extractStatus(t, client, srv.URL, tok, name, "main://restored")
+		assert.Equal(t, http.StatusBadRequest, status, "typeflag %q: %v", typeflag, body)
+		assert.Equal(t, "UNSUPPORTED_FORMAT", body["code"], "typeflag %q", typeflag)
+		code, _ := aiDownload(t, client, srv.URL, tok, "main://restored/ok.txt")
+		assert.Equal(t, http.StatusNotFound, code, "typeflag %q: nothing may be written", typeflag)
+	}
+}
+
+// A 7z made with `7zz a -snl` stores a symlink as a file whose Attributes end
+// in `lrwxrwxrwx`, with no "Symbolic Link" field. It is refused before queueing.
+func TestArchiveExtractRejects7zSymlinkBeforeQueueing(t *testing.T) {
+	bin, err := exec.LookPath("7zz")
+	if err != nil {
+		t.Skip("7-Zip is not installed")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need a unix host")
+	}
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "ok.txt"), []byte("ok"), 0o600))
+	require.NoError(t, os.Symlink("../../outside/secret.txt", filepath.Join(src, "sym")))
+	archive := filepath.Join(t.TempDir(), "sym.7z")
+	cmd := exec.Command(bin, "a", "-snl", "-bso0", archive, "ok.txt", "sym")
+	cmd.Dir = src
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+	raw, err := os.ReadFile(archive)
+	require.NoError(t, err)
+
+	srv, client, _, tok, _ := aiFixtureWithOps(t)
+	uploadArchive(t, client, srv.URL, tok, "main://archives/sym.7z", raw)
+	status, body := extractStatus(t, client, srv.URL, tok, "main://archives/sym.7z", "main://restored")
+	assert.Equal(t, http.StatusBadRequest, status, "%v", body)
+	assert.Equal(t, "UNSUPPORTED_FORMAT", body["code"])
+	code, _ := aiDownload(t, client, srv.URL, tok, "main://restored/ok.txt")
+	assert.Equal(t, http.StatusNotFound, code)
+}
+
+// A plain ZIP stays with archive/zip, whose reader stops at the size a member
+// declares (ErrFormat past it): a member whose headers say 100 bytes over 8 MiB
+// of deflated zeros never lands bigger than 100 bytes, so the declared-size
+// preflight holds for plain ZIPs as well.
+func TestArchiveExtractALyingZipMemberNeverLandsBiggerThanDeclared(t *testing.T) {
+	srv, client, _, tok := aiFixture(t)
+	uploadArchive(t, client, srv.URL, tok, "main://archives/lying.zip", archivetest.LyingZip(t, 8<<20))
+	status, body := extractStatus(t, client, srv.URL, tok, "main://archives/lying.zip", "main://restored")
+	require.Less(t, status, 500, "%v", body)
+	code, got := aiDownload(t, client, srv.URL, tok, "main://restored/payload.bin")
+	if code == http.StatusOK {
+		assert.LessOrEqual(t, len(got), 100, "the member landed bigger than it declared")
+	}
+}
+
+// Everything but a plain ZIP is made by 7-Zip. On a server without it (the
+// slim image, a desktop install) #48 accepted the request, staged every
+// selected file into the workspace and only then failed the job in the
+// background. It is refused when asked, and nothing is queued.
+func TestArchiveCreateWithoutSevenZipIsRefusedUpFront(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-7zip-here")
+	srv, client, _, tok, _ := aiFixtureConfigured(t, true, func(c *config.Config) { c.Archive.SevenZipBin = missing })
+	seedFiles(t, client, srv.URL, tok, map[string]string{"main://source/one.txt": "ONE"})
+	for _, c := range []struct{ dest, format, password string }{
+		{"main://archives/x.7z", "7z", ""},
+		{"main://archives/x.tar.gz", "tar.gz", ""},
+		{"main://archives/x.zip", "zip", "secret"},
+	} {
+		resp := aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/create", tok, map[string]any{
+			"sources": []string{"main://source/one.txt"}, "dest": c.dest, "format": c.format, "password": c.password,
+		})
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+		resp.Body.Close()
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, "%s: %v", c.format, body)
+		assert.Equal(t, "PROVIDER_UNAVAILABLE", body["code"], c.format)
+	}
+	resp := aiReq(t, client, http.MethodGet, srv.URL+"/api/files/ops", tok, nil)
+	var listed struct {
+		Ops []map[string]any `json:"ops"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&listed))
+	resp.Body.Close()
+	assert.Empty(t, listed.Ops, "nothing may be queued for a format this server cannot make")
+
+	// ...and a plain ZIP, which filex makes itself, still is.
+	resp = aiReq(t, client, http.MethodPost, srv.URL+"/api/files/archive/create", tok, map[string]any{
+		"sources": []string{"main://source/one.txt"}, "dest": "main://archives/plain.zip", "format": "zip",
+	})
+	resp.Body.Close()
+	assert.Equal(t, http.StatusAccepted, resp.StatusCode)
+}

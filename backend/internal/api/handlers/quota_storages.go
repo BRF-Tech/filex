@@ -25,6 +25,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
+	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 )
 
 // storageUsageTTL is how long a storage's (files, bytes) pair is reused before
@@ -90,6 +91,11 @@ type StorageUsageRow struct {
 	Name      string `json:"name"`
 	UsedBytes int64  `json:"used_bytes"`
 	FileCount int64  `json:"file_count"`
+	// Coverage is set when the figure counts only part of the drive: its
+	// first scan is still running, or it is catalogued lazily and not all of
+	// it has been (docs/LAZY-CATALOGUE.md). The card then draws it as a lower
+	// bound and says why.
+	Coverage *syncpkg.CatalogueCoverage `json:"coverage,omitempty"`
 }
 
 // AttachACL wires the RBAC resolver. nil (ACL unwired) means no grant
@@ -179,7 +185,11 @@ func (h *Quota) StorageUsage(w http.ResponseWriter, r *http.Request) {
 			files, bytes = c, sz
 			h.usage.put(s.ID, files, bytes)
 		}
-		rows = append(rows, StorageUsageRow{Name: s.Name, UsedBytes: bytes, FileCount: files})
+		row := StorageUsageRow{Name: s.Name, UsedBytes: bytes, FileCount: files}
+		if h.Lazy != nil {
+			row.Coverage = h.Lazy.CatalogueCoverage(ctx, s)
+		}
+		rows = append(rows, row)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"storages": rows})

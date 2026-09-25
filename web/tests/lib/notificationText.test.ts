@@ -96,6 +96,26 @@ describe('renderNotification', () => {
     });
   });
 
+  it('describes archive completion without falling back to a generic new-file event', () => {
+    expect(renderNotification({
+      event: 'archive.created',
+      title: 'archive.created',
+      body: 'Archives/backup.7z',
+      meta: { path: 'Archives/backup.7z', node: { path: 'Archives/backup.7z', name: 'backup.7z' } },
+    }, 'en')).toEqual({
+      title: 'Archive created: backup.7z',
+      body: 'Archives/backup.7z',
+    });
+    expect(renderNotification({
+      event: 'archive.extracted',
+      title: 'archive.extracted',
+      meta: { path: 'Restored', count: 1 },
+    }, 'en')).toEqual({
+      title: 'Extraction completed',
+      body: '1 file extracted to Restored',
+    });
+  });
+
   it('names the uploader, or says "someone" when the visitor typed nothing', () => {
     const drop = (uploader: string, count: number): NotificationLike => ({
       event: 'drop.received',

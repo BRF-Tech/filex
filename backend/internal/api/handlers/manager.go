@@ -26,6 +26,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 
@@ -67,6 +68,11 @@ type Manager struct {
 	// this the small-file path had no ceiling at all, and a user could sail
 	// past their limit a few megabytes at a time. nil disables enforcement.
 	Quota *quota.Service
+	// Lazy answers what a listing needs from the catalogue's own state: is it
+	// complete, can it vouch for this folder, and (on a lazy storage) please
+	// catalogue what was just opened. See lazy_listing.go. nil = the catalogue
+	// is whatever the last scan left.
+	Lazy LazyCatalogue
 }
 
 // checkQuota refuses a write that would put the acting account over its
@@ -341,7 +347,7 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 	infos := make([]storageInfo, 0, len(storages))
 	for _, s := range storages {
 		storageNames = append(storageNames, s.Name)
-		infos = append(infos, storageInfo{Name: s.Name, ReadOnly: s.ReadOnly})
+		infos = append(infos, storageInfo{Name: s.Name, ReadOnly: s.ReadOnly, Coverage: h.coverageOf(r.Context(), s)})
 	}
 	r = r.WithContext(withStorageInfo(r.Context(), infos))
 
@@ -670,6 +676,12 @@ func mimeByExt(name string) string {
 // requested dir (newly created via mkdir, just renamed, external write,
 // pre-sync) we ask the backing driver directly so the SFC's reactive
 // store still re-renders. The next sync run reconciles the cache.
+//
+// …and when the cache knows the folder but cannot VOUCH for it — a storage
+// whose first scan has not finished, a lazily catalogued folder that is not
+// watched — the folder is listed from the driver with the catalogue laid over
+// it (vfIndexMerged), so nothing reads as missing and nothing only the
+// catalogue knows (ids, owners, thumbnails) is lost.
 func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, storageNames []string, dirsOnly bool) {
 	// RBAC: the caller must be able to see this directory (either they have
 	// ≥viewer on it, or it's an ancestor folder on the way to a grant). The
@@ -683,6 +695,10 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
+
+	// Asked before the cache is read: on a lazy storage this is also the
+	// "somebody opened this folder" that gets it catalogued (never blocks).
+	vouched := h.catalogueVouches(s, rel)
 
 	parentID, dirname, err := h.resolveDirNode(r.Context(), s.ID, rel)
 	if err != nil {
@@ -700,14 +716,15 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 		return
 	}
 
-	// Pre-sync escape hatch: brand-new storages have an empty cache
-	// even though the driver may have hundreds of objects sitting on
-	// disk/in the bucket. Trust the driver over the cache until the
-	// first sync has run — afterwards the cache is authoritative
-	// (truly-empty dirs return [] without firing an extra driver
-	// list call).
-	if len(nodes) == 0 && s.LastSyncAt == nil {
-		if h.vfIndexFromDriver(w, r, s, rel, storageNames, dirsOnly, set) {
+	// Pre-sync escape hatch, widened: a storage whose first scan has not
+	// finished — or a lazy folder the catalogue does not vouch for — is
+	// listed from the driver with the catalogue overlaid. It used to apply
+	// only while the folder had NO catalogued children, so the root of a big
+	// storage showed the handful of entries the first scan had reached, for
+	// as long as that scan ran. Afterwards the cache is authoritative (a
+	// truly empty folder returns [] without an extra driver call).
+	if !vouched {
+		if h.vfIndexMerged(w, r, s, rel, dirname, storageNames, dirsOnly, set, nodes) {
 			return
 		}
 	}
@@ -726,6 +743,16 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 		}
 	}
 	files := projectFileNodes(s.Name, nodes, dirsOnly, set, h.ThumbSigner, h.hydrateOwnerNames(r.Context(), nodes))
+	h.respondIndex(w, r, s, rel, dirname, storageNames, dirsOnly, set, files, nil)
+}
+
+// respondIndex writes the listing response every index path shares — from
+// the catalogue, from the driver, or merged. objs is the driver listing when
+// there was one (nil from the catalogue): its encrypted-folder marker flags a
+// folder whose marker row does not exist yet.
+func (h *Manager) respondIndex(w http.ResponseWriter, r *http.Request, s *model.Storage, rel, dirname string,
+	storageNames []string, dirsOnly bool, set *acl.Set, files []map[string]any, objs []storage.Object) {
+	h.annotateSizes(r.Context(), s, files, h.coverageOf(r.Context(), s))
 	if dirsOnly {
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
 		return
@@ -745,6 +772,16 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 	   tell the client where the marker lives (e2e_root) so it can show the
 	   lock screen + fetch the marker. Server stays crypto-blind. */
 	h.annotateE2e(r.Context(), s, rel, files, resp)
+	/* cold-cache: a freshly-created encrypted folder (marker uploaded seconds
+	   ago, sync not yet run) must still present its lock screen. The marker
+	   object is right there in the driver listing, so flag directly. */
+	for _, o := range objs {
+		if o.Name == e2e.MarkerName {
+			resp["e2e"] = true
+			resp["e2e_root"] = joinAdapterPath(s.Name, strings.Trim(rel, "/"))
+			break
+		}
+	}
 	/* /wiring:e2 */
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -825,40 +862,7 @@ func (h *Manager) vfIndexFromDriver(w http.ResponseWriter, r *http.Request, s *m
 		}
 	}
 	files := projectDriverObjects(s.Name, clean, objs, dirsOnly, set)
-	if dirsOnly {
-		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
-		return true
-	}
-	annotateAppBadges(r.Context(), h.Store, s.ID, files)
-	resp := map[string]any{
-		"adapter":      s.Name,
-		"storages":     storageNames,
-		"storage_info": storageInfoFrom(r.Context()),
-		"dirname":      joinAdapterPath(s.Name, clean),
-		"read_only":    s.ReadOnly,
-		"perm":         permString(set, clean),
-		"files":        files,
-	}
-	/* wiring:e2 — cold-cache fallback: a freshly-created encrypted folder
-	   (marker uploaded seconds ago, sync not yet run) must still present
-	   its lock screen. The marker object is right there in the driver
-	   listing, so flag directly; ancestor detection additionally goes
-	   through the DB walk in case parents ARE cached. */
-	for _, o := range objs {
-		if o.Name == e2e.MarkerName {
-			resp["e2e"] = true
-			resp["e2e_root"] = joinAdapterPath(s.Name, clean)
-			break
-		}
-	}
-	if _, ok := resp["e2e_root"]; !ok {
-		if root, found := e2e.FindRoot(r.Context(), h.Store, s.ID, clean); found {
-			resp["e2e"] = root == clean
-			resp["e2e_root"] = joinAdapterPath(s.Name, root)
-		}
-	}
-	/* /wiring:e2 */
-	writeJSON(w, http.StatusOK, resp)
+	h.respondIndex(w, r, s, clean, clean, storageNames, dirsOnly, set, files, objs)
 	return true
 }
 
@@ -957,6 +961,11 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 	if filter == "" {
 		h.vfIndex(w, r, s, rel, storageNames, false)
 		return
+	}
+	// Somebody is using the storage: a lazy catalogue's background filler
+	// slows down while they do.
+	if h.Lazy != nil {
+		h.Lazy.NoteActivity(s.ID)
 	}
 
 	// Cross-storage mode — when the SPA is showing the multi-storage
@@ -1647,6 +1656,11 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 type storageInfo struct {
 	Name     string `json:"name"`
 	ReadOnly bool   `json:"read_only"`
+	// Coverage is set while the storage's catalogue does not cover all of
+	// it — a first scan still running, a lazy catalogue still filling, or
+	// one that only catalogues the folders people open. Search, folder sizes
+	// and drive usage say so from this (docs/LAZY-CATALOGUE.md).
+	Coverage *syncpkg.CatalogueCoverage `json:"coverage,omitempty"`
 }
 
 type storageInfoKey struct{}

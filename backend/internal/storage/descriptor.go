@@ -112,6 +112,12 @@ type Descriptor struct {
 	// Filled by Descriptors(); the registry does not hold them, which keeps
 	// TestDescriptorMatchesInit about what Init reads.
 	ScanFields []Field `json:"scan_fields,omitempty"`
+
+	// LazyFields are the lazy catalogue's settings (LazyFields()), offered
+	// only for a driver a storage may be catalogued lazily on
+	// (model.LazyDrivers). Same map, same renderer as ScanFields; filled by
+	// the admin descriptor endpoint, which knows which drivers those are.
+	LazyFields []Field `json:"lazy_fields,omitempty"`
 }
 
 // ScanExcludeKey is the storage config key holding a storage's scan
@@ -146,6 +152,149 @@ func ScanFields() []Field {
 		Monospace:   true,
 		Multiline:   true,
 	}}
+}
+
+// Lazy catalogue settings (sync_mode `lazy`, issue #45 — docs/LAZY-CATALOGUE.md).
+// They live in the storage's config map beside ScanExcludeKey, and like it they
+// are the scan's, not the driver's: Init never reads them.
+const (
+	// LazyFillKey chooses the behaviour: LazyFillBackground (A, the default)
+	// or LazyFillOnOpen (B).
+	LazyFillKey = "lazy_fill"
+	// LazyMaxWatchesKey caps the fsnotify watches on visited folders.
+	LazyMaxWatchesKey = "lazy_max_watches"
+	// LazyWatchTTLKey is how many minutes a folder nobody opens keeps its watch.
+	LazyWatchTTLKey = "lazy_watch_ttl"
+
+	LazyFillBackground = "background"
+	LazyFillOnOpen     = "on_open"
+
+	LazyMaxWatchesDefault = 1024
+	LazyWatchTTLDefault   = 60 // minutes
+)
+
+// LazyFields returns the lazy catalogue's settings for a storage on a driver
+// that supports it (model.LazyDrivers), in the shape every other storage
+// field has, so the storage form draws them with the same renderer. A fresh
+// slice: callers cannot edit the set.
+func LazyFields() []Field {
+	minOne := 1
+	maxWatches := 1_000_000
+	maxTTL := 7 * 24 * 60
+	return []Field{
+		{
+			Key:     LazyFillKey,
+			Type:    FieldSelect,
+			Label:   "Catalog behavior",
+			I18nKey: "storages.fields.lazyFill",
+			Help: "Click first, fill in the background: the folder somebody opens is listed from disk at once and cataloged " +
+				"first, and a throttled background pass catalogs the rest, so search, folder sizes and usage end up covering " +
+				"everything. Only on open: nothing runs in the background — only the folders people visit are cataloged, and " +
+				"search, folder sizes and usage say they cover those folders only.",
+			HelpI18nKey: "storages.fieldHelp.lazyFill",
+			Default:     LazyFillBackground,
+			Options: []SelectOption{
+				{Value: LazyFillBackground, Label: "Click first, fill in the background", I18nKey: "storages.lazyFill.background"},
+				{Value: LazyFillOnOpen, Label: "Only on open", I18nKey: "storages.lazyFill.on_open"},
+			},
+		},
+		{
+			Key:         LazyMaxWatchesKey,
+			Type:        FieldInt,
+			Label:       "Watched folders (at most)",
+			I18nKey:     "storages.fields.lazyMaxWatches",
+			Help:        "Visited folders are watched for changes made outside filex. Past this many, the folder opened longest ago stops being watched and is checked again the next time somebody opens it.",
+			HelpI18nKey: "storages.fieldHelp.lazyMaxWatches",
+			Default:     LazyMaxWatchesDefault,
+			Min:         &minOne,
+			Max:         &maxWatches,
+			Advanced:    true,
+		},
+		{
+			Key:         LazyWatchTTLKey,
+			Type:        FieldInt,
+			Label:       "Stop watching after (minutes unopened)",
+			I18nKey:     "storages.fields.lazyWatchTTL",
+			Help:        "A folder nobody has opened for this long stops being watched; it is checked again the next time somebody opens it.",
+			HelpI18nKey: "storages.fieldHelp.lazyWatchTTL",
+			Default:     LazyWatchTTLDefault,
+			Min:         &minOne,
+			Max:         &maxTTL,
+			Advanced:    true,
+		},
+	}
+}
+
+// ValidateLazyConfig checks the lazy catalogue's settings in a storage's
+// config map against LazyFields(): the behaviour must be one of its options
+// and the two numbers within their bounds. A key that is absent (or empty)
+// is fine — the default applies. The admin API refuses a storage that fails.
+func ValidateLazyConfig(cfg map[string]any) error {
+	for _, f := range LazyFields() {
+		v, ok := ConfigLookup(cfg, f.Key)
+		if !ok || v == nil {
+			continue
+		}
+		switch f.Type {
+		case FieldSelect:
+			s, isStr := v.(string)
+			if !isStr {
+				return fmt.Errorf("%s must be one of %s", f.Key, optionValues(f.Options))
+			}
+			if s == "" {
+				continue
+			}
+			found := false
+			for _, o := range f.Options {
+				found = found || o.Value == s
+			}
+			if !found {
+				return fmt.Errorf("%s must be one of %s", f.Key, optionValues(f.Options))
+			}
+		case FieldInt:
+			n, isNum := lazyInt(v)
+			if !isNum {
+				if s, isStr := v.(string); isStr && strings.TrimSpace(s) == "" {
+					continue
+				}
+				return fmt.Errorf("%s must be a whole number", f.Key)
+			}
+			if (f.Min != nil && n < *f.Min) || (f.Max != nil && n > *f.Max) {
+				return fmt.Errorf("%s must be between %d and %d", f.Key, *f.Min, *f.Max)
+			}
+		}
+	}
+	return nil
+}
+
+func optionValues(opts []SelectOption) string {
+	vals := make([]string, 0, len(opts))
+	for _, o := range opts {
+		vals = append(vals, o.Value)
+	}
+	return strings.Join(vals, ", ")
+}
+
+// lazyInt reads a number the way JSON and a form deliver it.
+func lazyInt(v any) (int, bool) {
+	switch x := v.(type) {
+	case float64:
+		if x != float64(int(x)) {
+			return 0, false
+		}
+		return int(x), true
+	case int:
+		return x, true
+	case int64:
+		return int(x), true
+	case string:
+		var n int
+		if _, err := fmt.Sscanf(strings.TrimSpace(x), "%d", &n); err != nil || fmt.Sprint(n) != strings.TrimSpace(x) {
+			return 0, false
+		}
+		return n, true
+	}
+	return 0, false
 }
 
 // Field returns the field with the given key.

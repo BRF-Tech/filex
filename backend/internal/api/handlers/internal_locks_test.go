@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -42,6 +43,65 @@ func freeze(t *testing.T, store db.Store, st *model.Storage, rel string, pluginI
 		StorageID: st.ID, PathHash: pathkey.Hash(st.ID, "/"+rel), Rel: rel,
 		PluginID: pluginID, PluginName: "sign", Reason: "imzalar toplanıyor", Until: &until,
 	}))
+}
+
+// sevenZipArchive builds a .7z of the given members with the host's 7-Zip,
+// or skips the test when there is none (the 7z path is 7-Zip's alone).
+func sevenZipArchive(t *testing.T, members map[string]string) []byte {
+	t.Helper()
+	bin, err := exec.LookPath("7zz")
+	if err != nil {
+		t.Skip("7-Zip is not installed")
+	}
+	src := t.TempDir()
+	names := make([]string, 0, len(members))
+	for name, content := range members {
+		full := filepath.Join(src, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o700))
+		require.NoError(t, os.WriteFile(full, []byte(content), 0o600))
+		names = append(names, name)
+	}
+	out := filepath.Join(t.TempDir(), "bundle.7z")
+	cmd := exec.Command(bin, append([]string{"a", "-bso0", out}, names...)...)
+	cmd.Dir = src
+	msg, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(msg))
+	raw, err := os.ReadFile(out)
+	require.NoError(t, err)
+	return raw
+}
+
+// A .7z goes through 7-Zip into a private workspace and is then copied in
+// member by member (#48). Each member lands through the same write gate as a
+// ZIP's: never over a frozen document, never under one of filex's own names.
+func TestLocks_SevenZipExtractionHonoursAFreezeAndTheReservedNames(t *testing.T) {
+	raw := sevenZipArchive(t, map[string]string{
+		"Sozlesmeler/NDA.docx":            "replaced by a 7z",
+		"fresh-7z.txt":                    "fine",
+		".versions/evil.txt":              "planted history",
+		".filex-open/a1b2c3d4e5f6-x.docx": "planted copy",
+	})
+	f := newMTFix(t, false)
+	ctx := context.Background()
+	admin, err := f.Store.GetUserByEmail(ctx, "admin@alpha.test")
+	require.NoError(t, err)
+	tok := issueToken(t, f.Store, admin.ID, fullScopes, nil)
+	const frozen = "Sozlesmeler/NDA.docx"
+	fxMutate(t, f.URL, tok, "newfolder", map[string]any{"path": "alpha://", "name": "Sozlesmeler"})
+	fxUpload(t, f.URL, tok, "alpha://Sozlesmeler", "NDA.docx", "the document under signature")
+	freeze(t, f.Store, f.StA, frozen, 991)
+
+	fxUpload(t, f.URL, tok, "alpha://", "bundle.7z", string(raw))
+	status, body := fxPost(t, f.URL+"/api/files/archive/extract", tok, map[string]any{"storage_id": f.StA.ID, "path": "bundle.7z", "dest": ""})
+	require.Equal(t, http.StatusAccepted, status, body)
+	f.drainOps(t)
+	assert.FileExists(t, filepath.Join(f.RootA, "fresh-7z.txt"), "precondition: the ordinary member was extracted")
+	got, err := os.ReadFile(filepath.Join(f.RootA, filepath.FromSlash(frozen)))
+	require.NoError(t, err)
+	assert.Equal(t, "the document under signature", string(got), "a .7z replaced the frozen document")
+	for _, planted := range []string{".versions/evil.txt", ".filex-open/a1b2c3d4e5f6-x.docx"} {
+		assert.NoFileExists(t, filepath.Join(f.RootA, filepath.FromSlash(planted)), ".7z extraction wrote %s", planted)
+	}
 }
 
 // assertLocked: a refused write answers 423 and names the app.
@@ -83,9 +143,15 @@ func TestLocks_EveryHTTPDoorHonoursAFreeze(t *testing.T) {
 	zipBytes := buildZip(t, map[string]string{"Sozlesmeler/NDA.docx": "replaced by an archive", "fresh.txt": "fine"})
 	fxUpload(t, f.URL, tok, "alpha://", "bundle.zip", string(zipBytes))
 	status, body := fxPost(t, f.URL+"/api/files/archive/extract", tok, map[string]any{"storage_id": f.StA.ID, "path": "bundle.zip", "dest": ""})
-	require.Equal(t, http.StatusOK, status, body)
-	assert.Contains(t, body, `"locked":1`, "the extraction did not say it skipped the frozen member: %s", body)
+	require.Equal(t, http.StatusAccepted, status, body)
+	f.drainOps(t)
 	assert.FileExists(t, filepath.Join(f.RootA, "fresh.txt"), "precondition: the other member was extracted")
+	// ...and through a .tar.gz, which #48 extracts along its own path.
+	fxUpload(t, f.URL, tok, "alpha://", "bundle.tar.gz", string(buildTarGz(t, map[string]string{"Sozlesmeler/NDA.docx": "replaced by a tarball", "fresh-tar.txt": "fine"})))
+	status, body = fxPost(t, f.URL+"/api/files/archive/extract", tok, map[string]any{"storage_id": f.StA.ID, "path": "bundle.tar.gz", "dest": ""})
+	require.Equal(t, http.StatusAccepted, status, body)
+	f.drainOps(t)
+	assert.FileExists(t, filepath.Join(f.RootA, "fresh-tar.txt"), "precondition: the other member of the .tar.gz was extracted")
 
 	// ── the operations queue ─────────────────────────────────────────────
 	// (A copy or move INTO its folder is allowed and de-collides — the queue
