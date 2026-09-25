@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An archive being made no longer looks like a click that did nothing.** An
+  archive job read "0%" beside an empty ring for most of its run: reading the
+  members off their storage — most of the time on a remote store — was worth
+  0–10% of the bar, counted per member, and the built-in ZIP and the write of
+  the result reported nothing. Measured in production, 175 files off S3: two
+  minutes between 0% and 9%, and the person who started it saw no sign of it.
+  Each phase now moves in bytes while it runs — reading 0–45%, compressing
+  45–90%, writing 90–99% — and creating or extracting an archive opens the
+  operations panel on the job, so its name, progress bar and Cancel are on
+  screen when the dialog closes rather than a small badge in the corner.
+
 ## [0.45.1] - 2026-09-25
 
 0.45.0 as it was meant to ship. **v0.45.0 was tagged but never published**:

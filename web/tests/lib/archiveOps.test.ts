@@ -48,4 +48,26 @@ describe('archive ops rows', () => {
       w.unmount();
     }
   });
+
+  // 2026-09-25, production: an archive of 175 files ran for two minutes and
+  // the person who started it saw "no sign of anything". The dialog had
+  // closed, the toast had gone after 2.5 s, and the job's one mark on screen
+  // was the collapsed badge — a "1 0%" pill in the far corner. The explorer
+  // reveals a job it has just started; revealing opens the panel on its row.
+  it('opens the panel on a job the explorer reveals, and only then', async () => {
+    const center = useOperations();
+    mount(PendingOpsTray, { props: { ops: [archiveRow('archive-create')], locale: 'tr', center } });
+    const w = mount(OperationsCenter, { props: { center, locale: 'tr' }, attachTo: document.body });
+    await nextTick();
+    expect(w.find('.fe-opc__badge').exists(), 'the badge is up').toBe(true);
+    expect(w.find('.fe-opc__panel').exists(), 'the panel stays closed until asked').toBe(false);
+
+    center.reveal();
+    await nextTick();
+    const panel = w.find('.fe-opc__panel');
+    expect(panel.exists(), 'revealing opens the panel').toBe(true);
+    expect(panel.text()).toContain('report.7z');
+    expect(panel.text()).toMatch(/Arşiv oluşturuluyor/);
+    w.unmount();
+  });
 });

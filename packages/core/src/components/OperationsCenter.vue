@@ -40,6 +40,16 @@ watch(visible, (v) => {
   if (!v) open.value = false;
 });
 
+// A job the person just started opens the panel on its row (useOperations
+// `reveal`). ⚠ Optional-chained: a store written by hand for a test or an
+// embed may not carry it, and a missing counter must not break the badge.
+watch(
+  () => props.center.revealRequests?.value ?? 0,
+  (n, before) => {
+    if (n > before) open.value = true;
+  },
+);
+
 // ---- progress ring ----
 const RING_R = 8.5;
 const RING_C = 2 * Math.PI * RING_R;
