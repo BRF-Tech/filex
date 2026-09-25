@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Everybody on a storage could read everybody's queued operations, file
+  paths included.** `GET /api/files/ops` — the list the explorer's operations
+  centre polls — was scoped to the storages a caller's tenant reaches and to
+  nothing finer, so every member of a tenant (every user of a single-tenant
+  install) was handed every other member's copies, moves, deletes, uploads and
+  app jobs: their sources and destinations, inside folders the reader may hold
+  no grant for, and a toast when one the tray was following finished.
+  `GET /api/files/ops/{id}` answered the full row, every source, for any id in
+  reach, and the ids are sequential. Found on a production install, where the
+  queue held a colleague's move into a folder of client records and handed it
+  to every member of the tenant, whatever their grants. An administrator still
+  follows every operation in reach; anybody else
+  is shown, can read and can cancel only the operations they queued, and gets
+  the same `404` for someone else's as for an id that does not exist. A row
+  that names nobody (queued before `actor_id` was recorded, or by a scheduled
+  app job) is an administrator's only.
+
 ## [0.46.0] - 2026-09-26
 
 ### Added

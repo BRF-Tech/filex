@@ -205,8 +205,9 @@ for — the cutoff the run purges below.
 
 **The run is an ops job** (kind `trash-empty`, `op_id`): it is in the
 explorer's operations centre and the admin tray, `GET /api/files/ops/{op_id}`
-reads it and `POST /api/files/ops/{op_id}/cancel` stops it (an administrator,
-or the admin who asked). A stopped run finishes the row in hand and stops;
+reads it and `POST /api/files/ops/{op_id}/cancel` stops it (an administrator
+of the tenant that asked; below an administrator nobody sees another person's
+ops). A stopped run finishes the row in hand and stops;
 what it had not reached stays in the trash. It never takes the queue's worker —
 copies, moves, deletes and upload commits keep running beside it — and a
 restart does not forget it: the row is requeued at boot and the run carries on

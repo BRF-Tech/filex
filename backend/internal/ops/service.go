@@ -592,6 +592,15 @@ func (s *Service) ListFor(ctx context.Context, status string, v Viewer) ([]*Op, 
 		where = append(where, `status=?`)
 		args = append(args, status)
 	}
+	if v.Own {
+		// Somebody's own rows only; a viewer who is nobody sees none (a row's
+		// actor_id is a user id, never 0 or less).
+		if v.Actor <= 0 {
+			return []*Op{}, nil
+		}
+		where = append(where, `actor_id=?`)
+		args = append(args, v.Actor)
+	}
 	if !v.All {
 		var either []string
 		if len(v.StorageIDs) > 0 {
