@@ -8,7 +8,8 @@ name: Release
 #
 # Job graph — and why it is shaped like this:
 #
-#   binaries ───── desktop  (three installers, attached to the Release)
+#   binaries ───── desktop  (installers, attached to the Release; the snap
+#                     │      also to the Snap Store) ── aur (PKGBUILD push)
 #   docker ─────── docker-manifest   (one native runner per architecture)
 #   npm            (independent)
 #
@@ -140,6 +141,43 @@ jobs:
           args: release --clean --release-notes=/tmp/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # .goreleaser.yml → homebrew_casks (`filex` into BRF-Tech/homebrew-filex,
+          # over this deploy key) and winget (`BRFTech.filex`, a PR to
+          # microsoft/winget-pkgs from brkfun's fork). Each block skips itself
+          # when its secret is absent.
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+      # ⚠ goreleaser logs a failed winget/Homebrew publish and carries on
+      # ("will not fail the pipeline"), so a release could miss both stores and
+      # still show green. This step makes that visible.
+      - name: Did the CLI reach winget and Homebrew?
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          set -uo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          case "$VER" in *-*) echo "pre-release: the stores are skipped on purpose"; exit 0 ;; esac
+          if [ -z "$HOMEBREW_TAP_DEPLOY_KEY" ]; then
+            echo "::warning title=Homebrew::HOMEBREW_TAP_DEPLOY_KEY is not set, the filex cask was not published."
+          elif gh api repos/BRF-Tech/homebrew-filex/contents/Casks/filex.rb --jq .content | base64 -d | grep -qF "version \"${VER}\""; then
+            echo "Homebrew: Casks/filex.rb is at ${VER}"
+          else
+            echo "::warning title=Homebrew::Casks/filex.rb is not at ${VER}, see the goreleaser log above."
+          fi
+          if [ -z "$WINGET_TOKEN" ]; then
+            echo "::warning title=winget::WINGET_TOKEN is not set, BRFTech.filex was not submitted."
+          else
+            # The trailing space keeps "BRFTech.filex-app <ver>" (the desktop PR) out.
+            n=$(GH_TOKEN="$WINGET_TOKEN" gh pr list --repo microsoft/winget-pkgs --state all --author "@me" --search "BRFTech.filex ${VER} in:title" --json title --jq "[.[] | select(.title | contains(\"BRFTech.filex ${VER}\"))] | length")
+            if [ "${n:-0}" -gt 0 ]; then
+              echo "winget: pull request for BRFTech.filex ${VER} is open"
+            else
+              echo "::warning title=winget::No pull request for BRFTech.filex ${VER}, see the goreleaser log above."
+            fi
+          fi
 
   # ── Docker images → ghcr.io ────────────────────────────────────────────
   #
@@ -386,7 +424,29 @@ jobs:
           - os: macos-14
             label: macos
             script: "dist:mac"
+          # The Microsoft Store package (MSIX). Built, installed and checked
+          # as a Store copy on the runner (desktop/scripts/store-e2e.mjs),
+          # then kept as a workflow artifact and — once the Partner Center
+          # credentials exist — submitted. It is NOT attached to the Release:
+          # an unsigned .appx installs for nobody; the Store signs it.
+          - os: windows-latest
+            label: store
+            script: "dist:store"
     runs-on: ${{ matrix.os }}
+    env:
+      # Partner Center → an Entra ID app with the Manager role
+      # (desktop/store/microsoft/listing.md). Mapped to env because a step's
+      # `if:` cannot read `secrets` directly.
+      MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+      MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+      MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+      MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+      MSSTORE_PRODUCT_ID: ${{ vars.MSSTORE_PRODUCT_ID }}
+      # A classic PAT with `public_repo`, from the account whose fork of
+      # microsoft/winget-pkgs the pull requests come from (brkfun).
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+      # The tap's deploy key (write access to BRF-Tech/homebrew-filex only).
+      HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -420,6 +480,11 @@ jobs:
           cd desktop
           npm version "$VER" --no-git-tag-version --allow-same-version
           node -e "console.log('desktop version =', require('./package.json').version)"
+      # `dist:linux` builds an .rpm as well (desktop/electron-builder.yml), and
+      # fpm hands that to rpmbuild, which ubuntu-latest does not ship.
+      - name: rpmbuild for the .rpm
+        if: matrix.label == 'linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm
       - name: Build installer
         env:
           # Never let the mac runner auction its keychain: a stray self-signed
@@ -428,12 +493,66 @@ jobs:
           # CSC_KEY_PASSWORD secrets) when a real Developer ID lands.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: pnpm --filter ./desktop run ${{ matrix.script }}
+      # The snap is its own target (never part of `dist:linux`), packed from
+      # the app the step above just built — no second web/main build, no second
+      # CLI. electron-builder's snap template needs no snapcraft here.
+      # ⚠ `--publish never`: on a tag electron-builder publishes by itself, and
+      # a snap's default publisher is the Snap Store — the upload is the
+      # explicit step further down, which says so when it cannot run.
+      - name: Build snap
+        if: matrix.label == 'linux'
+        run: pnpm --filter ./desktop exec electron-builder --linux snap --publish never
       # Listed before uploading so a build that produced nothing is visible in
       # the log as an empty directory rather than as a silently short release.
       - name: What was produced
         shell: bash
         run: ls -la desktop/release
+      # store-e2e registers the package from loose files, which needs no
+      # certificate but does need Developer Mode. The runner is a throwaway
+      # admin VM, so it is switched on here rather than signing a test cert.
+      - name: Developer Mode (for the Store package check)
+        if: matrix.label == 'store'
+        shell: pwsh
+        run: reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1
+      # ⚠ Before anything leaves the runner: installed, launched through its
+      # protocol, and asked over DevTools whether it knows it is a Store copy.
+      # A package Partner Center accepts is not a package that works.
+      - name: Install the Store package and check it as a Store copy
+        if: matrix.label == 'store'
+        run: pnpm --filter ./desktop run e2e:store
+      - name: Keep the Store package for Partner Center
+        if: matrix.label == 'store'
+        uses: actions/upload-artifact@v4
+        with:
+          name: msix-${{ github.ref_name }}
+          path: desktop/release/*.appx
+          if-no-files-found: error
+          retention-days: 90
+      - name: Microsoft Store CLI
+        if: matrix.label == 'store' && env.MSSTORE_CLIENT_SECRET != '' && env.MSSTORE_PRODUCT_ID != ''
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+      - name: Submit to the Microsoft Store
+        if: matrix.label == 'store' && env.MSSTORE_CLIENT_SECRET != '' && env.MSSTORE_PRODUCT_ID != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          msstore reconfigure --tenantId $env:MSSTORE_TENANT_ID --sellerId $env:MSSTORE_SELLER_ID --clientId $env:MSSTORE_CLIENT_ID --clientSecret $env:MSSTORE_CLIENT_SECRET
+          # The CLI looks for .msix/.msixupload; an .appx is the same format.
+          $appx = Get-ChildItem desktop/release/*.appx | Select-Object -First 1
+          $msix = Join-Path $appx.DirectoryName ($appx.BaseName + '.msix')
+          Copy-Item $appx.FullName $msix
+          # --noCommit: the submission waits in Partner Center as a draft.
+          # "What's new" is written there by a person (listing.md), then
+          # submitted by hand; drop --noCommit once that is automated.
+          msstore publish desktop -i $msix -id $env:MSSTORE_PRODUCT_ID --noCommit
+      # Not a silent skip: a release that did not reach the Store says so.
+      - name: Store submission skipped
+        if: matrix.label == 'store' && (env.MSSTORE_CLIENT_SECRET == '' || env.MSSTORE_PRODUCT_ID == '')
+        shell: bash
+        run: |
+          echo "::warning title=Microsoft Store::Not submitted — MSSTORE_* secrets or the MSSTORE_PRODUCT_ID variable are not set. Upload the msix-${GITHUB_REF_NAME} artifact in Partner Center by hand."
       - name: Attach to the release
+        if: matrix.label != 'store'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -441,7 +560,8 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           files=(desktop/release/*.exe desktop/release/*.blockmap desktop/release/*.AppImage \
-                 desktop/release/*.deb desktop/release/*.dmg desktop/release/*.zip \
+                 desktop/release/*.deb desktop/release/*.rpm desktop/release/*.snap \
+                 desktop/release/*.dmg desktop/release/*.zip \
                  desktop/release/latest*.yml)
           if [ ${#files[@]} -eq 0 ]; then
             echo "no desktop artefacts to upload" >&2
@@ -449,3 +569,157 @@ jobs:
           fi
           printf 'uploading: %s\n' "${files[@]}"
           gh release upload "${GITHUB_REF_NAME}" "${files[@]}" --clobber
+      # ── winget + Homebrew (the desktop app; the CLI goes through goreleaser) ──
+      # desktop/scripts/pkg-manifests.mjs writes both, hashing the files this
+      # job just built and pointing at the VERSIONED release URL.
+      # ⚠ From here on this tag's assets are pinned by hash in two public
+      # stores: never re-upload them. A fix is a new patch release.
+      - name: Package-manager manifests
+        if: matrix.label == 'windows' || matrix.label == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          if [ "${{ matrix.label }}" = windows ]; then
+            node desktop/scripts/pkg-manifests.mjs --version "$VER" --release-date "$(date -u +%F)" \
+              --windows desktop/release/filex-desktop-x64.exe --out pkg-out
+          else
+            node desktop/scripts/pkg-manifests.mjs --version "$VER" \
+              --mac desktop/release/filex-desktop-arm64.dmg --out pkg-out
+          fi
+      - name: Validate the winget manifests
+        if: matrix.label == 'windows'
+        shell: pwsh
+        run: |
+          $dir = (Get-ChildItem pkg-out/winget/manifests -Recurse -Filter '*.installer.yaml' | Select-Object -First 1).Directory.FullName
+          winget validate --manifest $dir
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          "WINGET_DIR=$dir" >> $env:GITHUB_ENV
+      - name: Submit to winget
+        if: matrix.label == 'windows' && env.WINGET_TOKEN != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          $ver = "$env:GITHUB_REF_NAME".TrimStart('v')
+          ./wingetcreate.exe submit --no-open --prtitle "New version: BRFTech.filex-app $ver" --token $env:WINGET_TOKEN $env:WINGET_DIR
+      - name: Commit the cask to the tap
+        if: matrix.label == 'macos' && env.HOMEBREW_TAP_DEPLOY_KEY != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          KEY="$RUNNER_TEMP/tap_key"
+          printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$KEY"
+          chmod 600 "$KEY"
+          export GIT_SSH_COMMAND="ssh -i $KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone --depth 1 git@github.com:BRF-Tech/homebrew-filex.git tap
+          mkdir -p tap/Casks
+          cp pkg-out/homebrew/Casks/filex-app.rb tap/Casks/
+          cd tap
+          git add Casks/filex-app.rb
+          if git diff --cached --quiet; then echo "cask already at ${VER}"; exit 0; fi
+          git -c user.name="filex release" -c user.email="hello@brf.sh" commit -m "filex-app ${VER}"
+          git push origin HEAD
+      # Not a silent skip: a release that did not reach a store says so.
+      - name: Package-manager submission skipped
+        if: (matrix.label == 'windows' && env.WINGET_TOKEN == '') || (matrix.label == 'macos' && env.HOMEBREW_TAP_DEPLOY_KEY == '')
+        shell: bash
+        run: |
+          echo "::warning title=${{ matrix.label == 'windows' && 'winget' || 'Homebrew' }}::Not submitted — the ${{ matrix.label == 'windows' && 'WINGET_TOKEN' || 'HOMEBREW_TAP_DEPLOY_KEY' }} secret is not set. The manifests are in the pkg-${{ matrix.label }} artifact."
+      - name: Keep the manifests
+        if: matrix.label == 'windows' || matrix.label == 'macos'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.label }}-${{ github.ref_name }}
+          path: pkg-out
+          retention-days: 90
+      # ⚠⚠ Never a silent skip. Without the secret the snap is still on the
+      # Release (above) but NOT in the Snap Store, and the run says so as a
+      # warning annotation and in the summary — a store that quietly stops
+      # getting releases is found months later by a user, not by us.
+      # The secret is `snapcraft export-login --snaps=filex-app --acls=…` output
+      # (desktop/README.md, "Publishing"); the snap is `filex-app` — `filex` is
+      # the CLI's name. Straight to `stable`: the snap
+      # is the same build the .deb is, and the Store's own review runs first.
+      - name: Upload to the Snap Store
+        if: matrix.label == 'linux'
+        shell: bash
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+          snap=desktop/release/filex-desktop-amd64.snap
+          [ -f "$snap" ] || { echo "no $snap to upload" >&2; exit 1; }
+          if [ -z "${SNAPCRAFT_STORE_CREDENTIALS:-}" ]; then
+            msg="SNAPCRAFT_STORE_CREDENTIALS is not set: $snap was NOT uploaded to the Snap Store (credentials missing). It is attached to the GitHub Release only."
+            echo "::warning title=Snap Store: not uploaded::$msg"
+            echo "### Snap Store: not uploaded (no credentials)" >> "$GITHUB_STEP_SUMMARY"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          sudo snap install snapcraft --classic
+          snapcraft whoami
+          snapcraft upload --release=stable "$snap"
+          echo "### Snap Store: uploaded to stable" >> "$GITHUB_STEP_SUMMARY"
+
+  # ── AUR (filex-app-bin) ─────────────────────────────────────────────
+  #
+  # The PKGBUILD repackages the .deb just attached, so it runs after `desktop`
+  # and hashes THAT file. packaging/aur/update-pkgbuild.sh sets pkgver and the
+  # checksums and regenerates .SRCINFO; both are kept as a run artifact either
+  # way. The push needs the SSH key registered with the AUR account — without
+  # it the run says so (warning + summary) instead of pretending.
+  aur:
+    name: AUR package (filex-app-bin)
+    needs: desktop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PKGBUILD and .SRCINFO for this tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "${GITHUB_REF_NAME}" -p filex-desktop-amd64.deb -D "$RUNNER_TEMP/rel"
+          bash packaging/aur/update-pkgbuild.sh "${GITHUB_REF_NAME}" --deb "$RUNNER_TEMP/rel/filex-desktop-amd64.deb"
+          cat packaging/aur/filex-app-bin/.SRCINFO
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aur-filex-app-bin
+          path: |
+            packaging/aur/filex-app-bin/PKGBUILD
+            packaging/aur/filex-app-bin/.SRCINFO
+          include-hidden-files: true
+      - name: Push to the AUR
+        shell: bash
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUR_SSH_PRIVATE_KEY:-}" ]; then
+            msg="AUR_SSH_PRIVATE_KEY is not set: filex-app-bin was NOT pushed to the AUR. PKGBUILD and .SRCINFO are in this run's artifacts."
+            echo "::warning title=AUR: not pushed::$msg"
+            echo "### AUR: not pushed (no SSH key)" >> "$GITHUB_STEP_SUMMARY"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # The committed PKGBUILD is a template (SKIP checksums) until the
+          # step above has rewritten it for this tag; never push that.
+          if grep -q "'SKIP'" packaging/aur/filex-app-bin/PKGBUILD; then
+            echo "PKGBUILD still carries SKIP checksums — not pushing" >&2
+            exit 1
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes"
+          git clone ssh://aur@aur.archlinux.org/filex-app-bin.git "$RUNNER_TEMP/aur"
+          cp packaging/aur/filex-app-bin/PKGBUILD packaging/aur/filex-app-bin/.SRCINFO "$RUNNER_TEMP/aur/"
+          cd "$RUNNER_TEMP/aur"
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then echo "AUR already at ${GITHUB_REF_NAME}"; exit 0; fi
+          git -c user.name="BRF Teknoloji" -c user.email="security@brf.sh" commit -q -m "Update to ${GITHUB_REF_NAME#v}"
+          git push origin HEAD:master
+          echo "### AUR: pushed ${GITHUB_REF_NAME#v}" >> "$GITHUB_STEP_SUMMARY"
