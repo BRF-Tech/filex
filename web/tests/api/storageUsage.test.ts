@@ -51,6 +51,16 @@ describe('api.storageUsage', () => {
     expect(await useFileApi({ apiBase: '', locale: 'en' }).storageUsage()).toBeNull();
   });
 
+  it('is null when there is no answer at all', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch');
+      }),
+    );
+    expect(await useFileApi({ apiBase: '', locale: 'en' }).storageUsage()).toBeNull();
+  });
+
   it('is null for a body that is not the usage shape', async () => {
     answer(200, '{"used_bytes":1}');
     expect(await useFileApi({ apiBase: '', locale: 'en' }).storageUsage()).toBeNull();

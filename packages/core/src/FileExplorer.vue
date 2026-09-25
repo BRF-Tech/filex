@@ -2299,6 +2299,10 @@ function onInspectorShareCreated(payload: { path: string; url: string }) {
  */
 const quotaMine = ref<QuotaSnapshot | null>(null);
 const quotaDrives = ref<MeasuredDrive[] | null>(null);
+/* ⚠ A lazy `computed`, and it has to stay one: `homeStorages` is declared
+   further down, so anything that reads it at setup time — a `watch` on this
+   line, say — throws "Cannot access before initialization" and takes the
+   explorer down (the `isNarrow` note in onMounted). */
 const quotaSnapshot = computed(() => storageLine(quotaMine.value, homeStorages.value, quotaDrives.value));
 async function loadQuota() {
   if (!identitySurfaces.value) {
@@ -2948,9 +2952,14 @@ function toggleHiddenFiles() {
  * The listing is ours; the storage list is the host's (`config.storages`), so
  * the host is told and re-answers it in its own time. Nothing here waits on
  * that: the folder is on screen again either way.
+ *
+ * surucu:d1 — the storage line is read again too: the person's usage and the
+ * drives' sizes both move, and a host that sends no sizes (the desktop app)
+ * would otherwise keep the figure the panel mounted with.
  */
 function refreshAll() {
   void load();
+  void loadQuota();
   emit('refresh');
 }
 

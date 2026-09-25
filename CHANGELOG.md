@@ -16,10 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sentence Home's drive card uses for a drive's size. A file a storage sync
   discovered has no owner, so beside a drive filled by a sync the line was a
   small fraction of it: 523.5 MB, next to a card saying 245.3 GB. Without a
-  quota both now print the size of the drives you can open, the figure Home's
-  cards print (`/api/files/quota/storages`, asked only for drives the host sent
-  no size for), as "at least" while a drive's catalogue does not cover it yet.
-  With a quota they print your share of it, as before.
+  quota both now print the size of the drives you can open, from
+  `/api/files/quota/storages` — the source of Home's drive cards — and "at
+  least" while part of it could not be counted yet. With a quota they print
+  your share of it, as before. The explorer reads the endpoint only for drives
+  the host sent no size for, so the web app costs no extra request.
 
 ## [0.45.0] - 2026-09-25
 

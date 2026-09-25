@@ -65,4 +65,14 @@ describe('SideNav — the storage line', () => {
     expect(explorer).toMatch(/await api\.storageUsage\(\)/);
     expect(explorer).not.toMatch(/used:\s*q\.used_bytes/);
   });
+
+  it('is read again by Refresh, like the listing beside it', () => {
+    // The drives' sizes and the person's usage both move; a Refresh that
+    // re-lists the folder and leaves the line at its mount-time figure is
+    // half a refresh (the desktop app measures the drives itself).
+    const explorer = readFileSync(path.join(CORE_SRC, 'FileExplorer.vue'), 'utf8');
+    const refresh = explorer.match(/function refreshAll\(\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(refresh, 'refreshAll was not found').not.toBe('');
+    expect(refresh).toMatch(/loadQuota\(\)/);
+  });
 });

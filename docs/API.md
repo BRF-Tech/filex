@@ -516,6 +516,10 @@ export interface ExplorerConfig {
      *  explorer itself, `GET /api/files/quota/storages`).
      *  ⚠ It must be the same quantity for every caller who gets it. */
     usedBytes?: number;
+    /** `usedBytes` counts only part of the storage (the server's `coverage`
+     *  beside the figure is not complete). Drawn as a lower bound: "at least
+     *  1.2 GB used", on the card and in the storage line. */
+    usedPartial?: boolean;
   }>;
 
   /** Where to persist the current path across reloads. */

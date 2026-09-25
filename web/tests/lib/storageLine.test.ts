@@ -88,6 +88,13 @@ describe('storageLine — a person without one', () => {
     expect(storageLine(uploader, namesOnly, rows)?.used).toBe(245_276_276_422);
   });
 
+  it('counts a drive once, however often the host lists it', () => {
+    const panel: PanelDrive[] = [{ name: DRIVE }, { name: DRIVE }];
+    expect(storageLine(uploader, panel, measured)?.used).toBe(245_276_276_422);
+    const sized: PanelDrive[] = [{ name: 'a', usedBytes: 100 }, { name: 'a', usedBytes: 100 }];
+    expect(storageLine(uploader, sized, null)?.used).toBe(100);
+  });
+
   it('counts every measured drive when the host lists none', () => {
     const rows: MeasuredDrive[] = [
       { name: 'a', used_bytes: 100 },

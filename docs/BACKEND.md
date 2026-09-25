@@ -1678,7 +1678,10 @@ Cost: one `COUNT(*) + SUM(size)` aggregate per visible storage, memoised
 process-wide for 15 s and keyed by storage id, so a page that shows every drive
 costs one pass per drive per quarter-minute no matter how many people have it
 open. A storage whose count fails is omitted rather than reported as `0`; the
-caller's card falls back to naming the kind of thing.
+caller's card falls back to naming the kind of thing. Its readers: Home's drive
+cards, the explorer's storage line for a person without a quota (only for
+drives the host sent no size for), and the admin top bar's storage chip, which
+polls it every 60 s — all inside that one cache.
 
 ---
 

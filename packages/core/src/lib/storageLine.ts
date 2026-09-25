@@ -104,7 +104,10 @@ export function storageLine(
   let used = 0;
   let counted = 0;
   let partial = false;
+  const seen = new Set<string>();
   for (const d of drives) {
+    if (seen.has(d.name)) continue; // one drive, one figure, however often it is listed
+    seen.add(d.name);
     const own = bytes(d.usedBytes);
     const row = own === null ? rows.get(d.name) : undefined;
     const figure = own ?? bytes(row?.used_bytes);

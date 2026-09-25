@@ -4,10 +4,17 @@
  * limit, how full the drives they can open are (`GET /api/files/quota/storages`).
  *
  * WHICH of the two the chip prints is core `storageLine`'s decision — the
- * same rule as the explorer panel's line, so the two cannot disagree. Without
- * a quota the person's own figure is only their upload counter (every file a
- * sync discovered counts for nobody), which put "523.5 MB" above a dashboard
- * whose drive held 245.3 GB (production, 2026-09-25).
+ * rule the explorer panel's line follows. Without a quota the person's own
+ * figure is only their upload counter (every file a sync discovered counts for
+ * nobody), which put "523.5 MB" above a dashboard whose drive held 245.3 GB
+ * (production, 2026-09-25).
+ *
+ * ⚠ One rule, not one input. The chip sums the endpoint's rows, which are the
+ * ENABLED drives the person may open; an administrator's explorer panel lists
+ * the admin storage list, disabled drives included, and so does the
+ * dashboard's total. And the endpoint leaves out a drive whose count failed:
+ * the panel, holding the names, draws its total as "at least", but the chip has
+ * no list to miss the drive from.
  *
  * The TopNav widget polls every 60s; views that need a one-shot snapshot can
  * call `fetch()` themselves. Failure is silent (the last answer stays) so a
@@ -29,9 +36,11 @@ export const useQuotaStore = defineStore('quota', () => {
 
   /** What the chip says; null = nothing trustworthy to say. */
   const line = computed(() => storageLine(snapshot.value, [], drives.value));
+  // ⚠ All three from `line`, so the chip draws what the rule decided: a
+  // snapshot of `quota_bytes: 0, unlimited: false` is still no ceiling.
   const used = computed(() => line.value?.used ?? 0);
-  const limit = computed(() => snapshot.value?.quota_bytes ?? 0);
-  const unlimited = computed(() => snapshot.value?.unlimited ?? false);
+  const limit = computed(() => line.value?.total ?? 0);
+  const unlimited = computed(() => line.value?.unlimited ?? false);
   /** `used` is a lower bound — a drive's catalogue does not cover it yet. */
   const partial = computed(() => line.value?.partial ?? false);
   // server returns 0..100; clamp for display so a brief over-quota race

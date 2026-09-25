@@ -21,6 +21,7 @@ vi.mock('@/api/quota', () => ({
 }));
 
 import QuotaWidget from '@/components/QuotaWidget.vue';
+import { useQuotaStore } from '@/stores/quota';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 
@@ -75,6 +76,27 @@ describe('QuotaWidget', () => {
     const w = await chip();
     expect(figure(w)).toBe('2,5 GB / 10 GB');
     expect(storages).not.toHaveBeenCalled();
+  });
+
+  it('takes "no ceiling" from the rule, not from the flag beside it', async () => {
+    // quota_bytes 0 IS no ceiling, whatever `unlimited` says: the chip must not
+    // draw the drives' size as "245.3 GB / 0 B" with a bar.
+    me.mockResolvedValue({ ...UPLOADER, unlimited: false });
+    storages.mockResolvedValue([DRIVE]);
+    const w = await chip();
+    expect(figure(w)).toBe('245,3 GB');
+    expect(tooltip(w)).toBe('245,3 GB kullanıldı · sınırsız');
+  });
+
+  it('keeps the last figure when a later poll cannot read the drives', async () => {
+    me.mockResolvedValue(UPLOADER);
+    storages.mockResolvedValueOnce([DRIVE]).mockRejectedValueOnce(new Error('502'));
+    const w = await chip();
+    expect(figure(w)).toBe('245,3 GB');
+    await useQuotaStore().fetch();
+    await flushPromises();
+    expect(storages).toHaveBeenCalledTimes(2);
+    expect(figure(w)).toBe('245,3 GB');
   });
 
   it('without a quota and without the drives’ figure, stays out of the bar', async () => {

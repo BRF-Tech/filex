@@ -17,8 +17,10 @@ The storage line under the explorer's navigation (web and desktop app) and the
 storage chip in the admin top bar print one or the other by a single rule
 (`packages/core/src/lib/storageLine.ts`): a person **with** a quota sees their
 own usage against it, because that ceiling is what refuses their next upload;
-a person **without** one sees the size of the drives they can open, the figure
-the Home cards print. Without a quota the per-user total is only what that
+a person **without** one sees the size of the drives they can open, from
+`/api/files/quota/storages` (or the sizes the host already passed in
+`config.storages`, which the Home cards print), and "at least" while part of
+it could not be counted. Without a quota the per-user total is only what that
 person uploaded — a file a storage sync discovered has no owner — so on a drive
 filled by a sync it is a small fraction of the drive.
 

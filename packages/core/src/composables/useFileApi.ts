@@ -1171,7 +1171,7 @@ export function useFileApi(config: ExplorerConfig) {
     search,
     globalSearch /* bul:s3 */,
     quotaMe /* surucu:d1 */,
-    storageUsage,
+    storageUsage /* surucu:d1 */,
     subfolders,
     newFolder,
     newFile,
