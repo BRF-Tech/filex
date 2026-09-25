@@ -2,10 +2,11 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.44.1"
+version: "0.44.2"
 releaseNotes: |-
-  filex v0.44.1 — 2026-09-25
-  • The release reaches the desktop packages and the stores again.
+  filex v0.44.2 — 2026-09-25
+  • The release reaches the desktop packages and the stores.
+  • A desktop page that cannot load now stops the release.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

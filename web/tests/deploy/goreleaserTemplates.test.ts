@@ -55,4 +55,31 @@ describe('.goreleaser.yml templates', () => {
   it('never uses envOrDefault (it failed the v0.44.0 release after publishing)', () => {
     expect(config).not.toMatch(/envOrDefault/);
   });
+
+  // ⚠⚠ v0.44.1 (release run 36094999699) failed at the same step for a second
+  // reason: a publisher's repository `token:` goes through GoReleaser's
+  // client.NewIfToken → tmpl.ApplySingleEnvOnly, which accepts exactly
+  // `{{ .Env.NAME }}` and nothing else (not even `{{ index .Env "NAME" }}`),
+  // with missingkey=error — so NAME must also be handed to the goreleaser step.
+  // The regular expression is GoReleaser's own (internal/tmpl/tmpl.go, v2.18.2).
+  const ENV_ONLY = /^{{\s*\.Env\.[^.\s}]+\s*}}$/;
+  const tokens = [...config.matchAll(/^\s*token:\s*'([^']*)'|^\s*token:\s*"([^"]*)"|^\s*token:\s*(\S.*)$/gm)].map(
+    (m) => (m[1] ?? m[2] ?? m[3] ?? '').trim(),
+  );
+
+  it('every repository token is a single {{ .Env.NAME }}, as GoReleaser demands', () => {
+    expect(tokens.length).toBeGreaterThan(0);
+    const bad = tokens.filter((t) => !ENV_ONLY.test(t));
+    expect(bad, `GoReleaser refuses these tokens at publish time: ${bad.join(' | ')}`).toEqual([]);
+  });
+
+  const workflowsDir = process.env.FILEX_WORKFLOWS_DIR;
+  it.skipIf(!workflowsDir)('the release hands every token variable to the goreleaser step', () => {
+    const release = readFileSync(path.join(workflowsDir!, 'release.yml'), 'utf8');
+    const step = release.slice(release.indexOf('goreleaser/goreleaser-action'));
+    const env = step.slice(step.indexOf('env:'), step.indexOf('\n      - ', step.indexOf('env:')));
+    const names = tokens.map((t) => /\.Env\.([^.\s}]+)/.exec(t)?.[1]).filter(Boolean) as string[];
+    const missing = names.filter((n) => !new RegExp(`^\\s+${n}:`, 'm').test(env));
+    expect(missing, `missing from the goreleaser step's env (missingkey=error): ${missing.join(', ')}`).toEqual([]);
+  });
 });

@@ -189,7 +189,7 @@ winget:
       # The fork the pull request comes from: the account that owns WINGET_TOKEN.
       owner: brkfun
       name: winget-pkgs
-      token: '{{ index .Env "WINGET_TOKEN" }}'
+      token: '{{ .Env.WINGET_TOKEN }}'
       pull_request:
         enabled: true
         base:

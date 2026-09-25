@@ -7,22 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.44.1] - 2026-09-25
+## [0.44.2] - 2026-09-25
 
 0.44.0 as it was meant to ship, and **the one to install the desktop app
-from**. v0.44.0's npm packages, container images and CLI binaries went out,
-but its release stopped at the winget step, so its desktop packages and every
-store and package-manager step behind it never ran. Everything 0.44.0
-describes below is in 0.44.1.
+from**. v0.44.0 and v0.44.1 both published their npm packages, container
+images and CLI binaries and then stopped at the winget step, so neither
+shipped the desktop packages or reached the stores. Everything 0.44.0
+describes below is in 0.44.2.
 
 ### Fixed
 
-- **The release reaches the desktop packages and the stores again.** The
-  winget and Homebrew-tap sections of `.goreleaser.yml` guarded their tokens
-  with a template function the release's GoReleaser does not define
-  (`envOrDefault`); it was evaluated only when publishing, after the Release,
-  npm and the images were out. They use `{{ index .Env "NAME" }}` now, and a
-  test fails on any template function GoReleaser does not have.
+- **The release reaches the desktop packages and the stores.** GoReleaser
+  accepts a publisher's repository token only as a single `.Env` variable
+  reference — nothing around it, not even an `index` lookup — and checks it
+  only when it publishes. The winget token is written that way now, and the
+  template test checks every token against GoReleaser's own rule and that the
+  release hands each variable to the GoReleaser step.
+- **A desktop page that cannot load now stops the release.** Nothing ran
+  the desktop unit tests before, which is how 0.43.x shipped a main window
+  whose script never parsed; the release's gate now runs them. Found and
+  proposed by Berk Başarır ([#52](https://github.com/BRF-Tech/filex/pull/52)).
+
+## [0.44.1] - 2026-09-25
+
+Tagged, but it stopped at the same winget step as 0.44.0 (see 0.44.2); its
+npm packages, container images and CLI binaries were published. It replaced
+`envOrDefault` in the release's template, and a test fails on any template
+function GoReleaser does not define.
 
 ## [0.44.0] - 2026-09-25
 
