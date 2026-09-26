@@ -358,6 +358,7 @@ export const en: Record<string, string> = {
   /* === bul:s3 === */
   'palette.everywhere': 'Everywhere',
   'palette.searching': 'Searching…',
+  'palette.everywhere_failed': 'The search could not reach the server. Try again.',
   'palette.saved': 'Saved searches',
   'palette.save': 'Save search',
   'palette.saved.delete': 'Delete saved search',

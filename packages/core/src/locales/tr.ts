@@ -350,6 +350,7 @@ export const tr: Record<string, string> = {
   /* === bul:s3 === */
   'palette.everywhere': 'Her yerde',
   'palette.searching': 'Aranıyor…',
+  'palette.everywhere_failed': 'Arama sunucuya ulaşamadı. Yeniden deneyin.',
   'palette.saved': 'Kayıtlı aramalar',
   'palette.save': 'Aramayı kaydet',
   'palette.saved.delete': 'Kayıtlı aramayı sil',
