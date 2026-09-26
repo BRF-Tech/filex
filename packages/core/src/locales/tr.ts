@@ -536,6 +536,7 @@ export const tr: Record<string, string> = {
   'opc.kind.delete': 'Silme',
   'opc.kind.rename': 'Yeniden adlandırma',
   'opc.kind.restore': 'Geri getirme',
+  'opc.kind.purge': 'Kalıcı silme',
   'opc.kind.convert': 'Dönüştürme',
   'opc.kind.archive': 'Arşiv',
   'opc.kind.plugin': 'Uygulama',

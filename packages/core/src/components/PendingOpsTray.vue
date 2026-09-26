@@ -62,7 +62,7 @@ function mapStatus(op: PendingOp): OperationStatus {
 }
 
 const DRAWN_KINDS: ReadonlySet<string> = new Set([
-  'copy', 'move', 'delete', 'rename', 'restore', 'plugin', 'archive-create', 'archive-extract',
+  'copy', 'move', 'delete', 'rename', 'restore', 'purge', 'plugin', 'archive-create', 'archive-extract',
 ]);
 
 /** A queue kind the center can draw. Anything it has no glyph for is shown as

@@ -54,7 +54,8 @@ type Capabilities struct {
 	Archive *archivecli.Service
 	// Queued names the changes this server runs as jobs of its operations queue
 	// when asked with `queued=1`: "rename" on POST /api/files/manager?action=rename,
-	// "restore" on POST /api/files/manager/restore. Published as `queued`;
+	// "restore" on POST /api/files/manager/restore, "purge" on
+	// DELETE /api/admin/trash/{id}. Published as `queued`;
 	// empty publishes nothing, and the explorer changes inside the request as
 	// it always did.
 	Queued []string

@@ -496,12 +496,13 @@ func BuildRouter(d *Deps) http.Handler {
 	th.AttachSigner(thumbSigner)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
 	ch.Archive = archiveEngine
-	// What the explorer may ask to run on the queue (queued=1), and only what
-	// is wired: the manager renames on it, the trash handler restores on it.
+	// What the explorer and the admin's Trash page may ask to run on the queue
+	// (queued=1), and only what is wired: the manager renames on it, the trash
+	// handler restores and purges on it.
 	if d.Ops != nil {
 		ch.Queued = []string{"rename"}
 		if d.Trash != nil {
-			ch.Queued = append(ch.Queued, "restore")
+			ch.Queued = append(ch.Queued, "restore", "purge")
 		}
 	}
 	ch.E2EEscrow = d.E2EEscrow /* wiring:e2 */
@@ -585,8 +586,10 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.Ops != nil && d.Trash != nil {
 		d.Ops.SetTrashEmptier(d.Trash)
 		trashH.AttachOps(d.Ops)
-		// …and so does a restore asked with `queued=1` (ops.OpRestore).
+		// …and so do a restore and a permanent delete asked with `queued=1`
+		// (ops.OpRestore, ops.OpPurge).
 		d.Ops.SetRestorer(trashH)
+		d.Ops.SetPurger(trashH)
 	}
 	metaH := handlers.NewMeta(d.Store)
 	// Starred / recent / tag rows carry the caller's `perm` like a folder

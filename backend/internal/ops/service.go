@@ -179,6 +179,8 @@ type Service struct {
 
 	// restorer brings a trash entry back for an OpRestore (rename_restore.go).
 	restorer Restorer
+	// purger takes a trash entry out for good for an OpPurge (rename_restore.go).
+	purger Purger
 
 	// life is what background runs live in; Stop ends it and waits (bg).
 	lifeMu     sync.Mutex
@@ -470,7 +472,7 @@ func (s *Service) SubmitJobWithCleanup(ctx context.Context, kind string, storage
 // queue had nowhere to put the target's storage.
 func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStorageID int64, sources []string, dest string) (*Op, error) {
 	switch kind {
-	case OpCopy, OpMove, OpDelete, OpUploadCommit, OpPluginAction, OpRename, OpRestore:
+	case OpCopy, OpMove, OpDelete, OpUploadCommit, OpPluginAction, OpRename, OpRestore, OpPurge:
 	default:
 		return nil, fmt.Errorf("ops: unknown kind %q", kind)
 	}
@@ -488,8 +490,8 @@ func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStor
 			return nil, err
 		}
 	}
-	if kind == OpRestore {
-		if _, err := restoreIDs(sources); err != nil {
+	if kind == OpRestore || kind == OpPurge {
+		if _, err := trashIDs(sources); err != nil {
 			return nil, err
 		}
 	}
@@ -508,7 +510,7 @@ func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStor
 			return nil, err
 		}
 	}
-	if kind == OpDelete || kind == OpUploadCommit || kind == OpPluginAction || kind == OpRename || kind == OpRestore {
+	if kind == OpDelete || kind == OpUploadCommit || kind == OpPluginAction || kind == OpRename || kind == OpRestore || kind == OpPurge {
 		// None of these has a destination storage; a stray id here would only
 		// be able to lie.
 		destStorageID = storageID
@@ -1058,6 +1060,8 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 		return s.runRename(ctx, drv, op, src)
 	case OpRestore:
 		return s.runRestore(ctx, src)
+	case OpPurge:
+		return s.runPurge(ctx, src)
 	case OpUploadCommit:
 		// `src` is the staged upload id. The committer owns the driver write
 		// and every post-write hook; this worker only owns the retry/progress
@@ -1369,8 +1373,8 @@ var ErrIntoOwnDescendant = errors.New("ops: a folder cannot be moved or copied i
 //     overwritten.
 //   - a rename TAKES its source and WRITES its new name, the way the
 //     explorer's own rename is judged; a taken name fails the op.
-//   - a restore's sources are trash entry ids, not paths: the handler judges
-//     each entry's original path before it queues them (handlers.Trash).
+//   - a restore's and a purge's sources are trash entry ids, not paths: the
+//     handler judges each entry before it queues them (handlers.Trash).
 //
 // Every one of them is judged on filex's own names — a copy INTO
 // `.filex-trash` is a file nobody can find, a move OUT of `.filex-open` takes
@@ -1378,7 +1382,7 @@ var ErrIntoOwnDescendant = errors.New("ops: a folder cannot be moved or copied i
 // Upload commits are not judged here: their sources are staged-upload ids,
 // and the target was judged when the upload began (StagedUpload.Begin).
 func Targets(kind string, sources []string, dest string) (src, dst []writegate.Target) {
-	if kind == OpUploadCommit || kind == OpRestore {
+	if kind == OpUploadCommit || kind == OpRestore || kind == OpPurge {
 		return nil, nil
 	}
 	for _, raw := range sources {

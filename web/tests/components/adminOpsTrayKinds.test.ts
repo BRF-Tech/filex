@@ -33,6 +33,11 @@ describe('the admin layout’s operations tray', () => {
     expect(text).not.toContain('Copying');
   });
 
+  it('names a queued purge as a permanent delete', async () => {
+    expect(await trayText('en', 'purge')).toContain('Deleting permanently');
+    expect(await trayText('tr', 'purge')).toContain('Kalıcı olarak siliniyor');
+  });
+
   it('names a queued restore as a restore', async () => {
     expect(await trayText('en', 'restore')).toContain('Restoring');
     expect(await trayText('tr', 'restore')).toContain('Geri getiriliyor');

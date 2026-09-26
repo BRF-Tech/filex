@@ -41,7 +41,7 @@ function iconFor(opType: string) {
   if (opType === 'move') return Move;
   if (opType === 'rename') return PenLine;
   if (opType === 'restore') return Undo2;
-  if (opType === 'delete' || opType === 'trash-empty') return Trash2;
+  if (opType === 'delete' || opType === 'trash-empty' || opType === 'purge') return Trash2;
   return Copy;
 }
 
@@ -59,6 +59,8 @@ function verbFor(opType: string): string {
       return t('pendingOps.verb.rename');
     case 'restore':
       return t('pendingOps.verb.restore');
+    case 'purge':
+      return t('pendingOps.verb.purge');
     case 'delete':
       return t('pendingOps.verb.delete');
     case 'trash-empty':

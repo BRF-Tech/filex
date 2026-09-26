@@ -267,6 +267,12 @@ func (h *Trash) RestoreNode(ctx context.Context, nodeID int64) error {
 	return nil
 }
 
+// PurgeNode implements ops.Purger: Purge's work for a queued purge. The entry
+// was judged when it was queued (Purge: ownsNode).
+func (h *Trash) PurgeNode(ctx context.Context, nodeID int64) error {
+	return h.Service.PurgeOne(ctx, nodeID)
+}
+
 // announceRestore re-indexes the restored node — and, for a folder, every
 // cached descendant, since deleting it dropped the whole subtree from the
 // index — enqueues a virus scan for every file coming back, then tells the
@@ -650,6 +656,23 @@ func (h *Trash) Purge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ownsNode(w, r, h.Store, id, "trash entry") {
+		return
+	}
+	// Asked with `queued=1` (the admin's Trash page asks): the purge is a job
+	// of the queue. A folder is purged one object and one row at a time, and
+	// the page's client gives up after 30 s.
+	if h.Ops != nil && r.URL.Query().Get("queued") == "1" {
+		n, err := h.Store.GetNode(r.Context(), id)
+		if err != nil || n == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
+			return
+		}
+		op, err := h.Ops.Submit(r.Context(), ops.OpPurge, n.StorageID, []string{strconv.FormatInt(id, 10)}, "")
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "purge: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"op": op})
 		return
 	}
 	// Finished even if the client leaves: the admin SPA gives up after 30 s,

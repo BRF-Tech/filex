@@ -546,6 +546,7 @@ export const en: Record<string, string> = {
   'opc.kind.delete': 'Delete',
   'opc.kind.rename': 'Rename',
   'opc.kind.restore': 'Restore',
+  'opc.kind.purge': 'Delete permanently',
   'opc.kind.convert': 'Convert',
   'opc.kind.archive': 'Archive',
   'opc.kind.plugin': 'App',

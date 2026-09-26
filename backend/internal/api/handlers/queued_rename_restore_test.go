@@ -8,9 +8,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -40,6 +42,7 @@ type queueRig struct {
 	*renameRig
 	svc *ops.Service
 	th  *handlers.Trash
+	drv storage.Driver
 }
 
 // newQueueRig is the manager and the trash handler over one local storage,
@@ -65,9 +68,10 @@ func newQueueRig(t *testing.T) *queueRig {
 	require.NoError(t, svc.Migrate(ctx))
 	svc.SetSync(mh)
 	svc.SetRestorer(th)
+	svc.SetPurger(th)
 	mh.AttachOps(svc)
 	th.AttachOps(svc)
-	return &queueRig{renameRig: &renameRig{mh: mh, store: store, st: st, root: root}, svc: svc, th: th}
+	return &queueRig{renameRig: &renameRig{mh: mh, store: store, st: st, root: root}, svc: svc, th: th, drv: drv}
 }
 
 func (q *queueRig) renameQueued(t *testing.T, item, name string) *httptest.ResponseRecorder {
@@ -260,7 +264,7 @@ func TestCapabilities_SayWhichChangesTheServerQueues(t *testing.T) {
 		srv, client := withQueue(t, true)
 		got, ok := queuedOf(t, srv, client)
 		require.True(t, ok, "the server does not say what it queues")
-		assert.Equal(t, []any{"rename", "restore"}, got)
+		assert.Equal(t, []any{"rename", "restore", "purge"}, got)
 	})
 
 	t.Run("with no trash, no restore", func(t *testing.T) {
@@ -274,4 +278,57 @@ func TestCapabilities_SayWhichChangesTheServerQueues(t *testing.T) {
 		_, ok := queuedOf(t, srv, client)
 		assert.False(t, ok, "a server with no queue claims to queue")
 	})
+}
+
+// purgeQueued is DELETE /api/admin/trash/{id}?queued=1.
+func purgeQueued(t *testing.T, th *handlers.Trash, id int64) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, "/api/admin/trash/"+strconv.FormatInt(id, 10)+"?queued=1", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", strconv.FormatInt(id, 10))
+	rec := httptest.NewRecorder()
+	th.Purge(rec, req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
+	return rec
+}
+
+// A permanent delete from the admin's Trash page ran inside the request: a
+// folder is purged one object and one row at a time, and the page's client
+// gave up after 30 s. Asked with `queued=1` it is a job of the queue.
+func TestPurgeQueued_IsAJobOfTheQueue(t *testing.T) {
+	q := newQueueRig(t)
+	ctx := context.Background()
+	q.dir(t, "Leon")
+	q.file(t, "Leon/a.txt", "a")
+	ids := q.trashed(t, "Leon")
+
+	rec := purgeQueued(t, q.th, ids[0])
+	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+	var body struct {
+		Op *ops.Op `json:"op"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.NotNil(t, body.Op, rec.Body.String())
+	assert.Equal(t, ops.OpPurge, body.Op.Kind)
+	_, err := q.store.GetNode(ctx, ids[0])
+	require.NoError(t, err, "the entry went inside the request")
+
+	done := q.drain(t, body.Op.ID)
+	require.Equal(t, ops.StatusOK, done.Status, done.Error)
+	n, err := q.store.GetNode(ctx, ids[0])
+	assert.True(t, err != nil || n == nil, "the entry is still in the trash")
+}
+
+// A server with no queue wired purges inside the request, as it always did.
+func TestPurgeQueued_WithNoQueuePurgesInTheRequest(t *testing.T) {
+	q := newQueueRig(t)
+	ctx := context.Background()
+	q.file(t, "a.txt", "a")
+	ids := q.trashed(t, "a.txt")
+	resolve := func(int64) (storage.Driver, error) { return q.drv, nil }
+	plain := handlers.NewTrash(trash.New(q.store, resolve, nil), q.store)
+
+	rec := purgeQueued(t, plain, ids[0])
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	n, err := q.store.GetNode(ctx, ids[0])
+	assert.True(t, err != nil || n == nil, "the entry is still in the trash")
 }

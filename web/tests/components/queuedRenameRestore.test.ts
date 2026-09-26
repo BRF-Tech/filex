@@ -1,4 +1,4 @@
-// A queued rename and a queued restore in the operations centre.
+// A queued rename, restore and permanent delete in the operations centre.
 //
 // A kind the tray did not know was drawn as an app job ("App", with the
 // puzzle-piece icon), so a folder being renamed would have read as an app
@@ -32,11 +32,13 @@ describe('a queued rename or restore', () => {
     const { center, w } = await centreWith([
       { id: 1, kind: 'rename', status: 'running', total: 1, done: 0, sources: ['Leon'], dest: 'Leo', storage_id: 1 },
       { id: 2, kind: 'restore', status: 'running', total: 3, done: 1, sources: ['11', '12', '13'], storage_id: 1 },
+      { id: 5, kind: 'purge', status: 'running', total: 1, done: 0, sources: ['14'], storage_id: 1 },
     ]);
-    expect(center.active.value.map((o) => o.kind).sort()).toEqual(['rename', 'restore']);
+    expect(center.active.value.map((o) => o.kind).sort()).toEqual(['purge', 'rename', 'restore']);
     const text = w.text();
     expect(text).toContain('Rename');
     expect(text).toContain('Restore');
+    expect(text).toContain('Delete permanently');
     expect(text).not.toContain('App');
     w.unmount();
   });

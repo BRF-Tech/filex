@@ -1,6 +1,7 @@
 package ops
 
-// A rename and a restore from the trash as jobs of this queue.
+// A rename, a restore from the trash and a permanent delete of a trash entry
+// as jobs of this queue.
 //
 // ⚠⚠ Why here (2026-09-26). Both ran inside the request. A folder renamed, or
 // brought back from the trash, on an object store is one request per object,
@@ -10,11 +11,12 @@ package ops
 // centre, and run on the one worker, so a second press cannot overlap the
 // first.
 //
-// Both finish what they start. A running rename or restore has no cancel
-// handle (a pending one can still be cancelled), and its storage work runs on
-// a context the worker's shutdown does not cut: stopped half-way, a folder is
-// left in two places, and the retry is refused because the half that arrived
-// holds the name.
+// All three finish what they start. A running one has no cancel handle (a
+// pending one can still be cancelled), and its storage work runs on a context
+// the worker's shutdown does not cut. A rename or a restore stopped half-way
+// leaves a folder in two places, and the retry is refused because the half
+// that arrived holds the name; a purge stopped half-way leaves a folder half
+// gone with its row still in the trash.
 
 import (
 	"context"
@@ -36,6 +38,11 @@ const (
 	// their node ids; the Restorer does the work, the same call
 	// POST /api/files/manager/restore makes.
 	OpRestore = "restore"
+	// OpPurge takes trash entries out for good. Sources holds their node ids;
+	// the Purger does the work, the same call DELETE /api/admin/trash/{id}
+	// makes. It ran inside that request, and a folder is purged one object and
+	// one row at a time: the admin page's client gave up after 30 s.
+	OpPurge = "purge"
 )
 
 // ErrNameTaken is a rename refused because something already has the name.
@@ -54,6 +61,16 @@ type Restorer interface {
 // fails rather than claiming to have restored anything.
 func (s *Service) SetRestorer(r Restorer) { s.restorer = r }
 
+// Purger takes one trash entry out for good: its bytes, its rows and its
+// descendants'. handlers.Trash implements it; wired with SetPurger.
+type Purger interface {
+	PurgeNode(ctx context.Context, nodeID int64) error
+}
+
+// SetPurger wires the purge behind an OpPurge row. Without it the row fails
+// rather than claiming to have purged anything.
+func (s *Service) SetPurger(p Purger) { s.purger = p }
+
 // RenameSync is what a DBSync adds to serve a rename (handlers.Manager does):
 // the one rule for whether a name is taken — the catalogue's live rows as well
 // as the storage, and a change of case alone is not the item colliding with
@@ -64,7 +81,9 @@ type RenameSync interface {
 }
 
 // finishesOnceStarted is a kind that runs to the end once the worker took it.
-func finishesOnceStarted(kind string) bool { return kind == OpRename || kind == OpRestore }
+func finishesOnceStarted(kind string) bool {
+	return kind == OpRename || kind == OpRestore || kind == OpPurge
+}
 
 // checkRename refuses a rename SubmitTo cannot run.
 func checkRename(sources []string, dest string) error {
@@ -77,13 +96,14 @@ func checkRename(sources []string, dest string) error {
 	return nil
 }
 
-// restoreIDs reads an OpRestore row's sources.
-func restoreIDs(sources []string) ([]int64, error) {
+// trashIDs reads the sources of an OpRestore or OpPurge row: trash entries by
+// node id.
+func trashIDs(sources []string) ([]int64, error) {
 	ids := make([]int64, 0, len(sources))
 	for _, raw := range sources {
 		id, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || id <= 0 {
-			return nil, fmt.Errorf("ops: a restore names trash entries by id, not %q", raw)
+			return nil, fmt.Errorf("ops: a restore or a purge names trash entries by id, not %q", raw)
 		}
 		ids = append(ids, id)
 	}
@@ -122,11 +142,22 @@ func (s *Service) runRestore(ctx context.Context, src string) error {
 	if s.restorer == nil {
 		return errors.New("ops: no restorer wired")
 	}
-	ids, err := restoreIDs([]string{src})
+	ids, err := trashIDs([]string{src})
 	if err != nil {
 		return err
 	}
 	return s.restorer.RestoreNode(context.WithoutCancel(ctx), ids[0])
+}
+
+func (s *Service) runPurge(ctx context.Context, src string) error {
+	if s.purger == nil {
+		return errors.New("ops: no purger wired")
+	}
+	ids, err := trashIDs([]string{src})
+	if err != nil {
+		return err
+	}
+	return s.purger.PurgeNode(context.WithoutCancel(ctx), ids[0])
 }
 
 // cancellable is what a row advertises: a row waiting in the queue can be

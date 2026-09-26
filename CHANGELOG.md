@@ -74,6 +74,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     by the time it runs fails the job. Neither job is cancelled once running, and
     a row says so (`cancellable`).
 
+- **The admin's Trash page restores and purges through the operations queue.**
+  Both ran inside the request, and a folder is moved back, or purged, one
+  object at a time. The page's HTTP client gave up after 30 s, and the admin
+  read "the server could not be reached" beside a raw "AxiosError: timeout of
+  30000ms exceeded" while the server carried on; a second press was refused
+  by the half that had already come back.
+  - `DELETE /api/admin/trash/{id}` takes `queued=1`: the same ownership check,
+    then `202 {op}` (kind `purge`). `capabilities.queued` lists `purge` beside
+    `rename` and `restore`. A running purge is not cancelled half-way.
+  - On a server that lists them, the page restores and purges as jobs. The row
+    says "Restoring…" or "Deleting permanently…" and takes no second press.
+    When the job ends the page says how, and reads the list again.
+  - The layout's operations tray and the explorer's operations centre name
+    the new kind.
+  - A request that got no answer is no longer printed in the client's own
+    English; the page's one "server could not be reached" notice says it.
+
 ## [0.46.0] - 2026-09-26
 
 ### Added
