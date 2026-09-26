@@ -37,12 +37,18 @@ export function wslGo() {
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
-/** C:\a\b → /mnt/c/a/b. Only drive-letter paths can be reached from WSL. */
+/**
+ * C:\a\b → /mnt/c/a/b. On Windows only drive-letter paths can be reached from
+ * WSL. Off Windows there is no WSL in between: an absolute path already is the
+ * path Linux reads, and is returned as it is (the repo's own tests build these
+ * snippets on a Linux CI runner too — 2026-09-26, v0.46.1's first CI run).
+ */
 export function toWslPath(winPath) {
-  const abs = path.resolve(winPath);
-  const m = /^([A-Za-z]):[\\/](.*)$/.exec(abs);
-  if (!m) throw new Error(`cannot express ${abs} as a WSL path (not on a drive letter)`);
-  return `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;
+  const drive = /^([A-Za-z]):[\\/](.*)$/;
+  const m = drive.exec(String(winPath)) ?? drive.exec(path.resolve(winPath));
+  if (m) return `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;
+  if (process.platform !== 'win32' && path.isAbsolute(winPath)) return path.resolve(winPath);
+  throw new Error(`cannot express ${path.resolve(winPath)} as a WSL path (not on a drive letter)`);
 }
 
 /** Single-quote a word for bash. */
