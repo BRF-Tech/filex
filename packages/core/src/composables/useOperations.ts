@@ -54,6 +54,10 @@ export interface OperationInput {
   /** Progress counters for queue ops (3/5 items). */
   doneCount?: number;
   totalCount?: number;
+  /** The items one source is made of, when the server counts them (a folder
+   *  job on one storage): "25 of 100 items" instead of a source count of 0/1. */
+  itemsDone?: number;
+  itemsTotal?: number;
   /** Byte progress for uploads. */
   uploadedBytes?: number;
   totalBytes?: number;
@@ -97,6 +101,8 @@ export interface Operation {
   cancelling: boolean;
   doneCount: number | null;
   totalCount: number | null;
+  itemsDone: number | null;
+  itemsTotal: number | null;
   uploadedBytes: number | null;
   totalBytes: number | null;
   cancellable: boolean;
@@ -125,6 +131,8 @@ function toOperation(key: string, input: OperationInput, prev?: Operation): Oper
     cancelling: input.cancelling ?? false,
     doneCount: input.doneCount ?? null,
     totalCount: input.totalCount ?? null,
+    itemsDone: input.itemsDone ?? null,
+    itemsTotal: input.itemsTotal ?? null,
     uploadedBytes: input.uploadedBytes ?? null,
     totalBytes: input.totalBytes ?? null,
     cancellable: input.cancellable ?? false,
@@ -311,12 +319,16 @@ export function useOperations() {
     let n = 0;
     for (const o of running) {
       let frac: number | null = null;
+      /* ⚠ The row's own percentage before its source count. A job over one
+       * source is "0 of 1" until it ends, while its row moves by bytes (a
+       * cross-storage transfer) or by items (a folder on one storage): the
+       * badge read 0% beside a bar that was moving. */
       if (o.totalBytes && o.totalBytes > 0) {
         frac = Math.min(1, (o.uploadedBytes ?? 0) / o.totalBytes);
-      } else if (o.totalCount && o.totalCount > 0) {
-        frac = Math.min(1, (o.doneCount ?? 0) / o.totalCount);
       } else if (o.percent !== null) {
         frac = Math.min(1, o.percent / 100);
+      } else if (o.totalCount && o.totalCount > 0) {
+        frac = Math.min(1, (o.doneCount ?? 0) / o.totalCount);
       }
       if (frac !== null) {
         sum += frac;

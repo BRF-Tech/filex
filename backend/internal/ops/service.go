@@ -88,11 +88,18 @@ type Op struct {
 	// BytesTotal / BytesDone are a running cross-storage transfer's byte
 	// counters (issue #27), merged in from memory by Get/List — never stored.
 	// BytesTotal 0 with BytesDone > 0 means the total is not known (yet).
-	BytesTotal int64  `json:"bytes_total,omitempty"`
-	BytesDone  int64  `json:"bytes_done,omitempty"`
-	Failed     int    `json:"failed"`
-	Status     string `json:"status"`
-	Error      string `json:"error,omitempty"`
+	BytesTotal int64 `json:"bytes_total,omitempty"`
+	BytesDone  int64 `json:"bytes_done,omitempty"`
+	// ObjectsTotal / ObjectsDone count the objects a running same-storage
+	// copy, move or delete has found and finished inside its sources: one
+	// folder on an object store is one source and minutes of objects, which
+	// the source counts above cannot show. From the storage driver's tally
+	// (storage.Tally); live counters like the bytes, never stored.
+	ObjectsTotal int64  `json:"objects_total,omitempty"`
+	ObjectsDone  int64  `json:"objects_done,omitempty"`
+	Failed       int    `json:"failed"`
+	Status       string `json:"status"`
+	Error        string `json:"error,omitempty"`
 	// ErrorCode / ErrorEngine classify a failed APP job for the client, which
 	// says it in the person's language (lib/errorWords `jobFailure`) and keeps
 	// `Error` — English, sometimes plumbing — for an administrator's second
@@ -873,6 +880,16 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 	if op.Kind == OpPluginAction {
 		s.executePlugin(ctx, parent, op, ch)
 		return
+	}
+
+	// A same-storage copy, move or delete counts its objects: the driver works
+	// through a folder's objects inside ONE call, and says how far it has got
+	// on the context's tally (storage.Tally; attachLive hands it out).
+	if !s.isCross(op) && (op.Kind == OpCopy || op.Kind == OpMove || op.Kind == OpDelete) {
+		lp := &liveProgress{}
+		s.live.Store(op.ID, lp)
+		defer s.live.Delete(op.ID)
+		ctx = storage.WithTally(ctx, &lp.objects)
 	}
 
 	if s.isCross(op) {

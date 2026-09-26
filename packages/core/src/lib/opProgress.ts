@@ -16,6 +16,9 @@
  *   - bytes moving with no total yet, or a single source with nothing but a
  *     source count, has NO honest percentage: `null`, and the surface shows
  *     an indeterminate indicator instead of a fake 0%;
+ *   - a single source whose storage driver counts the objects it works
+ *     through (`objects_done` / `objects_total`: one folder on an object store
+ *     is minutes of objects) draws those;
  *   - several sources still report per source, as before.
  */
 
@@ -25,6 +28,8 @@ export interface OpProgressLike {
   progress_done: number;
   bytes_total?: number;
   bytes_done?: number;
+  objects_total?: number;
+  objects_done?: number;
 }
 
 function clampPercent(n: number): number {
@@ -38,6 +43,10 @@ export function opPercent(op: OpProgressLike): number | null {
   const bytesDone = op.bytes_done ?? 0;
   if (bytesTotal > 0) return clampPercent((bytesDone / bytesTotal) * 100);
   if (bytesDone > 0) return null;
-  if (op.progress_total <= 1) return null;
+  if (op.progress_total <= 1) {
+    const objectsTotal = op.objects_total ?? 0;
+    if (objectsTotal > 0) return clampPercent(((op.objects_done ?? 0) / objectsTotal) * 100);
+    return null;
+  }
   return clampPercent((op.progress_done / op.progress_total) * 100);
 }

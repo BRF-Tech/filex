@@ -271,3 +271,62 @@ func TestTakeBackRestoresFileAndFolder(t *testing.T) {
 		require.Equal(t, []string{"proje/alt/iki.txt", "proje/bir.txt"}, core.keys())
 	})
 }
+
+// A folder put in the trash one object at a time counts its objects on the
+// context's tally, once each — the per-object moves inside do not count them
+// again (storage.Tally).
+func TestPutCountsTheObjectsItWalks(t *testing.T) {
+	core := newCore("proje/bir.txt", "proje/alt/iki.txt")
+	tally := &storage.Tally{}
+	out, err := Put(storage.WithTally(context.Background(), tally), countingMover{moverDrv{core}}, "proje")
+	require.NoError(t, err)
+	require.Equal(t, 2, out.Files)
+	done, total := tally.Load()
+	require.EqualValues(t, 2, total)
+	require.EqualValues(t, 2, done)
+}
+
+// countingMover counts a file move on the tally, the way the object-store
+// drivers do, so a caller that also counted it would count it twice.
+type countingMover struct{ moverDrv }
+
+func (m countingMover) Move(ctx context.Context, src, dst string) error {
+	t := storage.TallyOf(ctx)
+	t.Found(1)
+	err := m.moverDrv.Move(ctx, src, dst)
+	if err == nil {
+		t.Done(1)
+	}
+	return err
+}
+
+// A single-call attempt that stops part-way keeps what it finished on the
+// tally and takes back what it only found; the walk that carries on counts
+// what is left. Every object once, and the tally ends at done == total.
+func TestPutCountsAnAttemptThatStoppedPartWayOnce(t *testing.T) {
+	core := newCore("proje/bir.txt", "proje/alt/iki.txt", "proje/uc.txt")
+	tally := &storage.Tally{}
+	out, err := Put(storage.WithTally(context.Background(), tally), partialMover{moverDrv{core}}, "proje")
+	require.NoError(t, err)
+	require.True(t, out.Trashed)
+	done, total := tally.Load()
+	require.EqualValues(t, 3, total, "an object was counted twice, or one was lost")
+	require.EqualValues(t, 3, done)
+}
+
+// partialMover moves a folder the object-store way — finds its three objects,
+// moves the first, then fails — and single files as usual.
+type partialMover struct{ moverDrv }
+
+func (m partialMover) Move(ctx context.Context, src, dst string) error {
+	if src != "proje" {
+		return m.moverDrv.Move(ctx, src, dst)
+	}
+	t := storage.TallyOf(ctx)
+	t.Found(3)
+	if err := m.moverDrv.Move(context.Background(), "proje/bir.txt", dst+"/bir.txt"); err != nil {
+		return err
+	}
+	t.Done(1)
+	return errors.New("backend refused the rest")
+}

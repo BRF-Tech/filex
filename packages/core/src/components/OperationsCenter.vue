@@ -123,6 +123,9 @@ function statusText(o: Operation): string {
     if ((o.kind === 'archive-create' || o.kind === 'archive-extract') && o.percent !== null) {
       return t('opc.percent', { n: o.percent });
     }
+    if (o.itemsTotal && o.itemsTotal > 0) {
+      return t('opc.items', { done: o.itemsDone ?? 0, total: o.itemsTotal });
+    }
     if (o.totalCount && o.totalCount > 0) {
       return `${o.doneCount ?? 0}/${o.totalCount}`;
     }

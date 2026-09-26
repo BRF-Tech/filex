@@ -516,6 +516,7 @@ export const tr: Record<string, string> = {
   'opc.queued': 'Sırada',
   'opc.cancelling': 'İptal isteniyor…',
   'opc.percent': '%{n}',
+  'opc.items': '{total} öğeden {done}',
   'opc.status.running': 'Sürüyor',
   'opc.status.done': 'Bitti',
   'opc.status.error': 'Hata',

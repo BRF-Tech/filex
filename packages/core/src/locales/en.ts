@@ -526,6 +526,7 @@ export const en: Record<string, string> = {
   'opc.queued': 'Queued',
   'opc.cancelling': 'Cancel requested…',
   'opc.percent': '{n}%',
+  'opc.items': '{done} of {total} items',
   'opc.status.running': 'In progress',
   'opc.status.done': 'Done',
   'opc.status.error': 'Failed',

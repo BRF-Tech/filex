@@ -27,6 +27,8 @@ import (
 type liveProgress struct {
 	done  atomic.Int64
 	total atomic.Int64
+	// objects is a same-storage job's object count (storage.Tally).
+	objects storage.Tally
 }
 
 func (s *Service) liveFor(id int64) *liveProgress {
@@ -44,6 +46,7 @@ func (s *Service) attachLive(op *Op) {
 	if lp := s.liveFor(op.ID); lp != nil {
 		op.BytesDone = lp.done.Load()
 		op.BytesTotal = lp.total.Load()
+		op.ObjectsDone, op.ObjectsTotal = lp.objects.Load()
 	}
 }
 
