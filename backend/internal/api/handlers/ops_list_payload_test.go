@@ -20,11 +20,21 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/model"
 )
+
+// asMember is a context that queues as alpha's member, the account that then
+// reads the listing: a row that names nobody is an administrator's only
+// (ops_owner_test.go).
+func asMember(f *mtFix) context.Context {
+	return auth.WithUser(context.Background(), &model.User{ID: f.UserA, Role: model.RoleUser})
+}
 
 func TestOpsList_CarriesAPreviewOfEachRowsSources(t *testing.T) {
 	f := newMTFix(t, false)
-	ctx := context.Background()
+	ctx := asMember(f)
 
 	many := make([]string, 600)
 	for i := range many {
@@ -78,7 +88,7 @@ func TestOpsList_CarriesAPreviewOfEachRowsSources(t *testing.T) {
 // selection spread over two folders is labelled with the folder above both.
 func TestOpsList_SourceDirIsTheCommonFolder(t *testing.T) {
 	f := newMTFix(t, false)
-	ctx := context.Background()
+	ctx := asMember(f)
 
 	spread, err := f.Ops.SubmitTo(ctx, "delete", f.StA.ID, 0,
 		[]string{"müşteri/2026/eylül/a.docx", "müşteri/2026/ekim/b.docx", "müşteri/2026/ekim"}, "")

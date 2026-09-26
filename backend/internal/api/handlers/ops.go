@@ -401,10 +401,11 @@ func (o *Ops) List(w http.ResponseWriter, r *http.Request) {
 	}
 	status := r.URL.Query().Get("status")
 	// The tray is a plain authenticated user route, and the rows it returns
-	// carry storage_id, dest_storage_id, sources_json and dest — another
-	// tenant's live file paths, spelled out. Restrict the query to the storages
-	// this caller can reach. `nil` (unscoped / supertenant) keeps the previous
-	// instance-wide query verbatim, so single-tenant installs are unchanged.
+	// carry storage_id, dest_storage_id, sources_json and dest — live file
+	// paths, spelled out. Restrict the query to the storages this caller can
+	// reach (unscoped / supertenant: every storage), and below an
+	// administrator to the rows this caller queued, on a single-tenant install
+	// too (opsViewer).
 	//
 	// A trash empty is its TENANT's (ops.Viewer): it may name no storage at
 	// all, and its counts describe that tenant's trash.
@@ -433,11 +434,26 @@ func readerCtx(r *http.Request) context.Context {
 // caller or the supertenant, a tenant's storages' rows and its own trash
 // empties otherwise (ops.ViewerOf, from the same tenant scope
 // confinedScope reads).
+//
+// ⚠ And within that, only an administrator follows everybody's operations.
+// Anyone else is shown the rows they queued (ops.Viewer.Own): a row spells out
+// its sources and its destination, and the tenant scope says nothing about
+// which of that tenant's folders a member may see. Every member of a tenant
+// was handed every other member's paths here — on a production install, a
+// colleague's move into a folder of client records, whatever the reader's
+// grants — and in full, by sequential id, on GET /ops/{id}.
 func opsViewer(r *http.Request) ops.Viewer {
-	if _, confined := confinedScope(r.Context()); !confined {
-		return ops.Viewer{All: true}
+	v := ops.Viewer{All: true}
+	if _, confined := confinedScope(r.Context()); confined {
+		v = ops.ViewerOf(r.Context())
 	}
-	return ops.ViewerOf(r.Context())
+	if u := auth.UserFrom(r.Context()); !u.IsAdmin() {
+		v.Own = true
+		if u != nil {
+			v.Actor = u.ID
+		}
+	}
+	return v
 }
 
 // listSourcesPreview is how many of an op's sources one LIST row carries.
@@ -504,8 +520,9 @@ func commonSourceDir(sources []string) string {
 	return strings.Join(common, "/")
 }
 
-// Cancel ends a pending or running op the caller may see. A row already
-// finished answers 409; an unknown (or another tenant's) id 404, in the same
+// Cancel ends a pending or running op the caller may see: their own, or any
+// in reach for an administrator (opsViewer). A row already finished answers
+// 409; an unknown id, another tenant's or another person's, 404, in the same
 // words Status uses so the id range cannot be probed.
 func (o *Ops) Cancel(w http.ResponseWriter, r *http.Request) {
 	if o.Service == nil {
@@ -522,15 +539,11 @@ func (o *Ops) Cancel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
 		return
 	}
+	// The person who queued it, or an administrator: opsViewer already narrows
+	// everybody else to their own rows. A row that names nobody (written before
+	// actor_id existed) is an administrator's to stop.
 	if !opsViewer(r).Sees(op) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
-		return
-	}
-	// The person who queued it, or an administrator. A row written before
-	// actor_id existed names nobody and stays cancellable by anyone who can
-	// see it, as before.
-	if u := auth.UserFrom(r.Context()); u != nil && op.ActorID != nil && *op.ActorID != u.ID && !u.IsAdmin() {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not your operation"})
 		return
 	}
 	ok, err := o.Service.Cancel(r.Context(), id)
@@ -564,9 +577,10 @@ func (o *Ops) Status(w http.ResponseWriter, r *http.Request) {
 	}
 	// Ownership on the single-row read, matching the listing. The refusal wears
 	// the same "unknown op" the miss above already produces, so probing the id
-	// range cannot count another tenant's operations. An op is the caller's if
-	// EITHER end is in reach — a cross-storage copy belongs to both sides —
-	// and a trash empty is its tenant's (ops.Viewer).
+	// range cannot count another tenant's — or another person's — operations.
+	// An op is in reach if EITHER end is — a cross-storage copy belongs to both
+	// sides — and a trash empty is its tenant's (ops.Viewer); below an
+	// administrator, only the caller's own row is (opsViewer).
 	if !opsViewer(r).Sees(op) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
 		return

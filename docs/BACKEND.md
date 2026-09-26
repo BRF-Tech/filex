@@ -1132,6 +1132,14 @@ Copy / extract / archive create kick off background ops.
 ### `GET /api/files/ops` ![user](https://img.shields.io/badge/-user-blue)
 List the caller's ops, newest first (at most 200). `?status=running` filters.
 
+Whose ops that is: an administrator's view covers every op in reach (a
+tenant's administrator the tenant's storages, the supertenant and a
+single-tenant install's administrators every storage); everybody else is
+shown only the ops they queued. A row names its sources and its destination,
+and nothing about a storage says which of its folders a member may see. A row
+that names nobody (queued before `actor_id` was recorded, or by something that
+is not a person, such as a scheduled app job) is an administrator's only.
+
 **Response 200**
 ```json
 {
@@ -1168,12 +1176,15 @@ List the caller's ops, newest first (at most 200). `?status=running` filters.
   It names no files: no `sources`, no `dest`; `total` / `done` / `failed`
   count trashed rows, and `bytes_total` / `bytes_done` the bytes their files
   hold and the bytes freed so far. It is its tenant's — listed, read and
-  cancelled by the tenant that asked for it (a supertenant sees every one) —
-  and it runs beside the queue, never in the worker's line.
+  cancelled by the administrators of the tenant that asked for it (a
+  supertenant sees every one) — and it runs beside the queue, never in the
+  worker's line.
 
 ### `GET /api/files/ops/:id` ![user](https://img.shields.io/badge/-user-blue)
 Single op detail with **every** source (no `source_count` / `source_dir`),
-plus `error` when it failed.
+plus `error` when it failed. The same ops as the list: the caller's own, or
+any in reach for an administrator. Anything else answers `404`, as an id that
+does not exist does, so walking the sequential ids counts nothing.
 
 `status` is one of `pending | running | ok | failed | partial | cancelled` —
 `partial` when some sources failed and others did not, `cancelled` when
@@ -1182,8 +1193,8 @@ somebody stopped it.
 ### `POST /api/files/ops/:id/cancel` ![user](https://img.shields.io/badge/-user-blue)
 Stops an op: a pending one never runs, a running one stops at its next item
 (an item already under way is finished). `200` with the op; `409` when it has
-already ended; `403` for somebody else's op unless the caller is an
-administrator; `404` for an op the caller cannot see.
+already ended; `404` for an op the caller cannot see — somebody else's,
+unless the caller is an administrator.
 
 ---
 
