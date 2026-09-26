@@ -10,7 +10,12 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import ProductVersion from '@brftech/filex-core/src/components/ProductVersion.vue';
-import { PRODUCT_NAME, productVersionLine } from '@brftech/filex-core/src/lib/productVersion';
+import {
+  PRODUCT_NAME,
+  parseServerVersion,
+  productVersionLine,
+  shortCommit,
+} from '@brftech/filex-core/src/lib/productVersion';
 
 let open: VueWrapper | null = null;
 afterEach(() => {
@@ -29,12 +34,52 @@ describe('productVersionLine — one spelling of the line', () => {
     expect(productVersionLine('  0.43.0 ')).toBe('filex 0.43.0');
   });
 
+  /* ⚠ The server's REAL string (version.String): the release, then the
+     commit and the build time in brackets. The line printed it whole — 40
+     hex digits and a timestamp — and the avatar menu grew a sideways scroll
+     bar for it (Burak, 2026-09-26). The tests above only ever fed it a bare
+     number, which is why nobody saw it. */
+  const REAL = 'v0.46.0 (a2d7e34d1971707c638a5a44756685f1cd010bd6, 2026-09-26T03:41:30Z)';
+
+  it('names the release only, not the commit and build time the server adds', () => {
+    expect(productVersionLine(REAL)).toBe('filex v0.46.0');
+    expect(productVersionLine('0.1.0-dev (2026-09-26T03:41:30Z)')).toBe('filex 0.1.0-dev');
+  });
+
   it('says nothing while the version is not known — never the client’s placeholder', () => {
     // `0.0.0` is what the capabilities store holds before the server answers;
     // a menu opened in that moment must not announce a version that never was.
     for (const v of ['', '0.0.0', null, undefined]) {
       expect(productVersionLine(v), String(v)).toBe('');
     }
+  });
+});
+
+describe('parseServerVersion — the parts of the server’s string', () => {
+  it('splits release, commit and build time', () => {
+    expect(parseServerVersion('v0.46.0 (a2d7e34d1971707c638a5a44756685f1cd010bd6, 2026-09-26T03:41:30Z)')).toEqual({
+      release: 'v0.46.0',
+      commit: 'a2d7e34d1971707c638a5a44756685f1cd010bd6',
+      built: '2026-09-26T03:41:30Z',
+    });
+  });
+
+  it('leaves out what the build did not stamp', () => {
+    // version.String drops an unknown commit or date rather than printing it.
+    expect(parseServerVersion('0.1.0-dev')).toEqual({ release: '0.1.0-dev', commit: '', built: '' });
+    expect(parseServerVersion('0.1.0-dev (2026-09-26T03:41:30Z)')).toEqual({
+      release: '0.1.0-dev',
+      commit: '',
+      built: '2026-09-26T03:41:30Z',
+    });
+    expect(parseServerVersion('v0.46.0 (abc1234)')).toEqual({ release: 'v0.46.0', commit: 'abc1234', built: '' });
+    expect(parseServerVersion(null)).toEqual({ release: '', commit: '', built: '' });
+  });
+
+  it('shortens a commit to the seven characters git itself shows', () => {
+    expect(shortCommit('a2d7e34d1971707c638a5a44756685f1cd010bd6')).toBe('a2d7e34');
+    expect(shortCommit('abc1234')).toBe('abc1234');
+    expect(shortCommit('')).toBe('');
   });
 });
 
@@ -65,6 +110,21 @@ describe('where a person finds it', () => {
       expect(src, `${f} spells the line out itself`).not.toMatch(/filex \{\{\s*caps\.data\.version/);
     });
   }
+
+  /* The sign-in page and the About page printed the server's whole string
+     themselves — the same 40-digit commit, twice on sign-in. */
+  it('the sign-in page draws the same line, not the server’s whole string', () => {
+    const src = readFileSync(path.resolve(__dirname, '../../src/views/Login.vue'), 'utf8');
+    expect(src).not.toMatch(/filex \{\{\s*caps\.data\.version/);
+    expect(src).toMatch(/productVersionLine\(caps\.data\.version\)/);
+  });
+
+  it('the About page shows the release, and the commit short', () => {
+    const src = readFileSync(path.resolve(__dirname, '../../src/views/About.vue'), 'utf8');
+    expect(src).not.toMatch(/\{\{\s*data\.version\s*\}\}/);
+    expect(src).toMatch(/parseServerVersion\(/);
+    expect(src).toMatch(/shortCommit\(/);
+  });
 
   it('adds no catalogue key — a name and a number need no translation', () => {
     const src = readFileSync(

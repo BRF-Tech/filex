@@ -26,6 +26,7 @@ import { useCapabilitiesStore } from '@/stores/capabilities';
 import { AuthApi } from '@/api/auth';
 import { BrandingApi, type BrandingConfig } from '@/api/branding'; /* wiring:e1 */
 import { accentButtonStyle } from '@/lib/accentButton';
+import { productVersionLine } from '@brftech/filex-core';
 
 import LogoMark from '@/components/LogoMark.vue';
 import Button from '@/components/ui/Button.vue';
@@ -337,7 +338,7 @@ function startOidc() {
       </div>
 
       <p class="mt-10 text-center text-xs text-zinc-500 dark:text-zinc-500 inline-flex items-center justify-center gap-1 w-full">
-        <Mail class="h-3 w-3" /> filex {{ caps.data.version }}
+        <Mail class="h-3 w-3" /> {{ productVersionLine(caps.data.version) }}
       </p>
     </div>
 
@@ -539,7 +540,7 @@ function startOidc() {
              line either (InstallPrompt.vue → checkFit; measured under the card
              at 1440×900, 2026-09-21). -->
         <p class="lg-version" data-install-keep>
-          <Box class="lg-i16" aria-hidden="true" /> filex {{ caps.data.version }}
+          <Box class="lg-i16" aria-hidden="true" /> {{ productVersionLine(caps.data.version) }}
         </p>
       </div>
     </div>

@@ -48,6 +48,59 @@ export function toWslPath(winPath) {
 /** Single-quote a word for bash. */
 const shq = (s) => `'${String(s).split("'").join(`'"'"'`)}'`;
 
+/** The nearest directory above `dir` (itself included) holding `marker`. */
+function upTo(dir, marker) {
+  let d = path.resolve(dir);
+  for (;;) {
+    if (existsSync(path.join(d, marker))) return d;
+    const up = path.dirname(d);
+    if (up === d) return null;
+    d = up;
+  }
+}
+
+/** The repository `dir` belongs to (a worktree's `.git` is a file). */
+export function repoRootOf(dir) {
+  return upTo(dir, '.git') ?? path.resolve(dir);
+}
+
+/** The Go module `dir` belongs to: the directory holding its go.mod. */
+export function moduleRootOf(dir) {
+  return upTo(dir, 'go.mod') ?? path.resolve(dir);
+}
+
+/**
+ * A bash snippet that mirrors the Go module `dir` belongs to onto WSL's own
+ * disk (~/wt/<repository>/<module path in it>) and changes into `dir`'s place
+ * inside the mirror. Every Go call this repository makes through WSL starts
+ * with it. Only the module is copied: no Go test here reads outside backend/
+ * (checked 2026-09-26), and it is a third of the tree.
+ *
+ * ⚠⚠ Never run Go on /mnt/<drive>. /mnt/g is a 9P bridge: Go reads and hashes
+ * every package source on each build, and each read goes through dllhost.exe
+ * (Plan9FileSystem) on the Windows side — 0.5-0.9 of a core per test run, 8.4
+ * hours of CPU in two days, a workstation stuck at 60-80% (2026-09-26, lessons
+ * #577 and #578). rsync copies only what changed, so a later run costs seconds.
+ * The second rsync is not a typo: a file saved while the first one reads it
+ * (an editor's temp file) ends that pass with code 23/24.
+ */
+export function wslMirrorCd(dir) {
+  const mod = moduleRootOf(dir);
+  const repo = repoRootOf(mod);
+  const slashed = (p) => p.split(path.sep).join('/');
+  const name = path.basename(repo).replace(/[^A-Za-z0-9._-]/g, '_');
+  const modRel = slashed(path.relative(repo, mod));
+  const rel = slashed(path.relative(mod, path.resolve(dir)));
+  const mirror = `$HOME/wt/${name}${modRel ? `/${modRel}` : ''}`;
+  const sync = `rsync -a --delete --exclude node_modules --exclude .git ${shq(`${toWslPath(mod)}/`)} "${mirror}/"`;
+  return [
+    'command -v rsync >/dev/null || { echo "rsync is not installed in WSL (sudo apt install rsync)" >&2; exit 1; }',
+    `mkdir -p "${mirror}"`,
+    `{ ${sync} || ${sync}; }`,
+    `cd "${mirror}${rel ? `/${rel}` : ''}"`,
+  ].join(' && ');
+}
+
 /**
  * goBuild builds `pkg` (relative to `cwd`, e.g. `./cmd/filex`) into `out`.
  *
@@ -98,7 +151,7 @@ export function goBuild({ cwd, pkg, out, ldflags = '-s -w', trimpath = true, log
   const targetArch = goarch || 'amd64';
   const scratch = `/tmp/filex-gobuild-${randomBytes(6).toString('hex')}${path.extname(outAbs)}`;
   const script = [
-    `cd ${shq(toWslPath(cwd))}`,
+    wslMirrorCd(cwd),
     `CGO_ENABLED=0 GOOS=${shq(targetOS)} GOARCH=${shq(targetArch)} go build ${flags.map(shq).join(' ')} -o ${shq(scratch)} ${shq(pkg)}`,
     `cp ${shq(scratch)} ${shq(toWslPath(outAbs))}`,
   ].join(' && ');
