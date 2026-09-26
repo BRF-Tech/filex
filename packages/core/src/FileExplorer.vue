@@ -216,6 +216,7 @@ import NewDocumentModal from './modals/NewDocumentModal.vue'; /* belge:n1 */
 import RenameModal from './modals/RenameModal.vue';
 import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
 import Modal from './modals/Modal.vue'; /* tablo:t1 — the empty-trash confirmation */
+import { sayUndo, type UndoOutcome } from './lib/undoWords';
 import PreviewModal from './modals/PreviewModal.vue';
 import ConvertModal from './modals/ConvertModal.vue';
 import PluginViewModal from './components/plugin/PluginViewModal.vue'; /* App plugins */
@@ -351,7 +352,7 @@ const chunked = useUploadChunked(props.config, api);
 // (move → reverse move, trash-delete → restore) is queued, its inverse is
 // registered under the op id; once the op settles OK the toast grows a
 // "Geri Al" action. Ops without an entry keep the plain settled toast.
-const opUndo = new Map<number, { message: string; fn: () => Promise<void> }>();
+const opUndo = new Map<number, { message: string; fn: () => Promise<UndoOutcome> }>();
 
 const pendingOps = usePendingOps(props.config, api, {
   onSettled: (op: PendingOp) => {
@@ -2888,7 +2889,7 @@ onBeforeUnmount(() => {
 interface ToastState {
   message: string;
   actionLabel?: string;
-  action?: () => void | Promise<void>;
+  action?: () => UndoOutcome | Promise<UndoOutcome>;
 }
 const toast = ref<ToastState | null>(null);
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2948,7 +2949,7 @@ async function catalogAll(storage: string | undefined) {
     catalogAllBusy.value = false;
   }
 }
-function undoToast(message: string, undo: () => Promise<void>) {
+function undoToast(message: string, undo: () => Promise<UndoOutcome>) {
   showToast({ message, actionLabel: t('toast.undo'), action: undo }, 8000);
 }
 function dismissToast() {
@@ -2962,9 +2963,13 @@ async function runToastAction() {
   const act = toast.value?.action;
   dismissToast();
   if (!act) return;
+  // Said while it runs: undoing a large move or a restore takes a while, and
+  // nothing was on screen until it ended.
+  showToast({ message: t('toast.undoing') }, STICKY_TOAST_MS);
   try {
-    await act();
-    flashToast(t('toast.undone'));
+    const out = await act();
+    // Not "Undone" about an undo that was only queued, or brought back part.
+    flashToast(sayUndo(out, t));
     await load();
   } catch {
     flashToast(t('toast.undo_failed'));
@@ -3590,6 +3595,7 @@ function registerMoveUndo(
     fn: async () => {
       const { op } = await api.moveAsync(movedPaths, originWire, targetWire);
       pendingOps.register(op);
+      return { queued: true };
     },
   });
 }
@@ -5546,6 +5552,7 @@ async function submitRename(name: string) {
             }
             const back = (await api.renameQueued(dirWire, newPath, oldName)).op;
             if (back) pendingOps.register(back);
+            return { queued: true };
           }
         : null;
     if (job) {
@@ -5666,6 +5673,7 @@ async function confirmDelete() {
       ? async () => {
           const { restored } = await api.restoreIds(nodeIds);
           if (restored === 0) throw new Error('restore failed');
+          return { done: restored, total: nodeIds.length };
         }
       : null;
   deleteBusy.value = true;
