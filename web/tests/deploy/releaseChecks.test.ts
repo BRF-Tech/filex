@@ -167,6 +167,19 @@ describe('what was published', () => {
     ]);
   });
 
+  it('leaves a badge out of the heading, because the page renders it as a picture, not text', () => {
+    const diff = [
+      '+++ b/docs/BACKEND.md',
+      '+### `PUT /api/admin/storages/order` ![admin](https://img.shields.io/badge/-admin-red)',
+    ].join('\n');
+    const [probe] = headingsAdded(diff);
+    const page = htmlText(
+      '<h3 id="put-apiadminstoragesorder-"><code>PUT /api/admin/storages/order</code> <img src="https://img.shields.io/badge/-admin-red" alt="admin"> <a class="header-anchor" href="#put-apiadminstoragesorder-">​</a></h3>',
+    );
+    expect(probe.text).toBe('PUT /api/admin/storages/order');
+    expect(page.includes(probe.text)).toBe(true);
+  });
+
   it('reads rendered pages as text and maps docs files to site pages', () => {
     expect(htmlText('<h2 id="a">Backup &amp; restore&#39;s <code>data</code><a class="header-anchor">#</a></h2>')).toBe("Backup & restore's data #");
     expect(docsPageUrl('https://docs.filex.sh/', 'docs/STORAGE.md')).toBe('https://docs.filex.sh/STORAGE');

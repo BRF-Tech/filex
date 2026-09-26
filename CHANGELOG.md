@@ -39,6 +39,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     why: a failure other than a taken name used to drop out of the count.
     "Preparing the archive…" stays up until the download starts.
 
+## [0.46.1] - 2026-09-26
+
+### Fixed
+
+- **The version line no longer runs off the menu.** The server reports its
+  version as the release followed by the full commit hash and the build time,
+  and the line printed all of it: the explorer's avatar menu grew a sideways
+  scroll bar, the sign-in page carried the 40-character hash twice, and the
+  About page ran it off its card. The account menus, user settings and the
+  sign-in page now name the release only (`filex v0.46.1`); the About page
+  shows the release with the commit shortened to seven characters and the
+  build date under it, and its copy button still copies the whole string.
+
 ## [0.46.0] - 2026-09-26
 
 ### Added
