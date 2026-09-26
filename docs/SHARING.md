@@ -279,7 +279,9 @@ On the page a JavaScript browser gets:
   **not sent**: its row says why, and the rest of the drop still goes;
 - everything one drop carries goes up in **one** request — one drop, one
   submission folder (it used to be one request, and one folder, per file);
-- a refusal the server makes is shown in the server's own words (below).
+- a refusal the server makes is shown in the server's own words (below);
+- once every byte is sent, the rows say **"Saving…"** while the server writes
+  the files to the storage, one after another. The bar no longer sits at 100%.
 
 **Limits & safety** (enforced server‑side): per‑submission file count and
 per‑file size, an optional extension allowlist, an optional PIN, an expiry, a
@@ -344,6 +346,14 @@ admin settings.)
   once the backend is back. Out of space is the neighbouring case: **`507`
   `{"error":"quota_exceeded"}`**, which is the *owner's* problem, not the
   uploader's.
+- **"Sent, but the server did not confirm it in time"** — every byte of the
+  drop arrived, but the answer did not: a proxy in front of filex stopped
+  waiting (Cloudflare gives up at 100 s, nginx by default at 60 s), or the
+  connection dropped. The server finishes writing a drop that has fully
+  arrived, whoever stopped waiting, so the files are normally in the
+  submission folder; the owner is notified as usual. The visitor is asked to
+  check before sending again, because a second send is a second submission.
+  A proxy timeout long enough for your largest drops avoids the question.
 - **Uploader sees folder contents?** — they don't; the drop page never lists the
   folder. If you want them to *see* files, use a download share instead.
 - **Share link opens the wrong URL / host** — `FILEX_PUBLIC_URL` is wrong or

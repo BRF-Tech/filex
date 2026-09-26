@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Send by email" sends once per press.** The Send button waited while
+  the mail went out, but the address box also sends on Enter, and a second
+  Enter sent the same mail to the same people again. This affected both the
+  share link and the upload link.
+
+- **The converter window says which step it is on and lets a long conversion
+  finish.**
+  - It said "Converting…" from the first byte read to the last byte saved,
+    and after 180 seconds it called the conversion failed while the converter
+    was still working. It now names the step (reading, converting, saving)
+    and waits up to 30 minutes.
+  - A click on the backdrop, or on ×, no longer throws the conversion away
+    mid-way. × asks first.
+
+- **⌘K's "Everywhere" says when it could not search.** A failed search read
+  "No results", which is a different statement.
+
+- **The archive preview says why a listing takes long.**
+  - The server reads the whole archive from its storage before it can list
+    it, which takes minutes for a large one on an object store. The preview
+    said only "Loading…"; past three seconds it now says what it is waiting
+    for.
+  - Stepping to the next file no longer lets the first listing land on the
+    second file's screen. That could show its contents, its error, or end
+    the wait early.
+  - Closing the preview stops the server's download.
+
+- **Restoring a version and taking a snapshot say so while they run.** Both
+  copy the whole file on the storage, and the buttons only went grey.
+
+- **An app's screen says it is opening, and is not closed while its answer is
+  on the way.**
+  - An action that opens a screen showed nothing until the app had answered.
+    The dialog now opens at once under the action's name.
+  - Escape, a click outside and × closed the dialog while a submit was on its
+    way. The server still queued the job, but the job then ran with no row in
+    the operations centre and no word on screen. The dialog now waits for the
+    answer, which closes it.
+
+- **A file request says the server is saving, and a drop that arrived is not
+  called failed.**
+  - The upload page's bar reached 100% when the browser had sent the last
+    byte and stayed there while the server wrote each file to its storage.
+    The rows now say "Saving…".
+  - A proxy that gave up meanwhile (Cloudflare at 100 s, nginx at 60 s)
+    stopped the server between two files and left half the drop written. It
+    also made the page say "Could not be sent", and a retry made a second
+    submission. The server now finishes writing a drop that has fully
+    arrived.
+  - A gateway timeout, or a dropped connection, after every byte was sent now
+    reads "Sent, but the server did not confirm it in time".
+
 ## [0.46.0] - 2026-09-26
 
 ### Added
