@@ -262,7 +262,9 @@ let dragDrop: { cancel: () => void; dir: string } | null = null;
 let dragFill: AbortController | null = null;
 /** What the updater is doing, as far as the UI is concerned. */
 // 'store': a store copy (src/channel.ts) — the store updates it, `url` is its page.
-let updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error' | 'manual' | 'store'; version?: string; percent?: number; error?: string; url?: string } = { status: 'idle' };
+// ⚠ 'idle' is "not checked yet" and 'current' is "checked, nothing newer": the
+// card said "Up to date" before any check had been made.
+let updateState: { status: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'error' | 'manual' | 'store'; version?: string; percent?: number; error?: string; url?: string } = { status: 'idle' };
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -829,7 +831,13 @@ function refreshTray(): void {
         label: trayText('settings'),
         click: () => {
           route();
-          mainWindow?.webContents.send('app:open-settings');
+          // ⚠ A window the app started hidden (the login item) is only now
+          // loading, and a message sent before its page listens is lost: the
+          // explorer opened instead of Settings. Sent once it has loaded.
+          const wc = mainWindow?.webContents;
+          if (!wc) return;
+          if (wc.isLoading()) wc.once('did-finish-load', () => wc.send('app:open-settings'));
+          else wc.send('app:open-settings');
         },
       },
       { type: 'separator' },
@@ -1101,7 +1109,7 @@ async function checkFeedForManualUpdate(): Promise<void> {
     const version = /^version:\s*(\S+)/m.exec(yml)?.[1];
     if (!version) throw new Error('feed carries no version');
     if (!isNewerVersion(version, app.getVersion())) {
-      pushUpdateState({ status: 'idle' });
+      pushUpdateState({ status: 'current' });
       return;
     }
     // Hand the browser the artifact itself when the feed names one; the plain
@@ -1151,7 +1159,7 @@ function wireAutoUpdate(): void {
 
   autoUpdater.on('checking-for-update', () => pushUpdateState({ status: 'checking' }));
   autoUpdater.on('update-available', (i) => pushUpdateState({ status: 'available', version: i?.version }));
-  autoUpdater.on('update-not-available', () => pushUpdateState({ status: 'idle' }));
+  autoUpdater.on('update-not-available', () => pushUpdateState({ status: 'current' }));
   autoUpdater.on('download-progress', (p) =>
     pushUpdateState({ status: 'downloading', percent: Math.round(p?.percent ?? 0), version: updateState.version }));
   autoUpdater.on('update-downloaded', (i) => {

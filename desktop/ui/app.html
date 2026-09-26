@@ -1061,6 +1061,7 @@
         'upd.check':            ['Check now', 'Şimdi denetle'],
         'upd.checking':         ['Checking…', 'Denetleniyor…'],
         'upd.current':          ['Up to date', 'Güncel'],
+        'upd.unchecked':        ['Not checked yet', 'Henüz denetlenmedi'],
         'upd.available':        ['Version {v} found', '{v} sürümü bulundu'],
         'upd.downloading':      ['Downloading… %{p}', 'İndiriliyor… %{p}'],
         'upd.ready':            ['Version {v} installs itself shortly', '{v} sürümü birazdan kendiliğinden kurulacak'],
@@ -2313,7 +2314,9 @@
               <button id="upd-download">${esc(T('upd.open_store'))}</button>
             </div></div>`;
         }
-        let line = T('upd.current');
+        // "Up to date" only after a check has said so; before one, it was a
+        // claim nothing had checked.
+        let line = T(u.status === 'current' ? 'upd.current' : 'upd.unchecked');
         if (!supported) line = T('upd.dev');
         else if (u.status === 'checking') line = T('upd.checking');
         else if (u.status === 'manual') line = T(portable ? 'upd.portable_manual' : 'upd.manual', { v: u.version || '' });
