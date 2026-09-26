@@ -33,6 +33,14 @@ function Skip([string]$msg) {
   exit 0
 }
 
+# What went wrong, said so it can be acted on: the line tells which call it
+# was, and the Store's reason is in the response body, not in the exception's
+# "400 (Bad Request)" (all v0.47.0's first resubmit reported).
+function Why($err) {
+  $body = if ($err.ErrorDetails.Message) { " — $($err.ErrorDetails.Message)" } else { '' }
+  "line $($err.InvocationInfo.ScriptLineNumber): $($err.Exception.Message)$body"
+}
+
 try {
   $app = $env:MSSTORE_PRODUCT_ID
   $api = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$app"
@@ -76,7 +84,7 @@ try {
     $body = [Text.Encoding]::UTF8.GetBytes(($sub | ConvertTo-Json -Depth 32))
     Invoke-RestMethod -Method Put -Headers $h -ContentType 'application/json; charset=utf-8' -Body $body "$api/submissions/$sid" | Out-Null
   } catch {
-    Write-Host "::warning title=Microsoft Store::'What's new' was not updated ($($_.Exception.Message)); submitting with the previous text."
+    Write-Host "::warning title=Microsoft Store::'What's new' was not updated ($(Why $_)); submitting with the previous text."
   }
 
   Invoke-RestMethod -Method Post -Headers $h "$api/submissions/$sid/commit" | Out-Null
@@ -88,6 +96,6 @@ try {
   if ($state -like '*Failed') { Skip "submission $sid for $Version is $state; see Partner Center." }
   Write-Host "Microsoft Store: $Version submitted as $sid, now $state."
 } catch {
-  Skip "the submission did not go through: $($_.Exception.Message)"
+  Skip "the submission did not go through at $(Why $_)"
 }
 exit 0

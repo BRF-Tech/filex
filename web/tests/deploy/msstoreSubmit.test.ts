@@ -89,6 +89,15 @@ describe('the release submits its desktop package to the Microsoft Store', () =>
     expect(code(SCRIPT)).toMatch(/gh workflow run msstore-resubmit\.yml -R BRF-Tech\/filex -f tag=v\$Version/);
   });
 
+  // ⚠ v0.47.0's resubmit uploaded the package, then a Store call answered
+  // "400 (Bad Request)" and the warning said nothing else: the reason is in
+  // the response body (ErrorDetails), and which call it was is the line.
+  it.runIf(!!DIR)('says which call failed and what the Store answered', () => {
+    const script = code(SCRIPT);
+    expect(script.match(/ErrorDetails\.Message/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(script).toMatch(/InvocationInfo\.ScriptLineNumber/);
+  });
+
   it.runIf(!!DIR)('leaves a submission still in certification alone, and never fails the release', () => {
     const script = code(SCRIPT);
     for (const state of ['CommitStarted', 'PreProcessing', 'Certification', 'Release', 'PendingPublication', 'Publishing']) {
