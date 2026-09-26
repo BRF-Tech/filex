@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Desktop: sync says what it is doing, and comes back when it stops on its
+  own.**
+  - A folder no pass had finished yet (one just added, waiting its turn) read
+    "watching for changes" in green. It now reads "waiting for its first
+    check".
+  - Every phase keeps its figures: "listing the server — 48,211 items so far",
+    "97 changes to make", "finishing up — 40/97".
+  - An engine that stopped on its own stayed stopped, with one English line to
+    show for it. It is started again after 5 s, 15 s, a minute, then every five
+    minutes, and the line says so in the app's language.
+  - The tray tooltip carries the pause, sync's state and the unread count. The
+    pause was overwritten the moment it was written.
+
+- **Desktop: moving the filex folder runs once, and sync stays off until it
+  ends.**
+  - A second press of "Change…" started a second move of the same folders.
+  - Anything that looked at the accounts again mid-move (a hold, a folder
+    added) could restart the watcher over half-moved mirrors, which reads as a
+    mass delete.
+  - The folders say "moving" rather than a red "stopped".
+
+- **Desktop: "Open with filex" opens a document once.** A second
+  double-click while the working copy was still uploading opened a second
+  session of the same document, and the last save won. It now does nothing,
+  and a slow upload says "Opening {name}…".
+
+- **Desktop: a download to disk shows its progress and its end.** Nothing
+  listened to the window's downloads. The dock / taskbar bar now moves with
+  them, and a notification says "Downloaded" (click to show it in its folder)
+  or "Download failed".
+
+- **Desktop: a folder dragged out says how far it has got, and can be
+  stopped.** Every file that lands inside the folder is counted ("42 files so
+  far…"), and **Stop** keeps what has arrived. The explorer said
+  "Downloading…" once and then nothing.
+
+- **Desktop: "Stop syncing" stops the pass under way.** The watcher only
+  re-reads its folders between passes, so a first sync of the removed folder
+  went on for hours with no card to show it.
+
+- **Desktop: Settings stops losing clicks.** Every line the engine printed
+  repainted Settings whole. Repaints are now coalesced, and held while a press
+  is down or a field has the focus.
+
+- **Desktop: "Mount as a drive" works on macOS.** It mounted onto
+  `/Volumes/filex-<storage>`, a folder a user cannot make, and ignored the
+  failure. It now mounts onto `~/filex-drives/filex-<storage>` and says so when
+  the folder cannot be made.
+
+- **Desktop: the update card says "Up to date" only after a check, and the
+  tray's Settings opens Settings on a hidden start.**
+
 ## [0.46.1] - 2026-09-26
 
 ### Fixed

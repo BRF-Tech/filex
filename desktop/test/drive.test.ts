@@ -174,10 +174,15 @@ test('Linux mount reports a missing gio as no-tool', async () => {
   assert.equal(res.problem, 'no-tool');
 });
 
-test('macOS plan targets /Volumes and the token stays off argv', async () => {
+// ⚠ It targeted /Volumes/filex-<storage>. A user cannot make a folder under
+// /Volumes (measured on macOS 26: "Permission denied"), the mkdir's failure
+// was ignored, and mount_webdav then failed on a folder that did not exist:
+// the feature could not have worked for anyone. The folder is the user's own,
+// beside — never inside or instead of — the ~/filex sync folder.
+test('macOS plan targets a folder in the home, not /Volumes, and the token stays off argv', async () => {
   const mac: MountRequest = { ...base, platform: 'darwin' };
-  const plan = planMount(mac, () => false);
-  assert.equal(plan.mountDir, '/Volumes/filex-docs');
+  const plan = planMount(mac, () => false, '/Users/ada');
+  assert.equal(plan.mountDir, '/Users/ada/filex-drives/filex-docs');
   const { deps, calls, logs } = recorder({ '/bin/mkdir': { code: 0 }, '/sbin/mount_webdav': { code: 0 } });
   const res = await mount(mac, deps);
   assert.equal(res.ok, true);
@@ -185,4 +190,15 @@ test('macOS plan targets /Volumes and the token stays off argv', async () => {
   assert.ok(!mw.args.some((a) => a.includes(TOKEN)));
   assert.ok(mw.input.includes(TOKEN), 'mount_webdav takes the password on stdin');
   assertNoLeak(TOKEN, calls, logs);
+});
+
+test('macOS says so when the mount folder cannot be made, and does not mount', async () => {
+  const mac: MountRequest = { ...base, platform: 'darwin' };
+  const { deps, calls } = recorder({ '/bin/mkdir': { code: 1, stderr: 'mkdir: /x: Permission denied' } });
+  const res = await mount(mac, deps);
+  assert.equal(res.ok, false);
+  assert.equal(res.problem, 'failed');
+  assert.match(res.detail ?? '', /filex-drives\/filex-docs/);
+  assert.match(res.detail ?? '', /Permission denied/);
+  assert.ok(!calls.some((c) => c.file === '/sbin/mount_webdav'), 'it mounted onto a folder it could not make');
 });

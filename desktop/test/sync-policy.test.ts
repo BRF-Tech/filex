@@ -15,6 +15,9 @@ import {
   normWindow,
   heldItems,
   folderView,
+  restartDelay,
+  stopForRemoval,
+  trayTooltip,
   watchArgs,
   watchPrefsKey,
   watcherAccounts,
@@ -132,6 +135,8 @@ const NOON = 12 * 60;
 // errors live per pair, the engine's own in lastError.
 const running = (over: Partial<SyncStatus> = {}): SyncStatus => ({ ...newStatus('acc'), ...over });
 const failing = (pairId: string, error: string) => ({ [pairId]: { error, line: null, local: null, busy: null } });
+// A pair a pass has finished for since the engine started (syncstatus.ts).
+const passed = { error: null, line: 'already in step', local: null, busy: null, passed: true };
 
 test('the folder line: pause and sign-out come first', () => {
   const st = running({ pairs: failing('pair-1', 'boom'), lastError: 'boom' });
@@ -141,7 +146,7 @@ test('the folder line: pause and sign-out come first', () => {
 });
 
 test('the folder line: the pair being worked on says what is happening; the others are watching', () => {
-  const st = running({ active: { pairId: 'pair-2', phase: 'transfer', done: 3, total: 9 } });
+  const st = running({ active: { pairId: 'pair-2', phase: 'transfer', done: 3, total: 9 }, pairs: { 'pair-1': passed } });
   assert.deepEqual(folderView({ pairId: 'pair-2', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
     kind: 'active', phase: 'transfer', done: 3, total: 9,
   });
@@ -149,7 +154,7 @@ test('the folder line: the pair being worked on says what is happening; the othe
 });
 
 test('the folder line: an error is shown on ITS folder; the engine\'s own on every folder', () => {
-  const st = running({ pairs: failing('pair-1', 'list docs://a: HTTP 502') });
+  const st = running({ pairs: { ...failing('pair-1', 'list docs://a: HTTP 502'), 'pair-2': passed } });
   assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
     kind: 'error', message: 'list docs://a: HTTP 502',
   });
@@ -161,7 +166,7 @@ test('the folder line: an error is shown on ITS folder; the engine\'s own on eve
 });
 
 test('the folder line: "waiting for the window" only while the clock is outside it', () => {
-  const st = running({ waitingWindow: '22:00-07:00' });
+  const st = running({ waitingWindow: '22:00-07:00', pairs: { 'pair-1': passed } });
   assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
     kind: 'window', window: '22:00-07:00',
   });
@@ -180,7 +185,9 @@ test('the folder line: a watcher that is gone without a word is "stopped"', () =
 // what its line says, not an error left from before, and not "watching".
 test('the folder line: a folder another filex syncs says so, ahead of an old error', () => {
   const detail = 'another filex on this computer is syncing this pair (process 42)';
-  const st = running({ pairs: { 'pair-1': { error: 'list docs://a: HTTP 502', line: null, local: null, busy: { detail } } } });
+  const st = running({
+    pairs: { 'pair-1': { error: 'list docs://a: HTTP 502', line: null, local: null, busy: { detail } }, 'pair-2': passed },
+  });
   assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
     kind: 'busy', detail,
   });
@@ -255,4 +262,82 @@ test('…and a failed answer still restarts the watcher, and says so', async () 
   });
   assert.equal(said, null);
   assert.deepEqual(order, ['stop', 'error', 'refresh']);
+});
+
+// ⚠ A folder no pass had finished yet — a folder just added, waiting behind
+// the others for its first sync — read "watching for changes" in green, the
+// line of a folder that is in step (Y11).
+test('the folder line: a folder no pass has finished yet waits for its first check', () => {
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: running(), minuteOfDay: NOON }), {
+    kind: 'pending',
+  });
+  const st = running({ pairs: { 'pair-1': passed } });
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
+    kind: 'watching',
+  });
+});
+
+// ⚠ An engine that died stayed dead until something else made the app look
+// at its accounts again, and the one trace was an English line (Y9).
+test('the folder line: an engine that stopped on its own is said in a code, with when it comes back', () => {
+  const proc = running({ running: false, lastError: 'sync stopped unexpectedly (exit 1)', exited: '1', restartAt: 1_000 });
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: proc, minuteOfDay: NOON }), {
+    kind: 'error', message: 'sync stopped unexpectedly (exit 1)', exited: '1', restartAt: 1_000,
+  });
+});
+
+test('a crashed engine is started again, less often each time it keeps crashing', () => {
+  assert.equal(restartDelay(1), 5_000);
+  assert.equal(restartDelay(2), 15_000);
+  assert.equal(restartDelay(3), 60_000);
+  assert.equal(restartDelay(4), 300_000);
+  assert.equal(restartDelay(40), 300_000, 'it keeps trying, every five minutes');
+});
+
+// ⚠ The paused tooltip was written and at once overwritten by the unread
+// count's own tooltip, so a paused client was not recognisable from its icon,
+// which is the one thing on screen when the window is closed (Y9).
+test('the tray tooltip keeps a pause, and says what sync is doing', () => {
+  const words = { paused: 'Sync is paused', syncing: 'Syncing…', failing: 'A folder could not be synced' };
+  assert.equal(trayTooltip({ paused: true, unreadLabel: '3 unread', syncing: true, failing: true }, words),
+    'filex — Sync is paused — 3 unread');
+  assert.equal(trayTooltip({ paused: false, unreadLabel: null, syncing: true, failing: false }, words), 'filex — Syncing…');
+  assert.equal(trayTooltip({ paused: false, unreadLabel: null, syncing: true, failing: true }, words),
+    'filex — A folder could not be synced');
+  assert.equal(trayTooltip({ paused: false, unreadLabel: '1 unread', syncing: false, failing: false }, words), 'filex — 1 unread');
+  assert.equal(trayTooltip({ paused: false, unreadLabel: null, syncing: false, failing: false }, words), 'filex');
+});
+
+// ── moving the local filex folder (Y12) ──
+//
+// ⚠ Moving the folder copies it (to another drive: for hours). Its watcher is
+// stopped first, because a watcher reading half-moved mirrors sees a mass
+// local delete. But anything that made the app look at its accounts again —
+// a hold, a folder added, a crashed engine's restart — started the watcher
+// again in the middle of the move. And meanwhile every folder read "stopped",
+// in red.
+
+test('an account whose folder is being moved gets no watcher', () => {
+  assert.deepEqual(watcherAccounts([A, B], { moving: new Set(['a']) }), [B]);
+  assert.deepEqual([...wantedWatchers(watcherAccounts([A, B], { moving: new Set(['a']) }), PAIRS)], ['b']);
+});
+
+test('the folder line: a folder being moved says so, not "stopped"', () => {
+  const st = running({ running: false, pairs: { 'pair-1': passed } });
+  assert.deepEqual(
+    folderView({ pairId: 'pair-1', paused: false, signedOut: false, moving: true, status: st, minuteOfDay: NOON }),
+    { kind: 'moving' },
+  );
+});
+
+// ⚠ "Stop syncing" took the folder's card away at once, but the watcher only
+// re-reads its folders between passes: a pass of that folder already under
+// way (a first sync of 52 GiB, say) went on for hours with no card to show
+// it (O14).
+test('stopping the folder a pass is working on stops that pass', () => {
+  const st = running({ active: { pairId: 'pair-1', phase: 'transfer', done: 3, total: 9 } });
+  assert.equal(stopForRemoval(st, 'pair-1'), true);
+  assert.equal(stopForRemoval(st, 'pair-2'), false, 'another folder: the pass goes on');
+  assert.equal(stopForRemoval(running(), 'pair-1'), false, 'between passes: nothing to stop');
+  assert.equal(stopForRemoval(null, 'pair-1'), false);
 });

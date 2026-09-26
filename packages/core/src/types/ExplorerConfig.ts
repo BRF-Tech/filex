@@ -772,8 +772,13 @@ export interface ExplorerConfig {
         dropped?: string;
         finished?: boolean;
         error?: string;
+        /** Files written into the drop so far, inside folders too. */
+        files?: number;
       }) => void,
     ) => void;
+    /** Stops filling in a drop that has landed (the explorer offers "Stop"
+     *  while it runs); the shell reports it as `error: 'cancelled'`. */
+    stop?: () => void | Promise<void>;
   };
 
   /**

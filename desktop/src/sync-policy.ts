@@ -40,6 +40,10 @@ export function wantedWatchers(accounts: readonly PolicyAccount[], pairs: readon
 export interface WatchGate {
   /** Settings / tray → Pause sync. Stored, so it survives a restart. */
   paused?: boolean;
+  /** Accounts whose local filex folder is being moved. Their watcher was
+   *  stopped for the move and must not be started again before it ends: one
+   *  reading half-moved mirrors sees a mass local delete. */
+  moving?: ReadonlySet<string>;
 }
 
 /**
@@ -54,7 +58,7 @@ export interface WatchGate {
  */
 export function watcherAccounts<A extends PolicyAccount>(accounts: readonly A[], gate: WatchGate): A[] {
   if (gate.paused) return [];
-  return accounts.filter((a) => !a.signedOut);
+  return accounts.filter((a) => !a.signedOut && !gate.moving?.has(a.id));
 }
 
 // ── bandwidth limits and the sync window ────────────────────────────────
@@ -154,7 +158,9 @@ export type FolderView =
   | ({ kind: 'active' } & Omit<SyncActivity, 'pairId'>)
   | { kind: 'busy'; detail: string }
   | { kind: 'window'; window: string }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; exited?: string; restartAt?: number }
+  | { kind: 'pending' }
+  | { kind: 'moving' }
   | { kind: 'watching' }
   | { kind: 'stopped' };
 
@@ -169,9 +175,14 @@ export function folderView(input: {
   pairId: string;
   paused: boolean;
   signedOut: boolean;
+  /** Its account's local filex folder is being moved (its watcher is off). */
+  moving?: boolean;
   status: SyncStatus | null | undefined;
   minuteOfDay: number;
 }): FolderView {
+  // Before everything: the move is what is happening to it, and its stopped
+  // watcher read "stopped" in red for the hours a copy to another drive takes.
+  if (input.moving) return { kind: 'moving' };
   if (input.paused) return { kind: 'paused' };
   if (input.signedOut) return { kind: 'signed-out' };
   const st = input.status;
@@ -186,13 +197,68 @@ export function folderView(input: {
   // an error left from before it was taken is not what is true of it now —
   // and this is not a failure, the folder IS being synced.
   if (st.running && view.busy) return { kind: 'busy', detail: view.busy.detail };
-  // Its own error, or the engine's (which is every folder's).
+  // Its own error, or the engine's (which is every folder's). An engine that
+  // stopped on its own carries its exit code, so the page says so in its
+  // language, and when the supervisor starts it again.
   const own = view.error;
-  if (own) return { kind: 'error', message: own };
+  if (own) {
+    if (own === st.lastError && st.exited) {
+      return {
+        kind: 'error',
+        message: own,
+        exited: st.exited,
+        ...(st.restartAt ? { restartAt: st.restartAt } : {}),
+      };
+    }
+    return { kind: 'error', message: own };
+  }
   if (st.waitingWindow && !windowContains(st.waitingWindow, input.minuteOfDay)) {
     return { kind: 'window', window: st.waitingWindow };
   }
-  return st.running ? { kind: 'watching' } : { kind: 'stopped' };
+  // ⚠ "Watching for changes" only for a folder a pass has finished for: one
+  // just added, waiting behind the others for its first sync, read like a
+  // folder that is in step.
+  if (st.running) return view.passed ? { kind: 'watching' } : { kind: 'pending' };
+  return { kind: 'stopped' };
+}
+
+/**
+ * How long the supervisor waits before starting an engine that stopped on its
+ * own again, by how many times in a row it has: 5 s, 15 s, a minute, then
+ * every five minutes. A run that lasted a while starts the count again
+ * (sync.ts). It used to stay stopped until something else — a folder added, a
+ * setting changed — made the app look at its accounts again.
+ */
+export function restartDelay(crashesInARow: number): number {
+  const steps = [5_000, 15_000, 60_000, 300_000];
+  return steps[Math.min(Math.max(crashesInARow, 1), steps.length) - 1];
+}
+
+/** What the tray's tooltip says (trayTooltip). */
+export interface TrayFacts {
+  paused: boolean;
+  /** The unread count in words, or null. */
+  unreadLabel: string | null;
+  /** An engine is in the middle of a pass. */
+  syncing: boolean;
+  /** A folder, or an engine, is failing. */
+  failing: boolean;
+}
+
+/**
+ * The tray icon's tooltip, the one thing on screen when the window is closed.
+ *
+ * ⚠ One sentence from every fact, built in one place: the pause set it, and
+ * the unread count's own tooltip overwrote it the same moment, so a paused
+ * client looked like any other. Sync itself was not in it at all.
+ */
+export function trayTooltip(f: TrayFacts, words: { paused: string; syncing: string; failing: string }): string {
+  const parts = ['filex'];
+  if (f.paused) parts.push(words.paused);
+  else if (f.failing) parts.push(words.failing);
+  else if (f.syncing) parts.push(words.syncing);
+  if (f.unreadLabel) parts.push(f.unreadLabel);
+  return parts.join(' — ');
 }
 
 // ── held items ───────────────────────────────────────────────────────────
@@ -242,4 +308,14 @@ export async function answerHold(steps: {
 export function heldItems(p: HoldingPair): number {
   if (p.hold_new !== true) return 0;
   return typeof p.held === 'number' && Number.isFinite(p.held) && p.held > 0 ? Math.floor(p.held) : 0;
+}
+
+/**
+ * Whether removing a folder ("Stop syncing") has to stop its account's watcher
+ * first: a pass of that folder is under way. The watcher only re-reads its
+ * folders between passes, so the pass went on — for hours, for a first sync —
+ * after the folder's card had gone, with nothing on screen to show it.
+ */
+export function stopForRemoval(st: SyncStatus | null | undefined, pairId: string): boolean {
+  return !!st && st.running && st.active?.pairId === pairId;
 }

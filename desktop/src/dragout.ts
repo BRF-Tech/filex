@@ -57,6 +57,9 @@ export interface DragProgress {
   name?: string;
   finished?: boolean;
   error?: string;
+  /** Files written so far, inside folders too: a dragged folder is ONE item,
+   *  and its item count said nothing until the whole of it had arrived. */
+  files?: number;
 }
 
 export interface PrepareContext {
@@ -277,6 +280,7 @@ export class DragOutCache {
     remoteDir: string,
     dest: string,
     signal?: AbortSignal,
+    onFile?: () => void,
   ): Promise<void> {
     if (signal?.aborted) throw new Error('cancelled');
     xferLog('dir ->', remoteDir);
@@ -295,8 +299,13 @@ export class DragOutCache {
       if (!f.basename || f.basename === '.trash') continue;
       const childRemote = `${base}${f.basename}`;
       const childDest = path.join(dest, safeName(f.basename));
-      if (f.type === 'dir') await this.downloadTreeTo(ctx, childRemote, childDest, signal);
-      else await this.downloadFileTo(ctx, childRemote, childDest);
+      // A stop lands between two files, not after the whole tree.
+      if (signal?.aborted) throw new Error('cancelled');
+      if (f.type === 'dir') await this.downloadTreeTo(ctx, childRemote, childDest, signal, onFile);
+      else {
+        await this.downloadFileTo(ctx, childRemote, childDest);
+        onFile?.();
+      }
     }
   }
 
@@ -433,26 +442,39 @@ export async function fulfilDrop(
 ): Promise<{ ok: boolean; written: string[]; error?: string }> {
   const written: string[] = [];
   let done = 0;
+  let files = 0;
   for (const item of items) {
-    if (signal?.aborted) return { ok: false, written, error: 'cancelled' };
+    if (signal?.aborted) {
+      ctx.onProgress?.({ done, total: items.length, finished: true, error: 'cancelled', files });
+      return { ok: false, written, error: 'cancelled' };
+    }
     const name = safeName(item.basename);
     const dest = path.join(dropDir, name);
-    ctx.onProgress?.({ done, total: items.length, name });
+    ctx.onProgress?.({ done, total: items.length, name, files });
+    // Each file that lands is said: a folder is ONE item, and its count
+    // alone said nothing until the whole folder had arrived.
+    const onFile = () => {
+      files++;
+      ctx.onProgress?.({ done, total: items.length, name, files });
+    };
     try {
       // The empty stand-in goes first: the real content takes its place, and a
       // failure must not leave a zero-byte file wearing the right name.
       await fs.promises.rm(dest, { recursive: true, force: true });
-      if (item.type === 'dir') await cache.downloadTreeTo(ctx, item.path, dest, signal);
-      else await cache.downloadFileTo(ctx, item.path, dest);
+      if (item.type === 'dir') await cache.downloadTreeTo(ctx, item.path, dest, signal, onFile);
+      else {
+        await cache.downloadFileTo(ctx, item.path, dest);
+        onFile();
+      }
       written.push(dest);
     } catch (e) {
-      const msg = String((e as Error)?.message ?? e);
-      ctx.onProgress?.({ done, total: items.length, name, finished: true, error: msg });
+      const msg = signal?.aborted ? 'cancelled' : String((e as Error)?.message ?? e);
+      ctx.onProgress?.({ done, total: items.length, name, finished: true, error: msg, files });
       return { ok: false, written, error: msg };
     }
     done++;
   }
-  ctx.onProgress?.({ done, total: items.length, finished: true });
+  ctx.onProgress?.({ done, total: items.length, finished: true, files });
   return { ok: true, written };
 }
 

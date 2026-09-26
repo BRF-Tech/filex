@@ -1061,6 +1061,7 @@
         'upd.check':            ['Check now', 'Şimdi denetle'],
         'upd.checking':         ['Checking…', 'Denetleniyor…'],
         'upd.current':          ['Up to date', 'Güncel'],
+        'upd.unchecked':        ['Not checked yet', 'Henüz denetlenmedi'],
         'upd.available':        ['Version {v} found', '{v} sürümü bulundu'],
         'upd.downloading':      ['Downloading… %{p}', 'İndiriliyor… %{p}'],
         'upd.ready':            ['Version {v} installs itself shortly', '{v} sürümü birazdan kendiliğinden kurulacak'],
@@ -1125,6 +1126,14 @@
         'sync.held_discard':    ['Move to local trash', 'Yerel çöpe taşı'],
         'sync.phase_inventory': ['listing the server…', 'sunucu listeleniyor…'],
         'sync.phase_plan':      ['working out what to change…', 'neyin değişeceği hesaplanıyor…'],
+        'sync.phase_plan_n':    ['{n} change(s) to make', '{n} değişiklik yapılacak'],
+        'sync.phase_inventory_listed': ['listing the server — {n} item(s) so far', 'sunucu listeleniyor — şimdiye dek {n} öğe'],
+        'sync.phase_settling_n': ['finishing up — {done}/{total}', 'tamamlanıyor — {done}/{total}'],
+        'sync.pending':         ['waiting for its first check', 'ilk denetimini bekliyor'],
+        'sync.moving':          ['moving to the new filex folder…', 'yeni filex klasörüne taşınıyor…'],
+        'set.sync_root_moving': ['Moving…', 'Taşınıyor…'],
+        'sync.exited':          ['the sync engine stopped (exit {code})', 'eşitleme motoru durdu (çıkış {code})'],
+        'sync.restarting':      ['— starting it again shortly', '— birazdan yeniden başlatılıyor'],
         'sync.phase_transfer':  ['moving files — {done}/{total}', 'dosyalar aktarılıyor — {done}/{total}'],
         'sync.phase_bytes':     ['{bytes} of {size}', '{bytes} / {size}'],
         'sync.eta':             ['about {eta} left', 'yaklaşık {eta} kaldı'],
@@ -1624,6 +1633,7 @@
             prepare: (items) => window.filexApp.dragPrepare(account.id, items),
             start: (items) => window.filexApp.dragStart(account.id, items),
             cancel: () => window.filexApp.dragCancel(),
+            stop: () => window.filexApp.dragStop(),
             onProgress: (cb) => { explorerDragCb = cb; },
           },
           // #47 — the palette's "Everywhere" group searches EVERY account on
@@ -1882,9 +1892,24 @@
           if (v.eta) line += ' — ' + T('sync.eta', { eta: localEta(v) });
           return line;
         }
-        if (v.phase === 'plan') return T('sync.phase_plan');
-        if (v.phase === 'settling') return T('sync.phase_settling');
+        // Every phase says its figures once the engine has them: a large
+        // server lists for minutes, and "listing the server…" alone read as
+        // stuck.
+        if (v.phase === 'plan') {
+          return v.total > 0 ? T('sync.phase_plan_n', { n: localCount(v.total) }) : T('sync.phase_plan');
+        }
+        if (v.phase === 'settling') {
+          return v.total > 0
+            ? T('sync.phase_settling_n', { done: localCount(v.done), total: localCount(v.total) })
+            : T('sync.phase_settling');
+        }
+        if (typeof v.listed === 'number') return T('sync.phase_inventory_listed', { n: localCount(v.listed) });
         return T('sync.phase_inventory');
+      }
+
+      /** A count with this window's thousands separator. */
+      function localCount(n) {
+        return Number(n).toLocaleString(LANG === 'tr' ? 'tr-TR' : 'en-US');
       }
 
       /** A bandwidth limit: the presets the main process offers, KiB/s. A
@@ -1954,7 +1979,21 @@
             case 'active': line = activityLine(v); cls = 'ok'; break;
             case 'busy': line = T('sync.busy'); break;
             case 'window': line = T('sync.window_wait', { window: v.window.replace('-', '–') }); break;
-            case 'error': line = v.message; cls = 'err'; break;
+            // An engine that stopped on its own: said in this window's
+            // language (the message is the engine's English), with the
+            // restart the supervisor has scheduled.
+            case 'error':
+              line = v.exited
+                ? T('sync.exited', { code: v.exited }) + (v.restartAt ? ' ' + T('sync.restarting') : '')
+                : v.message;
+              cls = 'err';
+              break;
+            // A folder no pass has finished yet: not "watching", which is
+            // what a folder in step says.
+            case 'pending': line = T('sync.pending'); break;
+            // Its account's filex folder is being moved: its watcher is off
+            // until the move ends, which is not "stopped".
+            case 'moving': line = T('sync.moving'); break;
             case 'watching': line = T('sync.watching'); cls = 'ok'; break;
             case 'stopped': line = T('sync.stopped'); cls = 'err'; break;
           }
@@ -2059,7 +2098,9 @@
             </div>
             <div class="row">
               <button data-openlocal="${esc(active.syncRoot || '')}" ${active.syncRoot ? '' : 'disabled'}>${esc(T('set.open_folder'))}</button>
-              <button id="sync-root-change">${esc(T('set.sync_root_change'))}</button>
+              ${(state.rootMoving || []).includes(state.activeId)
+                ? `<button id="sync-root-change" disabled aria-busy="true">${esc(T('set.sync_root_moving'))}</button>`
+                : `<button id="sync-root-change">${esc(T('set.sync_root_change'))}</button>`}
             </div>
           </div></div>` : ''}
           ${pairs}
@@ -2273,7 +2314,9 @@
               <button id="upd-download">${esc(T('upd.open_store'))}</button>
             </div></div>`;
         }
-        let line = T('upd.current');
+        // "Up to date" only after a check has said so; before one, it was a
+        // claim nothing had checked.
+        let line = T(u.status === 'current' ? 'upd.current' : 'upd.unchecked');
         if (!supported) line = T('upd.dev');
         else if (u.status === 'checking') line = T('upd.checking');
         else if (u.status === 'manual') line = T(portable ? 'upd.portable_manual' : 'upd.manual', { v: u.version || '' });
@@ -2355,9 +2398,18 @@
         const addSync = $('#add-sync', el);
         if (addSync) addSync.addEventListener('click', () => openPicker());
         const rootChange = $('#sync-root-change', el);
+        // ⚠ One move at a time: moving to another drive copies for hours, and
+        // a second press started a second move of the same folders. The main
+        // process refuses one too (sync:setRoot); this shuts the button while
+        // the picker and the move are open.
         if (rootChange) rootChange.addEventListener('click', async () => {
-          state = await window.filexApp.setSyncRoot(state.activeId);
-          renderSettings();
+          if (rootChange.disabled) return;
+          rootChange.disabled = true;
+          try {
+            state = await window.filexApp.setSyncRoot(state.activeId);
+          } finally {
+            renderSettings();
+          }
         });
         $('#sync-trash', el).addEventListener('click', () => void openTrash());
         $('#bg', el).addEventListener('click', async () => {
@@ -2645,8 +2697,42 @@
       setupTitlebar();
       relabelStatic();
 
+      // ⚠ One repaint at a time, and never under a press or a field being
+      // typed in. The engine speaks on every chunk it prints, and each one
+      // repainted Settings whole: a click whose press and release fell either
+      // side of a repaint hit an element that no longer existed and did
+      // nothing, and a field lost its caret mid-word (O14).
+      let refreshQueued = false;
+      let pressing = false;
+      let refreshHeld = false;
+      function editingSettings() {
+        const a = document.activeElement;
+        return !!a && !!a.closest && !!a.closest('#settings') && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName);
+      }
+      function refreshSoon() {
+        if (refreshQueued) return;
+        refreshQueued = true;
+        setTimeout(() => {
+          refreshQueued = false;
+          if (pressing || editingSettings()) {
+            refreshHeld = true;
+            return;
+          }
+          void refresh();
+        }, 250);
+      }
+      function releaseHeldRefresh() {
+        if (!refreshHeld || pressing || editingSettings()) return;
+        refreshHeld = false;
+        // After the click the release is about to deliver.
+        setTimeout(() => void refresh(), 50);
+      }
+      document.addEventListener('pointerdown', () => { pressing = true; }, true);
+      document.addEventListener('pointerup', () => { pressing = false; releaseHeldRefresh(); }, true);
+      document.addEventListener('pointercancel', () => { pressing = false; releaseHeldRefresh(); }, true);
+      document.addEventListener('focusout', () => setTimeout(releaseHeldRefresh, 0), true);
       window.filexApp.onChanged(() => {
-        refresh();
+        refreshSoon();
         if (explorerSyncCb) explorerSyncCb();
       });
       window.filexApp.onDragProgress((p) => {

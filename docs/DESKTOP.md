@@ -420,6 +420,20 @@ While the engine is working, a strip along the bottom of the window names the
 folder it is on and shows what it is doing — listing, or `12/345` with a
 progress bar. It disappears when the run settles.
 
+Under each folder in *Settings* the same line says what is true of it now:
+
+- the phase, with its figures ("listing the server — 48,211 items so far",
+  "97 changes to make", "finishing up — 40/97");
+- "waiting for its first check" for a folder no pass has finished for since
+  the app started (a folder just added waits behind the others);
+- "watching for changes" only once a pass has left it in step;
+- "moving to the new filex folder…" while the filex folder is moved.
+
+An engine that stops on its own is started again after 5 s, 15 s, a minute,
+then every five minutes, and the line says so. The tray icon's tooltip carries
+the pause, whether a pass is running or a folder is failing, and the unread
+count.
+
 ### The filex folder on this computer
 
 *Settings ⚙ → filex folder on this computer* names the root, opens it, and can
@@ -434,6 +448,10 @@ times preserved, since those are what the engine reads change from — rather
 than failing. If a move fails halfway, the pair follows whichever side holds the
 complete folder; if even that cannot be arranged, the folder is unpaired rather
 than left pointing at a partial tree, and the dialog says so.
+
+A move runs once at a time ("Change…" reads "Moving…" until it ends), and
+nothing starts the account's watcher again before it ends: a watcher reading
+half-moved mirrors would see a mass delete.
 
 
 ### When filex holds items back
@@ -540,8 +558,9 @@ file that is genuinely there.
 **2. Stand-ins, for everything else.** The drag starts with empty placeholders
 carrying the right names, which the shell copies in microseconds. filex then
 finds the folder they landed in, removes them, and downloads the real content
-there, showing progress in the window. Nothing is fetched before the drag, so
-size stops mattering. Downloads land on `name.filexpart` and are renamed only
+there, showing progress in the window ("42 files so far…", counted inside
+folders too) with **Stop**, which keeps what has arrived and fetches nothing
+more. Nothing is fetched before the drag, so size stops mattering. Downloads land on `name.filexpart` and are renamed only
 once complete, so nothing ever wears the real name half-written.
 
 ⚠ Route 2 cannot fill in a drop onto an **application**: nothing is written to
