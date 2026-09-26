@@ -792,6 +792,7 @@ func (s *Store) SoftDeleteAndRetag(ctx context.Context, id int64, trashPath, tra
 	_, err := s.conn(ctx).ExecContext(ctx, `
 		UPDATE nodes
 		SET deleted_at=CURRENT_TIMESTAMP,
+		    deleted_by=NULL,
 		    updated_at=CURRENT_TIMESTAMP,
 		    parent_id=NULL,
 		    name=?, path=?, path_hash=?, storage_key=?
@@ -853,6 +854,7 @@ func (s *Store) retagTrashedSubtree(ctx context.Context, storageID int64, origPa
 		_, _ = s.conn(ctx).ExecContext(ctx, `
 			UPDATE nodes
 			SET deleted_at=CURRENT_TIMESTAMP,
+			    deleted_by=NULL,
 			    updated_at=CURRENT_TIMESTAMP,
 			    path=?, path_hash=?, storage_key=?
 			WHERE id=?`, newPath, newHash, c.path, c.id)
@@ -906,6 +908,7 @@ func (s *Store) restoreTrashedSubtree(ctx context.Context, storageID int64, tras
 		_, _ = s.conn(ctx).ExecContext(ctx, `
 			UPDATE nodes
 			SET deleted_at=NULL,
+			    deleted_by=NULL,
 			    updated_at=CURRENT_TIMESTAMP,
 			    path=?, path_hash=?, storage_key=?
 			WHERE id=?`, newPath, newHash, newPath, c.id)
@@ -952,7 +955,7 @@ func subtreeSuffix(p string, prefixes []string) string {
 }
 
 func (s *Store) SoftDeleteNode(ctx context.Context, id int64) error {
-	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET deleted_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET deleted_at=CURRENT_TIMESTAMP, deleted_by=NULL WHERE id=?`, id)
 	return err
 }
 
@@ -2801,7 +2804,7 @@ type rowScanner interface {
 // what there were, and a column added to `nodes` reached the ordinary listing,
 // the search rebuild — and silently missed the tag and starred reads, whose
 // scan then failed at runtime on a path the suite only walks in one test.
-const nodeColumnsFmt = `%[1]sid, %[1]sstorage_id, %[1]sparent_id, %[1]sname, %[1]spath, %[1]spath_hash, COALESCE(%[1]sstorage_key,''), %[1]stype, %[1]ssize, COALESCE(%[1]smime,''), COALESCE(%[1]setag,''), %[1]sbackend_mtime, %[1]sdb_mtime, %[1]ssync_state, COALESCE(%[1]stransfer_state,'stored'), %[1]sseen_at, %[1]sdeleted_at, %[1]screated_at, %[1]supdated_at, %[1]sowner_id, %[1]slast_actor_id, COALESCE(%[1]sexternal_upload,0)`
+const nodeColumnsFmt = `%[1]sid, %[1]sstorage_id, %[1]sparent_id, %[1]sname, %[1]spath, %[1]spath_hash, COALESCE(%[1]sstorage_key,''), %[1]stype, %[1]ssize, COALESCE(%[1]smime,''), COALESCE(%[1]setag,''), %[1]sbackend_mtime, %[1]sdb_mtime, %[1]ssync_state, COALESCE(%[1]stransfer_state,'stored'), %[1]sseen_at, %[1]sdeleted_at, %[1]screated_at, %[1]supdated_at, %[1]sowner_id, %[1]slast_actor_id, COALESCE(%[1]sexternal_upload,0), %[1]sdeleted_by`
 
 var (
 	// nodeColumnList is the unqualified list; nodeColumnsN is the "n."-aliased
@@ -2816,7 +2819,7 @@ func nodeSelectColumns() string {
 
 func scanNode(r rowScanner) (*model.Node, error) {
 	n := &model.Node{}
-	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.LastActorID, &n.ExternalUpload)
+	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.LastActorID, &n.ExternalUpload, &n.DeletedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -3339,6 +3342,43 @@ func (s *Store) GetUserDisplayNames(ctx context.Context, ids []int64) (map[int64
 	return out, nil
 }
 
+// SetNodeDeletedBy names who put a trashed row in the trash — the row, and
+// for a folder every trashed row under its path that names nobody yet: its
+// contents, which SoftDeleteAndRetag moved under the same trash key. A live
+// row is left alone, and so is a row another delete already named.
+//
+// ⚠ The subtree is matched with SUBSTR on the CHARACTER count, not
+// LIKE: a `%` or `_` in a folder name is data, and see prefixChars for why
+// len() is wrong.
+func (s *Store) SetNodeDeletedBy(ctx context.Context, nodeID int64, by *int64) error {
+	var storageID int64
+	var nodeType, p string
+	err := s.conn(ctx).QueryRowContext(ctx,
+		`SELECT storage_id, type, path FROM nodes WHERE id=? AND deleted_at IS NOT NULL`, nodeID).
+		Scan(&storageID, &nodeType, &p)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET deleted_by=? WHERE id=?`, by, nodeID); err != nil {
+		return err
+	}
+	if nodeType != string(model.NodeTypeDirectory) {
+		return nil
+	}
+	for _, pfx := range subtreePrefixVariants([]string{p}) {
+		if _, err := s.conn(ctx).ExecContext(ctx, `
+			UPDATE nodes SET deleted_by=?
+			WHERE storage_id=? AND deleted_at IS NOT NULL AND deleted_by IS NULL AND SUBSTR(path,1,?)=?`,
+			by, storageID, prefixChars(pfx), pfx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SetNodeActor updates the last_actor_id column for one node. A nil actor is
 // SYSTEM — a change that arrived from outside filex has nobody to name, and
 // writing the previous actor there instead would be a lie the UI cannot see
@@ -3433,7 +3473,7 @@ func (s *Store) CountTrashedExpired(ctx context.Context, before time.Time) (map[
 
 // RestoreNode flips deleted_at back to NULL.
 func (s *Store) RestoreNode(ctx context.Context, id int64) error {
-	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET deleted_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET deleted_at=NULL, deleted_by=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
 }
 
@@ -3496,6 +3536,7 @@ func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, or
 		if _, err := s.conn(ctx).ExecContext(ctx, `
 			UPDATE nodes
 			SET deleted_at=NULL,
+			    deleted_by=NULL,
 			    updated_at=CURRENT_TIMESTAMP,
 			    parent_id=NULL,
 			    name=?, path=?, path_hash=?, storage_key=?
@@ -3506,6 +3547,7 @@ func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, or
 		if _, err := s.conn(ctx).ExecContext(ctx, `
 			UPDATE nodes
 			SET deleted_at=NULL,
+			    deleted_by=NULL,
 			    updated_at=CURRENT_TIMESTAMP,
 			    parent_id=?,
 			    name=?, path=?, path_hash=?, storage_key=?

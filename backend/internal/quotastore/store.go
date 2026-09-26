@@ -438,6 +438,44 @@ func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, or
 	return nil
 }
 
+// SoftDeleteAndRetag records who put it in the trash — the row and, for a
+// folder, every row trashed with it. Usage does not move: trashed bytes keep
+// counting until the purge (HardDeleteNode).
+func (s *Store) SoftDeleteAndRetag(ctx context.Context, id int64, trashPath, trashHash, origPath string) error {
+	if err := s.Store.SoftDeleteAndRetag(ctx, id, trashPath, trashHash, origPath); err != nil {
+		return err
+	}
+	s.stampDeletedBy(ctx, id)
+	return nil
+}
+
+// SoftDeleteNode is SoftDeleteAndRetag for a row that keeps its path (the
+// scanner's tombstone pass, a driver with no trash of its own).
+func (s *Store) SoftDeleteNode(ctx context.Context, id int64) error {
+	if err := s.Store.SoftDeleteNode(ctx, id); err != nil {
+		return err
+	}
+	s.stampDeletedBy(ctx, id)
+	return nil
+}
+
+// stampDeletedBy names the acting identity as the one who trashed `id`.
+//
+// ⚠ Nobody is named for a delete no person made — the scanner finding an
+// object gone, the virus scan's quarantine — and nothing needs clearing for
+// it either: the soft delete itself already cleared the column, so a name
+// written on an earlier trip through the trash cannot come back.
+func (s *Store) stampDeletedBy(ctx context.Context, id int64) {
+	actor := ptr(ActorFrom(ctx))
+	if actor == nil {
+		return
+	}
+	if err := s.Store.SetNodeDeletedBy(ctx, id, actor); err != nil {
+		slog.Warn("quota: set node deleted_by",
+			slog.Int64("node", id), slog.String("err", err.Error()))
+	}
+}
+
 // stampActorByID is stampActor for the paths that have no `before` row in hand.
 //
 // ⚠ A system move does NOT blank the actor. internal/sync.repairStalePath

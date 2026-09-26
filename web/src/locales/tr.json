@@ -1105,6 +1105,8 @@
     "col_storage": "Depo",
     "col_size": "Boyut",
     "col_deleted_at": "Silinme",
+    "col_deleted_by": "Silen",
+    "deleted_by_nobody": "Kayıt yok: filex dışında kaldırılmış ya da filex bunu tutmaya başlamadan önce silinmiş",
     "col_ttl": "Kalan süre",
     "restore": "Geri yükle",
     "purge": "Kalıcı sil",

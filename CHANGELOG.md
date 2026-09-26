@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The Trash says who deleted each item.** The trash listed what was
+  deleted, where from and when, but not who, which in a shared storage is the
+  first thing anyone asks about a missing file. A delete now records the
+  person on the item, and on every file inside a deleted folder, whether it
+  ran in the request or later through the operations queue.
+  - The explorer's Trash shows it in a "Deleted by" column ("You" for your own
+    deletes). The admin's Trash page shows the name.
+  - An item nobody in filex deleted shows a dash, with a hover text saying
+    why: the scanner found it gone from the storage, or it was deleted before
+    this release, when nothing was recorded. It is not called "System",
+    because that is not true of the second kind.
+  - A restore clears the record.
+  - The trash listing (`GET /api/files/manager/trash`) carries
+    `deleted_by_id`, `deleted_by_name` and `deleted_by_self`, the shape the
+    file listing already uses for owners. Migration 00061 adds
+    `nodes.deleted_by`. Nothing is backfilled.
+
 ## [0.46.0] - 2026-09-26
 
 ### Added

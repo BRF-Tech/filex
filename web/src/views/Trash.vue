@@ -245,6 +245,15 @@ function fmtDate(s: string) {
 
 const hasItems = computed(() => entries.value.length > 0);
 
+/* Who put it in the trash: the account's name, its id when the server had no
+ * name for it, or a dash when nobody is named. ⚠ Not "System": a row nobody
+ * is named on may have been removed outside filex OR trashed before filex
+ * kept this, and "System" is false for the second. */
+function deleterLabel(e: TrashEntry): string {
+  if (typeof e.deleted_by_id !== 'number') return '—';
+  return e.deleted_by_name || `#${e.deleted_by_id}`;
+}
+
 /* The explorer's table (DataTable): every column resizes, hides, moves and
  * sorts, remembered on the account under `admin.trash`.
  *
@@ -275,7 +284,18 @@ const columns = computed<DataColumn<TrashEntry>[]>(() => [
     sortable: true,
     sortDir: 'desc',
     width: 170,
+    /* The whole date, or the table scrolls: squeezed toward the default
+       minimum, it read "Sep 26, 2026, 5:27 A". */
+    min: 150,
     sortValue: (e) => (e.deleted_at ? Date.parse(e.deleted_at) : null),
+  },
+  {
+    id: 'deleted_by',
+    label: t('trash.col_deleted_by'),
+    sortable: true,
+    width: 130,
+    min: 80,
+    sortValue: (e) => deleterLabel(e),
   },
   {
     id: 'ttl_days',
@@ -428,6 +448,14 @@ function onRowAction(key: string, row: TrashEntry) {
       <template #cell-storage="{ row }">{{ row.storage_name ?? `#${row.storage_id}` }}</template>
       <template #cell-size="{ row }">
         <span class="tabular-nums">{{ fmtBytes(row.size) }}</span>
+      </template>
+      <template #cell-deleted_by="{ row }">
+        <span
+          class="tbl-clamp"
+          :data-testid="`trash-deleted-by-${row.id}`"
+          :title="typeof row.deleted_by_id === 'number' ? deleterLabel(row) : t('trash.deleted_by_nobody')"
+          >{{ deleterLabel(row) }}</span
+        >
       </template>
       <template #cell-deleted_at="{ row }">
         <span class="whitespace-nowrap">{{ fmtDate(row.deleted_at) }}</span>

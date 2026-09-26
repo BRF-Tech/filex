@@ -210,7 +210,7 @@ Laravel conventions of the sister projects.
 | `users`                      | account row; bcrypt hash for local; OIDC `sub`/`iss` |
 | `sessions`                   | session cookies + Bearer token cache |
 | `storages`                   | named storage instances + driver config (encrypted) |
-| `files`                      | DB-cached file tree, indexed by `(storage_id, parent_path)`. Every row also says whose it is — `owner_id` (who put it here), `last_actor_id` (who touched it last) and `external_upload` (it arrived through an anonymous drop link). `NULL` on either id means **system**: nobody put it here through filex, and no user row is invented for it |
+| `files`                      | DB-cached file tree, indexed by `(storage_id, parent_path)`. Every row also says whose it is — `owner_id` (who put it here), `last_actor_id` (who touched it last) and `external_upload` (it arrived through an anonymous drop link). `NULL` on either id means **system**: nobody put it here through filex, and no user row is invented for it. A trashed row also says who put it in the trash (`deleted_by`, `NULL` when nobody is recorded) |
 | `file_metadata`              | lightweight extended attrs (mime override, label, color tag) |
 | `shares`                     | public links: token, PIN, expiry, max_downloads, owner |
 | `share_downloads`            | individual download events (audit) |

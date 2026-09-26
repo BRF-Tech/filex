@@ -119,6 +119,35 @@ the same rule; none of them adjust quota at delete time.
 > accounting is real now — see [Quotas](QUOTAS.md) for the full set of
 > rules (overwrite, move, restore, copy, purge) and where they live.
 
+### Who deleted it
+
+Every item in the trash records **who put it there** (`nodes.deleted_by`,
+migration 00061), and both Trash views show it: the explorer in a "Deleted by"
+column ("You" for your own deletes), the admin's Trash page by name.
+
+- **Who is recorded.** It is the person the delete was done for, whichever way
+  it arrived: the explorer, the API, WebDAV/SFTP/FTPS/S3 under their
+  account, or a delete the operations queue ran later (the queue keeps who
+  asked).
+- **Folders.** Deleting a folder records the person on the folder and on
+  every item inside it, because the trash lists a folder's contents as rows of
+  their own.
+- **Nobody recorded.** An item shows a dash in two cases, and the hover text
+  says so:
+  - nobody in filex deleted it: the scanner found it gone from the storage,
+    or the virus scan quarantined it;
+  - it was deleted before this was kept.
+
+  The two cannot be told apart, so neither is called "System".
+- **Restore.** A restore clears the record. If the item goes back into the
+  trash, it records whoever deleted it that time.
+- **Deleted accounts.** Deleting an account clears the record wherever it
+  names that account.
+
+The listing resolves the names in one lookup per page, as the file listing
+does for owners. Nothing is backfilled: there is no honest way to know who
+deleted an item before the column existed.
+
 ### Retention & purge
 
 Trashed items are kept for a fixed window, then hard‑deleted automatically.
@@ -164,7 +193,7 @@ logged; the next run tries again).
 
 | Method & path | Body / query | Notes |
 |---|---|---|
-| `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, and **`ttl_days`** (days remaining before purge, floored at 0). |
+| `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, **`ttl_days`** (days remaining before purge, floored at 0), and who deleted it: **`deleted_by_id`**, **`deleted_by_name`**, and **`deleted_by_self`** (`true` when it was the caller). The three are absent when nobody is recorded (see *Who deleted it* below). |
 | `POST /api/files/manager/restore` | `{ "node_id": 123 }` | Moves the file back to its original path and re‑attaches the row. Returns **409** `{ "code": "EXISTS", "name", "path" }` when something already holds that path; nothing moves and the entry stays in the trash. |
 
 The explorer's **Trash** view draws these entries in its own table with the

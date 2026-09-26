@@ -320,6 +320,7 @@ func (s *Service) List(ctx context.Context, storageID *int64, limit, offset int)
 			storageNames[st.ID] = st.Name
 		}
 	}
+	deleters := s.deleterNames(ctx, rows)
 	out := make([]TrashEntry, 0, len(rows))
 	for _, n := range rows {
 		entry := TrashEntry{
@@ -330,6 +331,11 @@ func (s *Service) List(ctx context.Context, storageID *int64, limit, offset int)
 			Mime:      n.Mime,
 		}
 		entry.StorageName = storageNames[n.StorageID]
+		if n.DeletedBy != nil {
+			by := *n.DeletedBy
+			entry.DeletedByID = &by
+			entry.DeletedByName = deleters[by]
+		}
 		// The ORIGINAL path (OriginalPath's rule, legacy fallback included),
 		// and the ORIGINAL basename rather than the `<unix>-<rand>__name` key
 		// the node was renamed to on soft-delete. A row that records no
@@ -351,6 +357,31 @@ func (s *Service) List(ctx context.Context, storageID *int64, limit, offset int)
 		out = append(out, entry)
 	}
 	return out, total, nil
+}
+
+// deleterNames resolves the accounts that trashed `rows` to display names,
+// in one lookup for the page — the file listing's owner column does the same.
+// A failed lookup is not fatal: the ids are still true, and a client shows an
+// id it has no name for the way it shows an owner it has no name for.
+func (s *Service) deleterNames(ctx context.Context, rows []*model.Node) map[int64]string {
+	seen := map[int64]bool{}
+	ids := make([]int64, 0, 4)
+	for _, n := range rows {
+		if n.DeletedBy == nil || *n.DeletedBy <= 0 || seen[*n.DeletedBy] {
+			continue
+		}
+		seen[*n.DeletedBy] = true
+		ids = append(ids, *n.DeletedBy)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	names, err := s.Store.GetUserDisplayNames(ctx, ids)
+	if err != nil {
+		slog.Warn("trash: resolve who deleted", slog.String("err", err.Error()))
+		return nil
+	}
+	return names
 }
 
 // PurgeOne immediately hard-deletes a single trashed node (admin / owner).
@@ -377,6 +408,15 @@ type TrashEntry struct {
 	Mime        string    `json:"mime,omitempty"`
 	DeletedAt   time.Time `json:"deleted_at"`
 	TTLDays     *int      `json:"ttl_days,omitempty"`
+	// Who put it in the trash (migration 00061), in the shape the file
+	// listing gives an owner: the account id, its display name, and — set by
+	// the handler, which knows who is asking — whether that was the asker.
+	// All three are absent when nobody in filex is named on the row: the
+	// scanner found the object gone, the virus scan quarantined it, or it was
+	// trashed before filex kept this. The client decides what to call that.
+	DeletedByID   *int64 `json:"deleted_by_id,omitempty"`
+	DeletedByName string `json:"deleted_by_name,omitempty"`
+	DeletedBySelf bool   `json:"deleted_by_self,omitempty"`
 }
 
 // RunDailyLoop ticks PurgeExpired every interval until ctx is cancelled.
