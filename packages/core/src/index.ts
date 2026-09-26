@@ -520,7 +520,8 @@ export { default as ConnectionNotice } from './components/ConnectionNotice.vue';
 /* `filex 0.43.0` — which filex this is, in ONE spelling for every place that
    says it (the account menus, user settings, the sign-in page). No catalogue
    key: a name and a number need no translation (lib/productVersion). */
-export { PRODUCT_NAME, productVersionLine } from './lib/productVersion';
+export { PRODUCT_NAME, parseServerVersion, productVersionLine, shortCommit } from './lib/productVersion';
+export type { ServerVersion } from './lib/productVersion';
 export { default as ProductVersion } from './components/ProductVersion.vue';
 /* The one splitter for list fields — "،" "，" "、" are commas too. */
 export { splitList, isListSeparatorKey } from './lib/listInput';

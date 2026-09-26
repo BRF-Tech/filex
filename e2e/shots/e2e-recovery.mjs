@@ -124,6 +124,16 @@ async function shot(page, name) {
  * The old path is kept as a fallback so a surface with no navigation panel
  * (an embed with `sidenav` off) still reaches the same modal.
  */
+// ⚠ Never `networkidle` in this script. The explorer mirrors a preference to
+// the account with a `keepalive` fetch (lib/viewPrefsHttp.ts), and Playwright
+// never sees a keepalive request finish: the page never counts as idle and
+// every such wait ran out at 30 s (v0.46.0 shots, 2026-09-26 — the request
+// was `PUT /api/me/prefs {"prefs":{"locale":"en"}}`, answered in 3 ms).
+// Wait for the explorer itself instead.
+async function explorerReady(page) {
+  await page.getByTestId('sidenav-new').first().waitFor({ state: 'visible', timeout: 30000 });
+}
+
 async function openNewFolder(page) {
   const plus = page.locator('[data-testid="sidenav-new"]');
   if (await plus.count()) {
@@ -317,7 +327,7 @@ async function main(expectedKid) {
   });
 
   // ── sign in ───────────────────────────────────────────────────────
-  await page.goto(`${BASE}/admin/login`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/admin/login`, { waitUntil: 'load' });
   await page.locator('input[type="email"], input[name="email"]').first().fill(EMAIL);
   await page.locator('input[type="password"]').first().fill(PASSWORD);
   await page.locator('form button[type="submit"]').first().click();
@@ -326,7 +336,8 @@ async function main(expectedKid) {
   // already arrived, and the run died before the first screenshot.
   await page.waitForURL(/\/admin\/(home|dashboard|explore)/, { timeout: 20000 });
 
-  await page.goto(`${BASE}/admin/explore`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/admin/explore`, { waitUntil: 'load' });
+  await explorerReady(page);
   await page.waitForTimeout(1500);
 
   // ── 1. create an encrypted folder ─────────────────────────────────
@@ -443,7 +454,8 @@ async function main(expectedKid) {
   );
 
   // ── 5. lose the password: reload drops the key from memory ────────
-  await page.reload({ waitUntil: 'networkidle' });
+  await page.reload({ waitUntil: 'load' });
+  await explorerReady(page);
   await page.waitForTimeout(2000);
   const lock = page.locator('.fe-e2e-lock');
   await lock.waitFor({ state: 'visible', timeout: 20000 });
@@ -492,7 +504,9 @@ async function main(expectedKid) {
       (n) => n.event === 'e2e.escrow_used',
     ).length;
 
-    await page.reload({ waitUntil: 'networkidle' });
+    await page.reload({ waitUntil: 'load' });
+
+    await explorerReady(page);
     await page.waitForTimeout(2000);
     await page.locator('.fe-e2e-lock').waitFor({ state: 'visible', timeout: 20000 });
     await page.locator('.fe-e2e-optlink').click();
@@ -560,7 +574,8 @@ async function main(expectedKid) {
     });
     let rowShown = false;
     for (let attempt = 0; attempt < 3 && !rowShown; attempt++) {
-      await page.reload({ waitUntil: 'networkidle' });
+      await page.reload({ waitUntil: 'load' });
+      await explorerReady(page);
       await bell.first().waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
       await page.waitForTimeout(1500);
       if (!(await bell.count())) break;
@@ -631,7 +646,8 @@ async function main(expectedKid) {
     await new Promise((r) => setTimeout(r, 1500));
   }
 
-  await page.goto(`${BASE}/admin/explore?storage=${STORAGE}`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/admin/explore?storage=${STORAGE}`, { waitUntil: 'load' });
+  await explorerReady(page);
   await page.waitForTimeout(2500);
   await page.getByText(legacyName, { exact: true }).first().dblclick();
   await page.waitForTimeout(1500);

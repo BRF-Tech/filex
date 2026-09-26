@@ -21,8 +21,8 @@ release — and it lays itself out **right to left** for the languages that read
 that way.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.43.0/explorer-grid-dark.png">
-  <img src="docs/screenshots/v0.43.0/explorer-grid-light.png" alt="filex explorer — thumbnail grid" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.46.0/explorer-grid-dark.png">
+  <img src="docs/screenshots/v0.46.0/explorer-grid-light.png" alt="filex explorer — thumbnail grid" width="900">
 </picture>
 
 </div>
@@ -195,85 +195,85 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 
 | Define the boxes — name each one and say whose it is; the document comes next | Place them — choose a box, tap the page where it goes |
 |---|---|
-| ![Defining the boxes of a signature request](docs/screenshots/v0.43.0/signing/sign-define-1440.png) | ![Placing the boxes on the document](docs/screenshots/v0.43.0/signing/sign-place-1440.png) |
+| ![Defining the boxes of a signature request](docs/screenshots/v0.46.0/signing/sign-define-1440.png) | ![Placing the boxes on the document](docs/screenshots/v0.46.0/signing/sign-place-1440.png) |
 
 | The partner's link — filex's one public screen, in your instance's name, behind a PIN | …and what it opens: only their own boxes — here a name typed in the face the requester chose (drawn and uploaded are the other two) |
 |---|---|
-| ![The outside signer's PIN gate](docs/screenshots/v0.43.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](docs/screenshots/v0.43.0/signing/sign-outside-fill-1440.png) |
+| ![The outside signer's PIN gate](docs/screenshots/v0.46.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](docs/screenshots/v0.46.0/signing/sign-outside-fill-1440.png) |
 
 | While it is out — the document frozen for everybody, who has signed in its details | Installing an app — every permission it asks for, in plain words, before anything runs |
 |---|---|
-| ![The document locked, its Signatures panel open](docs/screenshots/v0.43.0/signing/sign-status-1440.png) | ![The install wizard's permission review](docs/screenshots/v0.43.0/apps/apps-install-review-1440.png) |
+| ![The document locked, its Signatures panel open](docs/screenshots/v0.46.0/signing/sign-status-1440.png) | ![The install wizard's permission review](docs/screenshots/v0.46.0/apps/apps-install-review-1440.png) |
 
 | An installed app — where it came from, its fingerprint, and every permission it holds in plain words (its settings and its actions follow, further down the page) | The converter, another app — every target under its category, three steps |
 |---|---|
-| ![An installed app's detail](docs/screenshots/v0.43.0/apps/apps-detail-1440.png) | ![The converter's wizard](docs/screenshots/v0.43.0/apps/convert-wizard-1440.png) |
+| ![An installed app's detail](docs/screenshots/v0.46.0/apps/apps-detail-1440.png) | ![The converter's wizard](docs/screenshots/v0.46.0/apps/convert-wizard-1440.png) |
 
 | Every app on the instance, and a **language pack** among them — a manifest with nothing that runs, which says how much of this filex it translates and leaves with it |
 |---|
-| ![The Apps list, a language pack among the apps](docs/screenshots/v0.43.0/langpack/apps-list-1440.png) |
+| ![The Apps list, a language pack among the apps](docs/screenshots/v0.46.0/langpack/apps-list-1440.png) |
 
 ### Your own things, wherever you are
 
 | The bell — the unread count on it, every row going where it says | All of your notifications, inside the explorer — for everybody, not only administrators |
 |---|---|
-| ![The bell with its unread badge, open](docs/screenshots/v0.43.0/signing/bell-badge-1440.png) | ![The full notification list over the explorer](docs/screenshots/v0.43.0/signing/notifications-list-1440.png) |
+| ![The bell with its unread badge, open](docs/screenshots/v0.46.0/signing/bell-badge-1440.png) | ![The full notification list over the explorer](docs/screenshots/v0.46.0/signing/notifications-list-1440.png) |
 
 | My shares — the links you created, and their PINs when you need to pass one on | Every admin table — one pinned **Actions** menu per row, the same menu the explorer's ⋮ opens |
 |---|---|
-| ![My shares with a row's Actions menu open](docs/screenshots/v0.43.0/signing/my-shares-1440.png) | ![Admin → Shares, a row's Actions menu open](docs/screenshots/v0.43.0/signing/admin-table-actions-1440.png) |
+| ![My shares with a row's Actions menu open](docs/screenshots/v0.46.0/signing/my-shares-1440.png) | ![Admin → Shares, a row's Actions menu open](docs/screenshots/v0.46.0/signing/admin-table-actions-1440.png) |
 
 ### Your brand
 
 | Appearance — compose a theme in your own colours, previewed as you type | Made the default, it is what everybody's explorer wears… |
 |---|---|
-| ![The theme editor](docs/screenshots/v0.43.0/appearance/theme-editor-1440.png) | ![The explorer wearing the operator's theme](docs/screenshots/v0.43.0/appearance/themed-explorer-1440.png) |
+| ![The theme editor](docs/screenshots/v0.46.0/appearance/theme-editor-1440.png) | ![The explorer wearing the operator's theme](docs/screenshots/v0.46.0/appearance/themed-explorer-1440.png) |
 
 | …and the sign-in page, before anybody has signed in | A symlink filex will not follow says so — in the listing, and in words in its details |
 |---|---|
-| ![The sign-in page wearing the operator's theme](docs/screenshots/v0.43.0/appearance/themed-signin-1440.png) | ![A symlink that leaves the storage, badged](docs/screenshots/v0.43.0/symlinks/symlink-badge-1440.png) |
+| ![The sign-in page wearing the operator's theme](docs/screenshots/v0.46.0/appearance/themed-signin-1440.png) | ![A symlink that leaves the storage, badged](docs/screenshots/v0.46.0/symlinks/symlink-badge-1440.png) |
 
 ### The file manager
 
 | Sharing — PIN, expiry, download limit, one-line `curl` | Markdown viewer |
 |---|---|
-| ![Share modal](docs/screenshots/v0.43.0/share-modal.png) | ![Markdown viewer](docs/screenshots/v0.43.0/viewer-markdown.png) |
+| ![Share modal](docs/screenshots/v0.46.0/share-modal.png) | ![Markdown viewer](docs/screenshots/v0.46.0/viewer-markdown.png) |
 
 | …and what the person at the other end opens. filex has ONE outward-facing screen — a shared file, a folder, a file request, an app's signing page and the PIN in front of any of them are all this page, in your instance's name |
 |---|
-| ![A public share link, as its recipient sees it](docs/screenshots/v0.43.0/public-share.png) |
+| ![A public share link, as its recipient sees it](docs/screenshots/v0.46.0/public-share.png) |
 
 | Admin panel | Demo landing |
 |---|---|
-| ![Admin dashboard](docs/screenshots/v0.43.0/admin-dashboard.png) | ![Demo landing](docs/screenshots/v0.43.0/demo-landing.png) |
+| ![Admin dashboard](docs/screenshots/v0.46.0/admin-dashboard.png) | ![Demo landing](docs/screenshots/v0.46.0/demo-landing.png) |
 
 | The shell — what everybody lands on | Searching this folder; `⌘K` / `Ctrl K` hands the query to the palette |
 |---|---|
-| ![The filex shell](docs/screenshots/v0.43.0/driveshell/driveshell-hero-1440.png) | ![Searching a folder](docs/screenshots/v0.43.0/driveshell/driveshell-search-1440.png) |
+| ![The filex shell](docs/screenshots/v0.46.0/driveshell/driveshell-hero-1440.png) | ![Searching a folder](docs/screenshots/v0.46.0/driveshell/driveshell-search-1440.png) |
 
 | Navigation panel — Home, Shared with me, My shares, Recent, Starred, Trash, and the storages you can reach | Collapsed to the icon rail |
 |---|---|
-| ![Navigation panel](docs/screenshots/v0.43.0/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/v0.43.0/sidenav/sidenav-rail-1440.png) |
+| ![Navigation panel](docs/screenshots/v0.46.0/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/v0.46.0/sidenav/sidenav-rail-1440.png) |
 
 | Tags — your own, or your team's; a tag opens every file carrying it, from every folder they live in | Trash — what was deleted, where it came from, and how long is left before it goes |
 |---|---|
-| ![Personal and team tags](docs/screenshots/v0.43.0/tags/tags-kinds-1440.png) | ![The trash view](docs/screenshots/v0.43.0/sidenav/view-trash-1440.png) |
+| ![Personal and team tags](docs/screenshots/v0.46.0/tags/tags-kinds-1440.png) | ![The trash view](docs/screenshots/v0.46.0/sidenav/view-trash-1440.png) |
 
 | Shared with me — folders other people granted you, no mount instructions | Embedded in another product's page |
 |---|---|
-| ![Shared with me](docs/screenshots/v0.43.0/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/v0.43.0/sidenav/embed-webcomponent-1440.png) |
+| ![Shared with me](docs/screenshots/v0.46.0/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/v0.46.0/sidenav/embed-webcomponent-1440.png) |
 
 | How to connect — the guides, built from *your* deployment | API keys — mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry) |
 |---|---|
-| ![How to connect](docs/screenshots/v0.43.0/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.43.0/sidenav/apikeys-minted-1440.png) |
+| ![How to connect](docs/screenshots/v0.46.0/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.46.0/sidenav/apikeys-minted-1440.png) |
 
 | Reaching filex from anything — S3, SFTP, FTPS, NFS, WebDAV. Every command is built from *your* deployment |
 |---|
-| ![Connection guide](docs/screenshots/v0.43.0/connections-guide.png) |
+| ![Connection guide](docs/screenshots/v0.46.0/connections-guide.png) |
 
 | A storage filex does not ship — installed as a plugin on **Plugins → Storage plugins**, describing its own config form |
 |---|
-| ![Plugins](docs/screenshots/v0.43.0/admin-plugins.png) |
+| ![Plugins](docs/screenshots/v0.46.0/admin-plugins.png) |
 
 ## Quick start — binary
 

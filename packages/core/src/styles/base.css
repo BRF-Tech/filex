@@ -2205,6 +2205,10 @@ filex-explorer {
   font-variant-numeric: tabular-nums;
   user-select: text;
   white-space: nowrap;
+  /* A string longer than the menu is cut, never scrolled: the release alone
+     fits, and a menu must not grow a sideways scroll bar (2026-09-26). */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* === bul:s3 === */
