@@ -360,7 +360,7 @@ field selects the name part only, the way a rename does, so typing replaces
   extension is swapped (`notes.txt` → `notes.md`); a name with no extension, or
   one you chose (`test.conf`), stays as it is.
 
-![The New document dialog with a Plain text document named LICENSE](screenshots/v0.43.0/newdoc/newdoc-any-name-1280.png)
+![The New document dialog with a Plain text document named LICENSE](screenshots/v0.46.0/newdoc/newdoc-any-name-1280.png)
 
 The create itself is `POST /api/files/manager?action=newfile` with
 `{path, name, type, exact_name}`, where `type` is one of the `newdoc_types`

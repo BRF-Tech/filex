@@ -57,6 +57,7 @@ const SERVER_WRITTEN: { file: string; line: string; why: string }[] = [
   { file: 'web/src/views/ApiMcp.vue', line: "(tok.usernames || '')", why: 'the usernames the server stored, comma-joined by the server' },
   // (arrives with the release branch) the field keys a server-side check names
   { file: 'web/src/views/AuthProviders.vue', line: "params.fields = params.fields.split(',')", why: 'the field keys a provider check reports, as the server joined them' },
+  { file: 'packages/core/src/lib/productVersion.ts', line: "for (const part of m[2].split(',')", why: 'capabilities.version — commit and build time as backend internal/version.String joins them' },
 ];
 
 describe('no list field splits on its own', () => {
