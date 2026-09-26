@@ -11,6 +11,11 @@ export interface TrashEntry {
   deleted_at: string;
   /** Days remaining before automatic purge. */
   ttl_days?: number;
+  /** Who put it in the trash; every key absent when nobody is named (the
+   *  scanner found it gone, or it was trashed before filex kept this). */
+  deleted_by_id?: number;
+  deleted_by_name?: string;
+  deleted_by_self?: boolean;
 }
 
 export interface TrashList {

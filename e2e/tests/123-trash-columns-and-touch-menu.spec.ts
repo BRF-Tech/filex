@@ -61,7 +61,10 @@ test.describe('Trash and touch', () => {
     await expect(row.locator('.fe-list__col--mod')).not.toHaveText('—');
     await expect(row.locator('.fe-list__col--location')).toHaveText(`${STORAGE}/Raporlar`);
     await expect(row.locator('.fe-list__col--remaining')).toHaveText(/^\d+ (days?|gün)$/);
-    await expect(row.locator('.fe-list__col--owner')).toHaveCount(0);
+    // The owner's track says WHO DELETED IT in the Trash (161). What this line
+    // guards against is the Owner column reading "System" for every row.
+    await expect(head).toContainText(/Deleted by|Silen/);
+    await expect(row.locator('.fe-list__col--owner')).not.toHaveText(/^(System|Sistem)$/);
 
     await expect(page.getByTestId('sidenav-new')).toHaveCount(0);
   });

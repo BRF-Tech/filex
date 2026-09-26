@@ -73,6 +73,14 @@ type Node struct {
 	// but the row still has to be able to say the bytes were handed over by
 	// somebody else. That somebody is anonymous by design and gets no identity.
 	ExternalUpload bool `json:"external_upload,omitempty"`
+	// DeletedBy is who put it in the TRASH (migration 00061): the person whose
+	// delete it was, named on the row and on every row trashed with it, since
+	// the trash lists a folder's contents as rows of their own. nil when
+	// nobody in filex did it (the scanner found the object gone, the virus
+	// scan quarantined it) or the row was trashed before filex kept this. A
+	// restore clears it; so does every soft delete, before the person is
+	// named, so a name never outlives the trip through the trash it was for.
+	DeletedBy *int64 `json:"deleted_by,omitempty"`
 
 	// OwnerName is the owner's display name, resolved in one batched lookup by
 	// the API layer for the rows it is about to return. Never persisted, and

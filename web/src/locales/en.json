@@ -1105,6 +1105,8 @@
     "col_storage": "Storage",
     "col_size": "Size",
     "col_deleted_at": "Deleted",
+    "col_deleted_by": "Deleted by",
+    "deleted_by_nobody": "Not recorded: removed outside filex, or deleted before filex kept this",
     "col_ttl": "TTL",
     "restore": "Restore",
     "purge": "Purge",

@@ -3403,6 +3403,11 @@ async function loadTrash() {
              column read "—" for every row. */
           last_modified: Date.parse(e.deleted_at) || undefined,
           extra_metadata: { deleted_at: e.deleted_at, ttl_days: e.ttl_days ?? null },
+          /* Who put it here — the Trash draws it where a folder draws the
+             owner. Keys absent when nobody is named, as the listing sends. */
+          ...(e.deleted_by_id !== undefined ? { deleted_by_id: e.deleted_by_id } : {}),
+          ...(e.deleted_by_name ? { deleted_by_name: e.deleted_by_name } : {}),
+          ...(e.deleted_by_self ? { deleted_by_self: true } : {}),
         }) as unknown as FileNode,
     );
     dirname.value = '.trash';

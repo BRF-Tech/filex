@@ -278,4 +278,9 @@ export interface TrashEntry {
   mime?: string;
   deleted_at: string;
   ttl_days?: number | null;
+  /** Who put it in the Trash; every key absent when nobody is named. */
+  deleted_by_id?: number;
+  deleted_by_name?: string;
+  /** The asker's own delete ("You"). */
+  deleted_by_self?: boolean;
 }

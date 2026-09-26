@@ -537,6 +537,16 @@ func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 		entries = kept
 		total = len(kept)
 	}
+	// "You" is the client's word for the asker's own deletes, and the client
+	// is not told who it is signed in as (the core package is embedded in
+	// hosts that do not know): the listing says so, as it does for owners.
+	if u := auth.UserFrom(r.Context()); u != nil {
+		for i := range entries {
+			if by := entries[i].DeletedByID; by != nil && *by == u.ID {
+				entries[i].DeletedBySelf = true
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries": entries,
 		"total":   total,
