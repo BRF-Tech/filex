@@ -1039,6 +1039,8 @@
     "rebuild": "İndeksi yeniden oluştur",
     "rebuildHint": "Tüm depoları gezerek dosya metadata'sını yeniden indeksler. Milyon dosya başına birkaç dakika. Yükseltmeden sonra yeniden oluşturma önerildiğinde çalıştırın.",
     "rebuildStarted": "Yeniden oluşturma başladı",
+    "rebuildAlreadyRunning": "Bir yeniden oluşturma zaten sürüyor; bu sayfa onu izliyor.",
+    "rebuildDone": "Yeniden oluşturulan indeks devrede",
     "queryPlaceholder": "Dosya ara… ada göre ya da tag:etiket",
     "noResults": "Eşleşme yok",
     "resultCount": "{n} sonuç | {n} sonuç",

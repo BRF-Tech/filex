@@ -1039,6 +1039,8 @@
     "rebuild": "Rebuild index",
     "rebuildHint": "This walks every storage and re-indexes file metadata. Takes a few minutes per million files. Run it after an upgrade that reports a rebuild is recommended.",
     "rebuildStarted": "Rebuild started",
+    "rebuildAlreadyRunning": "A rebuild is already running; this page follows it.",
+    "rebuildDone": "The rebuilt index is live",
     "queryPlaceholder": "Search files… by name, or tag:label",
     "noResults": "No matches",
     "resultCount": "{n} result | {n} results",
