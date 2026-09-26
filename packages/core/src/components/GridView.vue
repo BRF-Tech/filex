@@ -437,6 +437,11 @@ function snippetTitle(snippet: string): string {
     :aria-label="t('grid.aria')"
     :aria-busy="loading ? 'true' : undefined"
   >
+    <!-- The cards on screen are the old ones while the listing is read again
+         (see DataTable's fe-list__refreshing). -->
+    <div v-if="loading && ordered.length > 0" class="fe-grid__refreshing" role="status">
+      <span class="fe-sr-only">{{ t('loading') }}</span>
+    </div>
     <template v-for="n in ordered" :key="n.path">
     <!-- surucu:d1 — the section label: a grid item spanning every column. The
          cards keep `role="option"`; the heading is aria-hidden, and the group
