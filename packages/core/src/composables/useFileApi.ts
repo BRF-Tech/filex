@@ -711,11 +711,21 @@ export function useFileApi(config: ExplorerConfig) {
    * protecting the file that holds the name — a restore used to overwrite it —
    * so it is reported by name rather than folded into "0 items restored",
    * which would read as if nothing had been tried.
+   *
+   * `failed` counts every other item that did not come back, and `failure` is
+   * the first of those errors, to be said. ⚠ They used to be skipped without a
+   * word: a folder whose restore outran the proxy (every object inside is moved
+   * back one by one on an object store) simply did not count, and the explorer
+   * reported "2 items restored" over a selection of three.
    */
-  async function restoreIds(ids: number[]): Promise<{ restored: number; taken: string[] }> {
+  async function restoreIds(
+    ids: number[],
+  ): Promise<{ restored: number; taken: string[]; failed: number; failure?: unknown }> {
     const url = endpoints.trashRestore;
     if (!url) throw new Error('trashRestore endpoint not configured');
     let restored = 0;
+    let failed = 0;
+    let failure: unknown;
     const taken: string[] = [];
     for (const id of ids) {
       try {
@@ -730,15 +740,19 @@ export function useFileApi(config: ExplorerConfig) {
         if (e.status === 409) {
           try {
             const body = JSON.parse(e.detail ?? '') as { code?: string; name?: string };
-            if (body.code === 'EXISTS') taken.push(body.name || String(id));
+            if (body.code === 'EXISTS') {
+              taken.push(body.name || String(id));
+              continue;
+            }
           } catch {
             /* a 409 without the envelope is counted as a plain failure */
           }
         }
-        /* any other failure: skip it, report the count that succeeded */
+        failed++;
+        if (failure === undefined) failure = err;
       }
     }
-    return { restored, taken };
+    return failure === undefined ? { restored, taken, failed } : { restored, taken, failed, failure };
   }
 
   /**

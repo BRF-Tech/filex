@@ -47,15 +47,18 @@ export const tr: Record<string, string> = {
   'modal.delete.message': '{count} öğe çöpe atılacak.',
   'modal.delete.message_one': '{count} öğe çöpe atılacak.',
   'modal.delete.confirm': 'Çöpe at',
+  'modal.delete.working': 'Çöpe taşınıyor…',
   'modal.delete.cancel': 'Vazgeç',
 
   'modal.rename.title': 'Yeniden adlandır',
   'modal.rename.save': 'Kaydet',
+  'modal.rename.saving': 'Yeniden adlandırılıyor…',
   'modal.rename.cancel': 'Vazgeç',
 
   'modal.newfolder.title': 'Yeni klasör',
   'modal.newfolder.placeholder': 'Klasör adı',
   'modal.newfolder.create': 'Oluştur',
+  'modal.newfolder.creating': 'Oluşturuluyor…',
   'modal.newfolder.cancel': 'Vazgeç',
 
   'modal.share.title': 'Paylaşım bağlantısı',
@@ -123,6 +126,7 @@ export const tr: Record<string, string> = {
   'upload.aborted': 'İptal edildi',
   'upload.cancel': 'İptal',
   'upload.resuming': '“{name}” %{percent} noktasından devam ediyor',
+  'upload.saving': 'Depoya kaydediliyor…',
   'upload.committing': 'Tamamlanıyor',
   'upload.transferring': 'Depolamaya aktarılıyor',
 
@@ -312,6 +316,10 @@ export const tr: Record<string, string> = {
   'toast.copy_ready': 'Kopyala → Yapıştır hazır',
   'toast.same_folder_cut': 'Aynı klasöre kesilemez',
   'toast.restored': '{n} öğe geri getirildi',
+  'toast.restoring': '{n} öğe geri getiriliyor…',
+  'toast.restoring_one': '{n} öğe geri getiriliyor…',
+  'toast.restore_partial': '{n} öğe geri getirildi, {failed} öğe getirilemedi: {reason}',
+  'toast.restore_partial_one': '{n} öğe geri getirildi, {failed} öğe getirilemedi: {reason}',
   'toast.restored_one': '{n} öğe geri getirildi',
   'toast.restore_taken': '{n} öğe geri getirilmedi: aynı adla bir şey zaten var. Oradakinin adını değiştirip yeniden deneyin.',
   'toast.restore_taken_one': '“{name}” geri getirilmedi: aynı adla bir şey zaten var. Oradakinin adını değiştirip yeniden deneyin.',
@@ -1840,7 +1848,7 @@ export const tr: Record<string, string> = {
   'toast.archive.started': '{name} indiriliyor ({count} dosya)',
   'toast.archive.started_one': '{name} indiriliyor ({count} dosya)',
   'toast.archive.empty': 'İndirilecek bir şey yok — seçimde okunabilir dosya bulunmuyor.',
-  'toast.moved_to': '{name} klasörüne taşındı',
+  'toast.moved_to': '{name} klasörüne taşıma kuyruğa alındı',
   'toast.copied_to': '{name} klasörüne kopyalama kuyruğa alındı',
 
   /* ── dil:paket — bkz. en.ts */
