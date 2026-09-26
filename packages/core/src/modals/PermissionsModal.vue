@@ -551,7 +551,11 @@ async function toggleLink() {
   await createLink();
 }
 
+// ⚠ One mail per press. The Send button shuts while the mail goes out, but
+// the address box sends on Enter too, and Enter did not ask: a second Enter
+// while the first mail was on its way sent it again, to the same people.
 async function sendShareMail() {
+  if (shareMailBusy.value) return;
   const list = splitEmails(shareMailTo.value);
   if (!list.length) {
     shareMailNotice.value = t('access.ui.enter_a_valid_email');
@@ -621,6 +625,7 @@ async function createDropLink() {
   }
 }
 async function sendDropMail() {
+  if (dropMailBusy.value) return; // one mail per press, as sendShareMail
   const list = splitEmails(dropMailTo.value);
   if (!list.length) {
     dropMailNotice.value = t('access.ui.enter_a_valid_email');
