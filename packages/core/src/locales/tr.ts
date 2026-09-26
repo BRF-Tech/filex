@@ -215,6 +215,8 @@ export const tr: Record<string, string> = {
   'viewer.archive.open': 'Arşivi aç',
   'viewer.archive.root': 'Arşiv',
   'viewer.archive.location': 'Arşiv konumu',
+  'viewer.archive.reading':
+    'Hâlâ okunuyor… İçeriği listelenmeden önce arşivin tamamı okunur; büyük bir arşivde bu biraz sürer.',
   'viewer.name': 'Ad',
   'viewer.size': 'Boyut',
 
@@ -350,6 +352,7 @@ export const tr: Record<string, string> = {
   /* === bul:s3 === */
   'palette.everywhere': 'Her yerde',
   'palette.searching': 'Aranıyor…',
+  'palette.everywhere_failed': 'Arama sunucuya ulaşamadı. Yeniden deneyin.',
   'palette.saved': 'Kayıtlı aramalar',
   'palette.save': 'Aramayı kaydet',
   'palette.saved.delete': 'Kayıtlı aramayı sil',
@@ -436,8 +439,10 @@ export const tr: Record<string, string> = {
   'inspector.versions.restore_confirm': 'Bu sürüm geri yüklensin mi?',
   'inspector.versions.snapshot_current': 'Önce şimdiki halin sürümünü al',
   'inspector.versions.confirm': 'Onayla',
+  'inspector.versions.restoring': 'Geri yükleniyor…',
   'inspector.versions.cancel': 'Vazgeç',
   'inspector.versions.take_snapshot': 'Şimdiki halin sürümünü al',
+  'inspector.versions.snapshotting': 'Sürüm alınıyor…',
   'inspector.versions.restored': 'Sürüm geri yüklendi',
   'inspector.versions.snapshotted': 'Sürüm alındı',
   'inspector.versions.unsupported': 'Sunucu bu işlemi desteklemiyor',
@@ -662,6 +667,9 @@ export const tr: Record<string, string> = {
   'public.request_full': 'İstenen her şey ulaştı',
   'public.upload_done': 'Gönderildi',
   'public.upload_failed': 'Gönderilemedi',
+  'public.upload_saving': 'Kaydediliyor…',
+  'public.upload_unanswered':
+    'Gönderildi ama sunucu zamanında onaylamadı. Hâlâ kaydediyor olabilir: yeniden göndermeden önce bu bağlantıyı size gönderen kişiye sorun.',
   'public.your_name': 'Adınız (isteğe bağlı)',
   'public.your_name_ph': 'Örn. Ahmet Yılmaz',
   'public.refused_ext': 'Gönderilmedi — bu bağlantı bu türde dosya kabul etmiyor.',
@@ -1543,6 +1551,9 @@ export const tr: Record<string, string> = {
   'convert.no_format': 'Eşleşen format yok.',
   'convert.unsupported_input': 'Bu dosya tipi için kaynak format bulunamadı.',
   'convert.converting': 'Dönüştürülüyor…',
+  'convert.reading': 'Dosya okunuyor…',
+  'convert.saving': 'Sonuç kaydediliyor…',
+  'convert.close_while_converting': 'Dönüştürme sürüyor. Pencere kapatılıp dönüştürme durdurulsun mu?',
   'convert.convert': 'Dönüştür',
   /* Asla HTTP katmanı değil: buradaki bir hata eskiden `503 Service
      Unavailable — {"error":…}` ya da dönüştürücünün kendi İngilizcesini

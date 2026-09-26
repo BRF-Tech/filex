@@ -13132,6 +13132,12 @@ filex-explorer {
 .fe-pdrop__ok {
   color: var(--fe-ok);
 }
+.fe-pdrop__saving {
+  color: var(--fe-text-muted);
+}
+.fe-pdrop__unconfirmed {
+  color: var(--fe-warning);
+}
 
 /* PublicLanguagePicker.vue */
 .fe-plang {

@@ -219,6 +219,8 @@ export const en: Record<string, string> = {
   'viewer.archive.open': 'Open archive',
   'viewer.archive.root': 'Archive',
   'viewer.archive.location': 'Archive location',
+  'viewer.archive.reading':
+    'Still reading… the whole archive is read before its contents can be listed, which takes a while for a large one.',
   'viewer.name': 'Name',
   'viewer.size': 'Size',
 
@@ -358,6 +360,7 @@ export const en: Record<string, string> = {
   /* === bul:s3 === */
   'palette.everywhere': 'Everywhere',
   'palette.searching': 'Searching…',
+  'palette.everywhere_failed': 'The search could not reach the server. Try again.',
   'palette.saved': 'Saved searches',
   'palette.save': 'Save search',
   'palette.saved.delete': 'Delete saved search',
@@ -446,8 +449,10 @@ export const en: Record<string, string> = {
   'inspector.versions.restore_confirm': 'Restore this version?',
   'inspector.versions.snapshot_current': 'Snapshot the current state first',
   'inspector.versions.confirm': 'Confirm',
+  'inspector.versions.restoring': 'Restoring…',
   'inspector.versions.cancel': 'Cancel',
   'inspector.versions.take_snapshot': 'Snapshot current state',
+  'inspector.versions.snapshotting': 'Taking a snapshot…',
   'inspector.versions.restored': 'Version restored',
   'inspector.versions.snapshotted': 'Snapshot taken',
   'inspector.versions.unsupported': 'The server does not support this operation',
@@ -673,6 +678,9 @@ export const en: Record<string, string> = {
   'public.request_full': 'Everything that was asked for has arrived',
   'public.upload_done': 'Sent',
   'public.upload_failed': 'Could not be sent',
+  'public.upload_saving': 'Saving…',
+  'public.upload_unanswered':
+    'Sent, but the server did not confirm it in time. It may still be saving it: check with whoever sent you this link before sending it again.',
   'public.your_name': 'Your name (optional)',
   'public.your_name_ph': 'e.g. Alex Smith',
   'public.refused_ext': 'Not sent — this link does not accept this type of file.',
@@ -1566,6 +1574,9 @@ export const en: Record<string, string> = {
   'convert.no_format': 'No matching format.',
   'convert.unsupported_input': 'This file type has no source format the converter can read.',
   'convert.converting': 'Converting…',
+  'convert.reading': 'Reading the file…',
+  'convert.saving': 'Saving the result…',
+  'convert.close_while_converting': 'The conversion is still running. Close the window and stop it?',
   'convert.convert': 'Convert',
   /* Never the HTTP layer: a failure here used to show `503 Service
      Unavailable — {"error":…}` or the converter's own English. */

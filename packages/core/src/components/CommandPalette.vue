@@ -241,6 +241,10 @@ const EVERYWHERE_DEBOUNCE_MS = 250;
 
 const everywhere = ref<GlobalSearchHit[]>([]);
 const everywhereLoading = ref(false);
+/** ⚠ The last search could not be made. A failure used to be drawn as an
+ *  empty answer — the group simply went away, as it does when nothing was
+ *  found — and a person believed the file was not there. */
+const everywhereFailed = ref(false);
 let everywhereTimer: ReturnType<typeof setTimeout> | undefined;
 let everywhereSeq = 0;
 
@@ -250,6 +254,7 @@ function scheduleEverywhere(q: string) {
   if (!fn || q.length < EVERYWHERE_MIN_CHARS) {
     everywhere.value = [];
     everywhereLoading.value = false;
+    everywhereFailed.value = false;
     return;
   }
   everywhereLoading.value = true;
@@ -261,8 +266,12 @@ function scheduleEverywhere(q: string) {
       // #47 — capped per ACCOUNT in hitItems (groupHitsByAccount), not here: a
       // flat cut would let the first account's eight rows hide every other.
       everywhere.value = Array.isArray(hits) ? hits : [];
+      everywhereFailed.value = false;
     } catch {
-      if (seq === everywhereSeq) everywhere.value = [];
+      if (seq === everywhereSeq) {
+        everywhere.value = [];
+        everywhereFailed.value = true;
+      }
     } finally {
       if (seq === everywhereSeq) everywhereLoading.value = false;
     }
@@ -612,10 +621,18 @@ onBeforeUnmount(() => {
           </template>
 
           <!-- bul:s3 — "Everywhere" global-search hits -->
-          <template v-if="hitItems.length || everywhereLoading">
+          <template v-if="hitItems.length || everywhereLoading || everywhereFailed">
             <div class="fe-cmdp__group">{{ t('palette.everywhere') }}</div>
             <div v-if="everywhereLoading && !hitItems.length" class="fe-cmdp__loading">
               {{ t('palette.searching') }}
+            </div>
+            <div
+              v-else-if="everywhereFailed && !hitItems.length"
+              class="fe-cmdp__loading"
+              role="alert"
+              data-testid="palette-everywhere-failed"
+            >
+              {{ t('palette.everywhere_failed') }}
             </div>
             <template v-for="(it, i) in hitItems" :key="it.id">
               <!-- #47 — one badge per signed-in account, above its first row. -->
@@ -728,7 +745,7 @@ onBeforeUnmount(() => {
             </button>
           </template>
 
-          <div v-if="flat.length === 0 && !everywhereLoading" class="fe-cmdp__empty">
+          <div v-if="flat.length === 0 && !everywhereLoading && !everywhereFailed" class="fe-cmdp__empty">
             {{ t('palette.empty') }}
           </div>
         </div>

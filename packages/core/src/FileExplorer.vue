@@ -985,13 +985,33 @@ const pluginActions = usePluginActions(api, () => pluginsEnabled.value);
 const pluginView = ref<{
   plugin: string;
   view: string;
-  surface: PluginSurface;
+  /** null while the first screen is on its way (`openingPluginView`). */
+  surface: PluginSurface | null;
   path?: string;
   /** Every row the view was opened on — a menu action on a selection (#64). */
   paths?: string[];
   /** A `home` view is drawn full-size whatever the surface says. */
   size?: 'xl';
+  /** The action's name, the dialog's title until the screen names itself. */
+  label?: string;
+  /** Which opening this dialog is, so a late answer can tell it is still wanted. */
+  ticket?: number;
 } | null>(null);
+
+/* ⚠ An action with a screen opens its dialog AT ONCE, saying it is loading.
+ * The first screen is the app's answer to `run`, and until it came the menu
+ * closed and nothing on the page moved. The ticket lets the answer know the
+ * dialog it was for is still the one on screen: closed in the meantime, the
+ * screen is dropped (a `run` that answers with a screen has queued nothing). */
+let pluginViewTickets = 0;
+function openingPluginView(v: Omit<NonNullable<typeof pluginView.value>, 'surface' | 'ticket'>): number {
+  const ticket = ++pluginViewTickets;
+  pluginView.value = { ...v, surface: null, ticket };
+  return ticket;
+}
+function stillOpening(ticket: number): boolean {
+  return ticket > 0 && pluginView.value?.ticket === ticket;
+}
 
 /** The `inspector` views, for the details panel; `[]` while the feature is off. */
 const pluginInspectorViews = computed<PluginViewRow[]>(() =>
@@ -1160,22 +1180,27 @@ function reportMutationError(err: unknown, context: Record<string, unknown>): vo
 async function runPluginAction(action: PluginActionRow, targets: FileNode[]) {
   const label = pluginLabelOf(action.label, locale.value);
   if (isPagePlacement(action.view_placement) && openPluginPage(action, targets)) return;
+  // ⚠ `paths` too: the screen's later events must name the same files the
+  // run did, or its second screen talks about targets[0] alone (#64).
+  const shell = {
+    plugin: action.plugin,
+    view: action.view || action.id,
+    path: targets[0]?.path,
+    paths: targets.map((n) => n.path),
+    label,
+  };
+  const ticket = action.view ? openingPluginView(shell) : 0;
   try {
     const res = await pluginActions.run(action, targets);
     if (res.surface) {
-      // ⚠ `paths` too: the screen's later events must name the same files the
-      // run did, or its second screen talks about targets[0] alone (#64).
-      pluginView.value = {
-        plugin: action.plugin,
-        view: action.view || action.id,
-        surface: res.surface,
-        path: targets[0]?.path,
-        paths: targets.map((n) => n.path),
-      };
+      if (action.view && !stillOpening(ticket)) return;
+      pluginView.value = { ...shell, surface: res.surface, ticket: ticket || ++pluginViewTickets };
       return;
     }
+    if (stillOpening(ticket)) pluginView.value = null;
     if (res.op) onPluginOpQueued(res.op, label);
   } catch (e) {
+    if (stillOpening(ticket)) pluginView.value = null;
     const err = e as Error & { status?: number; detail?: string };
     const detail = String(err?.detail ?? '');
     const held = lockedRefusal(err);
@@ -8639,6 +8664,7 @@ function closeRecoveryKey() {
       :path="pluginView.path"
       :paths="pluginView.paths"
       :size="pluginView.size"
+      :label="pluginView.label"
       :storages="(props.config.storages ?? []).map((st) => st.name)"
       :start-at="qualify(paneIsActive ? (splitPaneRef?.getPath() ?? '') : currentPath)"
       @close="pluginView = null"

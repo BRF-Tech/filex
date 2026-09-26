@@ -51,6 +51,9 @@ const props = defineProps<{
   startAt?: string;
   /** Forces the dialog size (a `home` view is drawn `xl`); else the surface's own. */
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  /** The action's name: the title while the first screen is on its way, and
+   *  whenever the screen names none of its own. */
+  label?: string;
 }>();
 
 const emit = defineEmits<{
@@ -94,7 +97,19 @@ watch(
 );
 
 const current = conv.current;
-const title = computed(() => labelOf(current.value?.title, props.locale) || props.view);
+const title = computed(() => labelOf(current.value?.title, props.locale) || props.label || props.view);
+
+/* ⚠⚠ Not closed while an answer is on its way. Escape, a click outside and
+ * × all went straight to `close`, and the frame's own Close button was the
+ * only one that waited: a submit whose answer was a queued job then came
+ * back to a dialog that no longer existed, and the job ran with no row in
+ * the operations centre and no word on screen. The answer closes the dialog
+ * itself (`onDone`); the app's run has its own time budget on the server, so
+ * this cannot hold the dialog open for ever. */
+function requestClose(): void {
+  if (conv.busy.value) return;
+  emit('close');
+}
 /**
  * A home page's menu, when a host with no page of its own draws one in this
  * dialog (the degraded frame — an embed without `pluginPageBase`). There is
@@ -120,8 +135,14 @@ const size = computed<'sm' | 'md' | 'lg' | 'xl'>(() => {
 </script>
 
 <template>
-  <Modal :open="open" :title="title" :size="size" :theme="theme" :locale="locale" @close="emit('close')">
+  <Modal :open="open" :title="title" :size="size" :theme="theme" :locale="locale" @close="requestClose">
     <div class="fe-plugin-view" data-testid="plugin-view">
+      <!-- The explorer opens the dialog as soon as the action is chosen; until
+           the app answers there is no screen to draw, and a blank card read
+           as nothing happening. -->
+      <p v-if="!current" class="fe-surface__text fe-surface__text--muted" role="status" data-testid="plugin-view-opening">
+        {{ t('plugin.view.loading') }}
+      </p>
       <SurfaceSections
         v-if="sections.length"
         :sections="sections"

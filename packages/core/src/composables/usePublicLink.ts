@@ -91,6 +91,11 @@ export interface PublicLinkOptions {
   locale: () => string;
   /** The words for an answer that carries nothing to show. */
   errorText: () => string;
+  /**
+   * The words for a drop that arrived but whose answer did not (a proxy gave
+   * up, the connection dropped): it may well be saved. Absent: `errorText`.
+   */
+  unansweredText?: () => string;
   fetchImpl?: typeof fetch;
 }
 
@@ -458,8 +463,11 @@ export interface PublicUpload {
   /**
    * `refused` — never sent: the link does not take it (its type, its size, one
    * file too many). Said before the transfer, not after it.
+   * `saving` — every byte is sent and the server is writing it to the storage.
+   * `unconfirmed` — every byte was sent, but the answer never came (a proxy
+   * gave up, the connection dropped): it may well be saved.
    */
-  state: 'sending' | 'done' | 'failed' | 'refused';
+  state: 'sending' | 'saving' | 'done' | 'failed' | 'unconfirmed' | 'refused';
   error?: string;
 }
 
@@ -490,6 +498,10 @@ export interface PublicUploadOptions {
  * simply sending them separately. The no-JavaScript page always sent them
  * together.
  */
+/** A proxy's own answer for a request it stopped waiting on: 502/504 from
+ *  nginx, 520/524 from Cloudflare. filex's own refusals carry a `message`. */
+const GATEWAY_GAVE_UP = new Set([502, 504, 520, 524]);
+
 export function usePublicRequest(token: string, opts: PublicLinkOptions) {
   const link = usePublicLink<PublicRequestInfo>(requestRoot(opts.base, token), opts);
   const uploads = ref<PublicUpload[]>([]);
@@ -516,6 +528,21 @@ export function usePublicRequest(token: string, opts: PublicLinkOptions) {
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && e.total > 0) patchRange(from, to, { percent: Math.round((e.loaded / e.total) * 100) });
       };
+      /* ⚠ Every byte is sent: the bar reached 100% here and stayed there while
+       * the server wrote the files to its storage, one after another — minutes
+       * for a large drop into an object store. The rows say that instead. */
+      let sentAll = false;
+      xhr.upload.onload = () => {
+        sentAll = true;
+        patchRange(from, to, { state: 'saving', percent: 100 });
+      };
+      /* ⚠⚠ A drop whose bytes all arrived and whose answer did not is not
+       * "could not be sent". A proxy that gives up (Cloudflare at 100 s, nginx
+       * at 60 s) answers with its own page, and the server finishes writing
+       * the drop regardless (drop.go); telling the visitor it failed invited
+       * a second submission of the same files. */
+      const unconfirmed = () =>
+        patchRange(from, to, { state: 'unconfirmed', error: (opts.unansweredText ?? opts.errorText)() });
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           patchRange(from, to, { state: 'done', percent: 100 });
@@ -529,12 +556,14 @@ export function usePublicRequest(token: string, opts: PublicLinkOptions) {
           } catch {
             msg = '';
           }
-          patchRange(from, to, { state: 'failed', error: msg || opts.errorText() });
+          if (!msg && sentAll && GATEWAY_GAVE_UP.has(xhr.status)) unconfirmed();
+          else patchRange(from, to, { state: 'failed', error: msg || opts.errorText() });
         }
         resolve();
       };
       xhr.onerror = () => {
-        patchRange(from, to, { state: 'failed', error: opts.errorText() });
+        if (sentAll) unconfirmed();
+        else patchRange(from, to, { state: 'failed', error: opts.errorText() });
         resolve();
       };
       const form = new FormData();
