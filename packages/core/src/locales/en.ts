@@ -219,6 +219,8 @@ export const en: Record<string, string> = {
   'viewer.archive.open': 'Open archive',
   'viewer.archive.root': 'Archive',
   'viewer.archive.location': 'Archive location',
+  'viewer.archive.reading':
+    'Still reading… the whole archive is read before its contents can be listed, which takes a while for a large one.',
   'viewer.name': 'Name',
   'viewer.size': 'Size',
 

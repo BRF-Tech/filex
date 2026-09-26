@@ -10,7 +10,7 @@
  * (`archivePreviewCache`). Extraction is exposed elsewhere (context menu /
  * actions panel): the viewer's job is just "what's inside?".
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 import DataTable, { type DataColumn } from '../components/DataTable.vue';
@@ -60,6 +60,22 @@ const error = ref<string | null>(null);
 const password = ref('');
 const passwordNeeded = ref(false);
 const passwordError = ref('');
+/** The listing has taken long enough to say why. */
+const slow = ref(false);
+
+/* ⚠ The server reads the WHOLE archive from its storage before it can list
+ * it — minutes for a large one on an object store — and all that time this
+ * said "Loading…". Past SLOW_LISTING_MS it says what it is waiting for.
+ *
+ * Each listing is also THIS file's: stepping to the next file started a second
+ * listing beside the first, and whichever ended last filled the screen, so the
+ * big zip's contents (or its "could not read") could land under the small
+ * one's name. A new listing aborts the old one — which also stops the
+ * server's download — and an answer that is no longer the latest is dropped. */
+const SLOW_LISTING_MS = 3000;
+let listing = 0;
+let inFlight: AbortController | null = null;
+let slowTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** ⚠ `vars` go THROUGH `t()`, not into a `.replace()` afterwards: `t()` is what
  *  picks the singular (`viewer.archive.entries_one`) from the count, and it can
@@ -77,7 +93,17 @@ function fmtSize(n: number): string {
   return formatSize(n);
 }
 
+/** Stops the listing in flight, if any: its answer is no longer wanted. */
+function stopListing(): number {
+  inFlight?.abort();
+  inFlight = null;
+  clearTimeout(slowTimer);
+  slow.value = false;
+  return ++listing;
+}
+
 async function load(): Promise<void> {
+  const mine = stopListing();
   loading.value = true;
   error.value = null;
   passwordError.value = '';
@@ -96,16 +122,25 @@ async function load(): Promise<void> {
       return;
     }
   }
+  const ctl = new AbortController();
+  inFlight = ctl;
+  slowTimer = setTimeout(() => {
+    if (mine === listing) slow.value = true;
+  }, SLOW_LISTING_MS);
   try {
+    const auth = props.authHeaders ? await props.authHeaders() : {};
+    if (mine !== listing) return;
     const res = await fetch(props.archiveListUrl || '/api/files/archive/list', {
       method: 'POST',
       credentials: props.authCredentials || 'same-origin',
       headers: {
         'Content-Type': 'application/json',
-        ...(props.authHeaders ? await props.authHeaders() : {}),
+        ...auth,
       },
       body: JSON.stringify({ path: props.filePath, password: password.value || undefined }),
+      signal: ctl.signal,
     });
+    if (mine !== listing) return;
     if (!res.ok) {
       /* ⚠ Never the raw status. This printed "503 Service Unavailable" (or a
        * JSON body) straight into the preview — the same failure the owner
@@ -114,6 +149,7 @@ async function load(): Promise<void> {
        * sent one we know, becomes a sentence; anything else is the generic
        * "could not read the archive". */
       const body = await res.json().catch(() => ({})) as { code?: string; error?: string };
+      if (mine !== listing) return;
       if (body.code === 'PASSWORD_REQUIRED' || body.code === 'BAD_PASSWORD') {
         props.archivePreviewCache?.forget(props.filePath);
         passwordNeeded.value = true;
@@ -125,14 +161,21 @@ async function load(): Promise<void> {
       throw new ArchiveError(archiveErrorText(res.status, body.code ?? body.error ?? ''));
     }
     const body = (await res.json()) as { entries?: ArchiveEntry[] };
+    if (mine !== listing) return;
     entries.value = body.entries ?? [];
     if (password.value) props.archivePreviewCache?.remember(props.filePath, entries.value);
     passwordNeeded.value = false;
   } catch (err) {
+    if (mine !== listing) return;
     error.value =
       err instanceof ArchiveError ? err.message : tt('viewer.archive.error', 'Could not read archive contents.');
   } finally {
-    loading.value = false;
+    if (mine === listing) {
+      loading.value = false;
+      inFlight = null;
+      clearTimeout(slowTimer);
+      slow.value = false;
+    }
   }
 }
 
@@ -195,6 +238,10 @@ function submitPassword(value: string) {
 }
 
 onMounted(load);
+/* Closing the preview stops the server reading an archive nobody will see. */
+onBeforeUnmount(() => {
+  stopListing();
+});
 watch(() => props.filePath, () => {
   currentDir.value = '';
   password.value = '';
@@ -274,7 +321,16 @@ function entryTile(entry: ArchiveEntry): string {
         aria-hidden="true"
         v-html="actionIconSvg('progress')"
       ></span>
-      <p>{{ tt('viewer.loading', 'Loading…') }}</p>
+      <p>
+        {{
+          slow
+            ? tt(
+                'viewer.archive.reading',
+                'Still reading… the whole archive is read before its contents can be listed, which takes a while for a large one.',
+              )
+            : tt('viewer.loading', 'Loading…')
+        }}
+      </p>
     </div>
     <div v-else-if="entries.length === 0" class="filex-viewer-fallback">
       <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->

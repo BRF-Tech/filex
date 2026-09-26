@@ -215,6 +215,8 @@ export const tr: Record<string, string> = {
   'viewer.archive.open': 'Arşivi aç',
   'viewer.archive.root': 'Arşiv',
   'viewer.archive.location': 'Arşiv konumu',
+  'viewer.archive.reading':
+    'Hâlâ okunuyor… İçeriği listelenmeden önce arşivin tamamı okunur; büyük bir arşivde bu biraz sürer.',
   'viewer.name': 'Ad',
   'viewer.size': 'Boyut',
 
