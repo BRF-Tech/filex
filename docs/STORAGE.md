@@ -160,9 +160,9 @@ one order, decided in three layers — the most personal wins:
 3. **Creation order**, when neither has been set — what every install showed
    before this existed.
 
-![A storage row's order menu in the navigation panel](screenshots/v0.43.0/sidenav/storage-order-menu-1440.png)
+![A storage row's order menu in the navigation panel](screenshots/v0.46.0/sidenav/storage-order-menu-1440.png)
 
-![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](screenshots/v0.43.0/sidenav/admin-storages-order-1440.png)
+![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](screenshots/v0.46.0/sidenav/admin-storages-order-1440.png)
 
 A storage the person's own order does not name — one added after they
 arranged theirs, or one they could not see then — keeps the position the
