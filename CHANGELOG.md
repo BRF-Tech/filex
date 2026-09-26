@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A storage made from the admin panel is switched on.** The "New storage"
+  form never sends `enabled`, and the server saved a body without it as
+  disabled. The storage got no scan, and "Sync now" answered 404 "storage not
+  found" for a storage that existed. `POST /api/admin/storages` now creates a
+  storage enabled unless the body says `"enabled": false`.
+
+- **"Sync now" says what the server did, and when the scan ends.**
+  - The three buttons (Dashboard, Storages, a storage's page) said "Sync
+    started" whatever the server answered, including "a scan is already
+    running", and then said nothing. They now say "started" or "already
+    running", hold the button while the scan runs, and say when it is done,
+    failed (with the error) or stopped.
+  - The server answers only once the scan holds the storage, so a second
+    press straight after the first is told "running".
+  - `GET /api/admin/storages` says whether each storage is being scanned now
+    (`running`).
+
+- **Saving a storage no longer restarts its scan for nothing, and a new
+  setting stops every scan of the old one.**
+  - Every save rebuilt the scanner, so renaming a storage, switching it
+    read-only or pairing a replica cut a running scan off as "aborted". A
+    save now rebuilds the scanner only when it changed what a scan reads.
+  - A scan started by "Sync now" did not stop with the scanner. It walked the
+    replaced root and exclusions for up to six hours, beside the new
+    scanner's own scan. It now stops, as a scheduled scan does.
+
+- **Deleting a large storage finishes, and a failed delete leaves the storage
+  as it was.**
+  - Removing a large storage's rows outlasts the admin panel's 30 s wait and
+    a proxy's. Their hang-up cancelled the delete, and the storage, which had
+    already lost its scanner, went on existing with no scan until the next
+    restart.
+  - The delete now finishes whoever stops waiting, and a failed delete gives
+    the scanner back.
+  - The page waits minutes, and an answer that never came reads the list
+    again: "deleted", or "the server is still deleting it".
+
+- **Replica "Fix all" queues each retry once, and says so.**
+  - Every press queued the whole set again and told the bell "retries queued"
+    once more; the list looks unchanged until a retry runs, which invites
+    exactly that.
+  - A retry waiting in the queue now absorbs the next request for the same
+    failure. `POST /api/admin/replica/fix` answers
+    `{queued, already_queued}`, and the button waits for its answer.
+
+- **"Rebuild index" follows the rebuild to its end.** The page read the
+  rebuild's state once, so its Running badge never went away and the end of
+  the rebuild went unsaid. A second press showed the server's English, "rebuild
+  already in progress". The page now reads the state again while the rebuild
+  runs, holds the button, says when the new index is live, and follows a
+  rebuild that was already running when it opened.
+
+- **Installing a storage plugin waits as long as the server takes.** The
+  server's conformance suite alone may run for 90 s, and the page said
+  "timeout of 30000ms exceeded" about an install that was working. Install,
+  upgrade and restart now wait up to 180 s, as app plugin installs already
+  did.
+
 ## [0.46.1] - 2026-09-26
 
 ### Fixed

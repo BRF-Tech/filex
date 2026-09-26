@@ -15,6 +15,7 @@ import {
 import { DashboardApi } from '@/api/dashboard';
 import type { DashboardStats } from '@/api/types';
 import { useStoragesStore } from '@/stores/storages';
+import { useSyncNow } from '@/composables/useSyncNow';
 import { useSyncStore } from '@/stores/sync';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
@@ -41,7 +42,6 @@ const RECENT_SYNCS = 5;
 
 const stats = ref<DashboardStats | null>(null);
 const loading = ref(true);
-const syncingId = ref<number | null>(null);
 
 async function load() {
   loading.value = true;
@@ -70,16 +70,12 @@ async function fetchStats(): Promise<DashboardStats | null> {
   }
 }
 
-async function syncOne(id: number) {
-  syncingId.value = id;
-  try {
-    await storages.syncNow(id);
-    toast.success(t('storages.syncStarted'));
-  } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.generic')));
-  } finally {
-    syncingId.value = null;
-  }
+// The recent-syncs table and the active count are read again when a scan
+// this page started ends, so the page says the same thing its toast does.
+const syncNow = useSyncNow({ onEnd: () => load() });
+
+function syncOne(id: number, name: string) {
+  void syncNow.press(id, name);
 }
 
 
@@ -280,8 +276,8 @@ const recentSyncs = computed(() => sync.items.slice(0, RECENT_SYNCS));
             <Button
               size="sm"
               variant="outline"
-              :loading="syncingId === s.id"
-              @click="syncOne(s.id)"
+              :loading="syncNow.isBusy(s.id)"
+              @click="syncOne(s.id, s.name)"
             >
               <RefreshCcw class="h-3.5 w-3.5" />
               {{ t('common.syncNow') }}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Search, RefreshCcw, Database } from 'lucide-vue-next';
 
@@ -59,17 +59,47 @@ async function runSearch() {
   }
 }
 
+/* ⚠ The rebuild runs in the background, and this page read its state once:
+ * "Rebuild started", then a Running badge that never went away and no word of
+ * the end. A second press answered 409 with the server's English ("rebuild
+ * already in progress"). The page now looks again while a rebuild runs — the
+ * button stays busy — and says when the new index is live. */
+const REBUILD_POLL_MS = 2000;
+/** A rebuild is running and this page is following it. */
+const followingRebuild = ref(false);
+let rebuildPoll: ReturnType<typeof setTimeout> | undefined;
+let alive = true;
+
 async function rebuild() {
+  if (rebuilding.value || followingRebuild.value) return;
   rebuilding.value = true;
   try {
     await SearchApi.rebuild();
     toast.success(t('search.rebuildStarted'));
-    await loadStats();
+    await followRebuild(true);
   } catch (e: unknown) {
+    if ((e as { response?: { status?: number } })?.response?.status === 409) {
+      toast.info(t('search.rebuildAlreadyRunning'));
+      await followRebuild(true);
+      return;
+    }
     toast.error(extractError(e, t('errors.generic')));
   } finally {
     rebuilding.value = false;
   }
+}
+
+/** Reads the stats; while a rebuild runs, reads them again every two seconds.
+ *  Its end is said when this page watched it run, or asked for it (`asked`). */
+async function followRebuild(asked: boolean) {
+  await loadStats();
+  if (stats.value?.rebuilding) {
+    followingRebuild.value = true;
+    if (alive) rebuildPoll = setTimeout(() => void followRebuild(false), REBUILD_POLL_MS);
+    return;
+  }
+  if (followingRebuild.value || asked) toast.success(t('search.rebuildDone'));
+  followingRebuild.value = false;
 }
 
 
@@ -79,7 +109,15 @@ const scopeOptions = computed(() => [
   { value: 'content', label: t('search.scopeContent') },
 ]);
 
-onMounted(loadStats);
+// A rebuild started in another tab, or before this page was opened, is
+// followed as well.
+onMounted(() => followRebuild(false));
+
+onBeforeUnmount(() => {
+  // Leaving stops the watching, never the rebuild.
+  alive = false;
+  if (rebuildPoll !== undefined) clearTimeout(rebuildPoll);
+});
 
 /* ⚠ The results were a `<ul class="card divide-y divide-zinc-200 …">`: one
    line for the name, one for the path, one for the snippet and one for the
@@ -146,7 +184,7 @@ const columns = computed<DataColumn<SearchHitEx>[]>(() => [
         <h1 class="text-xl font-semibold">{{ t('search.title') }}</h1>
         <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('search.subtitle') }}</p>
       </div>
-      <Button variant="outline" size="sm" :loading="rebuilding" @click="rebuild">
+      <Button variant="outline" size="sm" :loading="rebuilding || followingRebuild" :disabled="followingRebuild" @click="rebuild">
         <RefreshCcw class="h-4 w-4" />
         {{ t('search.rebuild') }}
       </Button>

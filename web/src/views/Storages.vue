@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n';
 import { Database, GripVertical, Plus, RefreshCcw, RotateCcw } from 'lucide-vue-next';
 
 import { useStoragesStore } from '@/stores/storages';
+import { useSyncNow } from '@/composables/useSyncNow';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { StorageRef } from '@/api/types';
@@ -32,7 +33,6 @@ const router = useRouter();
 const storages = useStoragesStore();
 const toast = useToastStore();
 
-const syncingId = ref<number | null>(null);
 const deleteTarget = ref<StorageRef | null>(null);
 const deleting = ref(false);
 
@@ -44,24 +44,19 @@ async function load() {
   await storages.fetch();
 }
 
-async function syncOne(s: StorageRef) {
-  syncingId.value = s.id;
-  try {
-    await storages.syncNow(s.id);
-    toast.success(t('storages.syncStarted'));
-  } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.generic')));
-  } finally {
-    syncingId.value = null;
-  }
+const syncNow = useSyncNow();
+
+function syncOne(s: StorageRef) {
+  void syncNow.press(s.id, s.name);
 }
 
 async function confirmDelete() {
   if (!deleteTarget.value) return;
   deleting.value = true;
   try {
-    await storages.remove(deleteTarget.value.id);
-    toast.success(t('storages.deletedOk'));
+    const target = deleteTarget.value;
+    if ((await storages.remove(target.id)) === 'deleted') toast.success(t('storages.deletedOk'));
+    else toast.info(t('storages.deleteStillRunning', { name: target.name }));
     deleteTarget.value = null;
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
@@ -164,7 +159,7 @@ const columns = computed<DataColumn<StorageRef>[]>(() => [
 function rowActions(s: StorageRef): ContextAction[] {
   const i = rows.value.findIndex((r) => r.id === s.id);
   return [
-    { key: 'sync', label: t('common.syncNow'), icon: 'refresh', disabled: syncingId.value === s.id },
+    { key: 'sync', label: t('common.syncNow'), icon: 'refresh', disabled: syncNow.isBusy(s.id) },
     { key: 'edit', label: t('common.edit'), icon: 'rename' },
     { divider: true, key: 'order-sep', label: '' },
     { key: 'move-up', label: t('storages.order.moveUp'), icon: 'move-up', disabled: i <= 0 },
@@ -175,7 +170,7 @@ function rowActions(s: StorageRef): ContextAction[] {
 }
 
 function onRowAction(key: string, s: StorageRef) {
-  if (key === 'sync') void syncOne(s);
+  if (key === 'sync') syncOne(s);
   else if (key === 'edit') void router.push({ name: 'storages.edit', params: { id: s.id } });
   else if (key === 'move-up') void saveOrder(moveStorage(keyed.value, String(s.id), -1));
   else if (key === 'move-down') void saveOrder(moveStorage(keyed.value, String(s.id), 1));

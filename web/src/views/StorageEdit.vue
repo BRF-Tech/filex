@@ -13,6 +13,7 @@ import {
 
 import { StoragesApi } from '@/api/storages';
 import { useStoragesStore } from '@/stores/storages';
+import { useSyncNow } from '@/composables/useSyncNow';
 import { useStorageDriversStore } from '@/stores/storageDrivers';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
@@ -184,21 +185,19 @@ async function save() {
   }
 }
 
+// The runs table is read again when the scan starts and when it ends.
+const scan = useSyncNow({ onEnd: () => loadRuns() });
+
 async function syncNow() {
-  try {
-    await storages.syncNow(id.value);
-    toast.success(t('storages.syncStarted'));
-    await loadRuns();
-  } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.generic')));
-  }
+  await scan.press(id.value, name.value || storages.find(id.value)?.name || `#${id.value}`);
+  await loadRuns();
 }
 
 async function confirmDelete() {
   deleting.value = true;
   try {
-    await storages.remove(id.value);
-    toast.success(t('storages.deletedOk'));
+    if ((await storages.remove(id.value)) === 'deleted') toast.success(t('storages.deletedOk'));
+    else toast.info(t('storages.deleteStillRunning', { name: name.value || `#${id.value}` }));
     router.replace({ name: 'storages' });
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
@@ -335,6 +334,7 @@ onMounted(load);
         <Button
           variant="outline"
           size="sm"
+          :loading="scan.isBusy(id)"
           @click="syncNow"
         >
           <RefreshCcw class="h-4 w-4" />

@@ -72,14 +72,15 @@ export const useReplicaStore = defineStore('replica', () => {
       loading.value = false;
     }
   }
-  async function fixAll(): Promise<{ queued: number }> {
+  async function fixAll(): Promise<{ queued: number; already_queued?: number }> {
     const r = await ReplicaApi.fixAll();
     await fetchFailures();
     return r;
   }
-  async function fixOne(path: string, op: string): Promise<void> {
-    await ReplicaApi.fixOne(path, op);
+  async function fixOne(path: string, op: string): Promise<{ ok: boolean; queued?: boolean }> {
+    const r = await ReplicaApi.fixOne(path, op);
     await fetchFailures();
+    return r;
   }
   function setUnresolvedFilter(v: boolean): void {
     onlyUnresolved.value = v;
