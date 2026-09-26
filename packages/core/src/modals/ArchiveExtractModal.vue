@@ -29,6 +29,10 @@ watch(() => props.open, (open) => {
 });
 
 function submit() {
+  /* ⚠ Enter in the box submits the form too, and the buttons' `disabled`
+   * does not reach it: while the server was still reading the archive, a
+   * second Enter sent it again — a second download, a second job. */
+  if (props.busy) return;
   if (!folder.value.trim() || /[\\/]/.test(folder.value)) {
     localError.value = t('archive.invalid_folder');
     return;
@@ -43,7 +47,7 @@ function submit() {
       <p class="fe-field__hint">{{ archiveName }}</p>
       <label class="fe-field">
         <span class="fe-field__label">{{ t('archive.destination_folder') }}</span>
-        <input v-model="folder" class="fe-input" autocomplete="off" />
+        <input v-model="folder" class="fe-input" autocomplete="off" :disabled="busy" />
       </label>
       <p v-if="localError || error" class="fe-form__error">{{ localError || error }}</p>
     </form>

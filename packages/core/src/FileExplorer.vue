@@ -5286,8 +5286,19 @@ async function startArchiveExtraction(
   inPane: boolean,
   password?: string,
 ) {
+  /* ⚠ One at a time. Before the server can queue an extraction it downloads
+   * the whole archive and inspects it (minutes for a large one on an object
+   * store), and "Extract here" — no dialog, no button to shut — could be
+   * chosen again meanwhile, starting a second download and a second job. */
+  if (archiveBusy.value) return;
   archiveBusy.value = true;
   archiveError.value = '';
+  /* The same wait, said: "Extract here" had nothing on screen until the job
+   * was queued. A dialog shows its own busy button, so only then. */
+  const preparing = t('archive.preparing_extract', { name: target.basename });
+  const sayPreparing = setTimeout(() => {
+    if (!showArchiveExtract.value && !showArchivePassword.value) showToast({ message: preparing }, 10 * 60_000);
+  }, 600);
   try {
     const result = await api.archiveExtract(target.path, {
       dest,
@@ -5323,6 +5334,9 @@ async function startArchiveExtraction(
      * cannot read) looked like a click that did nothing. */
     else showToast({ message }, 6000);
   } finally {
+    clearTimeout(sayPreparing);
+    // Whatever was said next replaced it; if nothing was, it goes now.
+    if (toast.value?.message === preparing) toast.value = null;
     archiveBusy.value = false;
   }
 }

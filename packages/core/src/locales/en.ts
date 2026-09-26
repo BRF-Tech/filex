@@ -100,6 +100,7 @@ export const en: Record<string, string> = {
   'archive.extracted': 'Extracted {count} files',
   'archive.extracted_one': 'Extracted {count} file',
   'archive.extraction_queued': 'Archive extraction is running in the background',
+  'archive.preparing_extract': 'Reading {name}… the whole archive is read before it can be extracted.',
   'archive.extraction_completed': 'Extraction completed',
   'archive.extraction_cancelled': 'Extraction cancelled after {count} files',
   'archive.extraction_cancelled_one': 'Extraction cancelled after {count} file',
