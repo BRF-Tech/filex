@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The explorer says what became of what you asked it to do.** An audit of
+  a production install (2026-09-26), where a person reported "no positive or
+  negative message, nothing at all":
+  - A paste, drag-move, duplicate or copy the server refused is said on
+    screen, in the reader's words. It went out as the explorer's `error`
+    event only, which both first-party hosts write to the console, so a
+    refusal looked exactly like a change that worked. New folder and Delete
+    show the server's answer in their dialog; it used to stay open with
+    nothing in it.
+  - Rename, New folder and Delete keep their button shut, with a label that
+    says so, while the request is on its way — renaming a folder on an object
+    store copies every object in it inside the request, and a second Save met
+    the half-copied folder and was refused as "already here". Enter no longer
+    gets past a busy dialog. Paste, Restore and a multi-item Download take one
+    press at a time too.
+  - A batch upload lands in the folder it was started in. Each file read the
+    open folder again when its turn came, so browsing during the batch sent
+    the rest of it somewhere else.
+  - "Move to…" says the move is queued — and only when it was. It said
+    "Moved to X" whatever happened, over a refusal too.
+  - The operations badge reads each row's own percentage. A queued move,
+    copy or delete of one folder is "0 of 1" until it ends (the queue counts
+    what was selected), and the badge read "0%" over an empty ring for as long
+    as it ran while its row showed a moving indicator; it spins now, and the
+    row no longer reads "0/1". An upload whose bytes are all in filex says
+    "Saving to the storage…" while the server writes it, instead of 100%.
+  - Restore from the trash says it is running, and what did not come back and
+    why: a failure other than a taken name used to drop out of the count.
+    "Preparing the archive…" stays up until the download starts.
+
+- **A folder renamed, moved, trashed, restored or purged on an object store
+  could be left half done when the client stopped waiting.** These ran under
+  the request's context, which is cancelled when the connection closes: a
+  closed tab, or a proxy that stops waiting (nginx after 60 s by default,
+  Cloudflare after 100 s, the admin app after 30 s). An object store changes
+  a folder one object at a time, so the objects after that moment stayed
+  where they were. The folder was left in two places, with the catalogue
+  still describing the old one, and a retry was refused (`NAME_TAKEN` for the
+  rename, `EXISTS` for the restore) because the half that had arrived held
+  the name. Once its checks have passed, the change now runs to the end
+  whether or not anybody is still waiting. That covers the explorer's rename
+  and its synchronous move and delete, the trash restore, the permanent
+  delete of one trash entry, and the agent surface's `/api/ai/move` and
+  `/api/ai/delete` (the MCP `file_move` and `file_delete` tools). The
+  response can still time out; the next listing shows the result.
+
+- **A folder rename and a restore from the trash no longer wait on the
+  request.** On an object store a folder is one request per object, so the
+  dialog waited with nothing on screen until the proxy gave up, then said the
+  change had failed while the server carried on.
+  - `POST /api/files/manager?action=rename` and `POST /api/files/manager/restore`
+    take `queued=1`; the restore then takes a `node_ids` batch. The same checks
+    answer at once, so a refusal still lands in the dialog. What they allow
+    becomes a job of the operations queue: `202 {op}` / `{ops}`, kinds `rename`
+    and `restore`. The server lists them under `capabilities.queued`.
+  - The explorer asks for a job only from a server that lists it. A folder's
+    rename and a restore from the trash then close at once and show in the
+    operations centre. The listing follows when the job ends, with the undo a
+    rename always offered. A file is still renamed inside the request.
+  - The admin layout's operations tray says what they are. It read a kind it
+    did not know as "Copying".
+  - A queued rename never picks another name the way a move does: a name taken
+    by the time it runs fails the job. Neither job is cancelled once running, and
+    a row says so (`cancellable`).
+
 ## [0.46.1] - 2026-09-26
 
 ### Fixed

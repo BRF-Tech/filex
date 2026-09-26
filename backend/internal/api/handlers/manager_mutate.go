@@ -275,7 +275,26 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if err := mv.Move(r.Context(), srcRel, dstRel); err != nil {
+	// Asked with `queued=1` (the explorer asks for a folder): the checks above
+	// have answered, and the rename is a job of the queue. A folder on an
+	// object store is one request per object, longer than any proxy waits.
+	if h.Ops != nil && r.URL.Query().Get("queued") == "1" {
+		op, err := h.Ops.Submit(r.Context(), ops.OpRename, current.ID, []string{srcRel}, dstRel)
+		if answerGate(w, err) {
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "rename: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"op": op})
+		return
+	}
+	// From here the storage changes: a folder on an object store is renamed
+	// one object at a time, and finished even if the client leaves.
+	ctx, cancel := detachedMutation(r.Context())
+	defer cancel()
+	if err := mv.Move(ctx, srcRel, dstRel); err != nil {
 		slog.Warn("rename failed",
 			slog.Int64("storage", current.ID),
 			slog.String("from", srcRel),
@@ -285,9 +304,9 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.applyDBMove(r.Context(), current.ID, srcRel, dstRel)
+	h.applyDBMove(ctx, current.ID, srcRel, dstRel)
 	/* bag:b3 event */
-	writehook.OnFileMoved(r.Context(), current.ID, normalizeDBPath(srcRel), normalizeDBPath(dstRel), body.Name,
+	writehook.OnFileMoved(ctx, current.ID, normalizeDBPath(srcRel), normalizeDBPath(dstRel), body.Name,
 		writehook.OriginManager, map[string]any{"rename": true})
 	// Live: an item was renamed in this directory.
 	emitFolderChange(current.ID, parentRel, realtime.ChangeEvent{Action: "rename", Name: path.Base(srcRel), NewName: body.Name})
@@ -366,6 +385,11 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The batch is finished even if the client leaves half-way through it, or
+	// through a folder in it (detachedMutation).
+	ctx, cancel := detachedMutation(r.Context())
+	defer cancel()
+
 	srcDirs := make(map[string]struct{})
 	moved := make([]string, 0, 1)
 	for _, it := range body.Items {
@@ -378,12 +402,12 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item path: " + it.Path})
 			return
 		}
-		if !h.allowed(r.Context(), current, srcRel, acl.LevelEditor) {
+		if !h.allowed(ctx, current, srcRel, acl.LevelEditor) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + it.Path})
 			return
 		}
-		dstRel, derr := ops.MoveDest(r.Context(), drv, srcRel, path.Join(destRel, path.Base(srcRel)),
-			liveRowTaken(r.Context(), h.Store, current.ID))
+		dstRel, derr := ops.MoveDest(ctx, drv, srcRel, path.Join(destRel, path.Base(srcRel)),
+			liveRowTaken(ctx, h.Store, current.ID))
 		if derr != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "move: " + clientErrText(derr), "code": "NO_FREE_NAME"})
 			return
@@ -391,7 +415,7 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 		if dstRel == srcRel {
 			continue
 		}
-		if err := mv.Move(r.Context(), srcRel, dstRel); err != nil {
+		if err := mv.Move(ctx, srcRel, dstRel); err != nil {
 			slog.Warn("move failed",
 				slog.Int64("storage", current.ID),
 				slog.String("from", srcRel),
@@ -400,9 +424,9 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, mapDriverErr(err), map[string]string{"error": "move: " + clientErrText(err)})
 			return
 		}
-		h.applyDBMove(r.Context(), current.ID, srcRel, dstRel)
+		h.applyDBMove(ctx, current.ID, srcRel, dstRel)
 		/* bag:b3 event */
-		writehook.OnFileMoved(r.Context(), current.ID, normalizeDBPath(srcRel), normalizeDBPath(dstRel), path.Base(dstRel),
+		writehook.OnFileMoved(ctx, current.ID, normalizeDBPath(srcRel), normalizeDBPath(dstRel), path.Base(dstRel),
 			writehook.OriginManager)
 		srcDirs[path.Dir(srcRel)] = struct{}{}
 		moved = append(moved, path.Base(dstRel))
@@ -480,6 +504,11 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no driver: " + err.Error()})
 		return
 	}
+	// The batch is finished even if the client leaves half-way through it, or
+	// through a folder in it (detachedMutation).
+	ctx, cancel := detachedMutation(r.Context())
+	defer cancel()
+
 	for _, it := range body.Items {
 		srcAdapter, srcRel := splitAdapterPath(it.Path)
 		if srcAdapter != "" && srcAdapter != current.Name {
@@ -490,7 +519,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item path: " + it.Path})
 			return
 		}
-		if !h.allowed(r.Context(), current, srcRel, acl.LevelEditor) {
+		if !h.allowed(ctx, current, srcRel, acl.LevelEditor) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + it.Path})
 			return
 		}
@@ -504,12 +533,12 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		// trash.Put is the shared implementation every delete surface uses
 		// (WebDAV, AI/REST, the async ops worker, and this one), so the same
 		// item deleted from any of them lands in the trash the same way.
-		out, terr := trash.Put(r.Context(), drv, srcRel)
+		out, terr := trash.Put(ctx, drv, srcRel)
 		trashed := terr == nil && out.Trashed
 		switch {
 		case trashed:
 			/* bag:b3 event */
-			writehook.OnFileTrashed(r.Context(), current.ID, normalizeDBPath(srcRel), base,
+			writehook.OnFileTrashed(ctx, current.ID, normalizeDBPath(srcRel), base,
 				normalizeDBPath(out.Key), writehook.OriginManager)
 
 		case terr == nil && out.Missing:
@@ -518,22 +547,22 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			// fail the whole delete batch.
 			origClean := normalizeDBPath(srcRel)
 			origHash := pathkey.Hash(current.ID, origClean)
-			if existing, err := h.Store.GetNodeByPath(r.Context(), current.ID, origHash); err == nil && existing != nil {
-				_ = h.Store.HardDeleteNode(r.Context(), existing.ID)
-				h.removeFromIndex(r.Context(), existing.ID)
+			if existing, err := h.Store.GetNodeByPath(ctx, current.ID, origHash); err == nil && existing != nil {
+				_ = h.Store.HardDeleteNode(ctx, existing.ID)
+				h.removeFromIndex(ctx, existing.ID)
 			}
 			continue
 
 		case errors.Is(terr, trash.ErrUnsupported):
 			// Driver can neither move nor copy — fall back to hard delete.
 			if del, ok := drv.(storage.Deleter); ok {
-				if err := del.Delete(r.Context(), srcRel); err != nil && !errors.Is(err, storage.ErrNotFound) {
+				if err := del.Delete(ctx, srcRel); err != nil && !errors.Is(err, storage.ErrNotFound) {
 					writeJSON(w, mapDriverErr(err), map[string]string{"error": "delete: " + err.Error()})
 					return
 				}
 			}
 			/* bag:b3 event */
-			writehook.OnFileDeleted(r.Context(), current.ID, normalizeDBPath(srcRel), base, writehook.OriginManager)
+			writehook.OnFileDeleted(ctx, current.ID, normalizeDBPath(srcRel), base, writehook.OriginManager)
 
 		default:
 			writeJSON(w, mapDriverErr(terr), map[string]string{"error": "trash: " + terr.Error()})
@@ -549,23 +578,23 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		// them too.
 		origClean := normalizeDBPath(srcRel)
 		origHash := pathkey.Hash(current.ID, origClean)
-		if existing, err := h.Store.GetNodeByPath(r.Context(), current.ID, origHash); err == nil && existing != nil {
+		if existing, err := h.Store.GetNodeByPath(ctx, current.ID, origHash); err == nil && existing != nil {
 			var subtreeIDs []int64
 			if existing.Type == model.NodeTypeDirectory {
-				subtreeIDs = h.collectSubtreeIDs(r.Context(), current.ID, existing.ID)
+				subtreeIDs = h.collectSubtreeIDs(ctx, current.ID, existing.ID)
 			}
 			if trashed {
 				newClean := normalizeDBPath(out.Key)
 				newHash := pathkey.Hash(current.ID, newClean)
-				_ = h.Store.SoftDeleteAndRetag(r.Context(), existing.ID, newClean, newHash, origClean)
+				_ = h.Store.SoftDeleteAndRetag(ctx, existing.ID, newClean, newHash, origClean)
 			} else {
 				// Bytes are gone for good: drop the row instead of parking a
 				// trash entry whose Restore could never find anything.
-				_ = h.Store.HardDeleteNode(r.Context(), existing.ID)
+				_ = h.Store.HardDeleteNode(ctx, existing.ID)
 			}
-			h.removeFromIndex(r.Context(), existing.ID)
+			h.removeFromIndex(ctx, existing.ID)
 			for _, cid := range subtreeIDs {
-				h.removeFromIndex(r.Context(), cid)
+				h.removeFromIndex(ctx, cid)
 			}
 		}
 	}

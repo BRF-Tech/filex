@@ -166,6 +166,7 @@ logged; the next run tries again).
 |---|---|---|
 | `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, and **`ttl_days`** (days remaining before purge, floored at 0). |
 | `POST /api/files/manager/restore` | `{ "node_id": 123 }` | Moves the file back to its original path and re‑attaches the row. Returns **409** `{ "code": "EXISTS", "name", "path" }` when something already holds that path; nothing moves and the entry stays in the trash. |
+| `POST /api/files/manager/restore?queued=1` | `{ "node_ids": [123, 124] }` | The same checks for every entry, and one refusal refuses the batch. What they allow is queued, one job per storage: **202** `{ "ops": [{ "kind": "restore", … }] }`, followed with `GET /api/files/ops`. An entry whose place is taken fails on its own, and the job's `error` says so; the others come back. Offered when `capabilities.queued` lists `restore`; the explorer's Restore uses it then. |
 
 The explorer's **Trash** view draws these entries in its own table with the
 facts a deleted item has: **Deleted** (when — the date column, sortable and
@@ -242,6 +243,14 @@ folder exists again.
 A file or folder now holds the original path. filex refuses rather than
 overwrite it or pour one folder into another. Rename or move what is there,
 then restore again.
+
+**A folder restore answered 504, or the page gave up waiting.**
+The restore carries on to the end: it no longer depends on anybody waiting for
+the answer. List the folder again to see it back. Up to v0.45.1 the proxy's
+timeout stopped it between two objects, leaving the folder half in the trash
+and half back in place; a second restore then answered 409 `EXISTS`, because
+the half that had come back held the name. The rest of such a folder is still
+under its `.filex-trash/` key on the backend, to be moved back by hand.
 
 **Restore reports success but the file isn't back on disk.**
 The DB flag is cleared **best‑effort**: if the driver's move step fails, filex

@@ -21,6 +21,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
@@ -73,7 +74,13 @@ type Manager struct {
 	// catalogue what was just opened. See lazy_listing.go. nil = the catalogue
 	// is whatever the last scan left.
 	Lazy LazyCatalogue
+	// Ops runs a folder rename asked with `queued=1` as a job of the queue
+	// (vfRename). nil renames inside the request, as it always did.
+	Ops *ops.Service
 }
+
+// AttachOps wires the queue a rename asked with `queued=1` runs on.
+func (h *Manager) AttachOps(o *ops.Service) { h.Ops = o }
 
 // checkQuota refuses a write that would put the acting account over its
 // ceiling. The identity comes from quotastore.OwnerFrom, not from the session,

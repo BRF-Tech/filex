@@ -12,6 +12,11 @@ const props = defineProps<{
   /* wiring:e2 — hosts hide the encrypted option (e.g. already inside an
    * encrypted folder / feature-gated embeds). Default: shown. */
   encryptedOption?: boolean;
+  /** The server's answer when it did not make the folder. It used to go to
+   *  the host's console only, and the dialog stayed open with nothing in it. */
+  error?: string | null;
+  /** The folder is being made; Create and Enter wait for the answer. */
+  busy?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -33,7 +38,15 @@ watch(() => props.open, (v) => {
   }
 });
 
+watch(
+  () => props.error,
+  (e) => {
+    if (e) err.value = e;
+  },
+);
+
 function submit() {
+  if (props.busy) return;
   const clean = name.value.trim();
   if (!clean) {
     err.value = t('modal.newfolder.placeholder');
@@ -68,7 +81,7 @@ function submit() {
           @keydown.enter.prevent="submit"
         />
       </label>
-      <p v-if="err" class="fe-form__error">{{ err }}</p>
+      <p v-if="err" class="fe-form__error" role="alert">{{ err }}</p>
       <!-- wiring:e2 — encrypted-folder entry point lives inside the normal
            new-folder flow so every trigger (toolbar / context menu / palette)
            reaches it without extra wiring. -->
@@ -88,8 +101,8 @@ function submit() {
       <button type="button" class="fe-btn" @click="emit('close')">
         {{ t('modal.newfolder.cancel') }}
       </button>
-      <button type="button" class="fe-btn fe-btn--primary" @click="submit">
-        {{ t('modal.newfolder.create') }}
+      <button type="button" class="fe-btn fe-btn--primary" :disabled="busy" @click="submit">
+        {{ busy ? t('modal.newfolder.creating') : t('modal.newfolder.create') }}
       </button>
     </template>
   </Modal>
