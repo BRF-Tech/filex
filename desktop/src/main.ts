@@ -150,6 +150,7 @@ import {
   type WatchPrefs,
 } from './sync-policy.js';
 import { SleepGuard, quietMomentForUpdate, syncBusy } from './power.js';
+import { DownloadTally, downloadEnding } from './download-guard.js';
 import { anyError } from './syncstatus.js';
 import { PORTABLE_DATA_DIRNAME, portableMode } from './portable.js';
 
@@ -368,6 +369,62 @@ function isApiUrl(url: string, serverUrl: string): boolean {
  * (`/files/edit`, `/admin/`) do belong in the browser, where the user's real
  * session and their extensions live.
  */
+const DOWNLOAD_STRINGS: Record<string, [en: string, tr: string]> = {
+  done: ['Downloaded', 'İndirildi'],
+  failed: ['Download failed', 'İndirilemedi'],
+};
+
+function downloadText(key: string): string {
+  const pair = DOWNLOAD_STRINGS[key];
+  return effectiveLocale() === 'tr' ? pair[1] : pair[0];
+}
+
+/** Every download of the app's windows, for the dock / taskbar bar. */
+const downloads = new DownloadTally();
+let downloadSeq = 0;
+
+/**
+ * A download to disk says how far it has got and how it ended.
+ *
+ * ⚠ The explorer's Download and ⌘K save through the window's own download
+ * (openOutward, remote:download), and nothing listened to it: no progress, no
+ * end, and a failure said nothing at all. The window's bar moves with the
+ * bytes of every download at once; the end is a notification, and clicking a
+ * finished one shows the file in its folder.
+ */
+function watchDownloads(): void {
+  session.defaultSession.on('will-download', (_e, item) => {
+    const id = String(++downloadSeq);
+    const paint = () => {
+      const f = downloads.fraction();
+      for (const w of BrowserWindow.getAllWindows()) w.setProgressBar(f);
+    };
+    downloads.update(id, item.getReceivedBytes(), item.getTotalBytes());
+    paint();
+    item.on('updated', () => {
+      downloads.update(id, item.getReceivedBytes(), item.getTotalBytes());
+      paint();
+    });
+    item.once('done', (_ev, state_) => {
+      downloads.finish(id);
+      paint();
+      const ending = downloadEnding(state_);
+      if (!ending) return;
+      const name = item.getFilename();
+      log('download', ending, { name });
+      try {
+        if (!Notification.isSupported()) return;
+        const n = new Notification({ title: downloadText(ending), body: name });
+        const saved = item.getSavePath();
+        if (ending === 'done' && saved) n.on('click', () => shell.showItemInFolder(saved));
+        n.show();
+      } catch {
+        /* a courtesy, never a failure path */
+      }
+    });
+  });
+}
+
 function openOutward(url: string, from?: BrowserWindow | null): void {
   const acc = activeAccount(state);
   if (acc && isApiUrl(url, acc.serverUrl)) {
@@ -3943,6 +4000,7 @@ if (!app.requestSingleInstanceLock()) {
     // No application menu. It is a file manager window, not an editor: the
     // default Edit/View/Window scaffolding only offers devtools and reload.
     Menu.setApplicationMenu(null);
+    watchDownloads();
 
     if (process.env.FILEX_NO_BROWSER === '1') {
       // ⚠⚠ A test run registers NOTHING with the operating system. The scheme
