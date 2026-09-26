@@ -89,6 +89,10 @@ export interface PairHealth {
   local: LocalNote | null;
   /** Set while another process syncs this pair (see PairBusy). */
   busy: PairBusy | null;
+  /** A pass of this pair has finished since the engine started (a summary
+   *  line): until then it is not known to be in step, and its line must not
+   *  say "watching for changes" (sync-policy.ts folderView). */
+  passed?: boolean;
 }
 
 export type SyncPhase = 'inventory' | 'plan' | 'transfer' | 'settling';
@@ -97,9 +101,14 @@ export type SyncPhase = 'inventory' | 'plan' | 'transfer' | 'settling';
 export interface SyncActivity {
   pairId: string;
   phase: SyncPhase;
-  /** transfer only: actions done / planned. 0/0 elsewhere. */
+  /** transfer: actions done / planned; settling: changes recorded / to
+   *  record; plan: 0 / the changes to make; inventory: 0/0. */
   done: number;
   total: number;
+  /** inventory only: the items found on this computer, and the server items
+   *  listed so far — a large tree lists for minutes. */
+  here?: number;
+  listed?: number;
   /** transfer only, once there are bytes to move: the engine's own figures,
    *  e.g. '1.2 GiB' of '52.6 GiB'. */
   bytesDone?: string;
@@ -141,6 +150,11 @@ export interface SyncStatus {
   /** Hold lines not yet handed to the supervisor (takeHolds): each is a cue to
    *  re-read the pair list, which carries the numbers the app shows. */
   holds?: Array<{ pairId: string; count: number }>;
+  /** The engine stopped on its own: its exit code (or signal), so the page
+   *  can say so in its own language; lastError has the English line. */
+  exited?: string | null;
+  /** When the supervisor starts it again (epoch ms), while it waits to. */
+  restartAt?: number | null;
 }
 
 /** `filex sync run` exits with this status when the server answers 401, and
@@ -171,6 +185,7 @@ export function pairView(st: SyncStatus, pairId: string): PairHealth {
     line: h?.line ?? null,
     local: h?.local ?? null,
     busy: h?.busy ?? null,
+    passed: h?.passed === true,
   };
 }
 
@@ -224,15 +239,20 @@ export function markExited(st: SyncStatus, code: number | null, stopping: boolea
   st.running = false;
   st.active = null;
   st.live = null;
-  // A pair this engine was waiting for is not being waited for any more.
-  for (const h of Object.values(st.pairs)) h.busy = null;
+  // A pair this engine was waiting for is not being waited for any more, and
+  // a pass the NEXT engine has not run is not known to be in step.
+  for (const h of Object.values(st.pairs)) {
+    h.busy = null;
+    h.passed = false;
+  }
   if (code === SIGNED_OUT_EXIT) {
     st.signedOut = true;
     st.lastError = st.lastError ?? 'signed out: the server no longer accepts this token (HTTP 401)';
     return;
   }
   if (!stopping && code !== 0) {
-    st.lastError = st.lastError ?? `sync stopped unexpectedly (exit ${code ?? signal ?? 'unknown'})`;
+    st.exited = String(code ?? signal ?? 'unknown');
+    st.lastError = st.lastError ?? `sync stopped unexpectedly (exit ${st.exited})`;
   }
 }
 
@@ -283,6 +303,45 @@ function transferActivity(pairId: string, detail: string): SyncActivity {
     }
   }
   return act;
+}
+
+const hereRe = /^(\d+) item\(s\) here\b/;
+const listedRe = /^listed \d+ server folder\(s\), (\d+) item\(s\) so far$/;
+const planRe = /^(\d+) change\(s\) to make$/;
+const settlingRe = /^(\d+) of (\d+) change\(s\) recorded$/;
+
+/**
+ * A phase other than the transfer, with the figures its line carries:
+ *   inventory: 1204 item(s) here, listing the server…
+ *   inventory: listed 312 server folder(s), 48211 item(s) so far
+ *   plan: 97 change(s) to make
+ *   settling: 40 of 97 change(s) recorded
+ * They used to be dropped (0/0), so a pass listing a large server for minutes
+ * read "listing the server…" with nothing moving. The inventory's two lines
+ * add up: the count here stays while the server's is listed.
+ */
+function phaseActivity(pairId: string, phase: SyncPhase, rest: string, prev: SyncActivity | null): SyncActivity {
+  const a: SyncActivity = { pairId, phase, done: 0, total: 0 };
+  if (phase === 'inventory') {
+    const same = prev && prev.pairId === pairId && prev.phase === 'inventory' ? prev : null;
+    const here = hereRe.exec(rest);
+    const listed = listedRe.exec(rest);
+    if (here) a.here = Number(here[1]);
+    else if (same?.here !== undefined) a.here = same.here;
+    if (listed) a.listed = Number(listed[1]);
+    return a;
+  }
+  if (phase === 'plan') {
+    const m = planRe.exec(rest);
+    if (m) a.total = Number(m[1]);
+    return a;
+  }
+  const m = settlingRe.exec(rest);
+  if (m) {
+    a.done = Number(m[1]);
+    a.total = Number(m[2]);
+  }
+  return a;
 }
 
 function health(st: SyncStatus, pairId: string): PairHealth {
@@ -397,11 +456,12 @@ export function absorbLine(st: SyncStatus, line: string, isErr: boolean, now = n
     st.active =
       pr[1] === 'transfer'
         ? transferActivity(p.id, pr[2])
-        : { pairId: p.id, phase: pr[1] as SyncPhase, done: 0, total: 0 };
+        : phaseActivity(p.id, pr[1] as SyncPhase, pr[2], st.active);
     return;
   }
   const sm = summaryRe.exec(p.rest);
   if (sm) {
+    h.passed = true;
     if (st.active?.pairId === p.id) st.active = null;
     // The engine works again, whatever stopped it before.
     st.lastError = null;

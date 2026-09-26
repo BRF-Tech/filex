@@ -143,11 +143,13 @@ import {
   normLimit,
   normWindow,
   folderView,
+  trayTooltip,
   watchPrefsKey,
   watcherAccounts,
   type WatchPrefs,
 } from './sync-policy.js';
 import { SleepGuard, quietMomentForUpdate, syncBusy } from './power.js';
+import { anyError } from './syncstatus.js';
 import { PORTABLE_DATA_DIRNAME, portableMode } from './portable.js';
 
 // ─────────────────────────── portable build ───────────────────────────
@@ -569,8 +571,34 @@ function paintUnread(): void {
   } catch {
     /* a platform that will not take a badge still gets the tooltip */
   }
-  const label = unreadBadgeLabel(count);
-  tray?.setToolTip(label ? `filex — ${label}` : 'filex');
+  paintTrayTip();
+}
+
+let lastTrayTip = '';
+
+/**
+ * The tray's tooltip: the pause, sync's state and the unread count, in ONE
+ * sentence (sync-policy.ts trayTooltip). The pause used to be written by
+ * refreshTray and overwritten the same moment by the unread count's own
+ * tooltip, and sync was not in it at all.
+ */
+function paintTrayTip(): void {
+  if (!tray) return;
+  const acc = activeAccount(state);
+  const count = acc ? (unreadByAccount[acc.id] ?? 0) : 0;
+  const statuses = supervisor?.statuses() ?? [];
+  const tip = trayTooltip(
+    {
+      paused: state.syncPaused === true,
+      unreadLabel: unreadBadgeLabel(count),
+      syncing: syncBusy(statuses),
+      failing: statuses.some((st) => st.signedOut !== true && anyError(st)),
+    },
+    { paused: trayText('pausedState'), syncing: trayText('syncingState'), failing: trayText('failingState') },
+  );
+  if (tip === lastTrayTip) return;
+  lastTrayTip = tip;
+  tray.setToolTip(tip);
 }
 
 function startNotifier(): void {
@@ -687,7 +715,9 @@ const TRAY_STRINGS: Record<string, [en: string, tr: string]> = {
   signedOutSuffix: ['signed out', 'oturum kapalı'],
   pause: ['Pause sync', 'Eşitlemeyi duraklat'],
   resume: ['Resume sync', 'Eşitlemeyi sürdür'],
-  pausedTip: ['filex — sync paused', 'filex — eşitleme duraklatıldı'],
+  pausedState: ['sync paused', 'eşitleme duraklatıldı'],
+  syncingState: ['syncing…', 'eşitleniyor…'],
+  failingState: ['a folder could not be synced — see Settings', 'bir klasör eşitlenemedi — Ayarlar’a bak'],
   updateReady: ['Update {v} ready — installs itself (or now)', '{v} güncellemesi hazır — kendiliğinden kurulur (ya da şimdi)'],
   settings: ['Settings…', 'Ayarlar…'],
   quit: ['Quit filex', "filex'ten çık"],
@@ -704,8 +734,8 @@ function refreshTray(): void {
   const acc = activeAccount(state);
   const paused = state.syncPaused === true;
   // The tray icon is often all there is on screen: a paused client has to be
-  // recognisable from it without opening anything.
-  tray.setToolTip(paused ? trayText('pausedTip') : 'filex');
+  // recognisable from it without opening anything (paintTrayTip, below via
+  // paintUnread).
   // ⚠ The badge follows the ACTIVE account, and every caller of this function
   // is a moment the active one may just have changed (boot, a rail switch, a
   // sign-out). Repainting here keeps the number on the icon the number for the
@@ -3912,6 +3942,7 @@ if (!app.requestSingleInstanceLock()) {
         // While any pair is being worked on the machine does not idle-sleep;
         // the moment none is, it may again. See src/power.ts.
         sleepGuard?.update(syncBusy(supervisor?.statuses() ?? []));
+        paintTrayTip();
         for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
       },
       onSignedOut: (accountId) => markSignedOut(accountId, 'the sync engine was refused (HTTP 401)'),
@@ -3923,6 +3954,9 @@ if (!app.requestSingleInstanceLock()) {
         void refreshPairs();
       },
       watchPrefs: () => currentWatchPrefs(),
+      // An engine that stopped on its own is started again from here, after
+      // the supervisor's backoff (sync-policy.ts restartDelay).
+      restart: () => void refreshPairs().catch((e) => log('sync', 'restart failed', String(e))),
     });
     // Local copies for dragging files out. Under userData rather than the OS
     // temp dir: the point of keeping them is that the SECOND drag of the same

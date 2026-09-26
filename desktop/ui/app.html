@@ -1125,6 +1125,12 @@
         'sync.held_discard':    ['Move to local trash', 'Yerel çöpe taşı'],
         'sync.phase_inventory': ['listing the server…', 'sunucu listeleniyor…'],
         'sync.phase_plan':      ['working out what to change…', 'neyin değişeceği hesaplanıyor…'],
+        'sync.phase_plan_n':    ['{n} change(s) to make', '{n} değişiklik yapılacak'],
+        'sync.phase_inventory_listed': ['listing the server — {n} item(s) so far', 'sunucu listeleniyor — şimdiye dek {n} öğe'],
+        'sync.phase_settling_n': ['finishing up — {done}/{total}', 'tamamlanıyor — {done}/{total}'],
+        'sync.pending':         ['waiting for its first check', 'ilk denetimini bekliyor'],
+        'sync.exited':          ['the sync engine stopped (exit {code})', 'eşitleme motoru durdu (çıkış {code})'],
+        'sync.restarting':      ['— starting it again shortly', '— birazdan yeniden başlatılıyor'],
         'sync.phase_transfer':  ['moving files — {done}/{total}', 'dosyalar aktarılıyor — {done}/{total}'],
         'sync.phase_bytes':     ['{bytes} of {size}', '{bytes} / {size}'],
         'sync.eta':             ['about {eta} left', 'yaklaşık {eta} kaldı'],
@@ -1882,9 +1888,24 @@
           if (v.eta) line += ' — ' + T('sync.eta', { eta: localEta(v) });
           return line;
         }
-        if (v.phase === 'plan') return T('sync.phase_plan');
-        if (v.phase === 'settling') return T('sync.phase_settling');
+        // Every phase says its figures once the engine has them: a large
+        // server lists for minutes, and "listing the server…" alone read as
+        // stuck.
+        if (v.phase === 'plan') {
+          return v.total > 0 ? T('sync.phase_plan_n', { n: localCount(v.total) }) : T('sync.phase_plan');
+        }
+        if (v.phase === 'settling') {
+          return v.total > 0
+            ? T('sync.phase_settling_n', { done: localCount(v.done), total: localCount(v.total) })
+            : T('sync.phase_settling');
+        }
+        if (typeof v.listed === 'number') return T('sync.phase_inventory_listed', { n: localCount(v.listed) });
         return T('sync.phase_inventory');
+      }
+
+      /** A count with this window's thousands separator. */
+      function localCount(n) {
+        return Number(n).toLocaleString(LANG === 'tr' ? 'tr-TR' : 'en-US');
       }
 
       /** A bandwidth limit: the presets the main process offers, KiB/s. A
@@ -1954,7 +1975,18 @@
             case 'active': line = activityLine(v); cls = 'ok'; break;
             case 'busy': line = T('sync.busy'); break;
             case 'window': line = T('sync.window_wait', { window: v.window.replace('-', '–') }); break;
-            case 'error': line = v.message; cls = 'err'; break;
+            // An engine that stopped on its own: said in this window's
+            // language (the message is the engine's English), with the
+            // restart the supervisor has scheduled.
+            case 'error':
+              line = v.exited
+                ? T('sync.exited', { code: v.exited }) + (v.restartAt ? ' ' + T('sync.restarting') : '')
+                : v.message;
+              cls = 'err';
+              break;
+            // A folder no pass has finished yet: not "watching", which is
+            // what a folder in step says.
+            case 'pending': line = T('sync.pending'); break;
             case 'watching': line = T('sync.watching'); cls = 'ok'; break;
             case 'stopped': line = T('sync.stopped'); cls = 'err'; break;
           }

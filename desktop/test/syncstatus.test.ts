@@ -388,3 +388,45 @@ test('a line that never ends is handed on once it is too long', () => {
   assert.equal(lines.length, 1);
   assert.equal(lines[0].length, LineReader.MAX_LINE + 1);
 });
+
+// ── what a pass says while it runs, and whether one has finished (Y11) ──
+//
+// ⚠ The engine says how far a pass has got in every phase, and only the
+// transfer's figures were kept: "listed 312 server folder(s), 48,211 item(s)
+// so far" became "listing the server…", minutes on end, with nothing moving.
+// And a folder no pass had finished yet read "watching for changes" beside a
+// folder that was genuinely in step.
+
+test('every phase keeps its figures', () => {
+  const st = newStatus('acc');
+  out(st, 'pair-1: inventory: 1204 item(s) here, listing the server…');
+  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'inventory', done: 0, total: 0, here: 1204 });
+  out(st, 'pair-1: inventory: listed 312 server folder(s), 48211 item(s) so far');
+  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'inventory', done: 0, total: 0, here: 1204, listed: 48211 });
+  out(st, 'pair-1: plan: 97 change(s) to make');
+  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'plan', done: 0, total: 97 });
+  out(st, 'pair-1: settling: 40 of 97 change(s) recorded');
+  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'settling', done: 40, total: 97 });
+});
+
+test('a pair has passed once a pass of it has finished, and not before', () => {
+  const st = newStatus('acc');
+  out(st, 'pair-1: inventory: 3 item(s) here, listing the server…');
+  assert.equal(pairView(st, 'pair-1').passed, false);
+  out(st, 'pair-1: already in step');
+  assert.equal(pairView(st, 'pair-1').passed, true);
+  out(st, 'pair-2: 4/4 done — 4 uploaded (1.2s)');
+  assert.equal(pairView(st, 'pair-2').passed, true);
+});
+
+test('an engine that stopped on its own says so as a code, and its pairs are to be checked again', () => {
+  const st = newStatus('acc');
+  out(st, 'pair-1: already in step');
+  markExited(st, 1, false);
+  assert.equal(st.exited, '1', 'the page cannot word "sync stopped unexpectedly (exit 1)" in Turkish');
+  assert.equal(pairView(st, 'pair-1').passed, false, 'the next engine has not checked it yet');
+
+  const stopped = newStatus('acc');
+  markExited(stopped, 0, true);
+  assert.equal(stopped.exited ?? null, null, 'a stop the app asked for is not a crash');
+});

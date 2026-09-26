@@ -32,7 +32,7 @@ import {
   takeHolds,
   type SyncStatus,
 } from './syncstatus.js';
-import { wantedWatchers, watchArgs, type WatchPrefs } from './sync-policy.js';
+import { restartDelay, wantedWatchers, watchArgs, type WatchPrefs } from './sync-policy.js';
 
 export type { SyncActivity, SyncStatus, LiveState, PairHealth, LocalNote } from './syncstatus.js';
 
@@ -203,7 +203,14 @@ export interface SupervisorHooks {
   /** The bandwidth limits and sync window a watcher is started with (read at
    *  start; a change means stop + reconcile). */
   watchPrefs?: () => WatchPrefs;
+  /** Look at the accounts again (the caller's reconcile): how an engine that
+   *  stopped on its own is started again, after restartDelay. */
+  restart?: () => void;
 }
+
+/** A run longer than this was healthy: a crash after it starts the backoff
+ *  over rather than counting on (restartDelay). */
+const HEALTHY_RUN_MS = 2 * 60_000;
 
 /**
  * Keeps one `filex sync run --watch` process alive per signed-in account.
@@ -220,12 +227,23 @@ export class SyncSupervisor {
   private readonly onSignedOut: (accountId: string) => void;
   private readonly onHold: (accountId: string, pairId: string, count: number) => void;
   private readonly watchPrefs: () => WatchPrefs;
+  private readonly restart: () => void;
+  /** Per account: crashes in a row, and the pending restart. */
+  private crashes = new Map<string, number>();
+  private restartTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(hooks: SupervisorHooks) {
     this.onChange = hooks.onChange;
     this.onSignedOut = hooks.onSignedOut ?? (() => {});
     this.onHold = hooks.onHold ?? (() => {});
     this.watchPrefs = hooks.watchPrefs ?? (() => ({}));
+    this.restart = hooks.restart ?? (() => {});
+  }
+
+  private cancelRestart(accountId: string): void {
+    const t = this.restartTimers.get(accountId);
+    if (t) clearTimeout(t);
+    this.restartTimers.delete(accountId);
   }
 
   statuses(): SyncStatus[] {
@@ -257,8 +275,12 @@ export class SyncSupervisor {
     }
     for (const acc of accounts) {
       if (wanted.has(acc.id) && !this.procs.has(acc.id)) {
+        this.cancelRestart(acc.id);
         this.start(acc, tokenFor(acc.id));
       }
+    }
+    for (const id of [...this.restartTimers.keys()]) {
+      if (!wanted.has(id)) this.cancelRestart(id);
     }
     this.onChange();
   }
@@ -280,6 +302,7 @@ export class SyncSupervisor {
     const st: SyncStatus = newStatus(acc.id);
     this.status.set(acc.id, st);
     this.procs.set(acc.id, proc);
+    const startedAt = Date.now();
 
     // The server refused the token. Said once per watcher; an older engine
     // that keeps looping on the 401 instead of exiting is stopped here.
@@ -332,6 +355,23 @@ export class SyncSupervisor {
       markExited(st, code, this.stopping, signal);
       holds();
       signedOut();
+      // ⚠ An engine that stopped on its own is started again, less often the
+      // more it keeps stopping (restartDelay). It used to stay stopped until
+      // something else — a folder added, a setting changed — made the app
+      // look at its accounts again, with one English line to show for it.
+      if (!this.stopping && !refused && st.exited) {
+        const n = Date.now() - startedAt > HEALTHY_RUN_MS ? 1 : (this.crashes.get(acc.id) ?? 0) + 1;
+        this.crashes.set(acc.id, n);
+        const delay = restartDelay(n);
+        st.restartAt = Date.now() + delay;
+        this.cancelRestart(acc.id);
+        this.restartTimers.set(acc.id, setTimeout(() => {
+          this.restartTimers.delete(acc.id);
+          this.restart();
+        }, delay));
+      } else if (!st.exited) {
+        this.crashes.delete(acc.id);
+      }
       this.onChange();
     });
   }
@@ -340,6 +380,7 @@ export class SyncSupervisor {
    *  a watcher mid-round holds the old paths in memory and would read the
    *  half-moved tree as a mass local delete. reconcile() restarts it. */
   stop(accountId: string): void {
+    this.cancelRestart(accountId);
     const proc = this.procs.get(accountId);
     if (proc) {
       proc.kill();
@@ -355,6 +396,7 @@ export class SyncSupervisor {
 
   stopAll(): void {
     this.stopping = true;
+    for (const id of [...this.restartTimers.keys()]) this.cancelRestart(id);
     for (const p of this.procs.values()) p.kill();
     this.procs.clear();
   }
