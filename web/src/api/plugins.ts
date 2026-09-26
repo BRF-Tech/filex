@@ -128,6 +128,18 @@ export function rolledBackPlugin(err: unknown): Plugin | null {
   return res?.data?.plugin ?? null;
 }
 
+/**
+ * How long installing, upgrading or restarting a storage plugin may take.
+ *
+ * ⚠ Not the client's 30 s default. The server runs the plugin's conformance
+ * suite after the binary arrives (up to 90 s) and waits for a restarted plugin
+ * to come up (30 s) and answer its health check (15 s); at 30 s the page said
+ * "timeout of 30000ms exceeded" about an install that was working. The app
+ * plugins' install has the same budget (INSTALL_TIMEOUT_MS) for the same
+ * reason.
+ */
+export const PLUGIN_INSTALL_TIMEOUT_MS = 180_000;
+
 export const PluginsApi = {
   async list(): Promise<PluginList> {
     const { data } = await api.get<PluginListResponse>('/admin/plugins');
@@ -148,13 +160,17 @@ export const PluginsApi = {
     form.append('name', name);
     form.append('file', file);
     if (signature) form.append('signature', signature);
-    const { data } = await api.post<Plugin>('/admin/plugins', form);
+    const { data } = await api.post<Plugin>('/admin/plugins', form, { timeout: PLUGIN_INSTALL_TIMEOUT_MS });
     return data;
   },
 
   /** Download a plugin binary from a URL. sha256 is required by the server. */
   async fromUrl(name: string, url: string, sha256: string, signature = ''): Promise<Plugin> {
-    const { data } = await api.post<Plugin>('/admin/plugins', { name, url, sha256, signature });
+    const { data } = await api.post<Plugin>(
+      '/admin/plugins',
+      { name, url, sha256, signature },
+      { timeout: PLUGIN_INSTALL_TIMEOUT_MS },
+    );
     return data;
   },
 
@@ -167,7 +183,7 @@ export const PluginsApi = {
     const form = new FormData();
     form.append('file', file);
     if (signature) form.append('signature', signature);
-    const { data } = await api.post<Plugin>(`/admin/plugins/${id}/upgrade`, form);
+    const { data } = await api.post<Plugin>(`/admin/plugins/${id}/upgrade`, form, { timeout: PLUGIN_INSTALL_TIMEOUT_MS });
     return data;
   },
 
@@ -183,7 +199,9 @@ export const PluginsApi = {
   },
 
   async restart(id: number): Promise<Plugin> {
-    const { data } = await api.post<Plugin>(`/admin/plugins/${id}/restart`);
+    const { data } = await api.post<Plugin>(`/admin/plugins/${id}/restart`, undefined, {
+      timeout: PLUGIN_INSTALL_TIMEOUT_MS,
+    });
     return data;
   },
 
