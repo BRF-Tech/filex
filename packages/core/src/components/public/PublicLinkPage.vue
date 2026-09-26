@@ -113,7 +113,11 @@ const share = props.kind === 'share' ? usePublicShare(props.token ?? '', opts) :
    never the app runtime's "The app returned an error" (QA, 2026-09-21). */
 const request =
   props.kind === 'request'
-    ? usePublicRequest(props.token ?? '', { ...opts, errorText: () => t('public.upload_failed') })
+    ? usePublicRequest(props.token ?? '', {
+        ...opts,
+        errorText: () => t('public.upload_failed'),
+        unansweredText: () => t('public.upload_unanswered'),
+      })
     : null;
 
 /** The words for a file the drop page will not send (lib/dropLimits). */

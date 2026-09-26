@@ -322,6 +322,11 @@ func (h *Drop) refuse(w http.ResponseWriter, r *http.Request, status int, body m
 // file into a fresh per-submission subfolder, notify the owner. Returns JSON
 // so the page's uploader script can show progress/success. It NEVER lists or
 // returns existing folder contents.
+// dropWriteCeiling bounds a drop's writes once its request has fully arrived
+// and no longer ends with the client: a storage that stopped answering must
+// not hold the work for ever.
+const dropWriteCeiling = 2 * time.Hour
+
 func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	// Rate-limit anonymous writers per source IP.
 	if !h.limiter.allow(clientIP(r)) {
@@ -340,6 +345,17 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 		h.refuse(w, r, http.StatusBadRequest, map[string]any{"error": "bad multipart"})
 		return
 	}
+	// ⚠⚠ Everything the visitor sent has arrived. What is left is the
+	// server's own work, above all writing the files to the storage one after
+	// another, and for a large drop into an object store that outlasts a
+	// proxy's wait (Cloudflare gives up at 100 s, nginx at 60 s). The proxy's
+	// hang-up cancelled the request, and the write loop stopped between two
+	// files: half the drop landed, the visitor was told none of it had, and a
+	// retry made a second submission of it. From here on the request's
+	// cancellation no longer stops the work; a ceiling still bounds it.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), dropWriteCeiling)
+	defer cancel()
+	r = r.WithContext(ctx)
 	pin := r.FormValue("pin")
 	sh, err := h.Store.GetShareByToken(r.Context(), strings.ToLower(strings.TrimSpace(tok)))
 	if err != nil || sh == nil {

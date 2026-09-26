@@ -196,7 +196,16 @@ function onDrop(e: DragEvent): void {
           :max="100"
           :value="u.percent >= 0 ? u.percent : undefined"
         ></progress>
+        <!-- Every byte is sent; the server is writing it to the storage. The
+             bar runs without a value: it is not stuck at 100%. -->
+        <template v-else-if="u.state === 'saving'">
+          <progress class="fe-pdrop__bar" :max="100"></progress>
+          <span class="fe-pdrop__saving" role="status">{{ t('public.upload_saving') }}</span>
+        </template>
         <span v-else-if="u.state === 'done'" class="fe-pdrop__ok">{{ t('public.upload_done') }}</span>
+        <span v-else-if="u.state === 'unconfirmed'" class="fe-pdrop__unconfirmed" role="status">{{
+          u.error || t('public.upload_unanswered')
+        }}</span>
         <span v-else class="fe-surface__error">{{ u.error || t('public.upload_failed') }}</span>
       </li>
     </ul>

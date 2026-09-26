@@ -678,6 +678,9 @@ export const en: Record<string, string> = {
   'public.request_full': 'Everything that was asked for has arrived',
   'public.upload_done': 'Sent',
   'public.upload_failed': 'Could not be sent',
+  'public.upload_saving': 'Saving…',
+  'public.upload_unanswered':
+    'Sent, but the server did not confirm it in time. It may still be saving it: check with whoever sent you this link before sending it again.',
   'public.your_name': 'Your name (optional)',
   'public.your_name_ph': 'e.g. Alex Smith',
   'public.refused_ext': 'Not sent — this link does not accept this type of file.',

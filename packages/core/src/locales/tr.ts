@@ -667,6 +667,9 @@ export const tr: Record<string, string> = {
   'public.request_full': 'İstenen her şey ulaştı',
   'public.upload_done': 'Gönderildi',
   'public.upload_failed': 'Gönderilemedi',
+  'public.upload_saving': 'Kaydediliyor…',
+  'public.upload_unanswered':
+    'Gönderildi ama sunucu zamanında onaylamadı. Hâlâ kaydediyor olabilir: yeniden göndermeden önce bu bağlantıyı size gönderen kişiye sorun.',
   'public.your_name': 'Adınız (isteğe bağlı)',
   'public.your_name_ph': 'Örn. Ahmet Yılmaz',
   'public.refused_ext': 'Gönderilmedi — bu bağlantı bu türde dosya kabul etmiyor.',
