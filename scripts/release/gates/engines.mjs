@@ -21,7 +21,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { nativeGo, toWslPath, wslGo } from '../../lib/go-build.mjs';
+import { nativeGo, wslGo, wslMirrorCd } from '../../lib/go-build.mjs';
 import { docker as dockerRun } from '../engine.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -68,7 +68,7 @@ function goTest() {
   if (wslGo()) {
     const q = (s) => `'${s.split("'").join(`'"'"'`)}'`;
     return sh('wsl', ['-e', 'bash', '-lc',
-      `cd ${q(toWslPath(backend))} && export PATH=/usr/local/go/bin:$PATH GOFLAGS=-buildvcs=false && FILEX_TEST_PG_DSN=${q(PG_DSN)} FILEX_TEST_MYSQL_DSN=${q(MY_DSN)} ${test}`]);
+      `${wslMirrorCd(backend)} && export PATH=/usr/local/go/bin:$PATH GOFLAGS=-buildvcs=false && FILEX_TEST_PG_DSN=${q(PG_DSN)} FILEX_TEST_MYSQL_DSN=${q(MY_DSN)} ${test}`]);
   }
   return { status: 1, stdout: '', stderr: 'no Go toolchain: go is not on PATH, and WSL has none either' };
 }
