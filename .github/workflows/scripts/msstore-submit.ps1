@@ -12,8 +12,8 @@
 # associated with the account (2026-09-26).
 #
 # 1. A submission still on its way (in certification, being published) cannot
-#    be replaced: the release says so and leaves the Store alone. Upload the
-#    msix-<tag> artifact in Partner Center once that one is live.
+#    be replaced: the release says so and leaves the Store alone. Once that
+#    one is live, msstore-resubmit.yml sends this release's kept package.
 # 2. A pending submission that is going nowhere (a draft, or one that failed)
 #    is deleted: this release supersedes it.
 # 3. msstore uploads the package into a new draft, the listing's "What's new"
@@ -49,7 +49,7 @@ try {
     $state = (Invoke-RestMethod -Headers $h "$api/submissions/$($pending.id)/status").status
     $onItsWay = 'CommitStarted', 'PreProcessing', 'Certification', 'Release', 'PendingPublication', 'Publishing'
     if ($onItsWay -contains $state) {
-      Skip "submission $($pending.id) is still $state, so $Version was not submitted. Upload the msix-v$Version artifact in Partner Center once that one is live."
+      Skip "submission $($pending.id) is still $state, so $Version was not submitted. Once that one is live: gh workflow run msstore-resubmit.yml -R BRF-Tech/filex -f tag=v$Version"
     }
     Write-Host "Deleting pending submission $($pending.id) ($state): $Version replaces it."
     Invoke-RestMethod -Method Delete -Headers $h "$api/submissions/$($pending.id)" | Out-Null
@@ -57,7 +57,11 @@ try {
 
   msstore reconfigure --tenantId $env:MSSTORE_TENANT_ID --sellerId $env:MSSTORE_SELLER_ID --clientId $env:MSSTORE_CLIENT_ID --clientSecret $env:MSSTORE_CLIENT_SECRET
   if ($LASTEXITCODE -ne 0) { Skip "msstore reconfigure failed (exit $LASTEXITCODE)." }
-  msstore publish desktop -i $Msix -id $app --noCommit
+  # The package goes in as the path argument: msstore's MSIX publisher takes a
+  # .msix file there. `-i` is --inputDirectory since 0.4.x and rejects a file
+  # ("Input directory does not exist"), which is how v0.47.0 never reached
+  # the Store.
+  msstore publish $Msix -id $app --noCommit
   if ($LASTEXITCODE -ne 0) { Skip "msstore could not upload $Msix (exit $LASTEXITCODE); see the log above." }
 
   $sid = (Invoke-RestMethod -Headers $h $api).pendingApplicationSubmission.id

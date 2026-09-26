@@ -45,6 +45,18 @@ describe('the release agrees to the CLA on its winget pull requests', () => {
     expect(titles).toContain('New version: BRFTech.filex-app ${GITHUB_REF_NAME#v}');
   });
 
+  // ⚠ v0.47.0: the step searched for the CLI's pull request 3 s after
+  // goreleaser opened it, the search index had not caught up, and the step
+  // warned "No pull request" and never signed #441927's sibling. winget-cla.sh
+  // already looks by exact title for five minutes, so nothing may gate it.
+  it.runIf(!!DIR)('signs the CLI pull request without searching for it first', () => {
+    const text = release();
+    const at = text.indexOf('- name: Did the CLI reach winget and Homebrew?');
+    expect(at).toBeGreaterThan(0);
+    const body = text.slice(at, text.indexOf('winget-cla.sh', at));
+    expect(body).not.toMatch(/gh pr list/);
+  });
+
   it.runIf(!!DIR)("uses the CLI's title as goreleaser writes it", () => {
     const gr = fs.readFileSync(path.join(REPO, '.goreleaser.yml'), 'utf8');
     expect(gr).toMatch(/^\s*package_identifier:\s*BRFTech\.filex\s*$/m);

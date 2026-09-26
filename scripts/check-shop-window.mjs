@@ -74,6 +74,7 @@ import {
   SCREENSHOTS,
   SITE_MUST_LINK,
 } from './shop-window-data.mjs';
+import { RETRY_WITH_GET, linksInReleaseBody } from './release-body-links.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -599,21 +600,17 @@ async function checkReleasePages() {
 
   // The links themselves. Distinct across every body, so the shared footer is
   // one request rather than a hundred.
+  // What counts as a link (not code, not an ellipsis) is in
+  // scripts/release-body-links.mjs, where the unit test can reach it.
   const urls = new Set();
   for (const r of releases.slice(0, 10)) {
-    for (const m of (r.body ?? '').match(/https?:\/\/[^\s)>\]]+/g) ?? []) {
-      // ⚠ An address with an ellipsis in it is prose describing a URL shape,
-      // not a link: v0.36.0's notes quote the broken `https://github.com/…/
-      // filex/-/issues` form they fixed, and requesting it reported a dead
-      // link in a release body that has none (measured on v0.41.0).
-      if (m.includes('…')) continue;
-      urls.add(m.replace(/[.,;:`]+$/, ''));
-    }
+    for (const u of linksInReleaseBody(r.body)) urls.add(u);
   }
   const broken = [];
   let unchecked = 0;
   for (const u of [...urls].slice(0, 40)) {
-    const { res, unreachable } = await get(u, { method: 'HEAD' });
+    let { res, unreachable } = await get(u, { method: 'HEAD' });
+    if (res && RETRY_WITH_GET.has(res.status)) ({ res, unreachable } = await get(u));
     if (unreachable) unchecked++;
     else if (res.status >= 400) broken.push(`${u} → ${res.status}`);
   }

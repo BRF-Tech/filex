@@ -170,16 +170,13 @@ jobs:
           if [ -z "$WINGET_TOKEN" ]; then
             echo "::warning title=winget::WINGET_TOKEN is not set, BRFTech.filex was not submitted."
           else
-            # The trailing space keeps "BRFTech.filex-app <ver>" (the desktop PR) out.
-            n=$(GH_TOKEN="$WINGET_TOKEN" gh pr list --repo microsoft/winget-pkgs --state all --author "@me" --search "BRFTech.filex ${VER} in:title" --json title --jq "[.[] | select(.title | contains(\"BRFTech.filex ${VER}\"))] | length")
-            if [ "${n:-0}" -gt 0 ]; then
-              echo "winget: pull request for BRFTech.filex ${VER} is open"
-              # The CLA bot asks on every pull request (scripts/winget-cla.sh).
-              GH_TOKEN="$WINGET_TOKEN" CLA_COMPANY="BRF TEKNOLOJİ LİMİTED ŞİRKETİ" \
-                bash .github/workflows/scripts/winget-cla.sh "New version: BRFTech.filex ${VER}"
-            else
-              echo "::warning title=winget::No pull request for BRFTech.filex ${VER}, see the goreleaser log above."
-            fi
+            # The CLA bot asks on every pull request (scripts/winget-cla.sh).
+            # ⚠ No search of our own first: the index lags a pull request
+            # goreleaser opened seconds ago. v0.47.0's search found nothing and
+            # the CLA went unsigned. winget-cla.sh looks for the exact title
+            # for five minutes and warns when there is none.
+            GH_TOKEN="$WINGET_TOKEN" CLA_COMPANY="BRF TEKNOLOJİ LİMİTED ŞİRKETİ" \
+              bash .github/workflows/scripts/winget-cla.sh "New version: BRFTech.filex ${VER}"
           fi
 
   # ── Docker images → ghcr.io ────────────────────────────────────────────

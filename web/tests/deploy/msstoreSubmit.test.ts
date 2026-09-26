@@ -60,6 +60,35 @@ describe('the release submits its desktop package to the Microsoft Store', () =>
     expect(script).toMatch(/releaseNotes/);
   });
 
+  // ⚠ v0.47.0's submission never left the runner: the script passed the .msix
+  // as `-i`, which msstore 0.4.x parses as --inputDirectory and rejects with
+  // "Input directory does not exist" (exit 1). msstore takes a package file as
+  // its pathOrUrl argument (MSIXProjectPublisher), with no -i at all.
+  it.runIf(!!DIR)('hands msstore the .msix as its path, not as -i', () => {
+    const script = code(SCRIPT);
+    expect(script).toMatch(/msstore publish \$Msix -id \$app --noCommit/);
+    expect(script).not.toMatch(/msstore publish[^\n]*\s-i\s/);
+  });
+
+  // A release the Store did not take (skipped behind a submission still in
+  // certification, or failed like v0.47.0's) is sent again from the package it
+  // kept, with the same script — never rebuilt, never uploaded by hand.
+  it.runIf(!!DIR)('can resubmit a release from the package it kept', () => {
+    const wf = code('msstore-resubmit.yml');
+    expect(wf).toMatch(/workflow_dispatch:/);
+    expect(wf).toMatch(/gh run download \$run [^\n]*-n "msix-\$env:TAG"/);
+    expect(wf).toMatch(/msstore-submit\.ps1 -Msix \$msix -Version \$env:TAG\.TrimStart\('v'\)/);
+    // The input reaches the shell through env, not spliced into a script.
+    expect(wf).toMatch(/TAG: \$\{\{ inputs\.tag \}\}/);
+    expect(wf.split('\n').filter((l) => /\$\{\{\s*inputs\./.test(l))).toHaveLength(1);
+    for (const s of ['MSSTORE_TENANT_ID', 'MSSTORE_SELLER_ID', 'MSSTORE_CLIENT_ID', 'MSSTORE_CLIENT_SECRET']) {
+      expect(wf).toContain(`${s}: \${{ secrets.${s} }}`);
+    }
+    expect(wf).toContain('MSSTORE_PRODUCT_ID: ${{ vars.MSSTORE_PRODUCT_ID }}');
+    // The skip message tells the maintainer to run it.
+    expect(code(SCRIPT)).toMatch(/gh workflow run msstore-resubmit\.yml -R BRF-Tech\/filex -f tag=v\$Version/);
+  });
+
   it.runIf(!!DIR)('leaves a submission still in certification alone, and never fails the release', () => {
     const script = code(SCRIPT);
     for (const state of ['CommitStarted', 'PreProcessing', 'Certification', 'Release', 'PendingPublication', 'Publishing']) {
