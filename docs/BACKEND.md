@@ -403,6 +403,20 @@ trash — and its catalogue row was dropped with its version history, shares and
 comments. A folder renamed onto another folder's name on an object store was
 merged into it.
 
+**Finished even if the client leaves.** Once a rename has passed its checks it
+runs to the end, whether or not anybody is still waiting for the answer. A
+closed tab, or a proxy that stops waiting (nginx after 60 s by default), no
+longer stops it half-way. The same holds for the synchronous `?action=move`
+and `?action=delete`, `POST /api/files/manager/restore`,
+`DELETE /api/admin/trash/{id}`, and `POST /api/ai/move` and `/api/ai/delete`
+(with the MCP tools behind them). A client that gave up lists the folder again
+to see the result.
+
+⚠ Before this, the request's cancellation stopped the work between two
+objects. A folder on an object store, which is changed one object at a time,
+was left in two places with the catalogue still describing the old one, and a
+retry answered `409` because the half that had arrived held the name.
+
 ### `POST /api/files/delete` ![user](https://img.shields.io/badge/-user-blue)
 ```json
 { "source": ["alpha://a.txt", "alpha://klasor"] }

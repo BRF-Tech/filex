@@ -149,7 +149,11 @@ func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := h.Service.Restore(r.Context(), req.NodeID); err != nil {
+	// A folder on an object store comes back one object at a time: finished
+	// even if the client leaves (detachedMutation).
+	ctx, cancel := detachedMutation(r.Context())
+	defer cancel()
+	if err := h.Service.Restore(ctx, req.NodeID); err != nil {
 		var conflict *trash.ConflictError
 		if errors.As(err, &conflict) {
 			// Nothing moved and the entry is still in the trash: the name was
@@ -165,9 +169,9 @@ func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	h.announceRestore(r.Context(), req.NodeID)
-	if n, err := h.Store.GetNode(r.Context(), req.NodeID); err == nil && n != nil {
-		auth.SetAuditTarget(r.Context(), strconv.FormatInt(n.ID, 10), n.Path)
+	h.announceRestore(ctx, req.NodeID)
+	if n, err := h.Store.GetNode(ctx, req.NodeID); err == nil && n != nil {
+		auth.SetAuditTarget(ctx, strconv.FormatInt(n.ID, 10), n.Path)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -557,7 +561,12 @@ func (h *Trash) Purge(w http.ResponseWriter, r *http.Request) {
 	if !ownsNode(w, r, h.Store, id, "trash entry") {
 		return
 	}
-	if err := h.Service.PurgeOne(r.Context(), id); err != nil {
+	// Finished even if the client leaves: the admin SPA gives up after 30 s,
+	// and a folder is purged one object and one row at a time
+	// (detachedMutation).
+	ctx, cancel := detachedMutation(r.Context())
+	defer cancel()
+	if err := h.Service.PurgeOne(ctx, id); err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, "no rows in result set") || strings.Contains(msg, "not found") {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})

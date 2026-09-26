@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A folder renamed, moved, trashed, restored or purged on an object store
+  could be left half done when the client stopped waiting.** These ran under
+  the request's context, which is cancelled when the connection closes: a
+  closed tab, or a proxy that stops waiting (nginx after 60 s by default,
+  Cloudflare after 100 s, the admin app after 30 s). An object store changes
+  a folder one object at a time, so the objects after that moment stayed
+  where they were. The folder was left in two places, with the catalogue
+  still describing the old one, and a retry was refused (`NAME_TAKEN` for the
+  rename, `EXISTS` for the restore) because the half that had arrived held
+  the name. Once its checks have passed, the change now runs to the end
+  whether or not anybody is still waiting. That covers the explorer's rename
+  and its synchronous move and delete, the trash restore, the permanent
+  delete of one trash entry, and the agent surface's `/api/ai/move` and
+  `/api/ai/delete` (the MCP `file_move` and `file_delete` tools). The
+  response can still time out; the next listing shows the result.
+
 ## [0.46.1] - 2026-09-26
 
 ### Fixed
