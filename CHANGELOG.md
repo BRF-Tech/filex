@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A copy, move or delete of one folder says how far it has got.**
+  - An operation counts the items that were selected, and a folder is one:
+    moving a folder of 4,000 files on an object store read "0/1" with a 0%
+    badge for the minutes the driver spent copying and deleting each file.
+    The storage driver now counts the objects it works through
+    (`storage.Tally`, carried on the context), and a running operation
+    carries `objects_total` / `objects_done`. The operations centre says
+    "25 of 100 items" and the bar and the badge move with them.
+  - The badge follows each row's own percentage before its source count. A
+    move of one file between two storages moved its bar by bytes while the
+    badge sat at 0%.
+
+- **The archive dialogs send once per press, and "Extract here" says it is
+  working.**
+  - Before it can queue an extraction, the server downloads the whole
+    archive and inspects it. Enter in the dialogs' name box sent the form
+    again meanwhile: a second download and a second job.
+  - "Extract here" showed nothing in that time and could be chosen again. It
+    now says the archive is being read, and a second choice starts nothing.
+
 ## [0.46.1] - 2026-09-26
 
 ### Fixed

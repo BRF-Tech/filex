@@ -85,6 +85,11 @@ function progressLine(op: PendingOp): string {
   if ((op.op_type === 'archive-create' || op.op_type === 'archive-extract') && percent !== null) {
     return t('pendingOps.progressPercent', { percent });
   }
+  // One source (a folder) whose objects the server counts: "25 of 100 items"
+  // rather than "0 / 1 files".
+  if (op.progress_total <= 1 && (op.objects_total ?? 0) > 0 && percent !== null) {
+    return t('pendingOps.progressItems', { done: op.objects_done ?? 0, total: op.objects_total ?? 0, percent });
+  }
   if (percent === null) return t('pendingOps.working');
   return t('pendingOps.progress', { done: op.progress_done, total: op.progress_total, percent });
 }

@@ -664,11 +664,13 @@ const emptyMarker = ".empty"
 // under the prefix — S3 has no folders, so a single DeleteObject on the bare
 // prefix key would be a no-op and orphan the contents.
 func (d *Driver) Delete(ctx context.Context, p string) error {
+	tally := storage.TallyOf(ctx)
 	if d.isDir(ctx, p) {
 		keys, err := d.listKeysUnder(ctx, p)
 		if err != nil {
 			return err
 		}
+		tally.Found(len(keys))
 		for _, k := range keys {
 			if _, err := d.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 				Bucket: aws.String(d.bucket),
@@ -676,13 +678,18 @@ func (d *Driver) Delete(ctx context.Context, p string) error {
 			}); err != nil {
 				return fmt.Errorf("s3: delete %s: %w", k, err)
 			}
+			tally.Done(1)
 		}
 		return nil
 	}
+	tally.Found(1)
 	_, err := d.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(d.key(p)),
 	})
+	if err == nil {
+		tally.Done(1)
+	}
 	return err
 }
 
@@ -697,6 +704,8 @@ func (d *Driver) Move(ctx context.Context, src, dst string) error {
 	// copyObject, not Copy: Copy would ask "is this a folder?" a second time
 	// — one more HEAD for every file moved, which is what putting a file in
 	// the trash is. Across a bulk delete that was a quarter of every request.
+	tally := storage.TallyOf(ctx)
+	tally.Found(1)
 	if err := d.copyObject(ctx, src, dst); err != nil {
 		return err
 	}
@@ -704,6 +713,9 @@ func (d *Driver) Move(ctx context.Context, src, dst string) error {
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(d.key(src)),
 	})
+	if err == nil {
+		tally.Done(1)
+	}
 	return err
 }
 
@@ -717,7 +729,13 @@ func (d *Driver) Copy(ctx context.Context, src, dst string) error {
 	if d.isDir(ctx, src) {
 		return d.copyDir(ctx, src, dst, false)
 	}
-	return d.copyObject(ctx, src, dst)
+	tally := storage.TallyOf(ctx)
+	tally.Found(1)
+	err := d.copyObject(ctx, src, dst)
+	if err == nil {
+		tally.Done(1)
+	}
+	return err
 }
 
 // copyObject is the single-object half of Copy, for a caller that already
@@ -764,6 +782,10 @@ func (d *Driver) copyDir(ctx context.Context, src, dst string, del bool) error {
 	if err != nil {
 		return err
 	}
+	// The listing is in: the context's tally learns how many objects this
+	// call works through, and one more as each is finished (storage.Tally).
+	tally := storage.TallyOf(ctx)
+	tally.Found(len(keys))
 	for _, k := range keys {
 		dstKey := dstPrefix + strings.TrimPrefix(k, srcPrefix)
 		if _, err := d.client.CopyObject(ctx, &s3.CopyObjectInput{
@@ -772,6 +794,7 @@ func (d *Driver) copyDir(ctx context.Context, src, dst string, del bool) error {
 			Key:        aws.String(dstKey),
 		}); err != nil {
 			if isS3NotFound(err) {
+				tally.Done(1)
 				continue // vanished mid-op (race) — nothing to move
 			}
 			return fmt.Errorf("s3: copy-dir %s: %w", k, err)
@@ -784,6 +807,7 @@ func (d *Driver) copyDir(ctx context.Context, src, dst string, del bool) error {
 				return fmt.Errorf("s3: move-dir del %s: %w", k, err)
 			}
 		}
+		tally.Done(1)
 	}
 	return nil
 }

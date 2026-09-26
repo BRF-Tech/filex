@@ -88,6 +88,8 @@ watch(name, (next) => {
 });
 
 function submit() {
+  // Enter in a box submits too; the buttons' `disabled` does not reach it.
+  if (props.busy) return;
   if (!name.value.trim() || /[\\/]/.test(name.value)) {
     error.value = t('archive.invalid_name');
     return;

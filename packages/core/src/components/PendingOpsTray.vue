@@ -107,6 +107,9 @@ watch(
           cancelling: op.status === 'cancelling',
           doneCount: op.progress_done,
           totalCount: op.progress_total,
+          ...(op.progress_total <= 1 && (op.objects_total ?? 0) > 0
+            ? { itemsDone: op.objects_done ?? 0, itemsTotal: op.objects_total }
+            : {}),
           cancellable: mayCancel(op),
           retryable: false,
           message: op.message ?? null,

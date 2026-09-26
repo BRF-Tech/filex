@@ -39,6 +39,10 @@ export interface PendingOp {
   /** Running cross-storage transfer's bytes (issue #27); absent otherwise. */
   bytes_total?: number;
   bytes_done?: number;
+  /** Objects a running same-storage copy/move/delete has found and finished
+   *  inside its sources (the storage driver's count); absent otherwise. */
+  objects_total?: number;
+  objects_done?: number;
   target_path: string | null;
   source_dir: string | null;
   source_count: number;
@@ -121,6 +125,8 @@ export function normalizeOp(raw: Record<string, unknown>): PendingOp {
     progress_done: num(raw.progress_done, raw.done),
     bytes_total: num(raw.bytes_total),
     bytes_done: num(raw.bytes_done),
+    objects_total: num(raw.objects_total),
+    objects_done: num(raw.objects_done),
     target_path: str(raw.target_path, raw.dest),
     source_dir: str(raw.source_dir),
     source_count: num(raw.source_count, sources.length),

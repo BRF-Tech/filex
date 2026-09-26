@@ -1157,6 +1157,13 @@ List the caller's ops, newest first (at most 200). `?status=running` filters.
   walk finishes, or when the tree is too large to measure; draw a moving
   indicator then, not a percentage. They are live counters in the worker's
   memory and are gone once the operation ends.
+- `objects_total` / `objects_done` appear while a copy, move or delete **within
+  one storage** runs on a driver that works through a folder object by object
+  (S3 and the S3-compatible stores, and the trash's own per-object walk). They
+  count the objects found inside the sources and the objects finished, so one
+  folder is no longer just `0` of `1`. `objects_total` grows as each source's
+  listing arrives. Like the bytes, they are live counters and are gone once the
+  operation ends. A local disk moves a folder in one rename and reports none.
 - `sources` is a **preview** in this list: the first 5 paths, with
   `sources_truncated: true` when there were more. `source_count` is the full
   count, and `source_dir` the deepest folder holding every source (omitted at
