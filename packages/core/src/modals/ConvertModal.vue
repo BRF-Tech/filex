@@ -87,14 +87,26 @@ const iframeSrc = computed(() => `${props.convertUrl.replace(/\/$/, '')}/?embed=
 let msgId = 0;
 const pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>();
 
-function send(cmd: string, extra: Record<string, unknown> = {}, transfer: Transferable[] = []): Promise<any> {
+/** How long the converter may take to answer an ordinary command. */
+const ANSWER_TIMEOUT_MS = 180000;
+/** ⚠ How long a CONVERSION may take. It shared the 180 s above, and a large
+ *  video or document simply takes longer: the window called it failed while
+ *  the converter was still at it, and dropped the result when it came. */
+const CONVERT_TIMEOUT_MS = 30 * 60 * 1000;
+
+function send(
+  cmd: string,
+  extra: Record<string, unknown> = {},
+  transfer: Transferable[] = [],
+  timeoutMs = ANSWER_TIMEOUT_MS,
+): Promise<any> {
   const id = ++msgId;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
     iframeRef.value?.contentWindow?.postMessage({ target: 'convert-embed', id, cmd, ...extra }, '*', transfer);
     setTimeout(() => {
       if (pending.has(id)) { pending.delete(id); reject(new Error('convert timeout')); }
-    }, 180000);
+    }, timeoutMs);
   });
 }
 
@@ -145,33 +157,48 @@ async function loadFormats() {
   }
 }
 
+/** The step a conversion is on — said on its button: reading the file can be
+ *  as long as converting it, and saving the result as well. */
+const stage = ref<'read' | 'convert' | 'save'>('read');
+const STAGE_WORDS = { read: 'convert.reading', convert: 'convert.converting', save: 'convert.saving' } as const;
+
 async function doConvert() {
-  if (!selectedTo.value || !fromFmt.value) return;
+  if (!selectedTo.value || !fromFmt.value || status.value === 'converting') return;
   status.value = 'converting';
   error.value = null;
-  let stage: 'read' | 'convert' | 'save' = 'read';
+  stage.value = 'read';
   try {
     const buf = await props.fetchBytes();
-    stage = 'convert';
+    stage.value = 'convert';
     const res = await send(
       'convert',
       { name: props.fileName, bytes: buf, fromIndex: fromFmt.value.index, toIndex: selectedTo.value.index },
       [buf],
+      CONVERT_TIMEOUT_MS,
     );
     const base = props.fileName.replace(/\.[^.]+$/, '');
     const ext = res.ext || selectedTo.value.ext || selectedTo.value.format;
     const outName = `${base}.${ext}`;
     const file = new File([res.bytes], outName, { type: selectedTo.value.mime || 'application/octet-stream' });
-    stage = 'save';
+    stage.value = 'save';
     await props.upload(file);
     status.value = 'done';
     emit('done', outName);
   } catch (e) {
     failWith(
-      stage === 'read' ? 'convert.read_failed' : stage === 'save' ? 'convert.save_failed' : 'convert.failed',
+      stage.value === 'read' ? 'convert.read_failed' : stage.value === 'save' ? 'convert.save_failed' : 'convert.failed',
       e,
     );
   }
+}
+
+/** ⚠ The conversion runs in this window's frame: closing it mid-way throws the
+ *  work away. A click on the backdrop does not close it then, and × asks. */
+function close(fromBackdrop: boolean) {
+  if (status.value === 'converting') {
+    if (fromBackdrop || !confirm(t('convert.close_while_converting'))) return;
+  }
+  emit('close');
 }
 
 onMounted(() => {
@@ -187,7 +214,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="filex-cv__bg" @click.self="emit('close')">
+  <div class="filex-cv__bg" @click.self="close(true)">
     <div class="filex-cv">
       <header class="filex-cv__head">
         <h3>{{ t('convert.title') }} — {{ fileName }}</h3>
@@ -196,7 +223,7 @@ onBeforeUnmount(() => {
           type="button"
           :title="t('convert.close')"
           :aria-label="t('convert.close')"
-          @click="emit('close')"
+          @click="close(false)"
         >
           <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
           <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
@@ -254,7 +281,7 @@ onBeforeUnmount(() => {
             :disabled="!selectedTo || !fromFmt || status === 'converting'"
             @click="doConvert"
           >
-            {{ status === 'converting' ? t('convert.converting') : t('convert.convert') }}
+            {{ status === 'converting' ? t(STAGE_WORDS[stage]) : t('convert.convert') }}
           </button>
         </footer>
       </template>

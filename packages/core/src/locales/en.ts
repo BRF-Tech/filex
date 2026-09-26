@@ -1566,6 +1566,9 @@ export const en: Record<string, string> = {
   'convert.no_format': 'No matching format.',
   'convert.unsupported_input': 'This file type has no source format the converter can read.',
   'convert.converting': 'Converting…',
+  'convert.reading': 'Reading the file…',
+  'convert.saving': 'Saving the result…',
+  'convert.close_while_converting': 'The conversion is still running. Close the window and stop it?',
   'convert.convert': 'Convert',
   /* Never the HTTP layer: a failure here used to show `503 Service
      Unavailable — {"error":…}` or the converter's own English. */

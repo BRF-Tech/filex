@@ -1543,6 +1543,9 @@ export const tr: Record<string, string> = {
   'convert.no_format': 'Eşleşen format yok.',
   'convert.unsupported_input': 'Bu dosya tipi için kaynak format bulunamadı.',
   'convert.converting': 'Dönüştürülüyor…',
+  'convert.reading': 'Dosya okunuyor…',
+  'convert.saving': 'Sonuç kaydediliyor…',
+  'convert.close_while_converting': 'Dönüştürme sürüyor. Pencere kapatılıp dönüştürme durdurulsun mu?',
   'convert.convert': 'Dönüştür',
   /* Asla HTTP katmanı değil: buradaki bir hata eskiden `503 Service
      Unavailable — {"error":…}` ya da dönüştürücünün kendi İngilizcesini
