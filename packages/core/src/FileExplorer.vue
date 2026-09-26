@@ -217,6 +217,7 @@ import RenameModal from './modals/RenameModal.vue';
 import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
 import Modal from './modals/Modal.vue'; /* tablo:t1 — the empty-trash confirmation */
 import { sayUndo, type UndoOutcome } from './lib/undoWords';
+import { catalogAndFollow } from './lib/catalogRun';
 import PreviewModal from './modals/PreviewModal.vue';
 import ConvertModal from './modals/ConvertModal.vue';
 import PluginViewModal from './components/plugin/PluginViewModal.vue'; /* App plugins */
@@ -498,6 +499,10 @@ const MANAGER_SEARCH_PAGE = 250;
  */
 const coverageMap = ref<Record<string, CatalogCoverage | null>>({});
 const catalogAllBusy = ref(false);
+/** The storage whose "Catalog everything" scan is being followed. */
+const catalogFollowing = ref<string | null>(null);
+/* Set when the explorer is taken down: it stops the following. */
+let catalogUnwatched = false;
 // trashMode — true while viewing the filex trash (soft-deleted nodes from the
 // backend trash endpoint), entered by opening the virtual `.trash` row and
 // exited by any normal navigation (load() resets it). Replaces a brittle
@@ -2941,12 +2946,39 @@ async function catalogAll(storage: string | undefined) {
     const rows = await api.jsonFetch<Array<{ id: number; name: string }>>(`${base}/api/admin/storages`);
     const row = Array.isArray(rows) ? rows.find((r) => r.name === storage) : undefined;
     if (!row) throw new Error('no such storage');
-    await api.jsonFetch(`${base}/api/admin/storages/${row.id}/sync`, { method: 'POST' });
+    /* ⚠ Followed to its end (lib/catalogRun). It used to flash "started" and
+     * leave the banner and the button as they were for the hours a large
+     * storage takes, with no word of the end. */
+    catalogFollowing.value = storage;
     flashToast(t('coverage.catalog_started'));
+    const end = await catalogAndFollow({
+      runs: async () => {
+        const res = await api.jsonFetch<{ entries?: Array<{ id: number; status: string; error?: string }> }>(
+          `${base}/api/admin/storages/${row.id}/sync-runs?limit=5`,
+        );
+        return (res?.entries ?? []).map((e) => ({ id: e.id, status: e.status, error: e.error || undefined }));
+      },
+      start: async () => {
+        await api.jsonFetch(`${base}/api/admin/storages/${row.id}/sync`, { method: 'POST' });
+      },
+      stopped: () => catalogUnwatched,
+    });
+    if (end === null) return;
+    if (end.status === 'ok') {
+      flashToast(t('coverage.catalog_done', { storage }));
+      await load();
+    } else if (end.status === 'failed') {
+      flashToast(t('coverage.catalog_failed', { storage, error: end.error ?? '' }));
+    } else if (end.status === 'aborted') {
+      flashToast(t('coverage.catalog_stopped', { storage }));
+    } else {
+      flashToast(t('coverage.catalog_unfollowed', { storage }));
+    }
   } catch (err) {
     flashToast(sayFailure(err, t('toast.failed'), { t, callerAdmin: callerAdmin.value }).text);
   } finally {
     catalogAllBusy.value = false;
+    catalogFollowing.value = null;
   }
 }
 function undoToast(message: string, undo: () => Promise<UndoOutcome>) {
@@ -3318,6 +3350,7 @@ const trashEmptyRun = ref<TrashEmptyStatus | null>(null);
 let trashEmptyUnwatched = false;
 onBeforeUnmount(() => {
   trashEmptyUnwatched = true;
+  catalogUnwatched = true;
 });
 
 async function probeTrashPolicy() {
@@ -8037,15 +8070,22 @@ function closeRecoveryKey() {
       role="status"
       data-testid="catalog-coverage"
     >
-      <span class="fe-coverage__text">{{ t(coverageShown.key, coverageShown.vars) }}</span>
+      <!-- While "Catalog everything" runs, the banner says so and the button
+           waits for it. -->
+      <span class="fe-coverage__text">{{
+        catalogFollowing && catalogFollowing === coverageShown.storage
+          ? t('coverage.cataloging', { storage: catalogFollowing })
+          : t(coverageShown.key, coverageShown.vars)
+      }}</span>
       <button
         v-if="coverageShown.offerCatalogAll"
         type="button"
         class="fe-coverage__action"
         data-testid="catalog-coverage-all"
         :disabled="catalogAllBusy"
+        :aria-busy="catalogAllBusy"
         @click="catalogAll(coverageShown.storage)"
-      >{{ t('coverage.catalog_all') }}</button>
+      >{{ catalogAllBusy ? t('coverage.catalog_running') : t('coverage.catalog_all') }}</button>
     </div>
 
     <!-- Live presence: who else is viewing this folder (empty → nothing shown).
