@@ -3,6 +3,8 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ExternalLink, FileText, Github } from 'lucide-vue-next';
 
+import { parseServerVersion, shortCommit } from '@brftech/filex-core';
+
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import LogoMark from '@/components/LogoMark.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -13,6 +15,15 @@ const { t, te } = useI18n();
 const caps = useCapabilitiesStore();
 
 const data = computed(() => caps.data);
+
+/* The server says `v0.46.0 (<40-digit commit>, <build time>)`. The release
+   is the headline; the commit, shortened as git shows it, and the build day
+   go on the quiet line below. The copy button still copies the whole string,
+   which is what a bug report wants (Burak, 2026-09-26: it ran off the card). */
+const ver = computed(() => parseServerVersion(data.value.version));
+const buildLine = computed(
+  () => [shortCommit(ver.value.commit), ver.value.built.slice(0, 10)].filter(Boolean).join(' · ') || data.value.build,
+);
 
 interface ToolEntry {
   name: string;
@@ -58,10 +69,10 @@ function authName(d: string): string {
       <div class="card card-body">
         <p class="text-xs uppercase tracking-wide text-zinc-500">{{ t('about.version') }}</p>
         <p class="mt-1 flex items-center gap-2">
-          <span class="text-lg font-semibold tabular-nums">{{ data.version }}</span>
+          <span class="text-lg font-semibold tabular-nums" data-testid="about-version">{{ ver.release }}</span>
           <CopyButton :value="data.version" size="xs" />
         </p>
-        <p class="mt-1 text-xs font-mono text-zinc-500">{{ data.build }}</p>
+        <p v-if="buildLine" class="mt-1 text-xs font-mono text-zinc-500" :title="data.version" data-testid="about-build">{{ buildLine }}</p>
       </div>
 
       <div class="card card-body">

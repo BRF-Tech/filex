@@ -283,8 +283,12 @@ export function vitestVerdict(report, { mustPass = [] } = {}) {
 
 /** Markdown inline → the text a reader sees. */
 export function markdownInline(s) {
+  // ⚠ A picture is dropped, alt text and all: the page renders it as <img>,
+  // which carries no text, so an alt kept here never matches the live page.
+  // v0.46.0's `### PUT /api/admin/storages/order ![admin](badge)` held the
+  // docs gate red against a site that was already current.
   return String(s)
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/`([^`]*)`/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
