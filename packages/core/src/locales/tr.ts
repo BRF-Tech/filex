@@ -337,6 +337,8 @@ export const tr: Record<string, string> = {
   'toast.trash_retention': 'Çöpteki öğeler saklama süresi sonunda otomatik silinir. Kalıcı silme yönetici panelinden yapılır.',
   'toast.purging': '{n} öğe kalıcı olarak siliniyor…',
   'toast.purging_one': '{n} öğe kalıcı olarak siliniyor…',
+  'toast.purging_partly': '{n} öğe kalıcı olarak siliniyor; {failed} öğe silinemedi',
+  'toast.purging_partly_one': '{n} öğe kalıcı olarak siliniyor; {failed} öğe silinemedi',
   'toast.purged': '{n} öğe kalıcı olarak silindi',
   'toast.purged_one': '{n} öğe kalıcı olarak silindi',
   'toast.purged_partly': '{n} öğe kalıcı olarak silindi; {failed} öğe silinemedi',

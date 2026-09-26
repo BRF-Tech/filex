@@ -344,6 +344,8 @@ export const en: Record<string, string> = {
   'toast.trash_retention': 'Items in the trash are removed automatically once the retention window ends. Permanent deletion is done from the admin panel.',
   'toast.purging': 'Deleting {n} items permanently…',
   'toast.purging_one': 'Deleting {n} item permanently…',
+  'toast.purging_partly': 'Deleting {n} items permanently; {failed} could not be',
+  'toast.purging_partly_one': 'Deleting {n} item permanently; {failed} could not be',
   'toast.purged': '{n} items deleted permanently',
   'toast.purged_one': '{n} item deleted permanently',
   'toast.purged_partly': '{n} items deleted permanently; {failed} could not be',

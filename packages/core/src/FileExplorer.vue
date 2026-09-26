@@ -217,6 +217,7 @@ import RenameModal from './modals/RenameModal.vue';
 import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
 import Modal from './modals/Modal.vue'; /* tablo:t1 — the empty-trash confirmation */
 import { sayUndo, type UndoOutcome } from './lib/undoWords';
+import { sayPurge } from './lib/purgeWords';
 import { catalogAndFollow } from './lib/catalogRun';
 import PreviewModal from './modals/PreviewModal.vue';
 import ConvertModal from './modals/ConvertModal.vue';
@@ -5662,12 +5663,8 @@ async function purgeSelection() {
   }
   showDelete.value = false;
   selection.clear();
-  if (queued) {
-    flashToast(t('toast.purging', { n: purged }));
-  } else {
-    flashToast(failed ? t('toast.purged_partly', { n: purged, failed }) : t('toast.purged', { n: purged }));
-    await loadTrash();
-  }
+  flashToast(sayPurge({ queued, purged, failed }, t));
+  if (!queued) await loadTrash();
 }
 
 async function confirmDelete() {
