@@ -94,17 +94,18 @@ func (w *Worker) RescanFolder(ctx context.Context, storageID int64, dir string) 
 	if clean == "" {
 		return FolderRescan{Path: "/"}, fmt.Errorf("%w: the storage root is a full scan", ErrScopeInvalid)
 	}
-	w.mu.Lock()
-	syncer, ok := w.syncers[storageID]
-	w.mu.Unlock()
+	syncer, ok := w.syncer(storageID)
 	if !ok {
-		return FolderRescan{Path: clean}, errors.New("sync: no syncer for storage")
+		return FolderRescan{Path: clean}, ErrNoSyncer
 	}
 	// A folder the storage's scan exclusions cover is not the scan's to look
 	// at, one folder at a time or otherwise (issue #44).
 	if syncer.rule.Excluded(clean) {
 		return FolderRescan{Path: clean}, fmt.Errorf("%w: %s is excluded from scanning on this storage", ErrScopeInvalid, clean)
 	}
+	// Like a full scan, a folder's rescan stops with the syncer (Trigger).
+	ctx, stop := syncer.bound(ctx)
+	defer stop()
 	return syncer.rescanFolder(ctx, clean)
 }
 

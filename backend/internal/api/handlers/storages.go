@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -190,6 +192,10 @@ func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 		} `json:"stats"`
 		LastSyncState string `json:"last_sync_state,omitempty"`
 		LastSyncError string `json:"last_sync_error,omitempty"`
+		// Running is whether a scan is walking the storage NOW, from the
+		// worker rather than the runs table — what a page following a
+		// "Sync now" waits on.
+		Running bool `json:"running"`
 		// Catalogue is a lazily catalogued storage's state (lazyCatalogue).
 		Catalogue *syncpkg.CatalogueCoverage `json:"catalogue,omitempty"`
 		// Coverage is set while the stats count only part of the storage —
@@ -218,6 +224,7 @@ func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 		row.Catalogue = h.lazyCatalogue(r.Context(), st.ID)
 		if h.Worker != nil {
 			row.Coverage = h.Worker.CatalogueCoverage(r.Context(), st)
+			row.Running = h.Worker.Running(st.ID)
 		}
 		enriched = append(enriched, row)
 	}
@@ -282,10 +289,26 @@ func (h *Storages) lazyCatalogue(ctx context.Context, storageID int64) *syncpkg.
 
 // Create adds a new storage.
 func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
-	var st model.Storage
-	if err := json.NewDecoder(r.Body).Decode(&st); err != nil {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
+	}
+	var st model.Storage
+	if err := json.Unmarshal(raw, &st); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	// ⚠ A storage is ON unless the request says otherwise. The admin panel's
+	// "New storage" form never sends `enabled`, and the zero value of the
+	// field is false: every storage made from the panel was saved switched
+	// off — no scan, "Disabled" in the list, and "Sync now" answering 404
+	// "storage not found" for a storage that plainly existed.
+	var said struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(raw, &said); err == nil && said.Enabled == nil {
+		st.Enabled = true
 	}
 	if st.Name == "" || st.Driver == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and driver required"})
@@ -360,6 +383,10 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	// What the running process holds now, to tell what the save changes.
+	// ConfigJSON is copied: decoding reuses a RawMessage's backing array.
+	before := *cur
+	before.ConfigJSON = append(json.RawMessage(nil), cur.ConfigJSON...)
 	// The form sends the row back whole, sort_order included; UpdateStorage
 	// never writes it (SetOrder does), so the answer keeps the stored one.
 	place := cur.SortOrder
@@ -401,7 +428,7 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	h.applyLive(cur)
+	h.applyLive(&before, cur)
 	writeJSON(w, http.StatusOK, cur)
 }
 
@@ -483,9 +510,18 @@ func (h *Storages) SetOrder(w http.ResponseWriter, r *http.Request) {
 //
 // Rebuilding is deliberately blunt — forget the driver, stop the syncer, start
 // a fresh one from the row just written. A syncer mid-walk is cancelled by the
-// stop; that is correct, since it is walking a configuration the operator has
-// just replaced, and the next run is a full pass anyway.
-func (h *Storages) applyLive(st *model.Storage) {
+// stop, the scans "Sync now" started included (sync.Worker.Trigger); that is
+// correct, since they walk a configuration the operator has just replaced, and
+// the next run is a full pass anyway.
+//
+// ⚠ Only when the save changed something the scan or the driver reads
+// (scanSettingsChanged). Every save used to rebuild, so renaming a storage,
+// switching it read-only or pairing a replica (which saves the row) cut a
+// running scan off as "aborted" for nothing.
+func (h *Storages) applyLive(before, st *model.Storage) {
+	if before != nil && !scanSettingsChanged(before, st) {
+		return
+	}
 	if h.ForgetStorage != nil {
 		h.ForgetStorage(st.ID)
 	}
@@ -502,6 +538,18 @@ func (h *Storages) applyLive(st *model.Storage) {
 		slog.Warn("storages: restarting the syncer after an edit failed",
 			slog.String("storage", st.Name), slog.String("err", err.Error()))
 	}
+}
+
+// scanSettingsChanged reports whether a save touched what the syncer and the
+// resolver's driver were built from. The name, read-only, access control,
+// the mount path and the replica pairing are read from the row where they
+// are used, and none of them changes what a scan walks.
+func scanSettingsChanged(a, b *model.Storage) bool {
+	return a.Driver != b.Driver ||
+		!bytes.Equal(a.ConfigJSON, b.ConfigJSON) ||
+		a.SyncMode != b.SyncMode ||
+		a.SyncIntervalS != b.SyncIntervalS ||
+		a.Enabled != b.Enabled
 }
 
 // Delete removes a storage and its descendant nodes (cascade).
@@ -529,7 +577,18 @@ func (h *Storages) Delete(w http.ResponseWriter, r *http.Request) {
 	if h.ForgetStorage != nil {
 		h.ForgetStorage(id)
 	}
-	if err := h.Store.DeleteStorage(r.Context(), id); err != nil {
+	// ⚠⚠ The delete runs to its end whoever stops waiting. Removing a large
+	// storage's rows outlasts the admin panel's wait and a proxy's, and on the
+	// request's context their hang-up cancelled it: the row stayed, having
+	// already lost its syncer above, so the storage went on existing with no
+	// scan and "Sync now" answering 404 until the next restart.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), storageDeleteCeiling)
+	defer cancel()
+	if err := h.Store.DeleteStorage(ctx, id); err != nil {
+		// Still there: it gets its syncer back, as it was before the press.
+		if h.Worker != nil && gone.Enabled {
+			_ = h.Worker.AddStorage(context.Background(), gone)
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -537,6 +596,10 @@ func (h *Storages) Delete(w http.ResponseWriter, r *http.Request) {
 	auth.SetAuditTarget(r.Context(), "", gone.Name)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
+
+// storageDeleteCeiling bounds a storage's deletion once it no longer ends
+// with its client (Delete).
+const storageDeleteCeiling = 30 * time.Minute
 
 // ScopedRescanTimeout bounds a folder rescan (TriggerSync with ?path=), which
 // answers inside the request.
@@ -590,11 +653,18 @@ func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 	// time (the first poll starts with the syncer), and refusing it would turn
 	// a correct sequence into an error. Progress is where it already was:
 	// Storages → sync runs.
-	if !h.Worker.Known(id) {
+	//
+	// ⚠ The scan holds the storage's run slot before this answers (StartScan),
+	// so the answer is true and Running(id) agrees with it at once. It runs on
+	// the storage's syncer, which a save of new scan settings, a delete or a
+	// shutdown stops, and under a generous ceiling: a walk of a large bucket
+	// is minutes, and an unbounded one is how a stuck driver becomes a leak.
+	started, err := h.Worker.StartScan(id, 6*time.Hour)
+	if errors.Is(err, syncpkg.ErrNoSyncer) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "storage not found"})
 		return
 	}
-	if h.Worker.Running(id) {
+	if !started {
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"ok":     true,
 			"status": "running",
@@ -602,17 +672,6 @@ func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	go func() {
-		// A background context with a generous ceiling: a walk of a large
-		// bucket is minutes, not seconds, and an unbounded goroutine is how a
-		// stuck driver becomes a leak.
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 6*time.Hour)
-		defer cancel()
-		if err := h.Worker.Trigger(ctx, id); err != nil {
-			slog.Warn("storages: manual sync failed",
-				slog.Int64("storage", id), slog.String("err", err.Error()))
-		}
-	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"ok":     true,
 		"status": "started",

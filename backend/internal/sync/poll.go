@@ -46,12 +46,30 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 	// over the same rows — two runs racing each other's seen_at, each one
 	// making the other slower (issue #33). The second caller is told, not
 	// queued: the run it wanted is the one already in progress.
-	if !s.runMu.TryLock() {
+	if !s.claimRun() {
 		return ErrRunInProgress
 	}
-	defer s.runMu.Unlock()
+	defer s.releaseRun()
+	return s.run(ctx)
+}
+
+// claimRun takes the storage's one run slot, or reports it taken. The caller
+// that got it runs `run` and then calls releaseRun.
+func (s *storageSyncer) claimRun() bool {
+	if !s.runMu.TryLock() {
+		return false
+	}
 	s.inFlight.Store(true)
-	defer s.inFlight.Store(false)
+	return true
+}
+
+func (s *storageSyncer) releaseRun() {
+	s.inFlight.Store(false)
+	s.runMu.Unlock()
+}
+
+// run is one full scan, for a caller holding the run slot (claimRun).
+func (s *storageSyncer) run(ctx context.Context) error {
 
 	// ⚠⚠ The scanner attributes NOTHING. Every row it creates or updates is
 	// SYSTEM, and that is true however the run was started.

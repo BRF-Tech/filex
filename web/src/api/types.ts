@@ -155,6 +155,9 @@ export interface StorageRef {
    *  translated spelling — accepted here too so both round-trip.) */
   last_sync_state?: 'ok' | 'failed' | 'error' | 'running' | 'aborted' | 'pending';
   last_sync_error?: string | null;
+  /** A scan is walking the storage right now (the worker's own word, not the
+   *  runs table): what a page following a "Sync now" waits on. */
+  running?: boolean;
   /** Replica fields. v0.1.18+: the canonical link is
    *  `replica_target_id` — a foreign key into the new
    *  `replication_targets` table. `role` / `replica_of_id` /

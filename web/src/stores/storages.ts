@@ -1,9 +1,19 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { StoragesApi } from '@/api/storages';
+import { StoragesApi, type SyncStartResponse } from '@/api/storages';
 import type { StorageCreateRequest, StorageRef, StorageUpdateRequest } from '@/api/types';
 import { extractError } from '@/api/client';
 import { t } from '@/i18n';
+
+/** A proxy's own answer for a request it stopped waiting on (nginx 502/504,
+ *  Cloudflare 520/524), or no answer at all (the client's own time limit, a
+ *  dropped connection). */
+function answerNeverCame(e: unknown): boolean {
+  const err = e as { response?: { status?: number }; request?: unknown; code?: string };
+  if (!err || typeof err !== 'object') return false;
+  if (err.response) return [502, 504, 520, 524].includes(err.response.status ?? 0);
+  return err.code === 'ECONNABORTED' || err.request !== undefined;
+}
 
 export const useStoragesStore = defineStore('storages', () => {
   const items = ref<StorageRef[]>([]);
@@ -37,19 +47,38 @@ export const useStoragesStore = defineStore('storages', () => {
     return updated;
   }
 
-  async function remove(id: number): Promise<void> {
-    await StoragesApi.remove(id);
+  /**
+   * Deletes a storage: 'deleted', or 'pending' when the server is still at it.
+   *
+   * ⚠ A delete whose answer never came is not a failed delete. The server
+   * finishes it whoever stops waiting (a large storage takes minutes, and a
+   * proxy gives up at 60–100 s), so the list is read again and says which it
+   * is. A refusal the server answered still throws.
+   */
+  async function remove(id: number): Promise<'deleted' | 'pending'> {
+    try {
+      await StoragesApi.remove(id);
+    } catch (e: unknown) {
+      if (!answerNeverCame(e)) throw e;
+      try {
+        await fetch();
+      } catch {
+        return 'pending';
+      }
+      return find(id) ? 'pending' : 'deleted';
+    }
     items.value = items.value.filter((s) => s.id !== id);
+    return 'deleted';
   }
 
-  async function syncNow(id: number): Promise<void> {
+  async function syncNow(id: number): Promise<SyncStartResponse> {
     // Optimistic state flip so the row reacts to the click; the refresh below
     // replaces it with what actually happened.
     items.value = items.value.map((s) =>
       s.id === id ? { ...s, last_sync_state: 'running' as const } : s,
     );
     try {
-      await StoragesApi.syncNow(id);
+      return await StoragesApi.syncNow(id);
     } finally {
       // ⚠ The endpoint answers 202 as soon as the run has STARTED (it walks in
       // the background), so what the refetch shows is the run's real state —
