@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -189,6 +190,36 @@ func TestPublicShare_PINLockAfterFiveTries(t *testing.T) {
 	assert.True(t, row.PinLocked(time.Now()))
 }
 
+// assertCarriesNoPIN checks that an unlock cookie does not carry the PIN by
+// what it is made of: an expiry and a MAC (share.MintUnlock), with nowhere to
+// put anything else. Whether its digits happen to include the PIN's is a
+// question about the clock and the MAC.
+func assertCarriesNoPIN(t *testing.T, value string) {
+	t.Helper()
+	assert.Regexp(t, `^[0-9]+\.[0-9a-f]{64}$`, value, "an unlock cookie is an expiry and a MAC, nothing else")
+}
+
+// ⚠ The PIN check above used to be `NotContains(value, "4242")`, and the value
+// is an expiry and a MAC: it failed whenever either held those four digits by
+// chance. A CI run on 2026-09-26 minted the expiry 1790424237. This pins the
+// clock to that instant and answers the PIN there.
+func TestPublicShare_PINCookieCheckIsNotFooledByTheClock(t *testing.T) {
+	r, svc, store, st, root := newPublicFixture(t)
+	node := fileNode(t, store, st, root, "secret.txt", "s")
+	sh, err := svc.Create(context.Background(), share.CreateOpts{NodeID: node.ID, PIN: "4242"})
+	require.NoError(t, err)
+
+	synctest.Test(t, func(t *testing.T) {
+		time.Sleep(time.Until(time.Unix(1790424237, 0).Add(-share.UnlockTTL())))
+		rec := publicPostJSON(t, r, "/api/public/s/"+sh.Token+"/pin", `{"pin":"4242"}`)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Len(t, rec.Result().Cookies(), 1)
+		value := rec.Result().Cookies()[0].Value
+		require.True(t, strings.HasPrefix(value, "1790424237."), "the clock is not where CI had it: %s", value)
+		assertCarriesNoPIN(t, value)
+	})
+}
+
 // TestPublicShare_PINUnlocksWithCookie: answering the PIN mints an HttpOnly
 // cookie that carries no PIN and opens only this link.
 func TestPublicShare_PINUnlocksWithCookie(t *testing.T) {
@@ -205,7 +236,7 @@ func TestPublicShare_PINUnlocksWithCookie(t *testing.T) {
 	require.Len(t, rec.Result().Cookies(), 1)
 	c := rec.Result().Cookies()[0]
 	assert.True(t, c.HttpOnly)
-	assert.NotContains(t, c.Value, "4242")
+	assertCarriesNoPIN(t, c.Value)
 
 	req := httptest.NewRequest("GET", "/api/public/s/"+sh.Token, nil)
 	req.AddCookie(c)
