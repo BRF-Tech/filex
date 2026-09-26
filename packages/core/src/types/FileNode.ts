@@ -212,6 +212,11 @@ export interface Capabilities {
    *  Absent on an older server or one with no mailer wired — read as "yes",
    *  i.e. keep offering mail the way it always was. */
   mail?: { ready: boolean };
+  /** The changes this server runs as jobs of its operations queue when asked
+   *  with `queued=1`: `rename` (POST /api/files/manager?action=rename) and
+   *  `restore` (POST /api/files/manager/restore, a `node_ids` batch). Absent on
+   *  an older server, which changes inside the request. */
+  queued?: Array<'rename' | 'restore' | (string & {})>;
   /* wiring:e2 */
   /** Whether this installation holds an escrow key for E2E-encrypted folders,
    *  and the public half the browser wraps new folders' master keys to.

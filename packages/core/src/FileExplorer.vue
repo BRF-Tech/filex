@@ -25,7 +25,7 @@ import type {
   ArchiveCreateFormat,
 } from './types/FileNode';
 import { isExternalUsable } from './types/FileNode';
-import { useFileApi, type GlobalSearchHit, type ManagerResponse, type QuotaSnapshot } from './composables/useFileApi';
+import { useFileApi, type GlobalSearchHit, type ManagerResponse, type PendingOpDto, type QuotaSnapshot } from './composables/useFileApi';
 import {
   useUploadChunked,
   isStagedUnsupported,
@@ -216,6 +216,9 @@ import NewDocumentModal from './modals/NewDocumentModal.vue'; /* belge:n1 */
 import RenameModal from './modals/RenameModal.vue';
 import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
 import Modal from './modals/Modal.vue'; /* tablo:t1 — the empty-trash confirmation */
+import { sayUndo, type UndoOutcome } from './lib/undoWords';
+import { sayPurge } from './lib/purgeWords';
+import { catalogAndFollow } from './lib/catalogRun';
 import PreviewModal from './modals/PreviewModal.vue';
 import ConvertModal from './modals/ConvertModal.vue';
 import PluginViewModal from './components/plugin/PluginViewModal.vue'; /* App plugins */
@@ -351,7 +354,7 @@ const chunked = useUploadChunked(props.config, api);
 // (move → reverse move, trash-delete → restore) is queued, its inverse is
 // registered under the op id; once the op settles OK the toast grows a
 // "Geri Al" action. Ops without an entry keep the plain settled toast.
-const opUndo = new Map<number, { message: string; fn: () => Promise<void> }>();
+const opUndo = new Map<number, { message: string; fn: () => Promise<UndoOutcome> }>();
 
 const pendingOps = usePendingOps(props.config, api, {
   onSettled: (op: PendingOp) => {
@@ -368,15 +371,32 @@ const pendingOps = usePendingOps(props.config, api, {
         ? t('archive.extraction_cancelled', { count: op.progress_done })
         : t('opc.status.aborted');
       flashToast(message);
+    } else if (op.status === 'error' && op.op_type === 'restore' && op.progress_done > 0) {
+      // A restore that brought some entries back says how many, and why the
+      // rest did not come.
+      flashToast(
+        t('toast.restore_partial', {
+          n: op.progress_done,
+          failed: op.progress_total - op.progress_done,
+          reason: opFailure(op, t).text,
+        }),
+      );
     } else if (op.status === 'error') {
       // Said, not printed: the server's error text is English and sometimes
       // plumbing ("engine libreoffice is not installed on this host").
       flashToast(opFailure(op, t).text);
     } else if (undo) {
-      undoToast(`${undo.message} (${op.progress_total})`, undo.fn);
+      // A rename is one item: no count after it.
+      undoToast(op.op_type === 'rename' ? undo.message : `${undo.message} (${op.progress_total})`, undo.fn);
     } else if (op.op_type === 'plugin') {
       /* App plugins — the job's own last words, else "<label> finished". */
       flashToast(op.message || t('plugin.done', { label: pluginOpLabel(op) }));
+    } else if (op.op_type === 'purge') {
+      flashToast(t('toast.purged', { n: 1 }));
+    } else if (op.op_type === 'rename') {
+      flashToast(t('toast.renamed'));
+    } else if (op.op_type === 'restore') {
+      flashToast(t('toast.restored', { n: op.progress_done }));
     } else {
       const verb =
         op.op_type === 'archive-create'
@@ -480,6 +500,10 @@ const MANAGER_SEARCH_PAGE = 250;
  */
 const coverageMap = ref<Record<string, CatalogCoverage | null>>({});
 const catalogAllBusy = ref(false);
+/** The storage whose "Catalog everything" scan is being followed. */
+const catalogFollowing = ref<string | null>(null);
+/* Set when the explorer is taken down: it stops the following. */
+let catalogUnwatched = false;
 // trashMode — true while viewing the filex trash (soft-deleted nodes from the
 // backend trash endpoint), entered by opening the virtual `.trash` row and
 // exited by any normal navigation (load() resets it). Replaces a brittle
@@ -1150,11 +1174,28 @@ function openPluginPage(action: PluginActionRow, targets: FileNode[]): boolean {
  * the permission text, "you are not allowed to do this" — a sentence they
  * can do nothing with. Every rename / move / delete catch goes through here
  * so there is exactly one place that decides.
+ *
+ * ⚠⚠ And every other refusal is SAID, on screen. It used to go out as
+ * `emit('error')` only, and both first-party hosts write that event to the
+ * console (web Explore.vue, desktop app.html): a paste, a drag-move, a
+ * duplicate or a copy the server refused looked exactly like one that worked.
+ * A dialog that shows the failure itself (rename, delete) passes `inDialog`,
+ * so the sentence is not said twice.
  */
-function reportMutationError(err: unknown, context: Record<string, unknown>): void {
+function reportMutationError(
+  err: unknown,
+  context: Record<string, unknown>,
+  opts: { inDialog?: boolean } = {},
+): void {
   const held = lockedRefusal(err);
   if (held) flashToast(lockWords(held, { t, formatDate, locale: locale.value }));
+  else if (!opts.inDialog) showToast({ message: failureText(err) }, ERROR_TOAST_MS);
   emit('error', { message: (err as Error)?.message ?? String(err), context });
+}
+
+/** A caught failure in the reader's words (lib/errorWords). */
+function failureText(err: unknown): string {
+  return sayFailure(err, t('toast.failed'), { t, callerAdmin: callerAdmin.value }).text;
 }
 
 async function runPluginAction(action: PluginActionRow, targets: FileNode[]) {
@@ -1586,6 +1627,15 @@ const effectiveOnlyOfficeBase = computed<string | null>(() => {
  */
 const callerAdmin = computed(() => capabilitiesData.value?.caller_admin === true);
 
+/** Does the server run this change as a job of its operations queue when asked
+ *  (`queued=1`)? A folder rename and a restore from the trash are one request
+ *  per object on an object store; inside the request they outlasted the proxy
+ *  with nothing on screen. An older server does not say, and is asked the old
+ *  way. */
+function serverQueues(kind: 'rename' | 'restore' | 'purge'): boolean {
+  return capabilitiesData.value?.queued?.includes(kind) === true;
+}
+
 const effectiveOnlyOfficeConfigEndpoint = computed<string | null>(() => {
   if (!effectiveOnlyOfficeBase.value) return null;
   return api.endpoints.onlyOfficeConfig || null;
@@ -1705,6 +1755,23 @@ const renameTarget = ref<FileNode | null>(null);
 const renameError = ref<string | null>(null);
 watch(showRename, (open) => {
   if (open) renameError.value = null;
+});
+/* The same for New folder and Delete, whose dialogs had nothing to show a
+ * failure in at all — and a busy flag for each of the three: a request that
+ * is still on its way keeps its dialog's button shut, so a second press does
+ * not send the same order twice (a folder rename on an object store copies
+ * every object inside the request; a second Save met the half-copied folder
+ * and was refused as "already here"). */
+const renameBusy = ref(false);
+const newFolderBusy = ref(false);
+const newFolderError = ref<string | null>(null);
+watch(showNewFolder, (open) => {
+  if (open) newFolderError.value = null;
+});
+const deleteBusy = ref(false);
+const deleteError = ref<string | null>(null);
+watch(showDelete, (open) => {
+  if (open) deleteError.value = null;
 });
 /* ui-fix — does the open rename/delete/new-folder modal belong to the side
  * pane? (the menu is identical to the main pane's; this routes the mutation
@@ -2828,10 +2895,14 @@ onBeforeUnmount(() => {
 interface ToastState {
   message: string;
   actionLabel?: string;
-  action?: () => void | Promise<void>;
+  action?: () => UndoOutcome | Promise<UndoOutcome>;
 }
 const toast = ref<ToastState | null>(null);
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
+/** How long a failure stays up: long enough to read a sentence. */
+const ERROR_TOAST_MS = 6000;
+/** A "still working on it" toast: up until the answer replaces it. */
+const STICKY_TOAST_MS = 10 * 60 * 1000;
 function showToast(state: ToastState, ms: number) {
   toast.value = state;
   if (toastTimer) clearTimeout(toastTimer);
@@ -2876,15 +2947,42 @@ async function catalogAll(storage: string | undefined) {
     const rows = await api.jsonFetch<Array<{ id: number; name: string }>>(`${base}/api/admin/storages`);
     const row = Array.isArray(rows) ? rows.find((r) => r.name === storage) : undefined;
     if (!row) throw new Error('no such storage');
-    await api.jsonFetch(`${base}/api/admin/storages/${row.id}/sync`, { method: 'POST' });
+    /* ⚠ Followed to its end (lib/catalogRun). It used to flash "started" and
+     * leave the banner and the button as they were for the hours a large
+     * storage takes, with no word of the end. */
+    catalogFollowing.value = storage;
     flashToast(t('coverage.catalog_started'));
+    const end = await catalogAndFollow({
+      runs: async () => {
+        const res = await api.jsonFetch<{ entries?: Array<{ id: number; status: string; error?: string }> }>(
+          `${base}/api/admin/storages/${row.id}/sync-runs?limit=5`,
+        );
+        return (res?.entries ?? []).map((e) => ({ id: e.id, status: e.status, error: e.error || undefined }));
+      },
+      start: async () => {
+        await api.jsonFetch(`${base}/api/admin/storages/${row.id}/sync`, { method: 'POST' });
+      },
+      stopped: () => catalogUnwatched,
+    });
+    if (end === null) return;
+    if (end.status === 'ok') {
+      flashToast(t('coverage.catalog_done', { storage }));
+      await load();
+    } else if (end.status === 'failed') {
+      flashToast(t('coverage.catalog_failed', { storage, error: end.error ?? '' }));
+    } else if (end.status === 'aborted') {
+      flashToast(t('coverage.catalog_stopped', { storage }));
+    } else {
+      flashToast(t('coverage.catalog_unfollowed', { storage }));
+    }
   } catch (err) {
     flashToast(sayFailure(err, t('toast.failed'), { t, callerAdmin: callerAdmin.value }).text);
   } finally {
     catalogAllBusy.value = false;
+    catalogFollowing.value = null;
   }
 }
-function undoToast(message: string, undo: () => Promise<void>) {
+function undoToast(message: string, undo: () => Promise<UndoOutcome>) {
   showToast({ message, actionLabel: t('toast.undo'), action: undo }, 8000);
 }
 function dismissToast() {
@@ -2898,9 +2996,13 @@ async function runToastAction() {
   const act = toast.value?.action;
   dismissToast();
   if (!act) return;
+  // Said while it runs: undoing a large move or a restore takes a while, and
+  // nothing was on screen until it ended.
+  showToast({ message: t('toast.undoing') }, STICKY_TOAST_MS);
   try {
-    await act();
-    flashToast(t('toast.undone'));
+    const out = await act();
+    // Not "Undone" about an undo that was only queued, or brought back part.
+    flashToast(sayUndo(out, t));
     await load();
   } catch {
     flashToast(t('toast.undo_failed'));
@@ -3249,6 +3351,7 @@ const trashEmptyRun = ref<TrashEmptyStatus | null>(null);
 let trashEmptyUnwatched = false;
 onBeforeUnmount(() => {
   trashEmptyUnwatched = true;
+  catalogUnwatched = true;
 });
 
 async function probeTrashPolicy() {
@@ -3526,6 +3629,7 @@ function registerMoveUndo(
     fn: async () => {
       const { op } = await api.moveAsync(movedPaths, originWire, targetWire);
       pendingOps.register(op);
+      return { queued: true };
     },
   });
 }
@@ -3884,6 +3988,12 @@ function onPaletteDropInside() {
 
 useKeyboardShortcuts(rootEl, {
   onDelete: () => {
+    // In the trash, only someone the server lets purge is asked; everybody
+    // else is told how the trash empties itself.
+    if (trashMode.value && !paneIsActive.value && !trashCanEmpty.value) {
+      if (!selection.isEmpty.value) flashToast(t('toast.trash_retention'));
+      return;
+    }
     /* ui-fix — the shortcut goes to the active pane too (consistent with the menu). */
     if (paneIsActive.value) {
       const psel = splitSelection.nodes.value;
@@ -4151,21 +4261,46 @@ function previewModeForExt(ext: string): 'view' | 'edit' {
   return 'edit';
 }
 
+/** A restore on its way. It is one request per item, and a folder is moved
+ *  back object by object on an object store: minutes, with nothing on screen,
+ *  and a second press met "something already has that name". */
+const restoreBusy = ref(false);
+
 async function restoreSelection(targets?: FileNode[]) {
+  if (restoreBusy.value) return;
   const nodes = targets ?? selection.nodes.value;
   if (nodes.length === 0) return;
+  restoreBusy.value = true;
   try {
     // filex trash: restore by node id, then refresh the trash listing.
     if (trashMode.value) {
       const ids = nodes
         .map((n) => (n as { id?: number }).id)
         .filter((x): x is number => typeof x === 'number');
-      const { restored, taken } = await api.restoreIds(ids);
-      flashToast(
-        taken.length
-          ? t('toast.restore_taken', { n: taken.length, name: taken[0] })
-          : t('toast.restored', { n: restored }),
-      );
+      if (serverQueues('restore')) {
+        // One request for the selection, answered at once with its jobs: the
+        // operations centre follows them, and the trash listing, with what did
+        // not come back and why, comes when each ends (onSettled).
+        const { ops } = await api.restoreQueued(ids);
+        for (const op of ops) pendingOps.register(op);
+        flashToast(t('toast.restoring', { n: ids.length }));
+        selection.clear();
+        return;
+      }
+      showToast({ message: t('toast.restoring', { n: ids.length }) }, STICKY_TOAST_MS);
+      const { restored, taken, failed, failure } = await api.restoreIds(ids);
+      if (taken.length) {
+        showToast({ message: t('toast.restore_taken', { n: taken.length, name: taken[0] }) }, ERROR_TOAST_MS);
+      } else if (failed > 0) {
+        // ⚠ Said, not skipped: what did not come back used to vanish from the
+        // count, and "2 items restored" stood over a selection of three.
+        showToast(
+          { message: t('toast.restore_partial', { n: restored, failed, reason: failureText(failure) }) },
+          ERROR_TOAST_MS,
+        );
+      } else {
+        flashToast(t('toast.restored', { n: restored }));
+      }
       selection.clear();
       await loadTrash();
       return;
@@ -4178,7 +4313,10 @@ async function restoreSelection(targets?: FileNode[]) {
     selection.clear();
     await load();
   } catch (err) {
+    showToast({ message: failureText(err) }, ERROR_TOAST_MS);
     emit('error', { message: (err as Error).message, context: { op: 'restore' } });
+  } finally {
+    restoreBusy.value = false;
   }
 }
 
@@ -4565,10 +4703,16 @@ const contextActions = computed<ContextAction[]>(() => {
 
   if (trashActive.value) {
     if (!any) return [];
+    // "Delete permanently" only for someone the server lets purge
+    // (trashCanEmpty): offered to everyone, it did nothing for most.
     return [
       { key: 'restore', label: t('ctx.restore') },
-      { divider: true, key: 'sep1', label: '' },
-      { key: 'delete', label: t('ctx.delete_perm'), danger: true },
+      ...(trashCanEmpty.value
+        ? [
+            { divider: true, key: 'sep1', label: '' },
+            { key: 'delete', label: t('ctx.delete_perm'), danger: true },
+          ]
+        : []),
     ];
   }
 
@@ -4784,7 +4928,7 @@ const toolbarActions = computed<ContextAction[]>(() => {
     if (sel.length === 0) return [];
     return [
       { key: 'restore', label: t('ctx.restore') },
-      { key: 'delete', label: t('ctx.delete_perm'), danger: true },
+      ...(trashCanEmpty.value ? [{ key: 'delete', label: t('ctx.delete_perm'), danger: true }] : []),
     ];
   }
   const trimmedPath = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
@@ -5028,9 +5172,15 @@ function copyToClipboard() {
   flashToast(t('toast.copied'));
 }
 
+/** A paste on its way. A cut paste lists the target folder before it queues
+ *  (movedNamesCollide), and the clipboard is only emptied once it has: a second
+ *  Ctrl+V meanwhile queued the same move twice. */
+let pasting = false;
+
 async function paste() {
   const cb = clipboard.value;
-  if (!cb.mode || cb.items.length === 0) return;
+  if (!cb.mode || cb.items.length === 0 || pasting) return;
+  pasting = true;
   try {
     const items = cb.items.map((n) => n.path); // already qualified (adapter://rel)
     const sourceDir = cb.sourcePath || '';
@@ -5067,6 +5217,8 @@ async function paste() {
     clipboard.value = { mode: null, items: [], sourcePath: null };
   } catch (err) {
     reportMutationError(err, { op: 'paste' });
+  } finally {
+    pasting = false;
   }
 }
 
@@ -5109,16 +5261,24 @@ function downloadFile(n: FileNode) {
  * single selection, because the only implementation was one `window.open` per
  * node and the browser blocks the second as a popup.
  */
+/** An archive download being prepared: a second press meanwhile asked the
+ *  server to walk the same folders again, for a second archive. */
+const archivePreparing = ref(false);
+
 async function downloadSelection(targets: FileNode[]): Promise<void> {
   if (targets.length === 0) return;
   if (targets.length === 1 && targets[0].type === 'file') {
     downloadFile(targets[0]);
     return;
   }
+  if (archivePreparing.value) return;
+  archivePreparing.value = true;
   /* ⚠ Not a courtesy: minting asks the server to resolve and authorize every
    * member, which on a deep folder is not instant, and nothing else on screen
-   * moves until the browser is handed the response. */
-  flashToast(t('toast.archive.preparing'));
+   * moves until the browser is handed the response. It stays up until the
+   * answer replaces it — it used to be the 2.5 s toast, gone long before a
+   * walk of a folder on an object store is. */
+  showToast({ message: t('toast.archive.preparing') }, STICKY_TOAST_MS);
   try {
     const ticket = await downloadArchive(api, targets.map((n) => n.path));
     flashToast(t('toast.archive.started', { name: ticket.name, count: String(ticket.files) }));
@@ -5127,8 +5287,10 @@ async function downloadSelection(targets: FileNode[]): Promise<void> {
     /* 409 is the server saying the selection held nothing this account may
      * read — a different sentence from "it failed", and the only one that
      * tells the reader what to do next. */
-    flashToast(e.status === 409 ? t('toast.archive.empty') : e.message);
+    showToast({ message: e.status === 409 ? t('toast.archive.empty') : failureText(err) }, ERROR_TOAST_MS);
     emit('error', { message: e.message, context: { op: 'archive-download' } });
+  } finally {
+    archivePreparing.value = false;
   }
 }
 
@@ -5155,17 +5317,22 @@ async function onDestinationPicked(dest: string): Promise<void> {
     : qualify(currentPath.value);
   destPickerBusy.value = true;
   try {
-    await transferItems(targets.map((n) => n.path), dest, originWire || undefined, move ? 'move' : 'copy');
+    const queued = await transferItems(targets.map((n) => n.path), dest, originWire || undefined, move ? 'move' : 'copy');
     /* ⚠ `transferItems` has already flashed "queued". This REPLACES it rather
      * than stacking on it — there is one toast slot (`showToast`), and the
      * useful half of the sentence is the destination, which "queued" does not
      * carry. Do not add a second call expecting two messages; you would only
-     * be choosing which one nobody reads. */
-    const name = labelOfWire(dest, dest);
-    flashToast(move ? t('toast.moved_to', { name }) : t('toast.copied_to', { name }));
-    if (move) {
-      if (actingInPane()) splitSelection.clear();
-      else selection.clear();
+     * be choosing which one nobody reads.
+     * ⚠⚠ Only when it WAS queued. This used to run whatever happened: a refused
+     * move said "Moved to X" over the refusal, and past tense besides — the
+     * job is only queued here; its own toast says when it is done. */
+    if (queued) {
+      const name = labelOfWire(dest, dest);
+      flashToast(move ? t('toast.moved_to', { name }) : t('toast.copied_to', { name }));
+      if (move) {
+        if (actingInPane()) splitSelection.clear();
+        else selection.clear();
+      }
     }
   } finally {
     destPickerBusy.value = false;
@@ -5362,7 +5529,12 @@ async function cancelPendingOp(id: number) {
 }
 
 async function submitNewFolder(name: string) {
+  if (newFolderBusy.value) return;
   const inPane = mutationInPane.value; /* ui-fix — new folder in the side pane */
+  newFolderBusy.value = true;
+  // Cleared first: the dialog shows it again when it CHANGES, and a retry
+  // refused with the same sentence would otherwise leave it untouched.
+  newFolderError.value = null;
   try {
     const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
     await api.newFolder(dirWire, name);
@@ -5370,11 +5542,15 @@ async function submitNewFolder(name: string) {
     if (inPane) await splitPaneRef.value?.reload();
     else await load();
   } catch (err) {
+    newFolderError.value = failureText(err);
     emit('error', { message: (err as Error).message, context: { op: 'newfolder' } });
+  } finally {
+    newFolderBusy.value = false;
   }
 }
 
 async function submitRename(name: string) {
+  if (renameBusy.value) return;
   const target = renameTarget.value;
   if (!target) return;
   /* ⚠ Cleared BEFORE the attempt, not only when the dialog opens. The dialog
@@ -5384,38 +5560,127 @@ async function submitRename(name: string) {
    * it did nothing at all. */
   renameError.value = null;
   const inPane = mutationInPane.value; /* ui-fix — rename from the side pane */
+  renameBusy.value = true;
   try {
     const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
     const oldPath = target.path; // qualified
     const oldName = target.basename;
-    await api.rename(dirWire, oldPath, name);
+    // A folder is a job of the queue when the server runs it there: on an
+    // object store every object inside it is a request of its own, and inside
+    // this one the dialog outlasted the proxy with nothing on screen.
+    const queued = target.type === 'dir' && serverQueues('rename');
+    let job: PendingOpDto | undefined;
+    if (queued) job = (await api.renameQueued(dirWire, oldPath, name)).op;
+    else await api.rename(dirWire, oldPath, name);
     showRename.value = false;
     renameTarget.value = null;
+    // Clean inverse: rename the new path back to the old basename — as a job
+    // too, when this one was.
+    const newPath = wireJoin(wireParent(oldPath), name);
+    const undo =
+      name && name !== oldName
+        ? async () => {
+            if (!queued) {
+              await api.rename(dirWire, newPath, oldName);
+              return;
+            }
+            const back = (await api.renameQueued(dirWire, newPath, oldName)).op;
+            if (back) pendingOps.register(back);
+            return { queued: true };
+          }
+        : null;
+    if (job) {
+      // The operations centre follows the job; the listing, and the undo,
+      // come when it ends (onSettled).
+      if (undo) opUndo.set(job.id, { message: t('toast.renamed'), fn: undo });
+      pendingOps.register(job);
+      flashToast(t('toast.rename_queued', { name }));
+      return;
+    }
     if (inPane) await splitPaneRef.value?.reload();
     else await load();
-    // Clean inverse: rename the new path back to the old basename.
-    if (name && name !== oldName) {
-      const newPath = wireJoin(wireParent(oldPath), name);
-      undoToast(t('toast.renamed'), async () => {
-        await api.rename(dirWire, newPath, oldName);
-      });
-    }
+    if (undo) undoToast(t('toast.renamed'), undo);
   } catch (err) {
     const e = err as Error & { status?: number };
     // 409 is the server refusing to replace what already has the name
     // (NAME_TAKEN). Everything else still says what went wrong, in the dialog.
-    renameError.value = e.status === 409 ? t('newdoc.err.exists', { name }) : e.message || String(err);
-    reportMutationError(err, { op: 'rename' });
+    renameError.value = e.status === 409 ? t('newdoc.err.exists', { name }) : failureText(err);
+    reportMutationError(err, { op: 'rename' }, { inDialog: true });
+  } finally {
+    renameBusy.value = false;
   }
 }
 
-async function confirmDelete() {
-  // In the trash view, items are already soft-deleted. Permanent removal is
-  // admin-only (and the backend auto-purges after the retention window), so
-  // offer Restore here rather than a delete that would just re-trash a path.
-  if (trashMode.value) {
+/**
+ * Purges the selected trash entries (DELETE /api/admin/trash/{id}), as jobs of
+ * the queue on a server that runs purges there (`capabilities.queued`): a
+ * folder is purged object by object, which outlasts a request. The trash is
+ * read again when each job ends (onSettled), or at once for the old way.
+ */
+async function purgeSelection() {
+  const ids = selection.nodes.value
+    .map((n) => (n as { id?: number }).id)
+    .filter((x): x is number => typeof x === 'number');
+  if (ids.length === 0) {
     showDelete.value = false;
-    flashToast(t('toast.trash_retention'));
+    return;
+  }
+  deleteBusy.value = true;
+  deleteError.value = null;
+  const queued = serverQueues('purge');
+  let purged = 0;
+  let failed = 0;
+  let firstFailure = '';
+  for (const id of ids) {
+    try {
+      const res = await fetch(`${props.config.apiBase ?? ''}/api/admin/trash/${id}${queued ? '?queued=1' : ''}`, {
+        method: 'DELETE',
+        headers: await buildAuthHeaders(),
+        credentials: api.credentialsMode(),
+      });
+      if (res.status === 202) {
+        const body = (await res.json().catch(() => ({}))) as { op?: Record<string, unknown> };
+        if (body.op) pendingOps.register(body.op);
+        purged++;
+      } else if (res.ok) {
+        purged++;
+      } else {
+        failed++;
+        if (!firstFailure) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          firstFailure = body.error || `HTTP ${res.status}`;
+        }
+      }
+    } catch (err) {
+      failed++;
+      if (!firstFailure) firstFailure = failureText(err);
+    }
+  }
+  deleteBusy.value = false;
+  if (purged === 0) {
+    deleteError.value = firstFailure ? failureText(new Error(firstFailure)) : t('toast.failed');
+    return;
+  }
+  showDelete.value = false;
+  selection.clear();
+  flashToast(sayPurge({ queued, purged, failed }, t));
+  if (!queued) await loadTrash();
+}
+
+async function confirmDelete() {
+  if (deleteBusy.value) return;
+  // In the trash view the items are already soft-deleted: "Delete
+  // permanently" purges them. ⚠ It used to show a retention notice and delete
+  // nothing, under a menu entry and a dialog that both promised a delete.
+  // Only someone the server lets purge is offered it (trashCanEmpty); anyone
+  // else reaching here is told how the trash empties itself.
+  if (trashMode.value) {
+    if (!trashCanEmpty.value) {
+      showDelete.value = false;
+      flashToast(t('toast.trash_retention'));
+      return;
+    }
+    await purgeSelection();
     return;
   }
   /* ui-fix — yan panelden silme: hedefler + dizin + tazeleme pane'e ait. */
@@ -5438,8 +5703,11 @@ async function confirmDelete() {
       ? async () => {
           const { restored } = await api.restoreIds(nodeIds);
           if (restored === 0) throw new Error('restore failed');
+          return { done: restored, total: nodeIds.length };
         }
       : null;
+  deleteBusy.value = true;
+  deleteError.value = null;
   try {
     if (api.endpoints.deleteAsync) {
       const { op } = await api.deleteAsync(items, dirWire);
@@ -5458,7 +5726,11 @@ async function confirmDelete() {
     if (inPane) void splitPaneRef.value?.reload();
     else selection.clear();
   } catch (err) {
-    reportMutationError(err, { op: 'delete' });
+    // Said in the dialog, which stays open over what was not deleted.
+    deleteError.value = failureText(err);
+    reportMutationError(err, { op: 'delete' }, { inDialog: true });
+  } finally {
+    deleteBusy.value = false;
   }
 }
 
@@ -5494,6 +5766,11 @@ function onFilePicked(ev: Event) {
 
 async function uploadFiles(list: File[]) {
   if (list.length === 0) return;
+  // ⚠ The folder the files were dropped into or picked for, read ONCE. The
+  // files go one after another, and each used to read the open folder again
+  // when its turn came — so browsing while the first file was on its way sent
+  // the rest of the batch into whatever folder was open by then.
+  const target = qualify(currentPath.value);
   /* wiring:e2 — uploads into an encrypted folder are encrypted transparently.
      No upload while locked (that would be a plaintext-leak door); anything
      over 200MB hits the MVP single-shot limit and is skipped with a warning. */
@@ -5514,7 +5791,7 @@ async function uploadFiles(list: File[]) {
     // the single-POST fast path, and a server that has no staged path at all
     // falls back to it too.
     if (chunked.shouldChunk(f)) {
-      const pending = chunked.resumableFor(qualify(currentPath.value), f);
+      const pending = chunked.resumableFor(target, f);
       if (pending) {
         // Say so. An upload that silently starts over looks identical to one
         // that never happened, which is precisely the complaint.
@@ -5525,9 +5802,9 @@ async function uploadFiles(list: File[]) {
           }),
         );
       }
-      if (await chunkedUpload(f)) continue;
+      if (await chunkedUpload(f, target)) continue;
     }
-    await legacyUpload(f);
+    await legacyUpload(f, target);
   }
   await load();
 }
@@ -6045,7 +6322,10 @@ async function prepareDragOut(items: DragItem[], quiet = false): Promise<void> {
   }
 }
 
-async function moveSourcesAsync(sources: string[], targetDir: string, opLabel: string, originOverride?: string): Promise<void> {
+/** Moves `sources` into `targetDir`; true once the move is queued (or done,
+ *  without the async endpoint), false when it was refused — the refusal is
+ *  already said (reportMutationError). */
+async function moveSourcesAsync(sources: string[], targetDir: string, opLabel: string, originOverride?: string): Promise<boolean> {
   try {
     const originWire = originOverride ?? qualify(currentPath.value); /* wiring:d1 — the real source folder for a drag coming from the split pane */
     const collides = await movedNamesCollide(sources, targetDir);
@@ -6068,8 +6348,10 @@ async function moveSourcesAsync(sources: string[], targetDir: string, opLabel: s
       }
     }
     selection.clear();
+    return true;
   } catch (err) {
     reportMutationError(err, { op: opLabel, targetDir });
+    return false;
   }
 }
 
@@ -6899,36 +7181,37 @@ async function transferItems(
   targetWire: string,
   originWire?: string,
   intent: TransferIntent = 'auto',
-): Promise<void> {
+): Promise<boolean> {
   // ui-fix — an in-place drop (source parent === target) is a no-op: this
   // avoids the backend's "copy onto itself" 400 (cross-pane + clipboard paths).
   const list = sources.filter(
     (p) => p && p !== targetWire && !targetWire.startsWith(p + '/') && !sameDir(wireParent(p), targetWire),
   );
-  if (list.length === 0 || !targetWire) return;
+  // Nothing to send is not a success: "Move to…" must not report one.
+  if (list.length === 0 || !targetWire) return false;
   const plan = resolveTransfer(list, targetWire, intent);
+  let queued = false;
   if (plan.kind === 'copy') {
     try {
       const { op } = await api.copy(list, targetWire);
       pendingOps.register(op);
       flashToast(plan.cross ? t('split.cross_copy') : t('split.copy_queued'));
+      queued = true;
     } catch (err) {
-      // ⚠ Show the server's own message. There used to be a hard-coded
-      // "cross-storage is not supported" text here; it IS supported now, so
-      // that text would mask the real cause (permissions, a read-only storage,
-      // a full quota).
-      // ⚠ `reportMutationError` already flashed the lock sentence when the
-      // server answered 423; the generic message would then overwrite it.
-      const held = lockedRefusal(err);
+      // ⚠ Said in the reader's words by reportMutationError (the server's own
+      // sentence when it wrote one for a person — permissions, a read-only
+      // storage, a full quota — and the lock sentence for a 423). There used
+      // to be a hard-coded "cross-storage is not supported" here, and then the
+      // raw message.
       reportMutationError(err, { op: 'transfer', targetWire });
-      if (!held) flashToast((err as Error).message);
-      return;
+      return false;
     }
   } else {
     if (plan.cross) flashToast(t('split.cross_move'));
-    await moveSourcesAsync(list, targetWire, 'move-transfer', originWire);
+    queued = await moveSourcesAsync(list, targetWire, 'move-transfer', originWire);
   }
   void splitPaneRef.value?.reload();
+  return queued;
 }
 
 function onPaneTransfer(p: { sources: string[]; targetWire: string; originWire?: string }) {
@@ -7784,15 +8067,22 @@ function closeRecoveryKey() {
       role="status"
       data-testid="catalog-coverage"
     >
-      <span class="fe-coverage__text">{{ t(coverageShown.key, coverageShown.vars) }}</span>
+      <!-- While "Catalog everything" runs, the banner says so and the button
+           waits for it. -->
+      <span class="fe-coverage__text">{{
+        catalogFollowing && catalogFollowing === coverageShown.storage
+          ? t('coverage.cataloging', { storage: catalogFollowing })
+          : t(coverageShown.key, coverageShown.vars)
+      }}</span>
       <button
         v-if="coverageShown.offerCatalogAll"
         type="button"
         class="fe-coverage__action"
         data-testid="catalog-coverage-all"
         :disabled="catalogAllBusy"
+        :aria-busy="catalogAllBusy"
         @click="catalogAll(coverageShown.storage)"
-      >{{ t('coverage.catalog_all') }}</button>
+      >{{ catalogAllBusy ? t('coverage.catalog_running') : t('coverage.catalog_all') }}</button>
     </div>
 
     <!-- Live presence: who else is viewing this folder (empty → nothing shown).
@@ -8457,6 +8747,8 @@ function closeRecoveryKey() {
       :open="showNewFolder"
       :locale="locale"
       :encrypted-option="!e2eActive /* wiring:e2 — no nested encrypted folders */"
+      :busy="newFolderBusy"
+      :error="newFolderError"
       @close="showNewFolder = false"
       @submit="submitNewFolder"
       @encrypted="showNewFolder = false; showEncFolder = true /* wiring:e2 */"
@@ -8551,6 +8843,7 @@ function closeRecoveryKey() {
       :locale="locale"
       :current-name="renameTarget?.basename || ''"
       :error="renameError"
+      :busy="renameBusy"
       @close="showRename = false"
       @submit="submitRename"
     />
@@ -8587,6 +8880,9 @@ function closeRecoveryKey() {
       :open="showDelete"
       :locale="locale"
       :count="selection.size.value"
+      :permanent="trashMode"
+      :busy="deleteBusy"
+      :error="deleteError"
       @close="showDelete = false"
       @confirm="confirmDelete"
     />

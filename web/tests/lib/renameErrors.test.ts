@@ -43,8 +43,9 @@ describe('submitRename shows its failure in the dialog', () => {
   it('any other failure is shown too, not only emitted', () => {
     expect(failure).toMatch(/renameError\.value = /);
     // Still reported to the host too — through reportMutationError, the one
-    // path every mutation's failure takes (it also says a lock refusal).
-    expect(failure).toContain("reportMutationError(err, { op: 'rename' })");
+    // path every mutation's failure takes (it also says a lock refusal). With
+    // `inDialog`: the dialog says the failure, so no toast says it again.
+    expect(failure).toContain("reportMutationError(err, { op: 'rename' }, { inDialog: true })");
   });
 
   it('the dialog is given the message', () => {

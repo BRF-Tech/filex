@@ -4,10 +4,13 @@
  * Actions: restore (clears deleted_at), purge (hard-delete one), empty
  * (purge all in a storage, optionally limited by age).
  */
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useToastStore } from '@/stores/toast';
 import { useStoragesStore } from '@/stores/storages';
+import { useCapabilitiesStore } from '@/stores/capabilities';
+import { usePendingOpsStore } from '@/stores/pendingOps';
+import type { PendingOp } from '@/api/ops';
 import { trashApi, type TrashEntry, type TrashEmptyStatus } from '@/api/trash';
 import Button from '@/components/ui/Button.vue';
 import Modal from '@/components/ui/Modal.vue';
@@ -27,6 +30,8 @@ function timeLeft(ttl: number | null | undefined): string {
 }
 const toast = useToastStore();
 const storages = useStoragesStore();
+const caps = useCapabilitiesStore();
+const pendingOps = usePendingOpsStore();
 
 const entries = ref<TrashEntry[]>([]);
 const total = ref(0);
@@ -56,12 +61,97 @@ async function load() {
   }
 }
 
+/* ── Restore and purge ────────────────────────────────────────────────────
+ *
+ * ⚠⚠ Both ran inside the request. A folder is moved back, or purged, one
+ * object at a time, and this page's HTTP client gives up after 30 s: the admin
+ * read "the server could not be reached" beside a raw "AxiosError: timeout of
+ * 30000ms exceeded" while the server carried on, and a second press was
+ * refused by the half that had already come back. A server that runs them as
+ * jobs of its queue says so (`capabilities.queued`): the page asks for a job,
+ * the row says what is happening to it and takes no second press, and the page
+ * says how it ended when the job does. The tray follows the same job. */
+type RowJob = 'restore' | 'purge';
+/** The rows being worked on, by entry id. */
+const working = ref<Record<number, RowJob>>({});
+/** The queued jobs this page is waiting for, by op id. */
+const following = new Map<number, { entry: TrashEntry; job: RowJob }>();
+
+function serverQueues(job: RowJob): boolean {
+  return caps.data.queued?.includes(job) === true;
+}
+
+function markWorking(id: number, job: RowJob | null) {
+  const next = { ...working.value };
+  if (job) next[id] = job;
+  else delete next[id];
+  working.value = next;
+}
+
+function follow(entry: TrashEntry, job: RowJob, ops: PendingOp[]) {
+  if (ops.length === 0) {
+    markWorking(entry.id, null);
+    void load();
+    return;
+  }
+  for (const op of ops) {
+    following.set(op.id, { entry, job });
+    pendingOps.track(op.id);
+  }
+}
+
+watch(
+  () => pendingOps.items,
+  (items) => {
+    for (const it of items) {
+      const f = following.get(it.op.id);
+      if (!f || !['done', 'error', 'cancelled'].includes(it.op.status)) continue;
+      following.delete(it.op.id);
+      markWorking(f.entry.id, null);
+      sayJobEnd(f.entry, f.job, it.op);
+      void load();
+    }
+  },
+);
+
+function sayJobEnd(entry: TrashEntry, job: RowJob, op: PendingOp) {
+  if (op.status === 'done') {
+    toast.success(t(job === 'restore' ? 'trash.restored' : 'trash.purged', { name: entry.name }));
+    return;
+  }
+  // Stopped from the tray before it ran: the reloaded list says what is left.
+  if (op.status === 'cancelled') return;
+  const reason = op.error_message ?? '';
+  if (job === 'restore' && /already exists/i.test(reason)) {
+    toast.error(t('trash.restore_taken', { name: entry.name }));
+    return;
+  }
+  toast.error(t(job === 'restore' ? 'trash.restore_failed' : 'trash.purge_failed', { name: entry.name, reason }));
+}
+
+/** A refused request, said. One that got no answer at all has been said
+ *  already, once for the page, by the client (errors.network); printing it here
+ *  put "AxiosError: timeout of 30000ms exceeded" beside that. */
+function sayRefusal(err: any) {
+  if (!err?.response) return;
+  toast.error(err.response.data?.error ?? t('errors.generic'));
+}
+
 async function restore(entry: TrashEntry) {
+  if (working.value[entry.id]) return;
+  markWorking(entry.id, 'restore');
   try {
+    if (serverQueues('restore')) {
+      const { ops } = await trashApi.restoreQueued([entry.id]);
+      follow(entry, 'restore', ops);
+      return;
+    }
     await trashApi.restore(entry.id);
+    markWorking(entry.id, null);
     toast.success(t('trash.restored', { name: entry.name }));
     await load();
   } catch (err: any) {
+    markWorking(entry.id, null);
     // 409 EXISTS: something holds the original path, and the server refused
     // rather than overwrite it. Said in the reader's language — the server's
     // own sentence is English and names no remedy.
@@ -69,18 +159,27 @@ async function restore(entry: TrashEntry) {
       toast.error(t('trash.restore_taken', { name: err.response.data.name || entry.name }));
       return;
     }
-    toast.error(err?.response?.data?.error ?? String(err));
+    sayRefusal(err);
   }
 }
 
 async function purge(entry: TrashEntry) {
+  if (working.value[entry.id]) return;
   if (!confirm(t('trash.purge_confirm', { name: entry.name }))) return;
+  markWorking(entry.id, 'purge');
   try {
+    if (serverQueues('purge')) {
+      const { op } = await trashApi.purgeQueued(entry.id);
+      follow(entry, 'purge', op ? [op] : []);
+      return;
+    }
     await trashApi.purge(entry.id);
+    markWorking(entry.id, null);
     toast.success(t('trash.purged', { name: entry.name }));
     await load();
   } catch (err: any) {
-    toast.error(err?.response?.data?.error ?? String(err));
+    markWorking(entry.id, null);
+    sayRefusal(err);
   }
 }
 
@@ -315,10 +414,13 @@ onBeforeUnmount(() => {
 
 /** The row's verbs, behind its one pinned `Actions` control. Purge keeps
  *  whatever confirmation `purge()` already puts in front of it. */
-function rowActions(_row: TrashEntry): ContextAction[] {
+function rowActions(row: TrashEntry): ContextAction[] {
+  // A row being worked on takes no second press, and says why.
+  const busy = working.value[row.id] !== undefined;
+  const title = busy ? t('trash.row_busy') : undefined;
   return [
-    { key: 'restore', label: t('trash.restore'), icon: 'restore' },
-    { key: 'purge', label: t('trash.purge'), icon: 'delete', danger: true },
+    { key: 'restore', label: t('trash.restore'), icon: 'restore', disabled: busy, title },
+    { key: 'purge', label: t('trash.purge'), icon: 'delete', danger: true, disabled: busy, title },
   ];
 }
 
@@ -422,6 +524,12 @@ function onRowAction(key: string, row: TrashEntry) {
       <template #cell-name="{ row }">
         <div>
           <span class="font-medium">{{ row.name }}</span>
+          <span
+            v-if="working[row.id]"
+            :data-testid="`trash-working-${row.id}`"
+            class="fx-trash-row__working"
+            role="status"
+          >{{ working[row.id] === 'restore' ? t('trash.restoring') : t('trash.purging') }}</span>
           <span class="tbl-sub tbl-clamp" :title="row.path">{{ row.path }}</span>
         </div>
       </template>
@@ -481,6 +589,11 @@ function onRowAction(key: string, row: TrashEntry) {
 </template>
 
 <style scoped>
+.fx-trash-row__working {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--fe-primary);
+}
 .fx-trash-run__muted {
   color: var(--fe-text-muted);
 }

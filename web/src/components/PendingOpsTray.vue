@@ -15,7 +15,7 @@
  */
 import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Archive, Copy, Move, Trash2, RotateCcw, X, AlertTriangle, Check } from 'lucide-vue-next';
+import { Archive, Copy, Move, PenLine, Trash2, Undo2, RotateCcw, X, AlertTriangle, Check } from 'lucide-vue-next';
 
 import { opPercent } from '@brftech/filex-core';
 import { usePendingOpsStore } from '@/stores/pendingOps';
@@ -39,7 +39,9 @@ const visibleItems = computed(() => store.items.slice().reverse());
 function iconFor(opType: string) {
   if (opType === 'archive-create' || opType === 'archive-extract') return Archive;
   if (opType === 'move') return Move;
-  if (opType === 'delete' || opType === 'trash-empty') return Trash2;
+  if (opType === 'rename') return PenLine;
+  if (opType === 'restore') return Undo2;
+  if (opType === 'delete' || opType === 'trash-empty' || opType === 'purge') return Trash2;
   return Copy;
 }
 
@@ -51,6 +53,14 @@ function verbFor(opType: string): string {
       return t('pendingOps.verb.archiveExtract');
     case 'move':
       return t('pendingOps.verb.move');
+    // A folder rename and a restore from the trash are jobs of the queue too;
+    // falling through to "Copying" named them as something they are not.
+    case 'rename':
+      return t('pendingOps.verb.rename');
+    case 'restore':
+      return t('pendingOps.verb.restore');
+    case 'purge':
+      return t('pendingOps.verb.purge');
     case 'delete':
       return t('pendingOps.verb.delete');
     case 'trash-empty':

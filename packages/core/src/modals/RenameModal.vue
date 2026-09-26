@@ -13,6 +13,10 @@ const props = defineProps<{
    *  (a taken name, a refusal, an outage). Shown under the field until the
    *  name is edited. */
   error?: string | null;
+  /** The rename is on its way. Renaming a folder on an object store copies
+   *  every object in it, so this can last; a second Save meanwhile met the
+   *  half-copied folder and was refused as "already here". */
+  busy?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -51,6 +55,7 @@ function onInput() {
 }
 
 function submit() {
+  if (props.busy) return;
   const clean = name.value.trim();
   if (!clean) return;
   if (/[\\/]/.test(clean) || clean === '.' || clean === '..') {
@@ -86,8 +91,8 @@ function submit() {
       <button type="button" class="fe-btn" @click="emit('close')">
         {{ t('modal.rename.cancel') }}
       </button>
-      <button type="button" class="fe-btn fe-btn--primary" @click="submit">
-        {{ t('modal.rename.save') }}
+      <button type="button" class="fe-btn fe-btn--primary" :disabled="busy" @click="submit">
+        {{ busy ? t('modal.rename.saving') : t('modal.rename.save') }}
       </button>
     </template>
   </Modal>

@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"path"
@@ -26,6 +27,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/realtime"
@@ -90,66 +92,37 @@ func (h *Trash) storageName(ctx context.Context, id int64) string {
 
 type restoreNodeReq struct {
 	NodeID int64 `json:"node_id"`
+	// NodeIDs is the batch a restore asked with `queued=1` carries.
+	NodeIDs []int64 `json:"node_ids,omitempty"`
 }
 
 // Restore lifts the deleted_at flag on a soft-deleted node.
+//
+// Asked with `queued=1` it takes a batch (`node_ids`), judges every entry the
+// way it judges one, and queues them as a job of the operations queue instead:
+// 202 `{ops}`, one job per storage (restoreQueued).
 func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 	var req restoreNodeReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
+	if h.Ops != nil && r.URL.Query().Get("queued") == "1" {
+		h.restoreQueued(w, r, req)
+		return
+	}
 	if req.NodeID <= 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing node_id"})
 		return
 	}
-	// A swept open-with working copy (or anything else whose original path
-	// is filex's own) is not offered by the trash list, and restoring it by
-	// id would put it back where nobody can see it — the same "not found"
-	// the list implies.
-	if node, err := h.Store.GetNode(r.Context(), req.NodeID); err == nil && node != nil {
-		if orig, known := trash.OriginalPath(node); known && syspath.Hidden(orig) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
-			return
-		} else if known && gate(w, r, h.ACL, node.StorageID, writegate.Writes(orig)) {
-			// Restoring writes the file back: not onto a path an app has
-			// frozen. Asked before the permission check below, which would
-			// read the lock's viewer cap as a plain 403.
-			return
-		}
+	if _, ok := h.mayRestore(w, r, req.NodeID); !ok {
+		return
 	}
-	// Confinement: a root-locked caller may only restore nodes whose original
-	// path lives inside its root (else it could resurrect another tenant's file).
-	if root, ok := confine.RootFrom(r.Context()); ok {
-		node, err := h.Store.GetNode(r.Context(), req.NodeID)
-		if err != nil || node == nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
-			return
-		}
-		// A row that records no original path (trash.OriginalPath, known=false)
-		// cannot be placed inside anybody's root, so it is outside every one.
-		orig, known := trash.OriginalPath(node)
-		if !known || !root.Within(h.storageName(r.Context(), node.StorageID), orig) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "path outside confined root"})
-			return
-		}
-	}
-	// RBAC: restoring writes the file back → require ≥editor on its original path.
-	if h.ACL != nil {
-		node, err := h.Store.GetNode(r.Context(), req.NodeID)
-		if err != nil || node == nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
-			return
-		}
-		// ⚠ Judged on where the file came from, never on `.filex-trash/…`: a
-		// grant on the bin says nothing about somebody else's deleted file.
-		orig, known := trash.OriginalPath(node)
-		if !known || !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, orig, acl.LevelEditor) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
-			return
-		}
-	}
-	if err := h.Service.Restore(r.Context(), req.NodeID); err != nil {
+	// A folder on an object store comes back one object at a time: finished
+	// even if the client leaves (detachedMutation).
+	ctx, cancel := detachedMutation(r.Context())
+	defer cancel()
+	if err := h.Service.Restore(ctx, req.NodeID); err != nil {
 		var conflict *trash.ConflictError
 		if errors.As(err, &conflict) {
 			// Nothing moved and the entry is still in the trash: the name was
@@ -165,11 +138,139 @@ func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	h.announceRestore(r.Context(), req.NodeID)
-	if n, err := h.Store.GetNode(r.Context(), req.NodeID); err == nil && n != nil {
-		auth.SetAuditTarget(r.Context(), strconv.FormatInt(n.ID, 10), n.Path)
+	h.announceRestore(ctx, req.NodeID)
+	if n, err := h.Store.GetNode(ctx, req.NodeID); err == nil && n != nil {
+		auth.SetAuditTarget(ctx, strconv.FormatInt(n.ID, 10), n.Path)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// mayRestore judges one trash entry for the caller: the checks Restore asks,
+// which a queued batch asks of every entry before it queues any. node is nil
+// when the row could not be read and no check needed it; Restore then answers
+// what the service says. A refusal is written, and ok is false.
+func (h *Trash) mayRestore(w http.ResponseWriter, r *http.Request, id int64) (node *model.Node, ok bool) {
+	if n, err := h.Store.GetNode(r.Context(), id); err == nil {
+		node = n
+	}
+	// A swept open-with working copy (or anything else whose original path
+	// is filex's own) is not offered by the trash list, and restoring it by
+	// id would put it back where nobody can see it — the same "not found"
+	// the list implies.
+	if node != nil {
+		if orig, known := trash.OriginalPath(node); known && syspath.Hidden(orig) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
+			return nil, false
+		} else if known && gate(w, r, h.ACL, node.StorageID, writegate.Writes(orig)) {
+			// Restoring writes the file back: not onto a path an app has
+			// frozen. Asked before the permission check below, which would
+			// read the lock's viewer cap as a plain 403.
+			return nil, false
+		}
+	}
+	// Confinement: a root-locked caller may only restore nodes whose original
+	// path lives inside its root (else it could resurrect another tenant's file).
+	if root, confined := confine.RootFrom(r.Context()); confined {
+		if node == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
+			return nil, false
+		}
+		// A row that records no original path (trash.OriginalPath, known=false)
+		// cannot be placed inside anybody's root, so it is outside every one.
+		orig, known := trash.OriginalPath(node)
+		if !known || !root.Within(h.storageName(r.Context(), node.StorageID), orig) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "path outside confined root"})
+			return nil, false
+		}
+	}
+	// RBAC: restoring writes the file back → require ≥editor on its original path.
+	if h.ACL != nil {
+		if node == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
+			return nil, false
+		}
+		// ⚠ Judged on where the file came from, never on `.filex-trash/…`: a
+		// grant on the bin says nothing about somebody else's deleted file.
+		orig, known := trash.OriginalPath(node)
+		if !known || !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, orig, acl.LevelEditor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+			return nil, false
+		}
+	}
+	return node, true
+}
+
+// restoreQueued is Restore asked with `queued=1`. Every entry is judged before
+// anything is queued, so a batch is never half-allowed; what it allows is one
+// job per storage, answered 202 `{ops}`. A place that is taken is found by the
+// job and reported on its row.
+func (h *Trash) restoreQueued(w http.ResponseWriter, r *http.Request, req restoreNodeReq) {
+	ids := req.NodeIDs
+	if len(ids) == 0 && req.NodeID > 0 {
+		ids = []int64{req.NodeID}
+	}
+	if len(ids) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing node_ids"})
+		return
+	}
+	seen := make(map[int64]bool, len(ids))
+	byStorage := map[int64][]string{}
+	var order []int64
+	for _, id := range ids {
+		if id <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad node id"})
+			return
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		node, ok := h.mayRestore(w, r, id)
+		if !ok {
+			return
+		}
+		if node == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
+			return
+		}
+		if _, known := byStorage[node.StorageID]; !known {
+			order = append(order, node.StorageID)
+		}
+		byStorage[node.StorageID] = append(byStorage[node.StorageID], strconv.FormatInt(id, 10))
+	}
+	queued := make([]*ops.Op, 0, len(order))
+	for _, storageID := range order {
+		op, err := h.Ops.Submit(r.Context(), ops.OpRestore, storageID, byStorage[storageID], "")
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "restore: " + err.Error()})
+			return
+		}
+		queued = append(queued, op)
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"ops": queued})
+}
+
+// RestoreNode implements ops.Restorer: Restore's work for a queued restore.
+// The bytes and the row come back, and the node is re-indexed, scanned and
+// announced (announceRestore). The entry was judged when it was queued
+// (RestoreQueued). A place that is taken is an error in the words Restore
+// answers with, and nothing of that entry moves.
+func (h *Trash) RestoreNode(ctx context.Context, nodeID int64) error {
+	if err := h.Service.Restore(ctx, nodeID); err != nil {
+		var conflict *trash.ConflictError
+		if errors.As(err, &conflict) {
+			return fmt.Errorf("something already exists at this path: %s", path.Base(conflict.Path))
+		}
+		return err
+	}
+	h.announceRestore(ctx, nodeID)
+	return nil
+}
+
+// PurgeNode implements ops.Purger: Purge's work for a queued purge. The entry
+// was judged when it was queued (Purge: ownsNode).
+func (h *Trash) PurgeNode(ctx context.Context, nodeID int64) error {
+	return h.Service.PurgeOne(ctx, nodeID)
 }
 
 // announceRestore re-indexes the restored node — and, for a folder, every
@@ -557,7 +658,29 @@ func (h *Trash) Purge(w http.ResponseWriter, r *http.Request) {
 	if !ownsNode(w, r, h.Store, id, "trash entry") {
 		return
 	}
-	if err := h.Service.PurgeOne(r.Context(), id); err != nil {
+	// Asked with `queued=1` (the admin's Trash page asks): the purge is a job
+	// of the queue. A folder is purged one object and one row at a time, and
+	// the page's client gives up after 30 s.
+	if h.Ops != nil && r.URL.Query().Get("queued") == "1" {
+		n, err := h.Store.GetNode(r.Context(), id)
+		if err != nil || n == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
+			return
+		}
+		op, err := h.Ops.Submit(r.Context(), ops.OpPurge, n.StorageID, []string{strconv.FormatInt(id, 10)}, "")
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "purge: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"op": op})
+		return
+	}
+	// Finished even if the client leaves: the admin SPA gives up after 30 s,
+	// and a folder is purged one object and one row at a time
+	// (detachedMutation).
+	ctx, cancel := detachedMutation(r.Context())
+	defer cancel()
+	if err := h.Service.PurgeOne(ctx, id); err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, "no rows in result set") || strings.Contains(msg, "not found") {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})

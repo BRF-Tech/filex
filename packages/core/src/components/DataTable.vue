@@ -1053,6 +1053,14 @@ defineExpose({ store, layout, pinLead });
       :data-table-id="tableId"
       @scroll.passive="onListScroll"
     >
+      <!-- A listing read again keeps its rows until the answer comes (opening
+           a folder, Refresh, a search): they are marked as the old ones, and
+           a thin bar runs along the top. The list carried an `is-loading`
+           class that nothing drew, so the previous folder's rows looked like
+           the answer for as long as a large folder took. -->
+      <div v-if="loading && rowCount > 0" class="fe-list__refreshing" role="status">
+        <span class="fe-sr-only">{{ t('loading') }}</span>
+      </div>
       <div
         class="fe-list__head"
         role="row"

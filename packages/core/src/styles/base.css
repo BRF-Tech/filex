@@ -13529,3 +13529,70 @@ filex-explorer {
 .fe-ppreview > .fe.fe-ppage {
   min-height: 0;
 }
+
+/* A listing read again (opening a folder, Refresh, a search) keeps its old
+   rows until the answer comes: a thin bar runs along the top and the rows
+   fade, after a moment so a quick answer does not flicker. The list carried
+   an `is-loading` class that nothing drew. */
+/* The list is its own scroll box: the bar sticks to the top of what is in
+   view, over the header, and takes no room (net zero height), so it cannot
+   change what scrolls. The grid is laid out inside its pane: the bar sits at
+   its top. */
+.fe-grid.is-loading {
+  position: relative;
+}
+.fe-list__refreshing,
+.fe-grid__refreshing {
+  height: 2px;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  animation: fe-refreshing-in 0s linear 300ms forwards;
+}
+.fe-list__refreshing {
+  position: sticky;
+  top: 0;
+  margin-bottom: -2px;
+}
+.fe-grid__refreshing {
+  position: absolute;
+  inset: 0 0 auto 0;
+}
+.fe-list__refreshing::before,
+.fe-grid__refreshing::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: var(--fe-primary);
+  animation: fe-refreshing-run 1.1s ease-in-out infinite;
+}
+.fe-list.is-loading .fe-list__row,
+.fe-grid.is-loading .fe-grid__card {
+  opacity: 0.55;
+  transition: opacity 0.2s ease 300ms;
+}
+@keyframes fe-refreshing-in {
+  to {
+    opacity: 1;
+  }
+}
+/* Runs toward the end of the line: right in a left-to-right script, left in
+   Arabic or Hebrew. */
+@keyframes fe-refreshing-run {
+  from {
+    transform: translateX(calc(-100% * var(--filex-dir-x, 1)));
+  }
+  to {
+    transform: translateX(calc(250% * var(--filex-dir-x, 1)));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fe-list__refreshing::before,
+  .fe-grid__refreshing::before {
+    animation: none;
+    width: 100%;
+    opacity: 0.6;
+  }
+}

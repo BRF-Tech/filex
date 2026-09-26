@@ -14,13 +14,27 @@ import { watch } from 'vue';
 import type { UploadJob } from '../composables/useUploadChunked';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import type { OperationsStore, OperationStatus } from '../composables/useOperations';
+import { useLocale } from '../composables/useLocale';
 
 const props = defineProps<{
   jobs: UploadJob[];
-  /** Kept for mount compatibility — strings now render in OperationsCenter. */
+  /** The row's words while the server writes a file (`upload.saving`); the
+   *  rest of an upload's strings render in OperationsCenter. */
   locale: LocaleCode;
   center: OperationsStore;
 }>();
+
+const { t } = useLocale(() => props.locale);
+
+/**
+ * Every byte is in filex and the server is writing the file to its storage:
+ * the commit, then the queue's transfer. ⚠ That is not "100%": on a slow
+ * uplink it is minutes, and the row read "X MB / X MB" over a full bar, the
+ * badge "100%", for all of it.
+ */
+function saving(status: UploadJob['status']): boolean {
+  return status === 'committing' || status === 'transferring';
+}
 
 const emit = defineEmits<{
   (e: 'cancel', job: UploadJob): void;
@@ -47,7 +61,8 @@ watch(
           id: j.id,
           kind: 'upload' as const,
           name: j.file.name,
-          percent: j.totalBytes > 0 || j.status === 'done' ? j.percent : null,
+          percent: saving(j.status) ? null : j.totalBytes > 0 || j.status === 'done' ? j.percent : null,
+          message: saving(j.status) ? t('upload.saving') : null,
           status: mapStatus(j.status),
           error: j.error ?? null,
           uploadedBytes: j.uploadedBytes,

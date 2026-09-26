@@ -57,6 +57,30 @@ func (h *Manager) SyncMove(ctx context.Context, storageID int64, src, dst string
 	emitMoved(storageID, normalizeDBPath(src), normalizeDBPath(dst))
 }
 
+// NameTaken implements ops.RenameSync: the rule the explorer's rename is
+// refused on (destinationTaken), asked again by the worker for a queued one.
+func (h *Manager) NameTaken(ctx context.Context, storageID int64, src, dst string) (bool, error) {
+	drv, err := h.StorageResolver(storageID)
+	if err != nil {
+		return false, err
+	}
+	return destinationTaken(ctx, h.Store, drv, storageID, src, dst)
+}
+
+// SyncRename implements ops.RenameSync: vfRename's catalogue side for a queued
+// rename. The rows follow, and it is announced as a rename, not a move: the
+// event carries `rename`, and the folder is told the old and the new name.
+func (h *Manager) SyncRename(ctx context.Context, storageID int64, src, dst string) {
+	h.applyDBMove(ctx, storageID, src, dst)
+	srcClean, dstClean := normalizeDBPath(src), normalizeDBPath(dst)
+	/* bag:b3 event */
+	writehook.OnFileMoved(ctx, storageID, srcClean, dstClean, path.Base(dstClean),
+		writehook.OriginOps, map[string]any{"rename": true})
+	emitFolderChange(storageID, path.Dir(srcClean), realtime.ChangeEvent{
+		Action: "rename", Name: path.Base(srcClean), NewName: path.Base(dstClean),
+	})
+}
+
 // emitMoved tells both ends of a move. srcClean/dstClean are normalized
 // storage-relative paths. A rename inside one folder is the same room twice,
 // so it is announced once — carrying both names, which is what lets the hub
