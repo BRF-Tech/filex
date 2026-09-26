@@ -1369,6 +1369,10 @@ exactly like one that does not exist); nothing is written then.
 ```
 **Response 200** `{ "id": 7, "name": "Hetzner archive", ... }`
 
+A storage is created **enabled** unless the body says `"enabled": false`. (Until
+this release a body without the key, which is what the admin panel's form sends,
+created it disabled.)
+
 `config.scan_exclude` — every driver — holds the storage's
 [scan exclusions](STORAGE.md#scan-exclusions): glob patterns, one per line (a
 JSON array of strings is accepted too). A pattern that would exclude
@@ -1395,9 +1399,21 @@ every change** — the operator may have just pointed it at a different bucket,
 and a configuration that half works fails the same way a half-working plugin
 does: in the user's hands, looking like filex.
 
+The change applies without a restart. The storage's scanner is rebuilt only
+when the save changed something a scan reads: the driver, its configuration
+(root, credentials, scan exclusions), the sync mode, the interval, or
+`enabled`. A rebuild stops every scan of the storage, including one started by
+`POST …/sync`, and records it as `aborted`. Renaming the storage, switching it
+read-only, changing its access control or pairing a replica leaves a running
+scan alone.
+
 ### `DELETE /api/admin/storages/:id` ![admin](https://img.shields.io/badge/-admin-red)
 Removes the storage and its DB cache rows. Files in the underlying backend
 are **not** deleted.
+
+A large storage takes minutes to remove. The delete finishes even when the
+client stops waiting, bounded at 30 minutes. If it fails, the storage keeps
+its scanner, as it was before the request.
 
 ### `POST /api/admin/storages/:id/sync` ![admin](https://img.shields.io/badge/-admin-red)
 Triggers an immediate **full** scan of the storage. The scan runs in the
@@ -1408,8 +1424,14 @@ background, so the answer comes at once:
 ```
 
 `status: "running"` (still `202`) means a scan was already walking this storage
-and no second one was started. There is no run id in the answer: watch the run
-under `GET /api/admin/storages/:id/sync-runs` or `GET /api/admin/sync-runs`.
+and no second one was started. The answer comes only once the scan holds the
+storage, so a second request straight after the first is answered `"running"`.
+
+There is no run id in the answer. `GET /api/admin/storages` says whether a scan is
+walking each storage right now (`running`); the run itself is under
+`GET /api/admin/storages/:id/sync-runs` or `GET /api/admin/sync-runs`. The scan
+belongs to the storage's scanner: a save that changes its scan settings, a
+delete, or a shutdown stops it.
 
 **`?path=<folder>` rescans one catalogued folder** instead of the whole storage
 — its subtree only, with the same rules as a full scan: new objects are

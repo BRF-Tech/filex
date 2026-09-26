@@ -223,10 +223,13 @@ count rather than piling up rows.
 persistent [queue](CONFIGURATION.md#queue) to do this reliably:
 
 - **Fix all** — `POST /api/admin/replica/fix` (`ReconcileAll`) enqueues one
-  `replica_retry` queue op for **every unresolved failure**, and returns the
-  number queued. Progress is visible on the Queue page.
+  `replica_retry` queue op for **every unresolved failure** that has none waiting
+  already. It answers `{queued, already_queued}`: a retry still waiting in the
+  queue absorbs the next request for the same failure, so pressing again adds
+  nothing. Progress is visible on the Queue page.
 - **Fix one** — `POST /api/admin/replica/fix-one` with `{path, op}` enqueues a
-  single retry for one failure.
+  single retry for one failure, `{ok, queued}`. `queued: false` means one was
+  already waiting.
 - The **retry handler** picks each op up and re‑executes it against the backup:
   a `write`/`move`/`copy` re‑reads the object from the primary and writes it to
   the target; a `delete` removes it from the target. On success it **resolves**
@@ -272,7 +275,7 @@ Other replication events that reach the bell + webhook:
 |---|---|---|
 | `replica_fail` | warning | a background fan‑out (write/delete/move/copy) to the backup failed |
 | `primary_read_fail` | error | a read/stat fell back to the backup because the primary errored |
-| `replica_reconcile_done` | info | a **Fix all** run queued one or more retries |
+| `replica_reconcile_done` | info | a **Fix all** run queued one or more new retries (retries already waiting are not announced again) |
 | `replica_status_report` | info | a status report ran and was actionable (see above) |
 
 ---
@@ -313,8 +316,8 @@ these return **`503 Service Unavailable`** (`{"error":"replica offline"}` /
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/replica/fix` | Enqueue a retry for **every** unresolved failure → `{queued}` |
-| `POST` | `/replica/fix-one` | Enqueue one retry — body `{path, op}` (`op` = `write`/`delete`/`move`/`copy`) |
+| `POST` | `/replica/fix` | Enqueue a retry for **every** unresolved failure with none waiting → `{queued, already_queued}` |
+| `POST` | `/replica/fix-one` | Enqueue one retry — body `{path, op}` (`op` = `write`/`delete`/`move`/`copy`) → `{ok, queued}` |
 
 **Report & settings:**
 
