@@ -5217,6 +5217,9 @@ async function submitArchiveCreate(value: {
     });
     pendingOps.register(op);
     showArchiveCreate.value = false;
+    /* The dialog has closed and the job may run for minutes: its row, not the
+     * corner badge alone, is what says it is under way (useOperations `reveal`). */
+    opsCenter.reveal();
     flashToast(t('archive.queued'));
   } catch (err) {
     archiveError.value = archiveRequestError(err);
@@ -5245,6 +5248,7 @@ async function startArchiveExtraction(
     archivePasswordError.value = '';
     if (result.op) {
       pendingOps.register(result.op);
+      opsCenter.reveal(); /* as for a new archive (submitArchiveCreate) */
       flashToast(t('archive.extraction_queued'));
       return;
     }

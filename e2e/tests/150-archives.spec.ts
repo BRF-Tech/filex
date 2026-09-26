@@ -5,7 +5,8 @@
  *      (`capabilities.archive`): its formats, and password fields only where
  *      it can encrypt. #48 as submitted offered every format everywhere, so a
  *      server without 7-Zip let the dialog be filled in and then failed. A ZIP
- *      made through the dialog lands beside the files.
+ *      made through the dialog lands beside the files, and its job is on screen
+ *      in the operations panel from the moment the dialog closes.
  *   2. A .tar.gz — read by filex itself, no 7-Zip needed — opens like a folder,
  *      in the explorer's own table, and "Extract here" unpacks it.
  *   3. A .tar.gz carrying a symlink is refused, and "Extract here" SAYS so: the
@@ -102,7 +103,8 @@ test.describe('Archives', () => {
     await page.reload();
     await expect(row(page, note)).toBeVisible({ timeout: 15_000 });
     await pick(page, note, /^(Create archive…|Arşiv oluştur…)$/);
-    const dialog = page.getByRole('dialog');
+    // By name: the operations panel that opens on Create is a dialog too.
+    const dialog = page.getByRole('dialog', { name: /^(Create archive|Arşiv oluştur)$/ });
     await expect(dialog).toBeVisible();
     const format = dialog.locator('select').first();
     const offered = await format.locator('option').evaluateAll((els) => els.map((e) => (e as HTMLOptionElement).value));
@@ -113,6 +115,12 @@ test.describe('Archives', () => {
 
     await dialog.getByRole('button', { name: /^(Create|Oluştur)$/ }).click();
     await expect(dialog).toBeHidden();
+    // The job is on screen, not only a badge in the corner: the dialog closes
+    // as soon as the job is queued, and with nothing but the badge a two-minute
+    // archive read as a click that did nothing (2026-09-25).
+    const panel = page.getByRole('dialog', { name: /^(Operations|İşlemler)$/ });
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText(`notes-${STAMP}.zip`);
     await expect(row(page, `notes-${STAMP}.zip`)).toBeVisible({ timeout: 20_000 });
   });
 

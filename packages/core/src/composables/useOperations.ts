@@ -279,6 +279,21 @@ export function useOperations() {
     history.value = [];
   }
 
+  /**
+   * Bumped by `reveal()`; OperationsCenter opens its panel on every bump.
+   *
+   * ⚠ For a job the person has JUST started and whose dialog has closed — the
+   * collapsed badge alone is a small pill in a far corner, and a job with only
+   * that on screen reads as a click that did nothing. Measured in production
+   * (2026-09-25): an archive of 175 files ran for two minutes, and the person
+   * who started it saw no sign of it at all. Not for work nobody is waiting on
+   * (a background sync, somebody else's job).
+   */
+  const revealRequests = ref(0);
+  function reveal() {
+    revealRequests.value += 1;
+  }
+
   const runningCount = computed(
     () => active.value.filter((o) => o.status === 'running').length,
   );
@@ -332,6 +347,8 @@ export function useOperations() {
     dismiss,
     open,
     clearHistory,
+    revealRequests,
+    reveal,
   };
 }
 

@@ -51,10 +51,13 @@ switches are never accepted from a request.
 Archive creation and extraction run through filex's asynchronous
 file-operation queue, in a lane of their own: one archive operation at a time,
 never in front of copies, moves, deletes and upload commits. Once the request
-has been validated, the dialog closes and progress appears in the operations
-center while source files are staged, compressed and written to the
-destination. Completion and failure use the same in-app feedback as copy, move
-and delete operations. Creation emits one `archive.created` notification and
+has been validated, the dialog closes and the operations center opens on the
+job: its name, a progress bar and Cancel. Creating an archive moves the bar in
+bytes through each phase — reading the source files off their storage
+(0–45%), compressing (45–90%) and writing the archive to the destination
+(90–99%) — so a job whose time goes to a remote storage does not sit at 0%.
+Completion and failure use the same in-app feedback as copy, move and delete
+operations. Creation emits one `archive.created` notification and
 extraction emits one `archive.extracted` notification, rather than reporting
 the component writes as generic "new file" events. Both retain the ordinary
 realtime folder update and antivirus scan behaviour.
