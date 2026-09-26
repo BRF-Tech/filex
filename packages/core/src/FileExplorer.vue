@@ -388,6 +388,8 @@ const pendingOps = usePendingOps(props.config, api, {
     } else if (op.op_type === 'plugin') {
       /* App plugins — the job's own last words, else "<label> finished". */
       flashToast(op.message || t('plugin.done', { label: pluginOpLabel(op) }));
+    } else if (op.op_type === 'purge') {
+      flashToast(t('toast.purged', { n: 1 }));
     } else if (op.op_type === 'rename') {
       flashToast(t('toast.renamed'));
     } else if (op.op_type === 'restore') {
@@ -1623,7 +1625,7 @@ const callerAdmin = computed(() => capabilitiesData.value?.caller_admin === true
  *  per object on an object store; inside the request they outlasted the proxy
  *  with nothing on screen. An older server does not say, and is asked the old
  *  way. */
-function serverQueues(kind: 'rename' | 'restore'): boolean {
+function serverQueues(kind: 'rename' | 'restore' | 'purge'): boolean {
   return capabilitiesData.value?.queued?.includes(kind) === true;
 }
 
@@ -3946,6 +3948,12 @@ function onPaletteDropInside() {
 
 useKeyboardShortcuts(rootEl, {
   onDelete: () => {
+    // In the trash, only someone the server lets purge is asked; everybody
+    // else is told how the trash empties itself.
+    if (trashMode.value && !paneIsActive.value && !trashCanEmpty.value) {
+      if (!selection.isEmpty.value) flashToast(t('toast.trash_retention'));
+      return;
+    }
     /* ui-fix — the shortcut goes to the active pane too (consistent with the menu). */
     if (paneIsActive.value) {
       const psel = splitSelection.nodes.value;
@@ -4655,10 +4663,16 @@ const contextActions = computed<ContextAction[]>(() => {
 
   if (trashActive.value) {
     if (!any) return [];
+    // "Delete permanently" only for someone the server lets purge
+    // (trashCanEmpty): offered to everyone, it did nothing for most.
     return [
       { key: 'restore', label: t('ctx.restore') },
-      { divider: true, key: 'sep1', label: '' },
-      { key: 'delete', label: t('ctx.delete_perm'), danger: true },
+      ...(trashCanEmpty.value
+        ? [
+            { divider: true, key: 'sep1', label: '' },
+            { key: 'delete', label: t('ctx.delete_perm'), danger: true },
+          ]
+        : []),
     ];
   }
 
@@ -4874,7 +4888,7 @@ const toolbarActions = computed<ContextAction[]>(() => {
     if (sel.length === 0) return [];
     return [
       { key: 'restore', label: t('ctx.restore') },
-      { key: 'delete', label: t('ctx.delete_perm'), danger: true },
+      ...(trashCanEmpty.value ? [{ key: 'delete', label: t('ctx.delete_perm'), danger: true }] : []),
     ];
   }
   const trimmedPath = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
@@ -5556,14 +5570,80 @@ async function submitRename(name: string) {
   }
 }
 
+/**
+ * Purges the selected trash entries (DELETE /api/admin/trash/{id}), as jobs of
+ * the queue on a server that runs purges there (`capabilities.queued`): a
+ * folder is purged object by object, which outlasts a request. The trash is
+ * read again when each job ends (onSettled), or at once for the old way.
+ */
+async function purgeSelection() {
+  const ids = selection.nodes.value
+    .map((n) => (n as { id?: number }).id)
+    .filter((x): x is number => typeof x === 'number');
+  if (ids.length === 0) {
+    showDelete.value = false;
+    return;
+  }
+  deleteBusy.value = true;
+  deleteError.value = null;
+  const queued = serverQueues('purge');
+  let purged = 0;
+  let failed = 0;
+  let firstFailure = '';
+  for (const id of ids) {
+    try {
+      const res = await fetch(`${props.config.apiBase ?? ''}/api/admin/trash/${id}${queued ? '?queued=1' : ''}`, {
+        method: 'DELETE',
+        headers: await buildAuthHeaders(),
+        credentials: api.credentialsMode(),
+      });
+      if (res.status === 202) {
+        const body = (await res.json().catch(() => ({}))) as { op?: Record<string, unknown> };
+        if (body.op) pendingOps.register(body.op);
+        purged++;
+      } else if (res.ok) {
+        purged++;
+      } else {
+        failed++;
+        if (!firstFailure) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          firstFailure = body.error || `HTTP ${res.status}`;
+        }
+      }
+    } catch (err) {
+      failed++;
+      if (!firstFailure) firstFailure = failureText(err);
+    }
+  }
+  deleteBusy.value = false;
+  if (purged === 0) {
+    deleteError.value = firstFailure ? failureText(new Error(firstFailure)) : t('toast.failed');
+    return;
+  }
+  showDelete.value = false;
+  selection.clear();
+  if (queued) {
+    flashToast(t('toast.purging', { n: purged }));
+  } else {
+    flashToast(failed ? t('toast.purged_partly', { n: purged, failed }) : t('toast.purged', { n: purged }));
+    await loadTrash();
+  }
+}
+
 async function confirmDelete() {
   if (deleteBusy.value) return;
-  // In the trash view, items are already soft-deleted. Permanent removal is
-  // admin-only (and the backend auto-purges after the retention window), so
-  // offer Restore here rather than a delete that would just re-trash a path.
+  // In the trash view the items are already soft-deleted: "Delete
+  // permanently" purges them. ⚠ It used to show a retention notice and delete
+  // nothing, under a menu entry and a dialog that both promised a delete.
+  // Only someone the server lets purge is offered it (trashCanEmpty); anyone
+  // else reaching here is told how the trash empties itself.
   if (trashMode.value) {
-    showDelete.value = false;
-    flashToast(t('toast.trash_retention'));
+    if (!trashCanEmpty.value) {
+      showDelete.value = false;
+      flashToast(t('toast.trash_retention'));
+      return;
+    }
+    await purgeSelection();
     return;
   }
   /* ui-fix — yan panelden silme: hedefler + dizin + tazeleme pane'e ait. */
@@ -8755,6 +8835,7 @@ function closeRecoveryKey() {
       :open="showDelete"
       :locale="locale"
       :count="selection.size.value"
+      :permanent="trashMode"
       :busy="deleteBusy"
       :error="deleteError"
       @close="showDelete = false"
