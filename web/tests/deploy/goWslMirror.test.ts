@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { moduleRootOf, repoRootOf, wslMirrorCd } from '../../../scripts/lib/go-build.mjs';
+import { moduleRootOf, repoRootOf, toWslPath, wslMirrorCd } from '../../../scripts/lib/go-build.mjs';
 
 const REPO = path.resolve(__dirname, '../../..');
 const read = (rel: string) => readFileSync(path.join(REPO, rel), 'utf8');
@@ -25,7 +25,7 @@ describe('Go under WSL runs from a mirror on WSL\'s own disk', () => {
   });
 
   it('copies the module only, not the whole repository', () => {
-    expect(script).toMatch(/'\/mnt\/[a-z]\/[^']+\/backend\/' "\$HOME\/wt\/[^"/]+\/backend\/"/);
+    expect(script).toMatch(/'(\/mnt\/[a-z])?\/[^']+\/backend\/' "\$HOME\/wt\/[^"/]+\/backend\/"/);
   });
 
   it('keeps a subdirectory of the module inside the mirror', () => {
@@ -33,7 +33,7 @@ describe('Go under WSL runs from a mirror on WSL\'s own disk', () => {
   });
 
   it('copies the tree without node_modules and .git, twice if a file was being saved', () => {
-    const syncs = script.match(/rsync -a --delete --exclude node_modules --exclude \.git '\/mnt\/[a-z]\/[^']+\/' "\$HOME\/wt\/[^"]+\/"/g) ?? [];
+    const syncs = script.match(/rsync -a --delete --exclude node_modules --exclude \.git '(\/mnt\/[a-z])?\/[^']+\/' "\$HOME\/wt\/[^"]+\/"/g) ?? [];
     expect(syncs).toHaveLength(2);
     expect(script).toMatch(/rsync [^|]+\|\| rsync /);
   });
@@ -44,6 +44,11 @@ describe('Go under WSL runs from a mirror on WSL\'s own disk', () => {
 
   it('never changes into the Windows drive', () => {
     expect(script).not.toMatch(/cd '?\/mnt\//);
+  });
+
+  it('reaches a Windows drive through /mnt, whichever machine builds the snippet', () => {
+    expect(toWslPath(['G:', 'filex', 'backend'].join(String.fromCharCode(92)))).toBe('/mnt/g/filex/backend');
+    expect(toWslPath('C:/Users/x')).toBe('/mnt/c/Users/x');
   });
 
   it('is what every WSL Go call in the repository uses', () => {
