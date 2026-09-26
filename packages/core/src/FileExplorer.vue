@@ -25,7 +25,7 @@ import type {
   ArchiveCreateFormat,
 } from './types/FileNode';
 import { isExternalUsable } from './types/FileNode';
-import { useFileApi, type GlobalSearchHit, type ManagerResponse, type QuotaSnapshot } from './composables/useFileApi';
+import { useFileApi, type GlobalSearchHit, type ManagerResponse, type PendingOpDto, type QuotaSnapshot } from './composables/useFileApi';
 import {
   useUploadChunked,
   isStagedUnsupported,
@@ -368,15 +368,30 @@ const pendingOps = usePendingOps(props.config, api, {
         ? t('archive.extraction_cancelled', { count: op.progress_done })
         : t('opc.status.aborted');
       flashToast(message);
+    } else if (op.status === 'error' && op.op_type === 'restore' && op.progress_done > 0) {
+      // A restore that brought some entries back says how many, and why the
+      // rest did not come.
+      flashToast(
+        t('toast.restore_partial', {
+          n: op.progress_done,
+          failed: op.progress_total - op.progress_done,
+          reason: opFailure(op, t).text,
+        }),
+      );
     } else if (op.status === 'error') {
       // Said, not printed: the server's error text is English and sometimes
       // plumbing ("engine libreoffice is not installed on this host").
       flashToast(opFailure(op, t).text);
     } else if (undo) {
-      undoToast(`${undo.message} (${op.progress_total})`, undo.fn);
+      // A rename is one item: no count after it.
+      undoToast(op.op_type === 'rename' ? undo.message : `${undo.message} (${op.progress_total})`, undo.fn);
     } else if (op.op_type === 'plugin') {
       /* App plugins — the job's own last words, else "<label> finished". */
       flashToast(op.message || t('plugin.done', { label: pluginOpLabel(op) }));
+    } else if (op.op_type === 'rename') {
+      flashToast(t('toast.renamed'));
+    } else if (op.op_type === 'restore') {
+      flashToast(t('toast.restored', { n: op.progress_done }));
     } else {
       const verb =
         op.op_type === 'archive-create'
@@ -1602,6 +1617,15 @@ const effectiveOnlyOfficeBase = computed<string | null>(() => {
  * else" (lib/serviceGate).
  */
 const callerAdmin = computed(() => capabilitiesData.value?.caller_admin === true);
+
+/** Does the server run this change as a job of its operations queue when asked
+ *  (`queued=1`)? A folder rename and a restore from the trash are one request
+ *  per object on an object store; inside the request they outlasted the proxy
+ *  with nothing on screen. An older server does not say, and is asked the old
+ *  way. */
+function serverQueues(kind: 'rename' | 'restore'): boolean {
+  return capabilitiesData.value?.queued?.includes(kind) === true;
+}
 
 const effectiveOnlyOfficeConfigEndpoint = computed<string | null>(() => {
   if (!effectiveOnlyOfficeBase.value) return null;
@@ -4205,6 +4229,16 @@ async function restoreSelection(targets?: FileNode[]) {
       const ids = nodes
         .map((n) => (n as { id?: number }).id)
         .filter((x): x is number => typeof x === 'number');
+      if (serverQueues('restore')) {
+        // One request for the selection, answered at once with its jobs: the
+        // operations centre follows them, and the trash listing, with what did
+        // not come back and why, comes when each ends (onSettled).
+        const { ops } = await api.restoreQueued(ids);
+        for (const op of ops) pendingOps.register(op);
+        flashToast(t('toast.restoring', { n: ids.length }));
+        selection.clear();
+        return;
+      }
       showToast({ message: t('toast.restoring', { n: ids.length }) }, STICKY_TOAST_MS);
       const { restored, taken, failed, failure } = await api.restoreIds(ids);
       if (taken.length) {
@@ -5477,18 +5511,40 @@ async function submitRename(name: string) {
     const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
     const oldPath = target.path; // qualified
     const oldName = target.basename;
-    await api.rename(dirWire, oldPath, name);
+    // A folder is a job of the queue when the server runs it there: on an
+    // object store every object inside it is a request of its own, and inside
+    // this one the dialog outlasted the proxy with nothing on screen.
+    const queued = target.type === 'dir' && serverQueues('rename');
+    let job: PendingOpDto | undefined;
+    if (queued) job = (await api.renameQueued(dirWire, oldPath, name)).op;
+    else await api.rename(dirWire, oldPath, name);
     showRename.value = false;
     renameTarget.value = null;
+    // Clean inverse: rename the new path back to the old basename — as a job
+    // too, when this one was.
+    const newPath = wireJoin(wireParent(oldPath), name);
+    const undo =
+      name && name !== oldName
+        ? async () => {
+            if (!queued) {
+              await api.rename(dirWire, newPath, oldName);
+              return;
+            }
+            const back = (await api.renameQueued(dirWire, newPath, oldName)).op;
+            if (back) pendingOps.register(back);
+          }
+        : null;
+    if (job) {
+      // The operations centre follows the job; the listing, and the undo,
+      // come when it ends (onSettled).
+      if (undo) opUndo.set(job.id, { message: t('toast.renamed'), fn: undo });
+      pendingOps.register(job);
+      flashToast(t('toast.rename_queued', { name }));
+      return;
+    }
     if (inPane) await splitPaneRef.value?.reload();
     else await load();
-    // Clean inverse: rename the new path back to the old basename.
-    if (name && name !== oldName) {
-      const newPath = wireJoin(wireParent(oldPath), name);
-      undoToast(t('toast.renamed'), async () => {
-        await api.rename(dirWire, newPath, oldName);
-      });
-    }
+    if (undo) undoToast(t('toast.renamed'), undo);
   } catch (err) {
     const e = err as Error & { status?: number };
     // 409 is the server refusing to replace what already has the name

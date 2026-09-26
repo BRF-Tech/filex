@@ -275,6 +275,21 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Asked with `queued=1` (the explorer asks for a folder): the checks above
+	// have answered, and the rename is a job of the queue. A folder on an
+	// object store is one request per object, longer than any proxy waits.
+	if h.Ops != nil && r.URL.Query().Get("queued") == "1" {
+		op, err := h.Ops.Submit(r.Context(), ops.OpRename, current.ID, []string{srcRel}, dstRel)
+		if answerGate(w, err) {
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "rename: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"op": op})
+		return
+	}
 	// From here the storage changes: a folder on an object store is renamed
 	// one object at a time, and finished even if the client leaves.
 	ctx, cancel := detachedMutation(r.Context())

@@ -52,7 +52,7 @@ import type {
 /** Server-side PendingOp DTO (mirror of Modules\FishApp\Models\PendingOp::toApiArray). */
 export interface PendingOpDto {
   id: number;
-  op_type: 'copy' | 'move' | 'delete' | 'archive-create' | 'archive-extract';
+  op_type: 'copy' | 'move' | 'delete' | 'rename' | 'restore' | 'archive-create' | 'archive-extract';
   status: 'pending' | 'running' | 'cancelling' | 'done' | 'error' | 'cancelled';
   progress_total: number;
   progress_done: number;
@@ -640,6 +640,21 @@ export function useFileApi(config: ExplorerConfig) {
     });
   }
 
+  /**
+   * Rename as a job of the operations queue (`queued=1`), for a folder: on an
+   * object store that is one request per object, longer than any proxy waits.
+   * `op` is the job when the server queued it. An older server ignores
+   * `queued` and renames inside the request, and answers the listing instead.
+   * A refusal throws, as `rename` does.
+   */
+  async function renameQueued(path: string, item: string, name: string): Promise<{ op?: PendingOpDto }> {
+    return jsonFetch<{ op?: PendingOpDto }>(managerUrl('rename', { queued: 1 }), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, item, name }),
+    });
+  }
+
   async function move(path: string, items: string[], target: string): Promise<ManagerResponse> {
     return jsonFetch<ManagerResponse>(managerUrl('move'), {
       method: 'POST',
@@ -691,6 +706,23 @@ export function useFileApi(config: ExplorerConfig) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ source }),
     });
+  }
+
+  /**
+   * Restore trash entries by node id as jobs of the operations queue
+   * (`queued=1`): one request for the whole selection, one job per storage.
+   * Only for a server whose capabilities list `restore` under `queued`; an
+   * older one restores one `node_id` per request (restoreIds).
+   */
+  async function restoreQueued(ids: number[]): Promise<{ ops: PendingOpDto[] }> {
+    if (!endpoints.trashRestore) throw new Error('trashRestore endpoint not configured');
+    const sep = endpoints.trashRestore.includes('?') ? '&' : '?';
+    const res = await jsonFetch<{ ops?: PendingOpDto[] }>(`${endpoints.trashRestore}${sep}queued=1`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ node_ids: ids }),
+    });
+    return { ops: res.ops ?? [] };
   }
 
   /** filex trash listing — soft-deleted nodes across (or within) storages. */
@@ -1222,6 +1254,7 @@ export function useFileApi(config: ExplorerConfig) {
     newFolder,
     newFile,
     rename,
+    renameQueued,
     move,
     copy,
     moveAsync,
@@ -1230,6 +1263,7 @@ export function useFileApi(config: ExplorerConfig) {
     restore,
     listTrash,
     restoreIds,
+    restoreQueued,
     uploadMultipart,
     downloadUrl,
     previewUrl,

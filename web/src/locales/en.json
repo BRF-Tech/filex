@@ -1498,6 +1498,8 @@
     "verb": {
       "copy": "Copying",
       "move": "Moving",
+      "rename": "Renaming",
+      "restore": "Restoring",
       "delete": "Deleting",
       "trash": "Emptying the trash",
       "archive": "Archive",

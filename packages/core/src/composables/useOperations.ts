@@ -28,7 +28,7 @@ import { computed, getCurrentScope, onScopeDispose, ref } from 'vue';
 /** `plugin` — an app-plugin job (docs/APP-PLUGINS-API.md); also what any
  *  queue kind this package has no drawing for is shown as. */
 export type OperationKind =
-  | 'upload' | 'copy' | 'move' | 'delete' | 'convert'
+  | 'upload' | 'copy' | 'move' | 'delete' | 'rename' | 'restore' | 'convert'
   | 'archive' | 'archive-create' | 'archive-extract' | 'plugin' | 'trash';
 export type OperationStatus = 'running' | 'done' | 'error' | 'aborted';
 

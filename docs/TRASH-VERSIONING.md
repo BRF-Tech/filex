@@ -166,6 +166,7 @@ logged; the next run tries again).
 |---|---|---|
 | `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, and **`ttl_days`** (days remaining before purge, floored at 0). |
 | `POST /api/files/manager/restore` | `{ "node_id": 123 }` | Moves the file back to its original path and re‑attaches the row. Returns **409** `{ "code": "EXISTS", "name", "path" }` when something already holds that path; nothing moves and the entry stays in the trash. |
+| `POST /api/files/manager/restore?queued=1` | `{ "node_ids": [123, 124] }` | The same checks for every entry, and one refusal refuses the batch. What they allow is queued, one job per storage: **202** `{ "ops": [{ "kind": "restore", … }] }`, followed with `GET /api/files/ops`. An entry whose place is taken fails on its own, and the job's `error` says so; the others come back. Offered when `capabilities.queued` lists `restore`; the explorer's Restore uses it then. |
 
 The explorer's **Trash** view draws these entries in its own table with the
 facts a deleted item has: **Deleted** (when — the date column, sortable and

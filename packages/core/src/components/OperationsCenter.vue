@@ -73,6 +73,9 @@ const KIND_ICONS: Record<Operation['kind'], string> = {
   copy: 'M9 9h11v11H9zM5 15V4h11',
   move: 'M4 12h13M12 6l6 6-6 6',
   delete: 'M5 7h14M9 7V5h6v2M8 7l1 13h6l1-13',
+  /* A folder given a new name, and one brought back from the trash. */
+  rename: 'M4 20h4L18.5 9.5l-4-4L4 16zM13 7l4 4',
+  restore: 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
   convert: 'M20 8A8 8 0 0 0 6 6L4 8M4 16a8 8 0 0 0 14 2l2-2M20 3v5h-5M4 21v-5h5',
   archive: 'M4 8V5h16v3zM5 8h14v12H5zM10 12h4',
   /* "Empty the trash" — the bin, with the lines of what is going. */

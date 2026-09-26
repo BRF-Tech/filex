@@ -417,6 +417,18 @@ objects. A folder on an object store, which is changed one object at a time,
 was left in two places with the catalogue still describing the old one, and a
 retry answered `409` because the half that had arrived held the name.
 
+**As a job: `?action=rename&queued=1`.** The same body and the same checks, so a
+refusal is still answered at once, as above. What they allow is queued instead
+of run: **202** `{ "op": { "kind": "rename", "sources": ["reports/old"],
+"dest": "reports/new", … } }`, followed with `GET /api/files/ops` like a move.
+The explorer asks for it for a folder, which on an object store is one request
+per object, when the server lists `rename` under `capabilities.queued`; a file
+is still renamed inside the request. The job never picks another name the way a
+move does: a name taken by the time it runs fails it (`something with that
+name already exists here`), and nothing is replaced. Once running it is not
+cancelled half-way; while it waits in the queue it can be. A server with no
+queue renames inside the request, as above.
+
 ### `POST /api/files/delete` ![user](https://img.shields.io/badge/-user-blue)
 ```json
 { "source": ["alpha://a.txt", "alpha://klasor"] }

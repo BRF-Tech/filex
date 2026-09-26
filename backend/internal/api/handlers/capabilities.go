@@ -52,6 +52,12 @@ type Capabilities struct {
 	// Archive publishes the non-sensitive creation policy used by the explorer
 	// so the create dialog honours the operator's configured default.
 	Archive *archivecli.Service
+	// Queued names the changes this server runs as jobs of its operations queue
+	// when asked with `queued=1`: "rename" on POST /api/files/manager?action=rename,
+	// "restore" on POST /api/files/manager/restore. Published as `queued`;
+	// empty publishes nothing, and the explorer changes inside the request as
+	// it always did.
+	Queued []string
 }
 
 // NewCapabilities constructs a Capabilities handler.
@@ -200,6 +206,9 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	merged["caller_kind"] = callerKind
 	merged["caller_admin"] = h.callerCanConfigure(r)
+	if len(h.Queued) > 0 {
+		merged["queued"] = h.Queued
+	}
 	// Can "Send by email" work at all? ⚠ A typed nil *mailer.Service inside
 	// the interface is not == nil, so Ready is nil-safe itself.
 	if h.Mail != nil {

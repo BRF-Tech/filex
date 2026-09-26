@@ -139,6 +139,9 @@ const CODE_WORDS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^read_only$|read-only/i, 'err.read_only'],
   [/^no_secret_key$/, 'err.no_secret_key'],
   [/^quota_exceeded$|quota exceeded|quota: exceeded/i, 'err.quota'],
+  // A queued rename or restore that found its name taken (ops.ErrNameTaken,
+  // handlers.Trash RestoreNode): the job's error is the server's English.
+  [/already exists/i, 'err.name_taken'],
 ];
 
 function fieldsOf(body: string): Record<string, unknown> {

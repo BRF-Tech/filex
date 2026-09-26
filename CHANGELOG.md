@@ -55,6 +55,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/api/ai/delete` (the MCP `file_move` and `file_delete` tools). The
   response can still time out; the next listing shows the result.
 
+- **A folder rename and a restore from the trash no longer wait on the
+  request.** On an object store a folder is one request per object, so the
+  dialog waited with nothing on screen until the proxy gave up, then said the
+  change had failed while the server carried on.
+  - `POST /api/files/manager?action=rename` and `POST /api/files/manager/restore`
+    take `queued=1`; the restore then takes a `node_ids` batch. The same checks
+    answer at once, so a refusal still lands in the dialog. What they allow
+    becomes a job of the operations queue: `202 {op}` / `{ops}`, kinds `rename`
+    and `restore`. The server lists them under `capabilities.queued`.
+  - The explorer asks for a job only from a server that lists it. A folder's
+    rename and a restore from the trash then close at once and show in the
+    operations centre. The listing follows when the job ends, with the undo a
+    rename always offered. A file is still renamed inside the request.
+  - The admin layout's operations tray says what they are. It read a kind it
+    did not know as "Copying".
+  - A queued rename never picks another name the way a move does: a name taken
+    by the time it runs fails the job. Neither job is cancelled once running, and
+    a row says so (`cancellable`).
+
 ## [0.46.0] - 2026-09-26
 
 ### Added
