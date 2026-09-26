@@ -13,6 +13,7 @@ import test from 'node:test';
 
 import {
   OFFICE_EXTENSIONS,
+  OpeningDocs,
   SessionStore,
   classifyArgv,
   extensionOf,
@@ -161,4 +162,27 @@ test('write-back keeps the document readable by whoever could read it before', a
   } finally {
     await fs.promises.rm(dir, { recursive: true, force: true });
   }
+});
+
+// ── a document being opened is opened once (Y14) ──
+//
+// ⚠ "Is it already open?" only knew documents whose editor was up, and the
+// editor comes up after the working copy has been uploaded (up to 256 MB). A
+// second double-click in that time opened a second session of the same
+// document: two working copies writing back to one path, the last save
+// winning and the other edit gone.
+
+test('a document already being opened is not opened again', () => {
+  const opening = new OpeningDocs('darwin');
+  assert.equal(opening.begin('/Users/ada/Rapor.docx'), true);
+  assert.equal(opening.begin('/Users/ada/Rapor.docx'), false, 'the second double-click opened it again');
+  assert.equal(opening.begin('/Users/ada/Başka.docx'), true, 'another document is not held up');
+  opening.end('/Users/ada/Rapor.docx');
+  assert.equal(opening.begin('/Users/ada/Rapor.docx'), true, 'once it has opened (or failed), it may be opened again');
+});
+
+test('on Windows, one document whatever the case of its path', () => {
+  const opening = new OpeningDocs('win32');
+  assert.equal(opening.begin('C:\\Docs\\a.docx'), true);
+  assert.equal(opening.begin('c:\\docs\\A.DOCX'), false);
 });

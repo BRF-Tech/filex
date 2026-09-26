@@ -585,3 +585,41 @@ export function orphanScratchEntries(
     .filter((e) => typeof e.lastModified === 'number' && now - e.lastModified > maxAge)
     .map((e) => e.basename);
 }
+
+/**
+ * The documents being opened right now: between the double-click and the
+ * editor window, while the working copy goes up (up to 256 MB).
+ *
+ * ⚠ "Is it already open?" only knew documents whose editor was up, so a second
+ * double-click in that time opened a second session of the same document: two
+ * working copies writing back to one path, the last save winning and the other
+ * edit gone without a word. A path is taken here for as long as it is being
+ * opened; one opened, or failed, may be opened again.
+ */
+export class OpeningDocs {
+  private readonly keys = new Set<string>();
+  private readonly platform: NodeJS.Platform;
+
+  constructor(platform: NodeJS.Platform) {
+    this.platform = platform;
+  }
+
+  /** One key per document: case-insensitive on Windows, where C:\Docs\a.docx
+   *  and c:\docs\A.DOCX are one file. */
+  private key(p: string): string {
+    const resolved = this.platform === 'win32' ? nodePath.win32.resolve(p) : nodePath.resolve(p);
+    return this.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  }
+
+  /** Takes the document; false when it is already being opened. */
+  begin(p: string): boolean {
+    const k = this.key(p);
+    if (this.keys.has(k)) return false;
+    this.keys.add(k);
+    return true;
+  }
+
+  end(p: string): void {
+    this.keys.delete(this.key(p));
+  }
+}

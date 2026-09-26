@@ -94,6 +94,7 @@ import { DesktopNotifier, opensInWindow, type NotificationRow } from './notifica
 import { unreadBadgeCount, unreadBadgeLabel } from '../../web/src/lib/unreadBadge.ts';
 import {
   OFFICE_EXTENSIONS,
+  OpeningDocs,
   OFFICE_MIME_TYPES,
   SessionStore,
   WriteBackError,
@@ -1961,6 +1962,11 @@ const OPEN_WITH_STRINGS: Record<string, [en: string, tr: string]> = {
     'Az önce açılan pencereden sunucunu ekle, sonra belgeyi yeniden aç.',
   ],
   openFailedTitle: ['filex could not open {name}', 'filex {name} dosyasını açamadı'],
+  openingTitle: ['Opening {name}…', '{name} açılıyor…'],
+  openingBody: [
+    'filex is putting a working copy on your server; the editor opens when it is there.',
+    'filex sunucuna bir çalışma kopyası koyuyor; kopya oraya varınca düzenleyici açılır.',
+  ],
   openFailedDetail: [
     'The document on this computer has not been touched.',
     'Bu bilgisayardaki belgeye dokunulmadı.',
@@ -2127,6 +2133,9 @@ async function openDocuments(paths: string[]): Promise<void> {
   }
 }
 
+/** Documents between the double-click and their editor (OpeningDocs). */
+const openingDocs = new OpeningDocs(process.platform);
+
 async function openOneDocument(acc: Account, localPath: string): Promise<void> {
   // ⚠ One document, one editor. Double-clicking a file that is already open —
   // easy to do, since the app does not put itself in front of you — would
@@ -2143,13 +2152,34 @@ async function openOneDocument(acc: Account, localPath: string): Promise<void> {
     return;
   }
 
-  const twin = resolveSyncTwin(localPath, accountPairs(acc.id));
-  if (twin) {
-    log('openwith', 'synced twin', { localPath, remote: twin.remote, pair: twin.pairId });
-    openEditorWindow(acc, twin.remote, localPath, 'twin');
+  // ⚠ …and one that is still being opened. The check above only knows
+  // documents whose editor is up, which is after the working copy has gone
+  // up: a second double-click in that time opened a second session.
+  if (!openingDocs.begin(localPath)) {
+    log('openwith', 'already being opened', { localPath });
     return;
   }
-  await openViaScratch(acc, localPath);
+  try {
+    const twin = resolveSyncTwin(localPath, accountPairs(acc.id));
+    if (twin) {
+      log('openwith', 'synced twin', { localPath, remote: twin.remote, pair: twin.pairId });
+      openEditorWindow(acc, twin.remote, localPath, 'twin');
+      return;
+    }
+    // The upload is the slow part (up to 256 MB), and nothing was on screen
+    // until the editor came up: said once it takes a moment.
+    const slow = setTimeout(
+      () => openWithNotify(openText('openingTitle', { name: path.basename(localPath) }), openText('openingBody')),
+      1500,
+    );
+    try {
+      await openViaScratch(acc, localPath);
+    } finally {
+      clearTimeout(slow);
+    }
+  } finally {
+    openingDocs.end(localPath);
+  }
 }
 
 /**
