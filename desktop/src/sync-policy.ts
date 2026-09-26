@@ -40,6 +40,10 @@ export function wantedWatchers(accounts: readonly PolicyAccount[], pairs: readon
 export interface WatchGate {
   /** Settings / tray → Pause sync. Stored, so it survives a restart. */
   paused?: boolean;
+  /** Accounts whose local filex folder is being moved. Their watcher was
+   *  stopped for the move and must not be started again before it ends: one
+   *  reading half-moved mirrors sees a mass local delete. */
+  moving?: ReadonlySet<string>;
 }
 
 /**
@@ -54,7 +58,7 @@ export interface WatchGate {
  */
 export function watcherAccounts<A extends PolicyAccount>(accounts: readonly A[], gate: WatchGate): A[] {
   if (gate.paused) return [];
-  return accounts.filter((a) => !a.signedOut);
+  return accounts.filter((a) => !a.signedOut && !gate.moving?.has(a.id));
 }
 
 // ── bandwidth limits and the sync window ────────────────────────────────
@@ -156,6 +160,7 @@ export type FolderView =
   | { kind: 'window'; window: string }
   | { kind: 'error'; message: string; exited?: string; restartAt?: number }
   | { kind: 'pending' }
+  | { kind: 'moving' }
   | { kind: 'watching' }
   | { kind: 'stopped' };
 
@@ -170,9 +175,14 @@ export function folderView(input: {
   pairId: string;
   paused: boolean;
   signedOut: boolean;
+  /** Its account's local filex folder is being moved (its watcher is off). */
+  moving?: boolean;
   status: SyncStatus | null | undefined;
   minuteOfDay: number;
 }): FolderView {
+  // Before everything: the move is what is happening to it, and its stopped
+  // watcher read "stopped" in red for the hours a copy to another drive takes.
+  if (input.moving) return { kind: 'moving' };
   if (input.paused) return { kind: 'paused' };
   if (input.signedOut) return { kind: 'signed-out' };
   const st = input.status;

@@ -1129,6 +1129,8 @@
         'sync.phase_inventory_listed': ['listing the server — {n} item(s) so far', 'sunucu listeleniyor — şimdiye dek {n} öğe'],
         'sync.phase_settling_n': ['finishing up — {done}/{total}', 'tamamlanıyor — {done}/{total}'],
         'sync.pending':         ['waiting for its first check', 'ilk denetimini bekliyor'],
+        'sync.moving':          ['moving to the new filex folder…', 'yeni filex klasörüne taşınıyor…'],
+        'set.sync_root_moving': ['Moving…', 'Taşınıyor…'],
         'sync.exited':          ['the sync engine stopped (exit {code})', 'eşitleme motoru durdu (çıkış {code})'],
         'sync.restarting':      ['— starting it again shortly', '— birazdan yeniden başlatılıyor'],
         'sync.phase_transfer':  ['moving files — {done}/{total}', 'dosyalar aktarılıyor — {done}/{total}'],
@@ -1987,6 +1989,9 @@
             // A folder no pass has finished yet: not "watching", which is
             // what a folder in step says.
             case 'pending': line = T('sync.pending'); break;
+            // Its account's filex folder is being moved: its watcher is off
+            // until the move ends, which is not "stopped".
+            case 'moving': line = T('sync.moving'); break;
             case 'watching': line = T('sync.watching'); cls = 'ok'; break;
             case 'stopped': line = T('sync.stopped'); cls = 'err'; break;
           }
@@ -2091,7 +2096,9 @@
             </div>
             <div class="row">
               <button data-openlocal="${esc(active.syncRoot || '')}" ${active.syncRoot ? '' : 'disabled'}>${esc(T('set.open_folder'))}</button>
-              <button id="sync-root-change">${esc(T('set.sync_root_change'))}</button>
+              ${(state.rootMoving || []).includes(state.activeId)
+                ? `<button id="sync-root-change" disabled aria-busy="true">${esc(T('set.sync_root_moving'))}</button>`
+                : `<button id="sync-root-change">${esc(T('set.sync_root_change'))}</button>`}
             </div>
           </div></div>` : ''}
           ${pairs}
@@ -2387,9 +2394,18 @@
         const addSync = $('#add-sync', el);
         if (addSync) addSync.addEventListener('click', () => openPicker());
         const rootChange = $('#sync-root-change', el);
+        // ⚠ One move at a time: moving to another drive copies for hours, and
+        // a second press started a second move of the same folders. The main
+        // process refuses one too (sync:setRoot); this shuts the button while
+        // the picker and the move are open.
         if (rootChange) rootChange.addEventListener('click', async () => {
-          state = await window.filexApp.setSyncRoot(state.activeId);
-          renderSettings();
+          if (rootChange.disabled) return;
+          rootChange.disabled = true;
+          try {
+            state = await window.filexApp.setSyncRoot(state.activeId);
+          } finally {
+            renderSettings();
+          }
         });
         $('#sync-trash', el).addEventListener('click', () => void openTrash());
         $('#bg', el).addEventListener('click', async () => {

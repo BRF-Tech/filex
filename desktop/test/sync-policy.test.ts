@@ -306,3 +306,25 @@ test('the tray tooltip keeps a pause, and says what sync is doing', () => {
   assert.equal(trayTooltip({ paused: false, unreadLabel: '1 unread', syncing: false, failing: false }, words), 'filex — 1 unread');
   assert.equal(trayTooltip({ paused: false, unreadLabel: null, syncing: false, failing: false }, words), 'filex');
 });
+
+// ── moving the local filex folder (Y12) ──
+//
+// ⚠ Moving the folder copies it (to another drive: for hours). Its watcher is
+// stopped first, because a watcher reading half-moved mirrors sees a mass
+// local delete. But anything that made the app look at its accounts again —
+// a hold, a folder added, a crashed engine's restart — started the watcher
+// again in the middle of the move. And meanwhile every folder read "stopped",
+// in red.
+
+test('an account whose folder is being moved gets no watcher', () => {
+  assert.deepEqual(watcherAccounts([A, B], { moving: new Set(['a']) }), [B]);
+  assert.deepEqual([...wantedWatchers(watcherAccounts([A, B], { moving: new Set(['a']) }), PAIRS)], ['b']);
+});
+
+test('the folder line: a folder being moved says so, not "stopped"', () => {
+  const st = running({ running: false, pairs: { 'pair-1': passed } });
+  assert.deepEqual(
+    folderView({ pairId: 'pair-1', paused: false, signedOut: false, moving: true, status: st, minuteOfDay: NOON }),
+    { kind: 'moving' },
+  );
+});
