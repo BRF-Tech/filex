@@ -230,19 +230,34 @@ async function deleteRule(r: ReplicaRule) {
 }
 
 // ── Failures ───────────────────────────────────────────
+/* ⚠ "Fix all" had no busy state, and the list comes back looking the same
+ * (a retry has not run yet when the request answers), which invited another
+ * press. The button now waits for its answer, and the answer says how many
+ * retries were already waiting in the queue: the server absorbs those rather
+ * than queuing them again. */
+const fixing = ref(false);
+
 async function fixAll() {
+  if (fixing.value) return;
+  fixing.value = true;
   try {
     const r = await replica.fixAll();
-    toast.success(t('replica.failures.queued', { n: r.queued }, r.queued));
+    const already = r.already_queued ?? 0;
+    if (r.queued > 0) toast.success(t('replica.failures.queued', { n: r.queued }, r.queued));
+    else if (already > 0) toast.info(t('replica.failures.alreadyQueued', { n: already }, already));
+    else toast.info(t('replica.failures.nothingToFix'));
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.actionFailed')));
+  } finally {
+    fixing.value = false;
   }
 }
 
 async function fixOne(path: string, op: string) {
   try {
-    await replica.fixOne(path, op);
-    toast.success(t('replica.failures.queuedOne'));
+    const r = await replica.fixOne(path, op);
+    if (r.queued === false) toast.info(t('replica.failures.alreadyQueuedOne'));
+    else toast.success(t('replica.failures.queuedOne'));
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.actionFailed')));
   }
@@ -589,7 +604,7 @@ function onFailureAction(key: string, row: ReplicaFailure) {
         </h2>
         <div class="flex items-center gap-3">
           <Toggle :model-value="replica.onlyUnresolved" :label="t('replica.failures.unresolvedOnly')" @update:model-value="setUnresolved" />
-          <Button size="sm" variant="primary" @click="fixAll" :disabled="!replica.failures.length">
+          <Button size="sm" variant="primary" :loading="fixing" :disabled="fixing || !replica.failures.length" @click="fixAll">
             <Wrench class="h-4 w-4" />
             {{ t('replica.failures.fixAll') }}
           </Button>

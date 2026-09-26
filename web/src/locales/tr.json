@@ -1405,6 +1405,9 @@
       "unresolvedOnly": "Sadece çözülmeyenler",
       "queued": "{n} yeniden deneme kuyruğa alındı",
       "queuedOne": "Retry kuyruğa alındı",
+      "alreadyQueued": "{n} yeniden deneme zaten kuyrukta bekliyor",
+      "alreadyQueuedOne": "Bunun yeniden denemesi zaten kuyrukta bekliyor",
+      "nothingToFix": "Onarılacak bir şey yok",
       "fields": {
         "path": "Yol",
         "op": "İşlem",

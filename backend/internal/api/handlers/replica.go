@@ -182,12 +182,14 @@ func (h *Replica) FixAll(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica reconcile offline"})
 		return
 	}
-	queued, err := h.Service.ReconcileAll(r.Context())
+	// `already_queued` counts failures whose retry was still waiting in the
+	// queue: pressing again adds nothing for them (replica.RetryDedupKey).
+	got, err := h.Service.ReconcileAll(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"queued": queued})
+	writeJSON(w, http.StatusOK, got)
 }
 
 // FixOne enqueues a single retry.
@@ -210,11 +212,13 @@ func (h *Replica) FixOne(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path and op required"})
 		return
 	}
-	if err := h.Service.FixOne(r.Context(), body.Path, body.Op); err != nil {
+	queued, err := h.Service.FixOne(r.Context(), body.Path, body.Op)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	// `queued: false` — a retry of this failure was already waiting.
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "queued": queued})
 }
 
 // GetReport returns the latest singleton status report. nil → 204.

@@ -3,6 +3,7 @@ package replica
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -39,34 +40,65 @@ func New(store db.Store, driver *storage.ReplicatedDriver, q queue.Driver, n not
 	}
 }
 
-// ReconcileAll enqueues a replica_retry op for every unresolved
-// failure currently recorded. Returns the number queued.
-func (s *Service) ReconcileAll(ctx context.Context) (int, error) {
+// Reconciled is what one "Repair all" did: retries it queued, and retries it
+// found already waiting in the queue and left alone.
+type Reconciled struct {
+	Queued        int `json:"queued"`
+	AlreadyQueued int `json:"already_queued"`
+}
+
+// RetryDedupKey coalesces the retries of one failure: while a retry of it is
+// waiting in the queue, another request for it adds nothing.
+//
+// ⚠ Every press of "Repair all" queued a full set again. The list looks the
+// same until a retry has run, which invites another press, and each one
+// doubled the queue and told the bell "retries queued" once more.
+func RetryDedupKey(path, op string) string {
+	return queue.TypeReplicaRetry + ":" + op + ":" + path
+}
+
+// enqueueRetry queues one retry, or reports it already waiting.
+func (s *Service) enqueueRetry(ctx context.Context, path, op string) (queued bool, err error) {
+	_, err = s.queue.Enqueue(ctx, queue.Op{
+		Type: queue.TypeReplicaRetry,
+		Payload: map[string]any{
+			"path": path,
+			"op":   op,
+		},
+		Priority:    50,
+		MaxAttempts: 3,
+		DedupKey:    RetryDedupKey(path, op),
+	})
+	if errors.Is(err, queue.ErrDuplicate) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// ReconcileAll enqueues a replica_retry op for every unresolved failure
+// currently recorded that has none waiting already.
+func (s *Service) ReconcileAll(ctx context.Context) (Reconciled, error) {
+	var out Reconciled
 	if s.queue == nil {
-		return 0, fmt.Errorf("replica reconcile: queue not configured")
+		return out, fmt.Errorf("replica reconcile: queue not configured")
 	}
 	failures, _, err := s.store.ListReplicaFailures(ctx, true, 10000, 0)
 	if err != nil {
-		return 0, err
+		return out, err
 	}
-	queued := 0
 	for _, f := range failures {
-		_, err := s.queue.Enqueue(ctx, queue.Op{
-			Type: queue.TypeReplicaRetry,
-			Payload: map[string]any{
-				"path": f.Path,
-				"op":   f.Op,
-			},
-			Priority:    50,
-			MaxAttempts: 3,
-		})
-		if err != nil {
+		queued, err := s.enqueueRetry(ctx, f.Path, f.Op)
+		switch {
+		case err != nil:
 			slog.Warn("replica reconcile: enqueue failed",
 				slog.String("path", f.Path), slog.String("err", err.Error()))
-			continue
+		case queued:
+			out.Queued++
+		default:
+			out.AlreadyQueued++
 		}
-		queued++
 	}
+	queued := out.Queued
 	if queued > 0 && s.notifier != nil {
 		_, _ = s.notifier.Send(ctx, notify.Event{
 			Event:    notify.EventReplicaReconcileDone,
@@ -76,24 +108,16 @@ func (s *Service) ReconcileAll(ctx context.Context) (int, error) {
 			Meta:     map[string]any{"queued": queued},
 		})
 	}
-	return queued, nil
+	return out, nil
 }
 
-// FixOne enqueues a single retry for one (path, op) pair.
-func (s *Service) FixOne(ctx context.Context, path, op string) error {
+// FixOne enqueues a single retry for one (path, op) pair, unless one is
+// waiting in the queue already (queued=false, no error).
+func (s *Service) FixOne(ctx context.Context, path, op string) (queued bool, err error) {
 	if s.queue == nil {
-		return fmt.Errorf("replica reconcile: queue not configured")
+		return false, fmt.Errorf("replica reconcile: queue not configured")
 	}
-	_, err := s.queue.Enqueue(ctx, queue.Op{
-		Type: queue.TypeReplicaRetry,
-		Payload: map[string]any{
-			"path": path,
-			"op":   op,
-		},
-		Priority:    50,
-		MaxAttempts: 3,
-	})
-	return err
+	return s.enqueueRetry(ctx, path, op)
 }
 
 // HandleRetry is the queue.Handler for op type "replica_retry". The

@@ -1405,6 +1405,9 @@
       "unresolvedOnly": "Unresolved only",
       "queued": "{n} retry queued | {n} retries queued",
       "queuedOne": "Retry queued",
+      "alreadyQueued": "{n} retry is already waiting in the queue | {n} retries are already waiting in the queue",
+      "alreadyQueuedOne": "A retry of this is already waiting in the queue",
+      "nothingToFix": "Nothing to fix",
       "fields": {
         "path": "Path",
         "op": "Op",
