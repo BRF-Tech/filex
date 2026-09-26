@@ -52,7 +52,7 @@ import type {
 /** Server-side PendingOp DTO (mirror of Modules\FishApp\Models\PendingOp::toApiArray). */
 export interface PendingOpDto {
   id: number;
-  op_type: 'copy' | 'move' | 'delete' | 'archive-create' | 'archive-extract';
+  op_type: 'copy' | 'move' | 'delete' | 'rename' | 'restore' | 'archive-create' | 'archive-extract';
   status: 'pending' | 'running' | 'cancelling' | 'done' | 'error' | 'cancelled';
   progress_total: number;
   progress_done: number;
@@ -640,6 +640,21 @@ export function useFileApi(config: ExplorerConfig) {
     });
   }
 
+  /**
+   * Rename as a job of the operations queue (`queued=1`), for a folder: on an
+   * object store that is one request per object, longer than any proxy waits.
+   * `op` is the job when the server queued it. An older server ignores
+   * `queued` and renames inside the request, and answers the listing instead.
+   * A refusal throws, as `rename` does.
+   */
+  async function renameQueued(path: string, item: string, name: string): Promise<{ op?: PendingOpDto }> {
+    return jsonFetch<{ op?: PendingOpDto }>(managerUrl('rename', { queued: 1 }), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, item, name }),
+    });
+  }
+
   async function move(path: string, items: string[], target: string): Promise<ManagerResponse> {
     return jsonFetch<ManagerResponse>(managerUrl('move'), {
       method: 'POST',
@@ -693,6 +708,23 @@ export function useFileApi(config: ExplorerConfig) {
     });
   }
 
+  /**
+   * Restore trash entries by node id as jobs of the operations queue
+   * (`queued=1`): one request for the whole selection, one job per storage.
+   * Only for a server whose capabilities list `restore` under `queued`; an
+   * older one restores one `node_id` per request (restoreIds).
+   */
+  async function restoreQueued(ids: number[]): Promise<{ ops: PendingOpDto[] }> {
+    if (!endpoints.trashRestore) throw new Error('trashRestore endpoint not configured');
+    const sep = endpoints.trashRestore.includes('?') ? '&' : '?';
+    const res = await jsonFetch<{ ops?: PendingOpDto[] }>(`${endpoints.trashRestore}${sep}queued=1`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ node_ids: ids }),
+    });
+    return { ops: res.ops ?? [] };
+  }
+
   /** filex trash listing — soft-deleted nodes across (or within) storages. */
   async function listTrash(storageName?: string): Promise<{ entries: TrashEntry[]; total: number }> {
     if (!endpoints.trashList) throw new Error('trashList endpoint not configured');
@@ -711,11 +743,21 @@ export function useFileApi(config: ExplorerConfig) {
    * protecting the file that holds the name — a restore used to overwrite it —
    * so it is reported by name rather than folded into "0 items restored",
    * which would read as if nothing had been tried.
+   *
+   * `failed` counts every other item that did not come back, and `failure` is
+   * the first of those errors, to be said. ⚠ They used to be skipped without a
+   * word: a folder whose restore outran the proxy (every object inside is moved
+   * back one by one on an object store) simply did not count, and the explorer
+   * reported "2 items restored" over a selection of three.
    */
-  async function restoreIds(ids: number[]): Promise<{ restored: number; taken: string[] }> {
+  async function restoreIds(
+    ids: number[],
+  ): Promise<{ restored: number; taken: string[]; failed: number; failure?: unknown }> {
     const url = endpoints.trashRestore;
     if (!url) throw new Error('trashRestore endpoint not configured');
     let restored = 0;
+    let failed = 0;
+    let failure: unknown;
     const taken: string[] = [];
     for (const id of ids) {
       try {
@@ -730,15 +772,19 @@ export function useFileApi(config: ExplorerConfig) {
         if (e.status === 409) {
           try {
             const body = JSON.parse(e.detail ?? '') as { code?: string; name?: string };
-            if (body.code === 'EXISTS') taken.push(body.name || String(id));
+            if (body.code === 'EXISTS') {
+              taken.push(body.name || String(id));
+              continue;
+            }
           } catch {
             /* a 409 without the envelope is counted as a plain failure */
           }
         }
-        /* any other failure: skip it, report the count that succeeded */
+        failed++;
+        if (failure === undefined) failure = err;
       }
     }
-    return { restored, taken };
+    return failure === undefined ? { restored, taken, failed } : { restored, taken, failed, failure };
   }
 
   /**
@@ -1208,6 +1254,7 @@ export function useFileApi(config: ExplorerConfig) {
     newFolder,
     newFile,
     rename,
+    renameQueued,
     move,
     copy,
     moveAsync,
@@ -1216,6 +1263,7 @@ export function useFileApi(config: ExplorerConfig) {
     restore,
     listTrash,
     restoreIds,
+    restoreQueued,
     uploadMultipart,
     downloadUrl,
     previewUrl,

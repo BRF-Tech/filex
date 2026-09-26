@@ -466,6 +466,8 @@ func BuildRouter(d *Deps) http.Handler {
 		// owns that DB logic, so inject it as the worker's DBSync hook —
 		// without this, async move/delete/copy don't reflect in the UI.
 		d.Ops.SetSync(mh)
+		// …and a folder rename asked with `queued=1` runs on it (vfRename).
+		mh.AttachOps(d.Ops)
 		// …and the staged-upload transfer, for the same reason: the bytes move
 		// in the worker, but the node/index/thumb/writehook side of a write
 		// lives in the handler layer.
@@ -494,6 +496,15 @@ func BuildRouter(d *Deps) http.Handler {
 	th.AttachSigner(thumbSigner)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
 	ch.Archive = archiveEngine
+	// What the explorer and the admin's Trash page may ask to run on the queue
+	// (queued=1), and only what is wired: the manager renames on it, the trash
+	// handler restores and purges on it.
+	if d.Ops != nil {
+		ch.Queued = []string{"rename"}
+		if d.Trash != nil {
+			ch.Queued = append(ch.Queued, "restore", "purge")
+		}
+	}
 	ch.E2EEscrow = d.E2EEscrow /* wiring:e2 */
 	// ⚠ Only a non-nil mailer: a nil *mailer.Service stored in the interface
 	// would make the field say "not ready" on a build that never had mail
@@ -575,6 +586,10 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.Ops != nil && d.Trash != nil {
 		d.Ops.SetTrashEmptier(d.Trash)
 		trashH.AttachOps(d.Ops)
+		// …and so do a restore and a permanent delete asked with `queued=1`
+		// (ops.OpRestore, ops.OpPurge).
+		d.Ops.SetRestorer(trashH)
+		d.Ops.SetPurger(trashH)
 	}
 	metaH := handlers.NewMeta(d.Store)
 	// Starred / recent / tag rows carry the caller's `perm` like a folder

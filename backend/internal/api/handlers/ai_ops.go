@@ -643,6 +643,10 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 		return err
 	}
 	base := path.Base(rel)
+	// Finished even if the caller leaves half-way through a folder
+	// (detachedMutation).
+	ctx, cancel := detachedMutation(ctx)
+	defer cancel()
 
 	// trash.Put is the shared implementation behind every delete surface: it
 	// renames the object into `.filex-trash/`, walks the prefix per-object when
@@ -805,6 +809,11 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 			return nil, err
 		}
 	}
+
+	// Finished even if the caller leaves half-way through a folder, on either
+	// arm (detachedMutation).
+	ctx, cancel := detachedMutation(ctx)
+	defer cancel()
 
 	if sSrc.ID != sDst.ID {
 		// Two storages have no rename between them, so the bytes travel — the

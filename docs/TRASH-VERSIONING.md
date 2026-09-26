@@ -166,6 +166,7 @@ logged; the next run tries again).
 |---|---|---|
 | `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, and **`ttl_days`** (days remaining before purge, floored at 0). |
 | `POST /api/files/manager/restore` | `{ "node_id": 123 }` | Moves the file back to its original path and re‑attaches the row. Returns **409** `{ "code": "EXISTS", "name", "path" }` when something already holds that path; nothing moves and the entry stays in the trash. |
+| `POST /api/files/manager/restore?queued=1` | `{ "node_ids": [123, 124] }` | The same checks for every entry, and one refusal refuses the batch. What they allow is queued, one job per storage: **202** `{ "ops": [{ "kind": "restore", … }] }`, followed with `GET /api/files/ops`. An entry whose place is taken fails on its own, and the job's `error` says so; the others come back. Offered when `capabilities.queued` lists `restore`; the explorer's Restore uses it then. |
 
 The explorer's **Trash** view draws these entries in its own table with the
 facts a deleted item has: **Deleted** (when — the date column, sortable and
@@ -192,6 +193,7 @@ answer to whoever holds a grant on `.filex-trash/`.
 | `POST /api/admin/trash/empty` | `?older_than_days=N&storage_id=…` **or** JSON `{ "older_than_days": N, "storage_id": … }` | Queues a purge of everything deleted more than `N` days before **the moment it is asked for**, in one storage or every storage the caller can reach. **`0` or missing days is everything in the trash at that moment** — a file deleted while the purge runs stays in the trash. Waits up to two seconds: **200** with the final counts when the purge is done by then, otherwise **202** with its progress so far while it carries on as an ops job — see the run fields below. **409** `{ "code": "BUSY", "job": … }` while the caller's tenant already has one queued or running (`job` is that run); another tenant's purge, or the nightly retention, does not refuse it — it waits its turn (`queued: true`). **400** for anything it cannot read — a non‑integer or negative day count, a storage id that is not a number, an unknown field — and nothing is purged. |
 | `GET /api/admin/trash/empty` | — | The latest purge the caller's tenant asked for: queued, running or finished. `{ "running": false }` alone when it has asked for none. |
 | `DELETE /api/admin/trash/{id}` | — | Immediately hard‑delete one trashed node (storage object + quota + row). |
+| `DELETE /api/admin/trash/{id}?queued=1` | — | The same ownership check, then the purge is a job of the operations queue: **202** `{ "op": { "kind": "purge", … } }`, followed with `GET /api/files/ops`. A folder is purged one object and one row at a time; inside the request the admin page's client gave up after 30 s. Offered when `capabilities.queued` lists `purge`; the admin Trash page uses it then, and restores with `POST /api/files/manager/restore?queued=1`. Once running it is not cancelled half-way. |
 
 A run reports `{ ok, op_id, running, queued, cancelled, storage_id,
 older_than_days, total, total_bytes, scanned, purged, failed, bytes, started_at,
@@ -242,6 +244,14 @@ folder exists again.
 A file or folder now holds the original path. filex refuses rather than
 overwrite it or pour one folder into another. Rename or move what is there,
 then restore again.
+
+**A folder restore answered 504, or the page gave up waiting.**
+The restore carries on to the end: it no longer depends on anybody waiting for
+the answer. List the folder again to see it back. Up to v0.45.1 the proxy's
+timeout stopped it between two objects, leaving the folder half in the trash
+and half back in place; a second restore then answered 409 `EXISTS`, because
+the half that had come back held the name. The rest of such a folder is still
+under its `.filex-trash/` key on the backend, to be moved back by hand.
 
 **Restore reports success but the file isn't back on disk.**
 The DB flag is cleared **best‑effort**: if the driver's move step fails, filex

@@ -287,6 +287,10 @@ export interface Capabilities {
    *  demo_mode is on — the demo landing publishes these credentials. */
   demo_pass?: string;
   default_locale?: string | null;
+  /** The changes this server runs as jobs of its operations queue when asked
+   *  with `queued=1` (`rename`, `restore`, `purge`). Absent on an older server,
+   *  which makes them inside the request. */
+  queued?: string[];
   /** The origin the server builds absolute links on — present only when the
    *  operator chose one (FILEX_PUBLIC_URL) or the request came in on a
    *  tenant's own host. */
