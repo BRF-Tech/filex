@@ -44,16 +44,19 @@ import (
 // objectStore is the local driver made to change a folder the way the S3
 // driver's copyDir does: one object after another, each refused once the
 // context is cancelled, as the SDK refuses a request it has not sent yet.
-// `leave` runs once, after the first object: the client goes away there.
+// Its client goes away after the first object.
 type objectStore struct {
 	*local.Driver
-	root  string
-	leave func()
+	root   string
+	client *client
 }
 
+// client is whose request it is: every storage of a rig shares one.
+type client struct{ leave context.CancelFunc }
+
 func (d *objectStore) step() {
-	if leave := d.leave; leave != nil {
-		d.leave = nil
+	if leave := d.client.leave; leave != nil {
+		d.client.leave = nil
 		leave()
 	}
 }
@@ -133,6 +136,7 @@ func (d *objectStore) Stat(ctx context.Context, p string) (storage.Object, error
 
 type leavingRig struct {
 	*renameRig
+	client *client
 	stores map[int64]*objectStore
 	th     *handlers.Trash
 }
@@ -140,7 +144,8 @@ type leavingRig struct {
 func newLeavingRig(t *testing.T) *leavingRig {
 	t.Helper()
 	_, store, drv, st, root := newMutateFixture(t)
-	r := &leavingRig{stores: map[int64]*objectStore{st.ID: {Driver: drv, root: root}}}
+	c := &client{}
+	r := &leavingRig{client: c, stores: map[int64]*objectStore{st.ID: {Driver: drv, root: root, client: c}}}
 	r.renameRig = &renameRig{mh: handlers.NewManager(store, r.resolve), store: store, st: st, root: root}
 	r.th = handlers.NewTrash(trash.New(store, r.resolve, nil), store)
 	return r
@@ -164,7 +169,7 @@ func (r *leavingRig) another(t *testing.T, name string) string {
 		ConfigJSON: json.RawMessage(`{"root":"` + escapeJSON(root) + `"}`),
 	})
 	require.NoError(t, err)
-	r.stores[st.ID] = &objectStore{Driver: drv, root: root}
+	r.stores[st.ID] = &objectStore{Driver: drv, root: root, client: r.client}
 	return root
 }
 
@@ -185,9 +190,7 @@ var leonFiles = []string{"a.txt", "b.txt", "c.txt"}
 func (r *leavingRig) leaving(method, target string, body any) *http.Request {
 	raw, _ := json.Marshal(body)
 	ctx, cancel := context.WithCancel(context.Background())
-	for _, d := range r.stores {
-		d.leave = cancel
-	}
+	r.client.leave = cancel
 	req := httptest.NewRequest(method, target, bytes.NewReader(raw)).WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
 	return req
