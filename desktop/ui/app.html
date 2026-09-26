@@ -1632,6 +1632,7 @@
             prepare: (items) => window.filexApp.dragPrepare(account.id, items),
             start: (items) => window.filexApp.dragStart(account.id, items),
             cancel: () => window.filexApp.dragCancel(),
+            stop: () => window.filexApp.dragStop(),
             onProgress: (cb) => { explorerDragCb = cb; },
           },
           // #47 — the palette's "Everywhere" group searches EVERY account on

@@ -205,8 +205,7 @@ import {
   hasInternalDrag,
   internalDragItems,
   internalDragOrigin,
-  type DragItem,
-} from './lib/dragOut';
+  type DragItem, sayDragProgress } from './lib/dragOut';
 
 import NewFolderModal from './modals/NewFolderModal.vue';
 import ArchiveCreateModal from './modals/ArchiveCreateModal.vue';
@@ -5785,22 +5784,21 @@ onMounted(() => {
     // Work that happens AFTER the drop (the placeholder path) is always
     // announced — the user dropped a file into a folder and has a right to
     // know what happened there. Silence only applies to the pre-preparation
-    // nobody asked for.
-    const afterDrop = !!p?.dropped;
-    if (p?.error === 'drop_not_found') {
-      flashToast(t('dragout.not_found'));
+    // nobody asked for. What is said is lib/dragOut's sayDragProgress.
+    if (!p) return;
+    const say = sayDragProgress(p, { quiet: dragOutQuiet, stoppable: !!dragOut.value?.stop, t });
+    if (!say) return;
+    if (say.kind === 'flash') {
+      flashToast(say.message);
       return;
     }
-    if (p?.error) {
-      if (afterDrop || !dragOutQuiet) flashToast(p.error);
-      return;
-    }
-    if (afterDrop) {
-      flashToast(p?.finished ? t('dragout.done') : t('dragout.downloading'));
-      return;
-    }
-    if (dragOutQuiet) return;
-    if (!p?.finished && p?.done === 0) flashToast(t('dragout.preparing'));
+    // Held until the next report replaces it — the filling-in is still going.
+    showToast(
+      say.stoppable
+        ? { message: say.message, actionLabel: t('dragout.stop'), action: () => void dragOut.value?.stop?.() }
+        : { message: say.message },
+      10 * 60_000,
+    );
   });
 });
 /* wiring:f1 — an OS drag never fires 'dragend' for us (the HTML5 drag never

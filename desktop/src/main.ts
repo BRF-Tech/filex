@@ -258,6 +258,8 @@ let dragReady: { key: string; paths: string[] } | null = null;
 let dragPrepare: AbortController | null = null;
 /** The placeholder drag in flight: its watcher, and the transfer it becomes. */
 let dragDrop: { cancel: () => void; dir: string } | null = null;
+/** The drop being filled in right now, which the explorer's Stop aborts. */
+let dragFill: AbortController | null = null;
 /** What the updater is doing, as far as the UI is concerned. */
 // 'store': a store copy (src/channel.ts) — the store updates it, `url` is its page.
 let updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error' | 'manual' | 'store'; version?: string; percent?: number; error?: string; url?: string } = { status: 'idle' };
@@ -3575,14 +3577,27 @@ function wireIpc(): void {
         }
         mainWindow?.webContents.send('drag:progress', { done: 0, total: items.length, name: loc.name, dropped: loc.dir });
         dragLog('filling in', { dir: loc.dir, items: items.length });
-        const res = await fulfilDrop(dragCache!, loc.dir, items, {
-          accountId: acc.id,
-          serverUrl: acc.serverUrl,
-          token: acc.token,
-          mirrorFor: (remote) => mirrorPathFor(acc.id, remote),
-          onProgress: (pr) => mainWindow?.webContents.send('drag:progress', { ...pr, dropped: loc.dir }),
+        // The explorer offers Stop while the drop is filled in (drag:stop).
+        const fill = new AbortController();
+        dragFill = fill;
+        const res = await fulfilDrop(
+          dragCache!,
+          loc.dir,
+          items,
+          {
+            accountId: acc.id,
+            serverUrl: acc.serverUrl,
+            token: acc.token,
+            mirrorFor: (remote) => mirrorPathFor(acc.id, remote),
+            onProgress: (pr) => mainWindow?.webContents.send('drag:progress', { ...pr, dropped: loc.dir }),
+          },
+          fill.signal,
+        ).finally(() => {
+          if (dragFill === fill) dragFill = null;
         });
         dragDrop = null;
+        // Stopped by the person: the explorer has said so (error 'cancelled').
+        if (!res.ok && res.error === 'cancelled') return;
         dragLog('fill result', res.ok ? { ok: true, written: res.written } : { ok: false, error: res.error });
         if (!res.ok) {
           // ⚠⚠ NOT dialog.showErrorBox. This runs long after the gesture, on
@@ -3618,6 +3633,13 @@ function wireIpc(): void {
   // there for its whole timeout after every in-app drag.
   ipcMain.handle('drag:cancel', () => {
     dragDropCancel();
+    return true;
+  });
+
+  // The explorer's Stop on a drop being filled in: what has arrived stays,
+  // the rest is not fetched.
+  ipcMain.handle('drag:stop', () => {
+    dragFill?.abort();
     return true;
   });
 
