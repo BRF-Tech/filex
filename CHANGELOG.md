@@ -91,6 +91,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A request that got no answer is no longer printed in the client's own
     English; the page's one "server could not be reached" notice says it.
 
+- **The explorer says when it is waiting, and on what.** More from the same
+  audit:
+  - "Delete permanently" in the Trash deletes. Everyone was offered it; its
+    dialog said the items "will be moved to trash", about items already
+    there, and then nothing was deleted. Someone the server lets purge (the
+    probe behind "Empty trash") now purges, as jobs of the queue on a server
+    that runs purges there, after a dialog that says it is for good. Anyone
+    else no longer sees it, and the Delete key says how the trash empties
+    itself.
+  - Undo says "Undoing…" while it runs, and then what it did: queued (moving
+    something back, or renaming a folder back, is a job), undone in part
+    ("2 of 5"), or undone. It said "Undone" about all three.
+  - A listing being read again (a folder opened, Refresh, a search) draws a
+    thin moving bar over the rows it will replace, and fades them, after
+    300 ms. For the seconds a large object-store folder takes, the previous
+    folder's rows looked like the answer.
+  - "Catalog everything" follows the scan it started. It flashed "started"
+    and then said nothing for the hours a large storage takes. The banner now
+    says the storage is being cataloged, the button reads "Cataloging…", and
+    the end is said: done (and the listing read again), failed with the
+    reason, or stopped.
+
 ## [0.46.0] - 2026-09-26
 
 ### Added

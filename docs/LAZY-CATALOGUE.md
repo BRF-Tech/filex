@@ -327,7 +327,14 @@ beside the figure).
 
 An administrator sees **Catalog everything** on the strip in behaviour B. It
 starts the ordinary full sync (`POST /api/admin/storages/{id}/sync`; the id is
-looked up at click time, so the listing never carries it).
+looked up at click time, so the listing never carries it), and follows it to
+its end through the storage's newest runs (`GET …/sync-runs?limit=5`,
+`lib/catalogRun`). The run followed is the one already walking the storage when
+pressed, or else the first run newer than every run before the press, told by
+its id. Meanwhile the strip says the storage is being cataloged and the button
+reads "Cataloging…"; the end is a notice — done (and the listing is read
+again), failed with the reason, stopped, or, when the run could not be
+followed, where the admin panel shows it.
 
 ## Admin and observability
 
