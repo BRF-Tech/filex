@@ -374,7 +374,11 @@ const versionsState = ref<SectionState>('idle');
 const versions = ref<NodeVersion[]>([]);
 const confirmVersionId = ref<number | null>(null);
 const snapshotFirst = ref(true);
-const versionBusy = ref(false);
+/* ⚠ Which version work is under way, not just THAT one is: both copy the
+ * whole file on the storage, and the buttons only went grey, so a long
+ * restore read as a stuck pane. The pressed button names its work. */
+const versionWork = ref<'restore' | 'snapshot' | null>(null);
+const versionBusy = computed(() => versionWork.value !== null);
 
 // ── shares state ─────────────────────────────────────────────────────
 const sharesState = ref<SectionState>('idle');
@@ -445,7 +449,7 @@ function askRestore(v: NodeVersion): void {
 async function confirmRestore(v: NodeVersion): Promise<void> {
   const id = nodeId.value;
   if (id == null || versionBusy.value) return;
-  versionBusy.value = true;
+  versionWork.value = 'restore';
   try {
     await props.api.restoreVersion(id, v.id, snapshotFirst.value);
     emit('toast', t('inspector.versions.restored'));
@@ -459,14 +463,14 @@ async function confirmRestore(v: NodeVersion): Promise<void> {
     const held = lockedRefusal(err);
     emit('toast', held ? lockWords(held, { t, formatDate: formatDateOf, locale: props.locale }) : (err as Error).message);
   } finally {
-    versionBusy.value = false;
+    versionWork.value = null;
   }
 }
 
 async function takeSnapshot(): Promise<void> {
   const id = nodeId.value;
   if (id == null || versionBusy.value) return;
-  versionBusy.value = true;
+  versionWork.value = 'snapshot';
   try {
     await props.api.snapshotVersion(id);
     emit('toast', t('inspector.versions.snapshotted'));
@@ -480,7 +484,7 @@ async function takeSnapshot(): Promise<void> {
       emit('toast', (err as Error).message);
     }
   } finally {
-    versionBusy.value = false;
+    versionWork.value = null;
   }
 }
 
@@ -994,8 +998,9 @@ watch(
                     type="button"
                     class="fe-btn fe-btn--primary fe-btn--sm"
                     :disabled="versionBusy"
+                    :aria-busy="versionWork === 'restore'"
                     @click="confirmRestore(v)"
-                  >{{ t('inspector.versions.confirm') }}</button>
+                  >{{ versionWork === 'restore' ? t('inspector.versions.restoring') : t('inspector.versions.confirm') }}</button>
                   <button
                     type="button"
                     class="fe-btn fe-btn--sm"
@@ -1017,8 +1022,9 @@ watch(
             type="button"
             class="fe-btn fe-btn--sm fe-inspector__snapshot"
             :disabled="versionBusy"
+            :aria-busy="versionWork === 'snapshot'"
             @click="takeSnapshot"
-          >{{ t('inspector.versions.take_snapshot') }}</button>
+          >{{ versionWork === 'snapshot' ? t('inspector.versions.snapshotting') : t('inspector.versions.take_snapshot') }}</button>
         </template>
       </section>
 
