@@ -92,6 +92,14 @@ describe('the release submits its desktop package to the Microsoft Store', () =>
   // ⚠ v0.47.0's resubmit uploaded the package, then a Store call answered
   // "400 (Bad Request)" and the warning said nothing else: the reason is in
   // the response body (ErrorDetails), and which call it was is the line.
+  // ⚠ The reason, once printed: "Only JSON content is accepted" on the commit.
+  // Invoke-RestMethod sends a body-less POST as
+  // application/x-www-form-urlencoded (measured against httpbin, 2026-09-27);
+  // -ContentType application/json alone makes it JSON, still with no body.
+  it.runIf(!!DIR)('commits the submission as JSON', () => {
+    expect(code(SCRIPT)).toMatch(/-Method Post -Headers \$h -ContentType 'application\/json' "\$api\/submissions\/\$sid\/commit"/);
+  });
+
   it.runIf(!!DIR)('says which call failed and what the Store answered', () => {
     const script = code(SCRIPT);
     expect(script.match(/ErrorDetails\.Message/g)?.length ?? 0).toBeGreaterThanOrEqual(2);

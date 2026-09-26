@@ -87,7 +87,10 @@ try {
     Write-Host "::warning title=Microsoft Store::'What's new' was not updated ($(Why $_)); submitting with the previous text."
   }
 
-  Invoke-RestMethod -Method Post -Headers $h "$api/submissions/$sid/commit" | Out-Null
+  # ⚠ -ContentType is required though there is no body: a body-less POST goes
+  # out as application/x-www-form-urlencoded and the Store answers 400 "Only
+  # JSON content is accepted" (v0.47.0's second resubmit).
+  Invoke-RestMethod -Method Post -Headers $h -ContentType 'application/json' "$api/submissions/$sid/commit" | Out-Null
   $state = 'CommitStarted'
   for ($i = 0; $i -lt 12 -and $state -eq 'CommitStarted'; $i++) {
     Start-Sleep -Seconds 10
