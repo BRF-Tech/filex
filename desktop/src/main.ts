@@ -144,6 +144,7 @@ import {
   normLimit,
   normWindow,
   folderView,
+  stopForRemoval,
   trayTooltip,
   watchPrefsKey,
   watcherAccounts,
@@ -3391,6 +3392,11 @@ function wireIpc(): void {
   });
 
   ipcMain.handle('sync:remove', async (_e, id: string) => {
+    // A pass of this folder already under way stops with it (stopForRemoval);
+    // refreshPairs() below starts the watcher again without it.
+    const account = knownPairs.find((p) => p.id === id)?.account;
+    const st = account ? supervisor?.statuses().find((s) => s.accountId === account) : undefined;
+    if (account && stopForRemoval(st, id)) supervisor?.stop(account);
     try {
       await removePair(id);
     } finally {

@@ -2693,8 +2693,42 @@
       setupTitlebar();
       relabelStatic();
 
+      // ⚠ One repaint at a time, and never under a press or a field being
+      // typed in. The engine speaks on every chunk it prints, and each one
+      // repainted Settings whole: a click whose press and release fell either
+      // side of a repaint hit an element that no longer existed and did
+      // nothing, and a field lost its caret mid-word (O14).
+      let refreshQueued = false;
+      let pressing = false;
+      let refreshHeld = false;
+      function editingSettings() {
+        const a = document.activeElement;
+        return !!a && !!a.closest && !!a.closest('#settings') && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName);
+      }
+      function refreshSoon() {
+        if (refreshQueued) return;
+        refreshQueued = true;
+        setTimeout(() => {
+          refreshQueued = false;
+          if (pressing || editingSettings()) {
+            refreshHeld = true;
+            return;
+          }
+          void refresh();
+        }, 250);
+      }
+      function releaseHeldRefresh() {
+        if (!refreshHeld || pressing || editingSettings()) return;
+        refreshHeld = false;
+        // After the click the release is about to deliver.
+        setTimeout(() => void refresh(), 50);
+      }
+      document.addEventListener('pointerdown', () => { pressing = true; }, true);
+      document.addEventListener('pointerup', () => { pressing = false; releaseHeldRefresh(); }, true);
+      document.addEventListener('pointercancel', () => { pressing = false; releaseHeldRefresh(); }, true);
+      document.addEventListener('focusout', () => setTimeout(releaseHeldRefresh, 0), true);
       window.filexApp.onChanged(() => {
-        refresh();
+        refreshSoon();
         if (explorerSyncCb) explorerSyncCb();
       });
       window.filexApp.onDragProgress((p) => {

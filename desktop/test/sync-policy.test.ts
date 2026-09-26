@@ -16,6 +16,7 @@ import {
   heldItems,
   folderView,
   restartDelay,
+  stopForRemoval,
   trayTooltip,
   watchArgs,
   watchPrefsKey,
@@ -327,4 +328,16 @@ test('the folder line: a folder being moved says so, not "stopped"', () => {
     folderView({ pairId: 'pair-1', paused: false, signedOut: false, moving: true, status: st, minuteOfDay: NOON }),
     { kind: 'moving' },
   );
+});
+
+// ⚠ "Stop syncing" took the folder's card away at once, but the watcher only
+// re-reads its folders between passes: a pass of that folder already under
+// way (a first sync of 52 GiB, say) went on for hours with no card to show
+// it (O14).
+test('stopping the folder a pass is working on stops that pass', () => {
+  const st = running({ active: { pairId: 'pair-1', phase: 'transfer', done: 3, total: 9 } });
+  assert.equal(stopForRemoval(st, 'pair-1'), true);
+  assert.equal(stopForRemoval(st, 'pair-2'), false, 'another folder: the pass goes on');
+  assert.equal(stopForRemoval(running(), 'pair-1'), false, 'between passes: nothing to stop');
+  assert.equal(stopForRemoval(null, 'pair-1'), false);
 });

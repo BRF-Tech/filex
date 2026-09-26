@@ -309,3 +309,13 @@ export function heldItems(p: HoldingPair): number {
   if (p.hold_new !== true) return 0;
   return typeof p.held === 'number' && Number.isFinite(p.held) && p.held > 0 ? Math.floor(p.held) : 0;
 }
+
+/**
+ * Whether removing a folder ("Stop syncing") has to stop its account's watcher
+ * first: a pass of that folder is under way. The watcher only re-reads its
+ * folders between passes, so the pass went on — for hours, for a first sync —
+ * after the folder's card had gone, with nothing on screen to show it.
+ */
+export function stopForRemoval(st: SyncStatus | null | undefined, pairId: string): boolean {
+  return !!st && st.running && st.active?.pairId === pairId;
+}
