@@ -2,14 +2,10 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.46.0"
+version: "0.46.1"
 releaseNotes: |-
-  filex v0.46.0 — 2026-09-26
-  • Put the storages in the navigation panel in your own order (#57).
-  • Administrators set the order everybody starts from (#57).
-  • New document: name the file anything — LICENSE, Makefile, test.conf, example.custom (#56).
-  • A text file whose name has no known extension opens as text and can be saved (#56).
-  • A new document opens once in the desktop app.
+  filex v0.46.1 — 2026-09-26
+  • The version line no longer runs off the menu.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

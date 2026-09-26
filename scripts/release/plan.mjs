@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { nativeGo, toWslPath, wslGo } from '../lib/go-build.mjs';
+import { nativeGo, wslGo, wslMirrorCd } from '../lib/go-build.mjs';
 import { docker, dockerArgv, run, shq, slash } from './engine.mjs';
 import { desktopFeeds, docsSite, readmePictures, runningRelease, updateManifest } from './verify.mjs';
 
@@ -40,7 +40,7 @@ function goGate(name, dirOf, script) {
       const t = goToolchain();
       if (t === 'native') return [c.bash, '-c', `cd ${shq(slash(dir))} && ${script}`];
       if (t === 'wsl') {
-        return ['wsl', '-e', 'bash', '-lc', `cd ${shq(toWslPath(dir))} && export PATH=/usr/local/go/bin:$PATH GOFLAGS=-buildvcs=false && ${script}`];
+        return ['wsl', '-e', 'bash', '-lc', `${wslMirrorCd(dir)} && export PATH=/usr/local/go/bin:$PATH GOFLAGS=-buildvcs=false && ${script}`];
       }
       return ['node', '-e', 'console.error("no Go toolchain: go is not on PATH, and WSL has none either"); process.exit(1)'];
     },

@@ -85,7 +85,7 @@ There is no marketplace. An app is a public repository whose root holds
 5. The wizard ends on *"The app is installed and running."* The app's rows are
    in the file menu from the next time it is opened.
 
-![The install wizard stopped at the permission review](screenshots/v0.43.0/apps/apps-install-review-1440.png)
+![The install wizard stopped at the permission review](screenshots/v0.46.0/apps/apps-install-review-1440.png)
 
 ### The permission review
 
@@ -141,7 +141,7 @@ row's one **Actions** menu: **Details**, **Upgrade**, **Remove**. A banner above
 the table says whether apps are on here, which engines this host has, and
 whether signatures are required.
 
-![The Apps tab, a language pack among the apps](screenshots/v0.43.0/langpack/apps-list-1440.png)
+![The Apps tab, a language pack among the apps](screenshots/v0.46.0/langpack/apps-list-1440.png)
 
 A **language pack** (below) sits in the same list and is read the same way —
 its row says what it is, and, per language, how much of THIS filex it
@@ -164,7 +164,7 @@ translates.
 **Details** opens the app's own page — `/admin/plugins/apps/<name>`, one
 section per card, **Back** returns to the Apps tab:
 
-![An installed app's details](screenshots/v0.43.0/apps/apps-detail-1440.png)
+![An installed app's details](screenshots/v0.46.0/apps/apps-detail-1440.png)
 
 - **The facts** — name, version, source (for a GitHub install,
   `https://github.com/<repo>@<tag>`), signed or unsigned, SHA-256, when it was
@@ -404,7 +404,7 @@ an optional reason. On an office document the first screen offers to
    purpose: what is being asked of whom is one decision, where it goes is
    the next. Every signer needs at least one signature box.
 
-   ![Defining the boxes](screenshots/v0.43.0/signing/sign-define-1440.png)
+   ![Defining the boxes](screenshots/v0.46.0/signing/sign-define-1440.png)
 
 4. **Place them** — the document, and the boxes that still need a place.
    Choose one, then tap the page where it goes, or drag to size it as you
@@ -412,7 +412,7 @@ an optional reason. On an office document the first screen offers to
    again, copied to another page or deleted. The step cannot be left while a
    box has nowhere to go.
 
-   ![Placing the boxes on the document](screenshots/v0.43.0/signing/sign-place-1440.png)
+   ![Placing the boxes on the document](screenshots/v0.46.0/signing/sign-place-1440.png)
 
 5. **Time** — *How long do they have?* How many days the links are valid
    (14 by default, at most 90 — both pulled down to the instance's maximum
@@ -483,7 +483,7 @@ during which even the right PIN is refused.
 
 | The partner's link, behind its PIN | …and what it opens: only their own boxes |
 |---|---|
-| ![The outside signer's PIN gate](screenshots/v0.43.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](screenshots/v0.43.0/signing/sign-outside-fill-1440.png) |
+| ![The outside signer's PIN gate](screenshots/v0.46.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](screenshots/v0.46.0/signing/sign-outside-fill-1440.png) |
 
 Both kinds of signer then walk the same three steps:
 
@@ -513,7 +513,7 @@ fingerprint, and the certificate files to keep.
   file), and the audit trail saved. These controls are offered to anybody who
   may edit the document, not only to the requester.
 
-  ![The document frozen, its Signatures panel open](screenshots/v0.43.0/signing/sign-status-1440.png)
+  ![The document frozen, its Signatures panel open](screenshots/v0.46.0/signing/sign-status-1440.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* — and,
@@ -524,7 +524,7 @@ fingerprint, and the certificate files to keep.
   asked for, only the requester's own links listed, and every read written to
   filex's audit trail.
 
-  ![The Signatures screen's PINs section](screenshots/v0.43.0/signing/sign-pins-1440.png)
+  ![The Signatures screen's PINs section](screenshots/v0.46.0/signing/sign-pins-1440.png)
 - **The bell** tells the requester when an outside signer opened the
   document, when somebody signed or refused, and when everything is done.
 
@@ -688,7 +688,7 @@ short wizard in a dialog, with only the steps that have something to ask:
 4. **Review** — what will happen, including the route the conversion takes,
    then **Convert**.
 
-![The converter's wizard](screenshots/v0.43.0/apps/convert-wizard-1440.png)
+![The converter's wizard](screenshots/v0.46.0/apps/convert-wizard-1440.png)
 
 The result lands **beside the input**, as `<name>.<new extension>` (pages and
 frames as `<name>-1.png`, `<name>-2.png`, …); a taken name gets a suffix, and
