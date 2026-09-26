@@ -63,6 +63,10 @@ type Index struct {
 	// handler, because a handler-local flag can only see the rebuilds the
 	// handler started.
 	rebuilding atomic.Bool
+	// lastRebuild is how the latest rebuild of this process ended: when, and
+	// its error ("" for one that went live). Zero before any has ended.
+	lastMu      sync.Mutex
+	lastRebuild rebuildOutcome
 
 	// dirty remembers the documents the write path touched during a
 	// rebuild, so the reindex loop does not overwrite them with the older
@@ -913,12 +917,21 @@ type IndexStats struct {
 	// Rebuilding is true while a replacement index is being built, by
 	// either the admin endpoint or the automatic schema repair.
 	Rebuilding bool
+	// LastRebuildAt is when the latest rebuild of this process ended, nil
+	// when none has; LastRebuildError is why it did not go live ("" when it
+	// did). Rebuilding turns false either way, so it alone cannot say which.
+	LastRebuildAt    *time.Time
+	LastRebuildError string
 }
 
 // Stats returns DocCount + on-disk size for the index.
 func (i *Index) Stats() IndexStats {
 	out := IndexStats{}
 	out.Rebuilding = i.rebuilding.Load()
+	if last := i.lastOutcome(); !last.at.IsZero() {
+		at := last.at
+		out.LastRebuildAt, out.LastRebuildError = &at, last.err
+	}
 	i.mu.RLock()
 	bx := i.bleve
 	path := i.path

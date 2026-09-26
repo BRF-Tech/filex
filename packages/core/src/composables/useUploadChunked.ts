@@ -42,6 +42,7 @@ import { networkFailure, requestFailure, wordsIn } from '../lib/errorWords';
 // file went (lib/connection).
 import { noteRequestFailed, noteRequestSucceeded } from '../lib/connection';
 import { resolveLocale } from '../locales/resolve';
+import { newId } from '../lib/uid';
 import {
   clearResume,
   defaultResumeStorage,
@@ -221,7 +222,7 @@ export function useUploadChunked(
     const key = uploadFingerprint(opts.path, opts.file);
 
     const job: UploadJob = {
-      id: crypto.randomUUID(),
+      id: newId(),
       file: opts.file,
       path: opts.path,
       totalBytes: opts.file.size,

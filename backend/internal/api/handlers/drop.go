@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -259,7 +260,7 @@ func (h *Drop) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: share.CookieName(sh.Token), Value: h.Service.MintUnlock(sh.Token),
-		Path: "/", HttpOnly: true, Secure: requestIsHTTPS(r), SameSite: http.SameSiteLaxMode,
+		Path: basepath.CookiePath(r.Context()), HttpOnly: true, Secure: requestIsHTTPS(r), SameSite: http.SameSiteLaxMode,
 		MaxAge: int(share.UnlockTTL().Seconds()),
 	})
 	h.renderUploader(w, r, tok, sh, pin)
@@ -318,6 +319,11 @@ func (h *Drop) refuse(w http.ResponseWriter, r *http.Request, status int, body m
 	writeJSON(w, status, body)
 }
 
+// dropWriteCeiling bounds a drop's writes once its request has fully arrived
+// and no longer ends with the client: a storage that stopped answering must
+// not hold the work for ever.
+const dropWriteCeiling = 2 * time.Hour
+
 // handleDrop processes the actual multipart upload: enforce limits, write each
 // file into a fresh per-submission subfolder, notify the owner. Returns JSON
 // so the page's uploader script can show progress/success. It NEVER lists or
@@ -340,6 +346,17 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 		h.refuse(w, r, http.StatusBadRequest, map[string]any{"error": "bad multipart"})
 		return
 	}
+	// ⚠⚠ Everything the visitor sent has arrived. What is left is the
+	// server's own work, above all writing the files to the storage one after
+	// another, and for a large drop into an object store that outlasts a
+	// proxy's wait (Cloudflare gives up at 100 s, nginx at 60 s). The proxy's
+	// hang-up cancelled the request, and the write loop stopped between two
+	// files: half the drop landed, the visitor was told none of it had, and a
+	// retry made a second submission of it. From here on the request's
+	// cancellation no longer stops the work; a ceiling still bounds it.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), dropWriteCeiling)
+	defer cancel()
+	r = r.WithContext(ctx)
 	pin := r.FormValue("pin")
 	sh, err := h.Store.GetShareByToken(r.Context(), strings.ToLower(strings.TrimSpace(tok)))
 	if err != nil || sh == nil {
@@ -638,7 +655,7 @@ func (h *Drop) renderUploader(w http.ResponseWriter, r *http.Request, tok string
 	}
 	cfg := map[string]any{
 		"token":         tok,
-		"action":        "/d/" + tok,
+		"action":        basepath.Path(r.Context(), "/d/"+tok),
 		"askName":       ds.AskName,
 		"maxFiles":      ds.MaxFiles,
 		"maxFileSizeMB": ds.MaxFileSizeMB,
@@ -719,7 +736,7 @@ func (h *Drop) renderDropPinForm(w http.ResponseWriter, r *http.Request, token, 
 		"Lang":      lang,
 		"Dir":       pageDir(lang),
 		"T":         t,
-		"Action":    "/d/" + path.Clean(token),
+		"Action":    basepath.Path(r.Context(), "/d/"+path.Clean(token)),
 		"Error":     errMsg,
 		"BrandCSS":  chrome.BrandCSS,
 		"BrandHead": chrome.BrandHead,

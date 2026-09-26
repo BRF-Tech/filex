@@ -10,6 +10,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 )
@@ -271,8 +272,9 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// Domain/Secure/SameSite logic); the body just forwards the browser. The
 	// target is a fixed relative path so it stays on the tenant host that
 	// served this callback (v0.1.66's host fix) with zero open-redirect
-	// surface.
-	writeOIDCBounce(w, r, "/admin/")
+	// surface. Under a base path (FILEX_BASE_PATH) the path carries it — still a
+	// fixed path, still on the host that served the callback.
+	writeOIDCBounce(w, r, basepath.Path(r.Context(), "/admin/"))
 }
 
 // oidcBounceTmpl is the 200 "signing in…" page that carries the session
@@ -367,7 +369,7 @@ func (h *Auth) setSessionCookie(w http.ResponseWriter, r *http.Request, token st
 	http.SetCookie(w, &http.Cookie{
 		Name:     authlocal.SessionCookieName,
 		Value:    token,
-		Path:     "/",
+		Path:     basepath.CookiePath(r.Context()),
 		Domain:   h.cookieDomain(r),
 		HttpOnly: true,
 		Secure:   requestIsHTTPS(r),
@@ -380,7 +382,7 @@ func (h *Auth) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     authlocal.SessionCookieName,
 		Value:    "",
-		Path:     "/",
+		Path:     basepath.CookiePath(r.Context()),
 		Domain:   h.cookieDomain(r),
 		HttpOnly: true,
 		Secure:   requestIsHTTPS(r),

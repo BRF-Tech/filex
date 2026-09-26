@@ -31,6 +31,7 @@
 import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { apiLogin, loginAs } from '../helpers/auth';
 import { dropStorageByName, seedLocalStorage } from '../helpers/seed';
+import { underBase } from '../helpers/base';
 
 const STAMP = Date.now();
 const PREFIX = `e2e-so-${STAMP}`;
@@ -356,7 +357,7 @@ test.describe('sidebar storage order (#57)', () => {
     await expect.poll(() => tableOrder(page)).toEqual([A, C, B]);
     await expect.poll(() => adminPositions(page)).toEqual({ [A]: 1, [C]: 2, [B]: 3 });
     // The release was a drop, not a click on the storage's link.
-    expect(new URL(page.url()).pathname).toBe('/admin/storages');
+    expect(new URL(page.url()).pathname).toBe(underBase('/admin/storages'));
   });
 
   test('Move down in a row menu, and the arrow keys on a handle, move a storage', async ({ page }) => {

@@ -152,6 +152,22 @@ export const CASES: Case[] = [
   },
   {
     group: 'twin',
+    // ⚠ "İ".toLowerCase() is TWO characters ("i" + a combining dot), so a
+    // lower-cased path is longer than the path, and a rest cut off the original
+    // at the lower-cased folder's length lost a letter: "Rapor.docx" became
+    // "apor.docx" — another file, or none — for anyone called İsmail or İpek.
+    name: 'a folder with a Turkish capital İ in its path still finds the right twin',
+    async run(impl) {
+      const got = impl.resolveSyncTwin(
+        'C:\\Users\\İsmail\\filex\\docs\\Rapor.docx',
+        [{ id: 'p', local: 'C:\\Users\\İsmail\\filex\\docs', remote: 'docs://' }],
+        { platform: 'win32' },
+      );
+      assert.deepEqual(got, { pairId: 'p', remote: 'docs://Rapor.docx' });
+    },
+  },
+  {
+    group: 'twin',
     name: 'a sibling folder whose name merely starts the same is NOT inside the pair',
     async run(impl) {
       const got = impl.resolveSyncTwin(

@@ -385,17 +385,35 @@ no wake-up is armed, no pass looks at a row, and `tick` answers `refused`.
 ```json
 {
   "runtime": {"enabled": true, "arch_ok": true, "disabled_reason": "", "requires_signature": false,
-              "engines": {"ffmpeg": true, "imagemagick": true, "libreoffice": false, "ghostscript": true, "poppler": true, "rsvg": true}},
+              "engines": {"ffmpeg": true, "imagemagick": true, "libreoffice": false, "ghostscript": true, "poppler": true, "rsvg": true},
+              "filex_version": "0.47.0", "compat_enforced": true,
+              "update_check": true, "updates_checked_at": "2026-09-26T03:00:00Z"},
   "plugins": [
     {"id": 1, "name": "sign", "version": "1.0.0", "label": {"en": "e-Signature", "tr": "e-İmza"},
      "enabled": true, "state": "running" | "disabled" | "refused" | "failed", "state_error": "",
      "source": "upload" | "url" | "github" | "bundle", "source_url": "", "sha256": "…", "signed": false,
      "permissions": ["files:read", …], "actions": 2, "views": 2, "public_pages": 1,
      "scheduled": true, "kind": "app" | "language-pack", "languages": [],
+     "manifest_url": "", "compat": {"requires": ">=0.47.0", "ok": true, "filex": "0.47.0"},
+     "auto_update": true, "update_source": "github" | "url",
+     "update": {"checked_at": "…", "status": "current" | "available" | "needs_approval" | "incompatible" | "failed" | "check_failed",
+                "version": "1.3.0", "ref": "v1.3.0", "added": ["mail:send"], "adds_module": false,
+                "requires": ">=0.48.0", "refusal": {"error": "…", "…": "…"},
+                "auto": {"from": "1.2.0", "to": "1.2.1", "at": "…"}},
      "created_at": "…", "updated_at": "…"}
   ]
 }
 ```
+
+`filex_version` is the filex app ranges are judged against; `compat_enforced`
+is false on a development build (no range is checked). `compat` is absent
+when the manifest declares no range; `ok: false` on an installed app is a
+warning — it keeps running. `update_source` is absent for an app installed
+from a file (nothing to check). `update` is what the last update check found
+(absent before the first): `refusal` is an install refusal's body
+(`error`, `message`, `reason`, `where`, …), so the panel says it with the
+install wizard's sentences; `auto` is the last automatic update. The exact
+bytes: `backend/internal/api/handlers/testdata/wire/app-plugin-update-check.json`.
 
 ### `POST /api/admin/app-plugins` — install
 Three bodies:
@@ -412,12 +430,17 @@ A **language pack** takes each body without its module: no `wasm` part, no
 (no module)* below). The manifest part is read up to 16 MiB and a larger one
 is refused `413 too_large` rather than truncated.
 
-`?dry_run=1` answers `200 {"manifest": {…}, "permissions": [{"id": "files:read", "label": "…", "reason": {"en": "…"}}], "wasm_sha256": "…", "wasm_bytes": N, "signed": bool, "kind": "app"|"language_pack", "manifest_sha256": "…", "languages": [{"code", "keys", "translated", "unknown", "total", "percent", "rtl"}]}` without installing — the wizard's permission-review step. `reason` is the manifest's `permission_reasons[id]` (may be absent). `…/{id}/upgrade?dry_run=1` answers the same shape.
+`?dry_run=1` answers `200 {"manifest": {…}, "permissions": [{"id": "files:read", "label": "…", "reason": {"en": "…"}}], "wasm_sha256": "…", "wasm_bytes": N, "signed": bool, "kind": "app"|"language_pack", "manifest_sha256": "…", "languages": [{"code", "keys", "translated", "unknown", "total", "percent", "rtl"}], "compat": {"requires", "ok", "filex"}}` without installing — the wizard's permission-review step. `reason` is the manifest's `permission_reasons[id]` (may be absent). `compat` (absent without a range) with `ok: false` means the install will be refused `incompatible`. `…/{id}/upgrade?dry_run=1` answers the same shape plus `"upgrade": {"from": "1.1.0", "added": ["public_pages"], "removed": ["mail:send"], "adds_module": false}` — the version it leaves and how the grant changes (`added` is what the administrator approves).
 
 `permissions` (granted) must equal the manifest's set exactly → else
 `400 {"error": "permissions_incomplete", "missing": [...]}`. Success `201` with
 the row as in the list. Errors: `400 manifest_invalid`, `400 sha256_mismatch`,
-`400 signature_required|signature_invalid`, `409 name_taken`, `409 describe_mismatch`.
+`400 signature_required|signature_invalid`, `409 name_taken`, `409 describe_mismatch`,
+`409 incompatible` (the manifest's `filex` range leaves this filex out:
+`{"error": "incompatible", "requires": ">=0.48.0", "filex": "0.47.0"}`).
+
+A URL install whose request carries `sha256` starts with `auto_update: false`
+— the administrator pinned those bytes; every other install starts with it on.
 
 ⚠ The server COMPILES the module before it answers — tens of seconds for a
 large one (the 20 MB signing module: 23–33 s measured, 2026-09-21). The admin
@@ -480,10 +503,26 @@ while it was running. Every other row is one piece of work.
 Row + `manifest` + `granted` + `overrides` + `settings` (secret values masked
 as `"***"`) + `describe` (last answer).
 
-### `PATCH …/{id}` `{"enabled": bool}` · `DELETE …/{id}` · `POST …/{id}/upgrade`
+### `PATCH …/{id}` `{"enabled"?: bool, "auto_update"?: bool}` · `DELETE …/{id}` · `POST …/{id}/upgrade`
 (same bodies as install; a manifest that asks for permissions not yet granted
 answers `409 {"error": "permissions_changed", "missing": [...]}` until the body
-grants them).
+grants them). An upgrade may also take `{"from_source": true, "permissions":
+[...]}`: the newer version the app's own source has, found and fetched
+exactly as the update check does — `409 up_to_date` when there is nothing
+newer, `409 incompatible` when the only newer version needs another filex,
+`400 manifest_invalid` for an app installed from a file (no source).
+
+### `POST /api/admin/app-plugins/updates/check`
+Asks every app's source for a newer version now and installs what may be
+installed (a newer version whose permissions the app already holds, while
+its `auto_update` is on and the instance does not require signatures).
+Answers `200 {"report": {"checked_at", "checked": N, "updated": [names],
+"available": [names], "needs_approval": [names], "failed": [names]},
+"runtime": {…}, "plugins": [...]}` — the list redrawn. One check runs at a
+time: a second caller waits for the one in flight and gets its answer. The
+request does not cut an update short when it is abandoned. `403
+demo_refused` on a demo. The daily check (`FILEX_APP_PLUGIN_UPDATE_CHECK`)
+runs the same code; the rules are in [APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates).
 
 ### `GET/PUT …/{id}/settings`
 `{"values": {"tsa_url": "https://…", "api_key": "***"}}`; a `"***"` value on PUT
@@ -501,7 +540,10 @@ Ring buffer of the last 500 lines (guest `log` + host warnings).
 (400), `sha256_mismatch` (400), `sha256_required` (400), `signature_required` /
 `signature_invalid` (400), `permissions_incomplete` (400, `missing`), `name_taken`
 (409), `describe_mismatch` (409), `permissions_changed` (409, upgrade, `missing`),
-`too_large` (413), `fetch_failed` (502), `demo_refused` (403), `not_found` (404),
+`too_large` (413), `fetch_failed` (502, `reason` one of `bad_repo`,
+`manifest_not_found`, `module_not_found`, `unreachable`, `http_status`,
+`bad_url`, `missing_url`, `too_large`, `changed`), `incompatible` (409,
+`requires`, `filex`), `up_to_date` (409), `demo_refused` (403), `not_found` (404),
 `app_plugins_disabled` (503, admin) — the user routes answer 404 when the
 runtime is off. `GET /api/admin/app-plugins` answers 200 even then, with
 `runtime.enabled=false` and `runtime.disabled_reason`.
@@ -750,8 +792,9 @@ running and holds `users:lookup`, `404` for an unknown plugin.
 `FILEX_APP_PLUGINS_DISABLED=1` turns the runtime off (demo mode flips the
 default to off), which also means no app is ever woken (see *The scheduled
 wake-up*); demo mode stops the schedule even where the runtime is on. `FILEX_APP_PLUGIN_MAX_INPUT_MB` (256), `_MAX_OUTPUT_MB` (512),
-`_MAX_WASM_MB` (64). Signatures use the same `FILEX_PLUGIN_TRUSTED_KEYS` as
-storage plugins. Modules live under `<data-dir>/app-plugins/<name>/`, the
+`_MAX_WASM_MB` (64). `FILEX_APP_PLUGIN_UPDATE_CHECK=0` stops the daily update
+check (the admin's "Check now" still runs; a demo never checks). Signatures use
+the same `FILEX_PLUGIN_TRUSTED_KEYS` as storage plugins. Modules live under `<data-dir>/app-plugins/<name>/`, the
 compilation cache and the per-call spool next to them.
 
 ## An app's public page IS a share (v3)
@@ -1329,7 +1372,11 @@ A manifest with `ui_locales` and no `actions`, `views`, `public_pages`,
   means the binary has none and coverage is unknown. `percent` is floored.
 - **The dry run** (`?dry_run=1`) adds `kind`, `manifest_sha256` (a pack) and
   the same `languages` rows, so the review can say *language pack* and how
-  much it covers. `rtl: true` marks a right-to-left language — the interface
+  much it covers.
+- **Updates**: installed from GitHub (a branch) or an address, a pack follows
+  it and moves to a higher `version` by itself — it asks for no permission,
+  so there is nothing to approve. A pack whose new version brings a module
+  waits for approval ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). `rtl: true` marks a right-to-left language — the interface
   is laid out right to left in it ([RTL.md](RTL.md)).
 
 ### The two public reads

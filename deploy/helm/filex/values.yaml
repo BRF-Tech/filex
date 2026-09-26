@@ -18,6 +18,14 @@ image:
 # redirect and ONLYOFFICE callbacks. Usually https://<ingress.host>.
 publicURL: "https://files.example.com"
 
+# Serve filex under a sub-path of ingress.host, e.g. "/filex" for
+# https://files.example.com/filex/ (docs/DEPLOYMENT.md → "Serving filex under a
+# sub-path"). Empty = the root of the host, as before. Sets FILEX_BASE_PATH and
+# the Ingress path. ⚠ Add NO rewrite/strip annotation: filex receives the full
+# path and takes the prefix off itself. The probes keep using /healthz, which
+# answers at the root too.
+basePath: ""
+
 replicaCount: 1
 
 service:

@@ -29,6 +29,7 @@
  */
 import { test, expect, type APIRequestContext } from '@playwright/test';
 import { ADMIN_EMAIL, ADMIN_PASSWORD } from '../helpers/auth';
+import { underBase } from '../helpers/base';
 import { dropStorageByName, seedLocalStorage } from '../helpers/seed';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -265,7 +266,7 @@ test.describe('Round 4 — SPA-vs-backend mismatches', () => {
     // The standalone Editor.vue route lives outside /admin/ so the SPA
     // fallback was widened to /files/edit + /files/edit/*.
     const res = await api.get(
-      '/files/edit?path=s3-test%3A%2F%2Fexample%2Freport.xlsx&mode=edit&type=xlsx',
+      underBase('/files/edit?path=s3-test%3A%2F%2Fexample%2Freport.xlsx&mode=edit&type=xlsx'),
       { maxRedirects: 0 },
     );
     // The handler may either return the SPA index.html directly or

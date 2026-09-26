@@ -15,18 +15,39 @@ import (
 // tests) allows; any resolution error denies. Shared by the file-mutation /
 // read handlers that resolve a storage by adapter name.
 func aclAllowName(ctx context.Context, resolver *acl.Resolver, store db.Store, storageName, rel string, need acl.Level) bool {
-	if resolver == nil {
+	return newACLByName(ctx, resolver, store).allow(storageName, rel, need)
+}
+
+// aclByName is aclAllowName for many rows at once: each storage's permission
+// set is read the first time a row of it is asked about, and kept. A listing
+// judged row by row (the trash) paid three queries a row without it.
+type aclByName struct {
+	ctx      context.Context
+	resolver *acl.Resolver
+	store    db.Store
+	sets     map[string]*acl.Set // nil: the storage or its set could not be read
+}
+
+func newACLByName(ctx context.Context, resolver *acl.Resolver, store db.Store) *aclByName {
+	return &aclByName{ctx: ctx, resolver: resolver, store: store, sets: map[string]*acl.Set{}}
+}
+
+// allow is aclAllowName's answer: a nil resolver allows, any resolution error
+// denies.
+func (a *aclByName) allow(storageName, rel string, need acl.Level) bool {
+	if a.resolver == nil {
 		return true
 	}
-	st, err := store.GetStorageByName(ctx, storageName)
-	if err != nil || st == nil {
-		return false
+	set, known := a.sets[storageName]
+	if !known {
+		if st, err := a.store.GetStorageByName(a.ctx, storageName); err == nil && st != nil {
+			if s, err := a.resolver.LoadSet(a.ctx, auth.UserFrom(a.ctx), st); err == nil {
+				set = s
+			}
+		}
+		a.sets[storageName] = set
 	}
-	set, err := resolver.LoadSet(ctx, auth.UserFrom(ctx), st)
-	if err != nil || set == nil {
-		return false
-	}
-	return set.Effective(rel) >= need
+	return set != nil && set.Effective(rel) >= need
 }
 
 // aclAllowID is aclAllowName keyed by storage id.

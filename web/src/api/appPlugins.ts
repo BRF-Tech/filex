@@ -92,6 +92,11 @@ export interface AppPluginManifest {
   description?: PluginText;
   icon?: string;
   homepage?: string;
+  /**
+   * The filex versions the app works with — a range, `">=0.47.0 <0.60.0"`
+   * (wasmplugin/compat.go). The older `min_filex` means `>=` that version.
+   */
+  filex?: string;
   min_filex?: string;
   permissions: string[];
   permission_reasons?: Record<string, PluginText>;
@@ -143,6 +148,56 @@ export interface AppPluginRuntime {
   /** Engine id → the name a person reads (`libreoffice` → `LibreOffice`),
    *  the server's one spelling (enginebin.DisplayName). */
   engine_names: Record<string, string>;
+  /** The filex apps' ranges are judged against (`0.47.0`, or a dev build's own string). */
+  filex_version: string;
+  /** False on a development build: ranges are not checked there. */
+  compat_enforced: boolean;
+  /** The daily update check runs (FILEX_APP_PLUGIN_UPDATE_CHECK). */
+  update_check: boolean;
+  /** RFC 3339 — when the last update check ran; absent: never. */
+  updates_checked_at?: string;
+}
+
+/** An app's `filex` range against the running filex (wasmplugin.Compat). */
+export interface AppPluginCompat {
+  requires: string;
+  ok: boolean;
+  /** The running filex it was judged against. */
+  filex: string;
+}
+
+/**
+ * What the last update check found for one app (wasmplugin.UpdateInfo).
+ *
+ * `status`: `current` (nothing newer this filex can run) · `available` (a
+ * newer version waits for the administrator — automatic updates are off) ·
+ * `needs_approval` (it asks for more: `added`, `adds_module`) ·
+ * `incompatible` (only newer versions that need a newer filex: `version`,
+ * `requires`) · `failed` (the automatic update was tried and undone:
+ * `refusal`) · `check_failed` (the source could not be read: `refusal`).
+ * `auto` is the last automatic update and survives later checks.
+ */
+export interface AppPluginUpdate {
+  checked_at?: string;
+  status?: 'current' | 'available' | 'needs_approval' | 'incompatible' | 'failed' | 'check_failed' | string;
+  version?: string;
+  ref?: string;
+  requires?: string;
+  added?: string[];
+  adds_module?: boolean;
+  /** The refusal, in the shape an install answers (read it with `refusalOf`). */
+  refusal?: Record<string, unknown>;
+  auto?: { from: string; to: string; at: string };
+}
+
+/** `POST /admin/app-plugins/updates/check` — one check, as it went. */
+export interface AppPluginUpdateReport {
+  checked_at: string;
+  checked: number;
+  updated: string[];
+  available: string[];
+  needs_approval: string[];
+  failed: string[];
 }
 
 /** An engine as a person reads it: the server's name for the id, else the id. */
@@ -165,6 +220,8 @@ export interface AppPlugin {
   state_error?: string;
   source: AppPluginSource;
   source_url?: string;
+  /** A URL install: where its manifest is read (the update check's address). */
+  manifest_url?: string;
   sha256?: string;
   signed: boolean;
   permissions: string[];
@@ -182,6 +239,17 @@ export interface AppPlugin {
   kind?: AppPluginKind;
   /** The languages it adds to filex itself, with coverage. Absent when none. */
   languages?: AppPluginLanguage[];
+  /**
+   * Its `filex` range against this filex; absent when it declares none.
+   * `ok: false` on an installed app is a warning — it keeps running.
+   */
+  compat?: AppPluginCompat;
+  /** Newer versions that ask for nothing more are installed by themselves. */
+  auto_update?: boolean;
+  /** Where newer versions are looked for; absent = nowhere (an uploaded app). */
+  update_source?: 'github' | 'url' | string;
+  /** What the last update check found; absent before the first. */
+  update?: AppPluginUpdate;
   created_at: string;
   updated_at: string;
 }
@@ -307,6 +375,14 @@ export interface AppPluginDryRun {
   /** A language pack's integrity is its manifest's: this is what was verified. */
   manifest_sha256?: string;
   languages?: AppPluginLanguage[];
+  /** The manifest's `filex` range against this filex; `ok: false` → it cannot be installed here. */
+  compat?: AppPluginCompat;
+  /**
+   * An upgrade's review: the version it replaces, the permissions it adds to
+   * the grant (what is being approved) and drops from it, and whether a
+   * language pack now brings a module. Absent on an install.
+   */
+  upgrade?: { from: string; added?: string[]; removed?: string[]; adds_module?: boolean };
 }
 
 /**
@@ -345,8 +421,13 @@ export interface AppPluginLogs {
   next: number;
 }
 
-/** The three install bodies (install and upgrade take the same ones). */
+/**
+ * The install bodies (install and upgrade take the same ones). `update` is an
+ * upgrade from the app's OWN source: the server finds and fetches the newer
+ * version exactly as the update check does (wasmplugin.FetchUpdate).
+ */
 export type AppPluginInstallSource =
+  | { kind: 'update' }
   | { kind: 'github'; repo: string; ref?: string }
   // ⚠ `wasm` / `url` absent = a language pack, which has no module (the
   // server decides from the manifest and refuses the wrong combination).
@@ -378,12 +459,27 @@ export interface AppPluginInstallRefusal {
   refs: string[];
   /** fetch_failed: the HTTP status that came back, 0 when none did. */
   status: number;
+  /** incompatible: the range the app declares. */
+  requires: string;
+  /** incompatible: the filex it leaves out. */
+  filex: string;
 }
 
 /** The machine code and the details of a refused install, if any. */
 export function appPluginError(err: unknown): AppPluginInstallRefusal | null {
   if (!axios.isAxiosError(err) || !err.response?.data) return null;
-  const data = err.response.data as {
+  return refusalOf(err.response.data);
+}
+
+/**
+ * A refusal as the wire carries it (wasmplugin.InstallRefusal) — the body of
+ * a refused install AND what an update check stores when it could not read
+ * the source or undid an automatic update (`update.refusal`). ONE reader, so
+ * the Apps list says an update's failure with the wizard's own sentences.
+ */
+export function refusalOf(raw: unknown): AppPluginInstallRefusal | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const data = raw as {
     error?: string;
     message?: string;
     missing?: string[];
@@ -391,6 +487,8 @@ export function appPluginError(err: unknown): AppPluginInstallRefusal | null {
     where?: string;
     refs?: string[];
     status?: number;
+    requires?: string;
+    filex?: string;
   };
   if (!data.error) return null;
   return {
@@ -401,6 +499,8 @@ export function appPluginError(err: unknown): AppPluginInstallRefusal | null {
     where: data.where ?? '',
     refs: Array.isArray(data.refs) ? data.refs : [],
     status: typeof data.status === 'number' ? data.status : 0,
+    requires: data.requires ?? '',
+    filex: data.filex ?? '',
   };
 }
 
@@ -416,6 +516,9 @@ function installPayload(
     if (source.signature) form.append('signature', source.signature);
     form.append('grant', JSON.stringify({ permissions }));
     return { body: form };
+  }
+  if (source.kind === 'update') {
+    return { body: { from_source: true, permissions } };
   }
   if (source.kind === 'github') {
     return { body: { github_repo: source.repo, ref: source.ref ?? '', permissions } };
@@ -449,20 +552,56 @@ const BASE = '/admin/app-plugins';
  */
 export const INSTALL_TIMEOUT_MS = 180_000;
 
+/** The list answer, defaults filled — for the list and for "Check now". */
+function listOf(data: Partial<AppPluginList>): AppPluginList {
+  return {
+    runtime: {
+      enabled: data.runtime?.enabled ?? false,
+      arch_ok: data.runtime?.arch_ok ?? false,
+      disabled_reason: data.runtime?.disabled_reason ?? '',
+      requires_signature: data.runtime?.requires_signature ?? false,
+      engines: data.runtime?.engines ?? {},
+      engine_names: data.runtime?.engine_names ?? {},
+      filex_version: data.runtime?.filex_version ?? '',
+      // Absent = a server that checks no range: say nothing about it.
+      compat_enforced: data.runtime?.compat_enforced ?? true,
+      update_check: data.runtime?.update_check ?? false,
+      updates_checked_at: data.runtime?.updates_checked_at,
+    },
+    plugins: data.plugins ?? [],
+  };
+}
+
+/**
+ * How long "Check now" may take: every app's source is read, and each update
+ * that may be applied is installed — a compile each (INSTALL_TIMEOUT_MS).
+ */
+export const UPDATE_CHECK_TIMEOUT_MS = 600_000;
+
 export const AppPluginsApi = {
   async list(): Promise<AppPluginList> {
     const { data } = await api.get<Partial<AppPluginList>>(BASE);
-    return {
-      runtime: {
-        enabled: data.runtime?.enabled ?? false,
-        arch_ok: data.runtime?.arch_ok ?? false,
-        disabled_reason: data.runtime?.disabled_reason ?? '',
-        requires_signature: data.runtime?.requires_signature ?? false,
-        engines: data.runtime?.engines ?? {},
-        engine_names: data.runtime?.engine_names ?? {},
-      },
-      plugins: data.plugins ?? [],
-    };
+    return listOf(data);
+  },
+
+  /**
+   * Ask every app's source for a newer version now; what may be applied is
+   * installed. Answers what happened, and the list redrawn. A check already
+   * running (the daily one) is waited for, not doubled.
+   */
+  async checkUpdates(): Promise<AppPluginList & { report: AppPluginUpdateReport }> {
+    const { data } = await api.post<Partial<AppPluginList> & { report: AppPluginUpdateReport }>(
+      `${BASE}/updates/check`,
+      {},
+      { timeout: UPDATE_CHECK_TIMEOUT_MS },
+    );
+    return { ...listOf(data), report: data.report };
+  },
+
+  /** Switch automatic updates for one app. */
+  async setAutoUpdate(id: number, on: boolean): Promise<AppPlugin> {
+    const { data } = await api.patch<AppPlugin>(`${BASE}/${id}`, { auto_update: on });
+    return data;
   },
 
   /** `?dry_run=1`: the manifest, the permission review and the wasm hash — nothing installed. */

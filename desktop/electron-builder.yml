@@ -242,14 +242,19 @@ nsis:
 # placeholders below build a package that installs for a local test (signed
 # with a matching self-signed certificate) and that the Store would refuse.
 appx:
-  identityName: BRFTeknoloji.filex
-  publisher: CN=BRF Teknoloji
-  publisherDisplayName: BRF Teknoloji
+  # Partner Center → Product management → Product identity (2026-09-26). The
+  # identity comes from the first name reserved, "filex app" ("filex" was
+  # taken); the listing's name is "filex File Manager", also reserved. The
+  # Store checks the package's display name against the reserved names; the
+  # Start menu tile is set back to "filex" by scripts/appx-manifest.cjs.
+  identityName: BRFTech.filexapp
+  publisher: CN=69159FAC-B790-4E30-94CC-F229F3A585B2
+  publisherDisplayName: BRF Tech
   # Required as soon as the identity comes from Partner Center: those names
   # usually start with a digit, and electron-builder refuses an Application.Id
   # that does ("AppX Application.Id can't start with numbers").
   applicationId: filex
-  displayName: filex
+  displayName: filex File Manager
   # Tiles are drawn on the Start menu's own background.
   backgroundColor: transparent
   languages:

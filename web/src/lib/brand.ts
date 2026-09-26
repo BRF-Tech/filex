@@ -14,6 +14,7 @@
 // synchronously with the default until the answer lands. Nothing waits on the
 // network for a label.
 
+import { withAppBase } from '@brftech/filex-core';
 import { BrandingApi } from '@/api/branding';
 
 /** The product's own name, used until (and unless) an operator renames it. */
@@ -74,9 +75,10 @@ export function onBrandName(fn: (n: string) => void): () => void {
  * `/p/` too, and a relative icon path resolves against whichever one served
  * the page — `/drive/icons/icon-192.png` is a 404 and a toast with no logo.
  * The assets live in the admin build's public folder, so that is the one
- * address that is always right.
+ * address that is always right — under the base path the app is served at
+ * (FILEX_BASE_PATH, the core's `withAppBase`), which is '' at the root.
  */
-export const BRAND_ICON_URL = '/admin/icons/icon-192.png';
+export const brandIconUrl = (): string => withAppBase('/admin/icons/icon-192.png');
 
 /** The Android status-bar mask — monochrome, alpha only. */
-export const BRAND_BADGE_URL = '/admin/icons/badge-96.png';
+export const brandBadgeUrl = (): string => withAppBase('/admin/icons/badge-96.png');

@@ -68,6 +68,11 @@ func (h *SearchAdmin) Stats(w http.ResponseWriter, r *http.Request) {
 		// showing a needs_rebuild banner over an index that is already
 		// being repaired, and looking broken while it happens.
 		"rebuilding": stats.Rebuilding,
+		// How the latest rebuild ended: `rebuilding` turns false on a
+		// failure too, so the page reads these before it says the new index
+		// is live. Absent/empty before any rebuild of this process ended.
+		"last_rebuild_finished_at": stats.LastRebuildAt,
+		"last_rebuild_error":       stats.LastRebuildError,
 	})
 }
 

@@ -37,6 +37,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/davlock"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
@@ -189,8 +190,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Under a base path (FILEX_BASE_PATH) the library has to see the path the
+	// CLIENT used: it writes it into every PROPFIND href and reads it back out
+	// of a MOVE/COPY Destination. The base was taken off for the router, so it
+	// goes back on here, for the library only — splitDavPath above and below
+	// keeps reading base-less paths.
+	base := basepath.From(r.Context())
+	if base != "" {
+		u := *r.URL
+		u.Path = base + u.Path
+		if u.RawPath != "" {
+			u.RawPath = base + u.RawPath
+		}
+		r = r.WithContext(r.Context())
+		r.URL = &u
+	}
 	dh := &webdav.Handler{
-		Prefix:     Prefix,
+		Prefix:     base + Prefix,
 		FileSystem: newFS(h, p),
 		LockSystem: h.locks,
 		Logger: func(req *http.Request, err error) {
@@ -351,8 +367,9 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 		if err != nil || du.Path == "" {
 			return 0, "" // let the library produce its 400
 		}
-		dname, drel, ok := splitDavPath(du.Path)
-		if !ok || dname == "" {
+		dpath, inBase := basepath.Strip(basepath.From(ctx), du.Path)
+		dname, drel, ok := splitDavPath(dpath)
+		if !inBase || !ok || dname == "" {
 			return http.StatusBadGateway, "destination outside /dav"
 		}
 		if r.Method == "MOVE" && dname != name {

@@ -96,3 +96,35 @@ func TestAdminListNamesThePerson(t *testing.T) {
 		assert.Empty(t, r.UserName)
 	}
 }
+
+// An app that moved, or waits for approval, is the platform operator's to
+// hear about: a plain user cannot act on it (app management is
+// supertenant-only), so none of the four update notices reaches their bell.
+func TestAppUpdateNoticesReachOnlyAdministrators(t *testing.T) {
+	_, store := dbtest.NewTestDB(t)
+	ctx := context.Background()
+	admin, err := store.CreateUser(ctx, "admin@example.test", "x", model.RoleAdmin, "en", "UTC")
+	require.NoError(t, err)
+	user, err := store.CreateUser(ctx, "ayse@example.test", "x", model.RoleUser, "tr", "UTC")
+	require.NoError(t, err)
+	svc := notify.New(store, notify.Config{RetryBackoffs: []time.Duration{}})
+	defer svc.Stop()
+	kinds := []notify.EventType{
+		notify.EventAppUpdated, notify.EventAppUpdateAvailable,
+		notify.EventAppUpdateNeedsApproval, notify.EventAppUpdateFailed,
+	}
+	for _, k := range kinds {
+		_, err := svc.Send(ctx, notify.Event{Event: k, Severity: notify.SeverityInfo, Title: "lang-es",
+			Meta: map[string]any{"plugin": "lang-es", "version": "0.1.4"}})
+		require.NoError(t, err)
+	}
+	rows, _, err := svc.List(ctx, &user.ID, notify.MemberBell, false, 50, 0)
+	require.NoError(t, err)
+	assert.Empty(t, rows, "a plain user's bell carries no app update notice")
+	rows, _, err = svc.List(ctx, &admin.ID, notify.AdminBell, false, 50, 0)
+	require.NoError(t, err)
+	assert.Len(t, rows, len(kinds))
+	rows, _, err = svc.List(ctx, &admin.ID, notify.TenantAdminBell, false, 50, 0)
+	require.NoError(t, err)
+	assert.Empty(t, rows, "nor a tenant administrator's: apps are the supertenant's")
+}

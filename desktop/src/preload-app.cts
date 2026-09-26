@@ -107,6 +107,7 @@ contextBridge.exposeInMainWorld('filexApp', {
   dragStart: (accountId: string, items: unknown) => ipcRenderer.invoke('drag:start', accountId, items),
   /** The drag ended inside the window — stop waiting for a drop out there. */
   dragCancel: () => ipcRenderer.invoke('drag:cancel'),
+  dragStop: () => ipcRenderer.invoke('drag:stop'),
   // "Open with filex" — which document types this app can be a handler for,
   // whether the installer registered them, and the one action that can move the
   // OS's own default. Read-only plus a single button, deliberately: nothing

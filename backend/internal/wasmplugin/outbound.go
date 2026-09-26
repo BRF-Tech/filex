@@ -151,6 +151,21 @@ const maxNoticeLangs = 16
 // always set, Get's fallback included — because the desktop app and rows
 // already stored read exactly those.
 func noticeMeta(pluginName string, label, title, body wire.Text) map[string]any {
+	meta := labelMeta(pluginName, label)
+	meta["title_en"] = clip(strings.TrimSpace(title.Get("en")), 200)
+	meta["title_tr"] = clip(strings.TrimSpace(title.Get("tr")), 200)
+	meta["body_en"] = clip(strings.TrimSpace(body.Get("en")), 1000)
+	meta["body_tr"] = clip(strings.TrimSpace(body.Get("tr")), 1000)
+	perLanguage(meta, "title_", title, 200)
+	perLanguage(meta, "body_", body, 1000)
+	return meta
+}
+
+// labelMeta names an app in a notification row: `plugin` (its install id)
+// and `plugin_label_<lang>` in every language its label has — what the bell
+// prints in front of anything said about the app, an app's own notice and
+// filex's notices about the app (updates.go) alike.
+func labelMeta(pluginName string, label wire.Text) map[string]any {
 	meta := map[string]any{
 		"plugin": pluginName,
 		// The app's NAME as a person knows it, per language — what a reader
@@ -160,14 +175,8 @@ func noticeMeta(pluginName string, label, title, body wire.Text) map[string]any 
 		// same app "İmzalar" (release-candidate sweep, 2026-09-21).
 		"plugin_label_en": clip(strings.TrimSpace(label.Get("en")), 80),
 		"plugin_label_tr": clip(strings.TrimSpace(label.Get("tr")), 80),
-		"title_en":        clip(strings.TrimSpace(title.Get("en")), 200),
-		"title_tr":        clip(strings.TrimSpace(title.Get("tr")), 200),
-		"body_en":         clip(strings.TrimSpace(body.Get("en")), 1000),
-		"body_tr":         clip(strings.TrimSpace(body.Get("tr")), 1000),
 	}
 	perLanguage(meta, "plugin_label_", label, 80)
-	perLanguage(meta, "title_", title, 200)
-	perLanguage(meta, "body_", body, 1000)
 	return meta
 }
 

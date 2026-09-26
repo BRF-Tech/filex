@@ -13,15 +13,14 @@
  * Pure on purpose: no electron import, so node:test can drive it.
  */
 
+import { serverUrl } from './server-url.ts';
+
 /** The palette never asks for more than this per account. */
 const MAX_LIMIT = 50;
 const SCOPES = new Set(['name', 'content', 'all']);
 
-function apiUrl(serverUrl: string, rel: string): URL {
-  // Keep a sub-path install's prefix: `new URL('/api/…', base)` would drop it.
-  const base = serverUrl.endsWith('/') ? serverUrl : `${serverUrl}/`;
-  return new URL(rel, base);
-}
+// Keep a sub-path install's prefix: `new URL('/api/…', base)` would drop it.
+const apiUrl = serverUrl;
 
 export function remoteSearchUrl(
   serverUrl: string,

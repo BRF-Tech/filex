@@ -44,6 +44,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/httpx"
@@ -442,7 +443,7 @@ func (h *PublicAPI) PIN(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: share.CookieName(sh.Token), Value: h.Service.MintUnlock(sh.Token),
-		Path: "/", HttpOnly: true, Secure: requestIsHTTPS(r), SameSite: http.SameSiteLaxMode,
+		Path: basepath.CookiePath(r.Context()), HttpOnly: true, Secure: requestIsHTTPS(r), SameSite: http.SameSiteLaxMode,
 		MaxAge: int(share.UnlockTTL().Seconds()),
 	})
 	writeJSON(w, http.StatusOK, h.describe(r, sh, true))

@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/brf-tech/filex/backend/internal/basepath"
 )
 
 // Config is the top-level runtime configuration object.
@@ -37,7 +39,23 @@ type Config struct {
 	// refused, and the client fell back to 12-second polling with no error
 	// raised anywhere. Not serialised -- it describes how the config was
 	// loaded, not the deployment.
-	PublicURLSet  bool   `yaml:"-"`
+	PublicURLSet bool `yaml:"-"`
+	// BasePath is the path prefix filex is served under behind a reverse
+	// proxy — "/filex" for https://example.com/filex/ — and "" at the root of
+	// its own host, which is the default and behaves exactly as before the
+	// setting existed. Set by FILEX_BASE_PATH (`base_path`), or, when that is
+	// unset, taken from the path of PublicURL. Load validates it (see
+	// internal/basepath.Normalize) and refuses to start on a bad value, and
+	// guarantees PublicURL ends with it, so every link built from PublicURL
+	// carries the prefix. docs/CONFIGURATION.md, docs/DEPLOYMENT.md.
+	//
+	// ⚠ The proxy passes the FULL path (`handle`, not `handle_path`): filex
+	// takes the prefix off itself and 404s everything outside it.
+	BasePath string `yaml:"base_path"`
+	// BasePathFrom names where BasePath came from, for the startup log:
+	// "FILEX_BASE_PATH", "base_path" (the config file), "FILEX_PUBLIC_URL",
+	// or "" at the root. Not serialised, like PublicURLSet.
+	BasePathFrom  string `yaml:"-"`
 	DataDir       string `yaml:"data_dir"`
 	DefaultLocale string `yaml:"default_locale"`
 	// CookieDomain sets the Domain attribute on the filex_session cookie
@@ -103,6 +121,13 @@ type Config struct {
 	AppPluginMaxInputMB  int `yaml:"app_plugin_max_input_mb"`
 	AppPluginMaxOutputMB int `yaml:"app_plugin_max_output_mb"`
 	AppPluginMaxWasmMB   int `yaml:"app_plugin_max_wasm_mb"`
+	// AppPluginUpdateCheck (FILEX_APP_PLUGIN_UPDATE_CHECK, default on) runs
+	// the daily check that asks every installed app's source for a newer
+	// version and installs the ones that ask for nothing new
+	// (wasmplugin/updates.go). Off = no request leaves the server for it —
+	// what an air-gapped install wants; an administrator can still press
+	// "Check now". A demo never runs it.
+	AppPluginUpdateCheck bool `yaml:"app_plugin_update_check"`
 	// SecretKey (FILEX_SECRET_KEY) encrypts the secrets filex has to be able to
 	// read back rather than merely compare — today the S3 access keys, because
 	// SigV4 derives an HMAC chain from the secret and so cannot work off a
@@ -768,6 +793,7 @@ func Default() Config {
 			Channel:  "stable",
 			Interval: 24 * time.Hour,
 		},
+		AppPluginUpdateCheck: true,
 		Upload: UploadConfig{
 			ChunkSize:     8 << 20,
 			StagingTTL:    24 * time.Hour,
@@ -846,9 +872,16 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("config: read %s: %w", expanded, err)
 		}
 	}
+	basePathFrom := ""
+	if strings.TrimSpace(cfg.BasePath) != "" {
+		basePathFrom = "base_path"
+	}
 	applyEnv(&cfg)
 	if os.Getenv("FILEX_AUTH_DRIVERS") != "" {
 		cfg.Auth.DriversFrom = "FILEX_AUTH_DRIVERS"
+	}
+	if strings.TrimSpace(os.Getenv("FILEX_BASE_PATH")) != "" {
+		basePathFrom = "FILEX_BASE_PATH"
 	}
 	// Set by either source -- a YAML `public_url` counts as much as the env
 	// var. Comparing against the default rather than tracking each writer
@@ -856,6 +889,12 @@ func Load(path string) (Config, error) {
 	// who spells out the default gets the default, which is what they asked
 	// for.
 	cfg.PublicURLSet = cfg.PublicURL != DefaultPublicURL
+	// ⚠ After PublicURLSet (putting the base on the DEFAULT address does not
+	// make it one the operator chose) and before the OIDC default below (the
+	// callback lives under the base too).
+	if err := resolveBasePath(&cfg, basePathFrom); err != nil {
+		return Config{}, err
+	}
 	// Default the OIDC redirect to <public_url>/api/auth/oidc/callback so an
 	// issuer + client id/secret are enough to stand up SSO (no need to also
 	// spell out the callback URL).
@@ -904,6 +943,59 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
+// resolveBasePath settles Config.BasePath, the one base filex is served under.
+//
+// ONE setting, two ways to say it:
+//
+//   - FILEX_BASE_PATH / `base_path` (`from` names which), validated. When
+//     PublicURL has no path, the base is put on it, so share links, mail links
+//     and the OIDC callback — all built from PublicURL — carry the prefix
+//     without a second setting to keep in step.
+//   - unset: the path of PublicURL. `FILEX_PUBLIC_URL=https://example.com/filex`
+//     alone serves filex under /filex.
+//
+// ⚠ The two must agree. A base of /filex with a public URL ending in /files
+// would hand out links to one prefix while serving another; that is refused at
+// startup, not discovered by the first person whose link 404s. "/" as the
+// explicit setting means the root, and so conflicts with a public URL that has
+// a path — the upgrade note for a proxy that strips the prefix is in
+// docs/DEPLOYMENT.md.
+func resolveBasePath(c *Config, from string) error {
+	fromURL, err := basepath.FromURL(c.PublicURL)
+	if err != nil {
+		return fmt.Errorf("config: FILEX_PUBLIC_URL: %w", err)
+	}
+	if from == "" {
+		c.BasePath = fromURL
+		c.BasePathFrom = ""
+		if fromURL != "" {
+			c.BasePathFrom = "FILEX_PUBLIC_URL"
+		}
+		return nil
+	}
+	base, err := basepath.Normalize(c.BasePath)
+	if err != nil {
+		return fmt.Errorf("config: %s: %w", from, err)
+	}
+	if fromURL != "" && fromURL != base {
+		shown := base
+		if shown == "" {
+			shown = "/"
+		}
+		return fmt.Errorf("config: %s is %q but FILEX_PUBLIC_URL (%s) says %q; filex is served under one base, so make the two agree or leave %s unset",
+			from, shown, c.PublicURL, fromURL, from)
+	}
+	c.BasePath = base
+	c.BasePathFrom = ""
+	if base != "" {
+		c.BasePathFrom = from
+		if fromURL == "" {
+			c.PublicURL = strings.TrimRight(strings.TrimSpace(c.PublicURL), "/") + base
+		}
+	}
+	return nil
+}
+
 // getenvFirst returns the value of the first non-empty env var.
 // Used by applyEnv to honor both the short FILEX_OIDC_* prefix
 // (current convention) and the legacy FILEX_AUTH_OIDC_* prefix.
@@ -935,6 +1027,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_PUBLIC_URL"); v != "" {
 		c.PublicURL = v
+	}
+	if v := os.Getenv("FILEX_BASE_PATH"); strings.TrimSpace(v) != "" {
+		c.BasePath = v
 	}
 	if v := os.Getenv("FILEX_DATA_DIR"); v != "" {
 		c.DataDir = v
@@ -970,6 +1065,9 @@ func applyEnv(c *Config) {
 	if v, ok := os.LookupEnv("FILEX_APP_PLUGINS_DISABLED"); ok && v != "" {
 		appPluginsSpoken = true
 		c.AppPluginsDisabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_APP_PLUGIN_UPDATE_CHECK"); v != "" {
+		c.AppPluginUpdateCheck = v == "1" || strings.EqualFold(v, "true")
 	}
 	for _, kv := range []struct {
 		env string

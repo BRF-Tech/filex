@@ -26,6 +26,18 @@ async function freshClient() {
   return await import('@/api/client');
 }
 
+// Runs a request config through EVERY request interceptor, in the order axios
+// runs them (last registered first), and returns what the request would carry.
+type Cfg = { method?: string; headers?: Record<string, string>; baseURL?: string };
+async function throughRequestInterceptors(api: { interceptors: { request: unknown } }, cfg: Cfg): Promise<Cfg> {
+  const handlers = (api.interceptors.request as { handlers: Array<{ fulfilled: (c: Cfg) => unknown } | null> }).handlers;
+  let out = cfg;
+  for (const h of [...handlers].reverse()) {
+    if (h) out = (await h.fulfilled(out)) as Cfg;
+  }
+  return out;
+}
+
 describe('api/client', () => {
   beforeEach(() => {
     // Each test gets its own fresh interceptor set.
@@ -36,6 +48,22 @@ describe('api/client', () => {
   afterEach(() => {
     // No-op: vi.resetModules() at the top of each test gives us a clean
     // axios instance, so leaked interceptors from prior tests can't bleed.
+  });
+
+  // The queue's doors name their refusal in a `code` (NOT_CANCELLABLE,
+  // FINISHED, TOO_MANY, BAD_KIND, READ_ONLY); their `error` is English. The
+  // panel says the code's words (core lib/errorWords `codeWords`), the same
+  // ones the explorer says — never the English sentence.
+  it('extractError says a queue refusal by its code, not its English', async () => {
+    const { extractError } = await freshClient();
+    const refused = {
+      isAxiosError: true,
+      response: {
+        status: 409,
+        data: { error: 'this operation cannot be stopped once it has started; it finishes on its own', code: 'NOT_CANCELLABLE' },
+      },
+    };
+    expect(extractError(refused as never)).toBe(coreEn['err.not_cancellable']);
   });
 
   it('extractError returns a string from various error shapes', async () => {
@@ -162,14 +190,25 @@ describe('api/client', () => {
   it('request interceptor sets config.baseURL to /api by default (web unchanged)', async () => {
     const { api, installAxiosInterceptors } = await freshClient();
     installAxiosInterceptors({ router: fakeRouter() });
-
-    const handlers = (api.interceptors.request as unknown as { handlers: Array<{ fulfilled: (cfg: { method?: string; headers?: Record<string, string>; baseURL?: string }) => unknown }> }).handlers;
-    const handler = handlers[handlers.length - 1];
-    const out = (await handler.fulfilled({
-      method: 'get',
-      headers: {} as Record<string, string>,
-    })) as { baseURL?: string };
+    const out = (await throughRequestInterceptors(api, { method: 'get', headers: {} })) as { baseURL?: string };
     expect(out.baseURL).toBe('/api');
+  });
+
+  // ⚠ Before installAxiosInterceptors, too: main.ts fetches the instance palette
+  // and the operator stylesheet before the app exists, and under a base path
+  // (FILEX_BASE_PATH) those went to the host's root with the boot default.
+  it('the API base applies from the first request, before the app installs anything', async () => {
+    const meta = document.createElement('meta');
+    meta.setAttribute('name', 'filex-base');
+    meta.setAttribute('content', '/filex');
+    document.head.appendChild(meta);
+    try {
+      const { api } = await freshClient();
+      const out = (await throughRequestInterceptors(api, { method: 'get', headers: {} })) as { baseURL?: string };
+      expect(out.baseURL).toBe('/filex/api');
+    } finally {
+      meta.remove();
+    }
   });
 
   it('request interceptor honours a runtime API base override (Electron path)', async () => {
@@ -181,13 +220,7 @@ describe('api/client', () => {
     // different one, so import client without resetting here.
     const { api, installAxiosInterceptors } = await import('@/api/client');
     installAxiosInterceptors({ router: fakeRouter() });
-
-    const handlers = (api.interceptors.request as unknown as { handlers: Array<{ fulfilled: (cfg: { method?: string; headers?: Record<string, string>; baseURL?: string }) => unknown }> }).handlers;
-    const handler = handlers[handlers.length - 1];
-    const out = (await handler.fulfilled({
-      method: 'get',
-      headers: {} as Record<string, string>,
-    })) as { baseURL?: string };
+    const out = (await throughRequestInterceptors(api, { method: 'get', headers: {} })) as { baseURL?: string };
     expect(out.baseURL).toBe('https://fm.example.com/api');
     runtime.setApiBaseUrl(''); // reset so later tests see the default
   });

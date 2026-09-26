@@ -28,7 +28,7 @@ import { computed, getCurrentScope, onScopeDispose, ref } from 'vue';
 /** `plugin` — an app-plugin job (docs/APP-PLUGINS-API.md); also what any
  *  queue kind this package has no drawing for is shown as. */
 export type OperationKind =
-  | 'upload' | 'copy' | 'move' | 'delete' | 'convert'
+  | 'upload' | 'copy' | 'move' | 'delete' | 'rename' | 'restore' | 'purge' | 'convert'
   | 'archive' | 'archive-create' | 'archive-extract' | 'plugin' | 'trash';
 export type OperationStatus = 'running' | 'done' | 'error' | 'aborted';
 
@@ -54,6 +54,10 @@ export interface OperationInput {
   /** Progress counters for queue ops (3/5 items). */
   doneCount?: number;
   totalCount?: number;
+  /** The items one source is made of, when the server counts them (a folder
+   *  job on one storage): "25 of 100 items" instead of a source count of 0/1. */
+  itemsDone?: number;
+  itemsTotal?: number;
   /** Byte progress for uploads. */
   uploadedBytes?: number;
   totalBytes?: number;
@@ -97,6 +101,8 @@ export interface Operation {
   cancelling: boolean;
   doneCount: number | null;
   totalCount: number | null;
+  itemsDone: number | null;
+  itemsTotal: number | null;
   uploadedBytes: number | null;
   totalBytes: number | null;
   cancellable: boolean;
@@ -125,6 +131,8 @@ function toOperation(key: string, input: OperationInput, prev?: Operation): Oper
     cancelling: input.cancelling ?? false,
     doneCount: input.doneCount ?? null,
     totalCount: input.totalCount ?? null,
+    itemsDone: input.itemsDone ?? null,
+    itemsTotal: input.itemsTotal ?? null,
     uploadedBytes: input.uploadedBytes ?? null,
     totalBytes: input.totalBytes ?? null,
     cancellable: input.cancellable ?? false,
@@ -301,27 +309,26 @@ export function useOperations() {
   const hasError = computed(() => errorCount.value > 0);
 
   /**
-   * Aggregate progress across determinate running rows (uploads weighted by
-   * bytes, queue ops by item counts). null → nothing determinate is running
-   * (badge ring spins instead of filling).
+   * Aggregate progress across determinate running rows: each row's own
+   * `percent`, the number its publisher already decided is honest. null →
+   * nothing determinate is running (badge ring spins instead of filling).
+   *
+   * ⚠ Not the rows' counters. This used to read done/total before `percent`,
+   * and a queued move, copy or delete of ONE folder is "0 of 1" until it ends
+   * (the queue counts what was selected; on an object store every object
+   * inside is its own request): the row drew a moving indicator, because
+   * lib/opProgress gives it no percent, while the badge beside it read "0%"
+   * over an empty ring for minutes. An upload whose bytes are all in filex
+   * has no percent either while the server writes it to the storage.
    */
   const overallPercent = computed<number | null>(() => {
     const running = active.value.filter((o) => o.status === 'running');
     let sum = 0;
     let n = 0;
     for (const o of running) {
-      let frac: number | null = null;
-      if (o.totalBytes && o.totalBytes > 0) {
-        frac = Math.min(1, (o.uploadedBytes ?? 0) / o.totalBytes);
-      } else if (o.totalCount && o.totalCount > 0) {
-        frac = Math.min(1, (o.doneCount ?? 0) / o.totalCount);
-      } else if (o.percent !== null) {
-        frac = Math.min(1, o.percent / 100);
-      }
-      if (frac !== null) {
-        sum += frac;
-        n += 1;
-      }
+      if (o.percent === null) continue;
+      sum += Math.min(1, Math.max(0, o.percent / 100));
+      n += 1;
     }
     if (n === 0) return null;
     return Math.round((sum / n) * 100);

@@ -360,7 +360,7 @@ a tag cannot be used to learn that a file exists.
 opening one lists every file carrying it — from every folder and every storage
 the person can reach:
 
-![Personal and team tags, with a team tag opened](screenshots/v0.46.0/tags/tags-kinds-1440.png)
+![Personal and team tags, with a team tag opened](screenshots/v0.47.0/tags/tags-kinds-1440.png)
 
 Rules that follow from it:
 
@@ -805,7 +805,9 @@ Reports the index state:
   "index_size_bytes": 5242880,
   "last_updated_at": "",
   "needs_rebuild": false,
-  "rebuilding": false
+  "rebuilding": false,
+  "last_rebuild_finished_at": "2026-09-26T10:00:00Z",
+  "last_rebuild_error": ""
 }
 ```
 
@@ -825,6 +827,11 @@ Reports the index state:
   until the new index is live, and it is why an admin UI can say "rebuilding"
   instead of showing a `needs_rebuild` banner over an index that is already
   being fixed.
+- `last_rebuild_finished_at` / `last_rebuild_error` — how the latest rebuild of
+  the running server ended: when, and why it did not go live (empty when it
+  did). `null` / empty before any has ended. `rebuilding` turns `false` on a
+  failure too, so this pair is what tells a finished rebuild from a failed
+  one; the admin Search page reads it before it says the new index is live.
 
 ### `POST /api/admin/search/rebuild`
 
@@ -928,8 +935,9 @@ empty index, which is exactly why filex would not run one on its own.
 ### If it does not finish
 
 - **It fails.** The old index keeps serving, `needs_rebuild` stays `true`, and
-  the log says why (`search: rebuild failed …`). The half-built directory is
-  removed.
+  the log says why (`search: rebuild failed …`), as does `last_rebuild_error` on
+  the stats endpoint — the admin Search page shows it. The half-built directory
+  is removed.
 - **The disk cannot take two indexes.** Same outcome, refused before anything is
   written: `search: not enough free disk space to rebuild the index`, with the
   bytes it needed and the bytes it found.

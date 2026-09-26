@@ -148,16 +148,71 @@ func (w *Worker) RemoveStorage(id int64) {
 	}
 }
 
+// ErrNoSyncer is what the scan doors return for a storage with no syncer: it
+// does not exist, it is switched off, or its driver would not start.
+var ErrNoSyncer = errors.New("sync: no syncer for storage")
+
 // Trigger forces an immediate sync for a single storage. Returns when the
 // run completes or ctx is cancelled.
+//
+// ⚠ The run is also the SYNCER's: stopping the syncer (the storage was
+// edited, switched off or deleted; the server is stopping) stops it, as it
+// stops a run the syncer's own loop started. A manual run used to live on
+// its caller's context alone, which the stop could not reach, and walked the
+// replaced settings for up to six hours beside the new syncer's own scan.
 func (w *Worker) Trigger(ctx context.Context, storageID int64) error {
-	w.mu.Lock()
-	syncer, ok := w.syncers[storageID]
-	w.mu.Unlock()
+	syncer, ok := w.syncer(storageID)
 	if !ok {
-		return errors.New("sync: no syncer for storage")
+		return ErrNoSyncer
 	}
+	ctx, stop := syncer.bound(ctx)
+	defer stop()
 	return syncer.RunOnce(ctx)
+}
+
+// StartScan starts a full scan of one storage in the background, unless one
+// is already walking it (started=false). It answers only once the scan holds
+// the storage's run slot, so Running(id) is true from the moment it returns:
+// "Sync now" used to answer "started" first, and a second press straight
+// after was told "started" too and then lost the race for the slot.
+//
+// The scan runs on the syncer's lifetime (see Trigger), bounded by ceiling.
+func (w *Worker) StartScan(storageID int64, ceiling time.Duration) (started bool, err error) {
+	syncer, ok := w.syncer(storageID)
+	if !ok {
+		return false, ErrNoSyncer
+	}
+	if !syncer.claimRun() {
+		return false, nil
+	}
+	go func() {
+		defer syncer.releaseRun()
+		ctx, cancel := context.WithTimeout(syncer.ctx, ceiling)
+		defer cancel()
+		if err := syncer.run(ctx); err != nil {
+			slog.Warn("sync: manual scan ended with an error",
+				slog.String("storage", syncer.storage.Name), slog.String("err", err.Error()))
+		}
+	}()
+	return true, nil
+}
+
+func (w *Worker) syncer(storageID int64) (*storageSyncer, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	s, ok := w.syncers[storageID]
+	return s, ok
+}
+
+// bound ties ctx to the syncer's lifetime: when the syncer stops, so does
+// work running on the returned context.
+func (s *storageSyncer) bound(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	unhook := context.AfterFunc(s.ctx, cancel)
+	return ctx, func() {
+		unhook()
+		cancel()
+	}
 }
 
 // Known reports whether a storage has a registered syncer — what Trigger would

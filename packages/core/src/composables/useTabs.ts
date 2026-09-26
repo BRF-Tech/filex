@@ -26,6 +26,7 @@
 
 import { computed, ref, watch, type Ref } from 'vue';
 import type { ViewMode } from '../types/FileNode';
+import { newId } from '../lib/uid';
 
 /** Per-tab split state — the secondary pane's own location. */
 export interface TabSplit {
@@ -46,14 +47,6 @@ export interface TabState {
 export interface UseTabsOptions {
   /** localStorage key; null disables persistence entirely. */
   storageKey: string | null;
-}
-
-function makeId(): string {
-  try {
-    return crypto.randomUUID();
-  } catch {
-    return `t${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  }
 }
 
 export function useTabs(opts: UseTabsOptions) {
@@ -97,7 +90,7 @@ export function useTabs(opts: UseTabsOptions) {
               }
             : null;
         clean.push({
-          id: typeof t.id === 'string' && t.id ? t.id : makeId(),
+          id: typeof t.id === 'string' && t.id ? t.id : newId(),
           path: t.path,
           viewMode: vm,
           split,
@@ -135,7 +128,7 @@ export function useTabs(opts: UseTabsOptions) {
   /** Create the first tab (no-op once any tab exists). */
   function seed(path: string, viewMode: ViewMode): void {
     if (tabs.value.length > 0) return;
-    const t: TabState = { id: makeId(), path, viewMode, split: null };
+    const t: TabState = { id: newId(), path, viewMode, split: null };
     tabs.value = [t];
     activeId.value = t.id;
   }
@@ -153,7 +146,7 @@ export function useTabs(opts: UseTabsOptions) {
     path: string,
     o: { viewMode: ViewMode; background?: boolean; split?: TabSplit | null },
   ): TabState {
-    const t: TabState = { id: makeId(), path, viewMode: o.viewMode, split: o.split ?? null };
+    const t: TabState = { id: newId(), path, viewMode: o.viewMode, split: o.split ?? null };
     const idx = activeIndex.value;
     tabs.value.splice(idx === -1 ? tabs.value.length : idx + 1, 0, t);
     if (!o.background) activeId.value = t.id;

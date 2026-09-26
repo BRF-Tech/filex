@@ -224,7 +224,7 @@ func (i *Index) StartRebuild(store NodeLister, opts RebuildOptions) error {
 		// check, a database that went away — cannot leave the flag stuck
 		// and lock out every later rebuild.
 		defer i.rebuilding.Store(false)
-		if err := i.rebuild(context.Background(), store, opts); err != nil {
+		if err := i.rebuildAndRecord(context.Background(), store, opts); err != nil {
 			slog.Error("search: rebuild failed; the existing index is still serving queries",
 				slog.String("reason", opts.Reason), slog.String("err", err.Error()))
 			return
@@ -243,7 +243,37 @@ func (i *Index) Rebuild(ctx context.Context, store NodeLister, opts RebuildOptio
 		return ErrRebuildInProgress
 	}
 	defer i.rebuilding.Store(false)
-	return i.rebuild(ctx, store, opts)
+	return i.rebuildAndRecord(ctx, store, opts)
+}
+
+// rebuildOutcome is how a rebuild ended (Index.lastRebuild).
+type rebuildOutcome struct {
+	at  time.Time
+	err string
+}
+
+// rebuildAndRecord is rebuild, remembering how it ended for Stats.
+//
+// ⚠ The admin page used to say "the rebuilt index is live" whenever
+// `rebuilding` went false — which it does on a failure too (a disk that cannot
+// hold two indexes, a database that went away): the old index kept serving,
+// and the page announced a new one. It now reads how the rebuild ended.
+func (i *Index) rebuildAndRecord(ctx context.Context, store NodeLister, opts RebuildOptions) error {
+	err := i.rebuild(ctx, store, opts)
+	out := rebuildOutcome{at: time.Now().UTC()}
+	if err != nil {
+		out.err = err.Error()
+	}
+	i.lastMu.Lock()
+	i.lastRebuild = out
+	i.lastMu.Unlock()
+	return err
+}
+
+func (i *Index) lastOutcome() rebuildOutcome {
+	i.lastMu.Lock()
+	defer i.lastMu.Unlock()
+	return i.lastRebuild
 }
 
 // rebuild does the work. The caller owns the rebuilding flag.

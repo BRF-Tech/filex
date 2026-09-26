@@ -43,6 +43,7 @@ import type { PaginatedResponse, Share } from '@/api/types';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import { copyText } from '@/lib/clipboard';
+import { fallbackShareUrl } from '@/lib/shareLink';
 import { formatDate, formatRelative } from '@/lib/format';
 
 import Badge from '@/components/ui/Badge.vue';
@@ -91,8 +92,7 @@ function linkOf(row: MyShareRow): string {
   // Only reachable against a server older than this endpoint, which cannot
   // happen for a page the same binary serves. Kept so a missing `url` degrades
   // to something openable instead of "undefined".
-  const token = shareOf(row).token ?? '';
-  return typeof window === 'undefined' ? `/s/${token}` : `${window.location.origin}/s/${token}`;
+  return fallbackShareUrl(shareOf(row).token ?? '');
 }
 
 function hasPin(row: MyShareRow): boolean {

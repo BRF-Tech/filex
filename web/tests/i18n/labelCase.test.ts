@@ -64,6 +64,7 @@ const NAMES = new Set([
   'Trash', 'Home', 'Webhooks', 'Test', // a screen or button quoted by its name
   'Esc', 'Claude', 'Keycloak', 'Authentik', 'Hetzner', 'Ubuntu', 'Apple', 'Silicon',
   'Active', 'Directory', 'Sunday', 'English', 'İngilizce',
+  'Store', // "Microsoft Store": a product's name (install.dl.win_store)
   'Acme', 'Cloud', 'Bulut', // the placeholder's made-up company name
   // …and its made-up person, in the file-request page's "your name" box
   // (public.your_name_ph). A sample name is a name.

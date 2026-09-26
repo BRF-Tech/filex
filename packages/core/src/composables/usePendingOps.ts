@@ -39,6 +39,10 @@ export interface PendingOp {
   /** Running cross-storage transfer's bytes (issue #27); absent otherwise. */
   bytes_total?: number;
   bytes_done?: number;
+  /** Objects a running same-storage copy/move/delete has found and finished
+   *  inside its sources (the storage driver's count); absent otherwise. */
+  objects_total?: number;
+  objects_done?: number;
   target_path: string | null;
   source_dir: string | null;
   source_count: number;
@@ -121,6 +125,8 @@ export function normalizeOp(raw: Record<string, unknown>): PendingOp {
     progress_done: num(raw.progress_done, raw.done),
     bytes_total: num(raw.bytes_total),
     bytes_done: num(raw.bytes_done),
+    objects_total: num(raw.objects_total),
+    objects_done: num(raw.objects_done),
     target_path: str(raw.target_path, raw.dest),
     source_dir: str(raw.source_dir),
     source_count: num(raw.source_count, sources.length),
@@ -140,7 +146,15 @@ export function normalizeOp(raw: Record<string, unknown>): PendingOp {
 }
 
 export interface UsePendingOpsOptions {
-  /** Called once an op flips into a terminal state (done|error). */
+  /**
+   * Called once a job THIS instance registered (`register`) flips into a
+   * terminal state (done|error|cancelled).
+   *
+   * ⚠ Only those. The list also carries other people's running jobs (an
+   * administrator sees every account's, #58), and they end too: an admin's
+   * explorer said "Renamed" and "3 items restored", and read its listing
+   * again, for every colleague's rename and restore (#61).
+   */
   onSettled?: (op: PendingOp) => void;
 }
 
@@ -152,10 +166,13 @@ export function usePendingOps(
   void config; // kept for future per-instance config knobs
   const ops = ref<PendingOp[]>([]);
   const announced = new Set<number>();
+  /** The jobs registered here, still to be announced when they end. */
+  const mine = new Set<number>();
   const settledAt = new Map<number, number>();
   // First poll after mount returns the server's recent-history window
-  // (last 5 min of done/error rows). Mark them announced silently and
-  // skip the callback so we don't double-fire toasts on F5.
+  // (last 5 min of done/error rows). They are marked announced silently —
+  // none was registered here (`mine`), so no toast fires twice on F5 — and
+  // kept out of the tray.
   let firstPollDone = false;
 
   const hasActive = computed(() =>
@@ -194,9 +211,10 @@ export function usePendingOps(
         if ((op.status === 'done' || op.status === 'error' || op.status === 'cancelled') && !announced.has(op.id)) {
           announced.add(op.id);
           settledAt.set(op.id, Date.now());
-          if (firstPollDone) {
-            opts.onSettled?.(op);
-          }
+          // Only a job this tab queued is announced — on the first look too:
+          // one that ended before it would otherwise go unsaid. (What the
+          // first look finds from before a reload was never registered here.)
+          if (mine.delete(op.id)) opts.onSettled?.(op);
         }
       }
 
@@ -235,6 +253,7 @@ export function usePendingOps(
 
   function register(raw: PendingOp | Record<string, unknown>): void {
     const op = normalizeOp(raw as Record<string, unknown>);
+    if (!announced.has(op.id)) mine.add(op.id);
     const exists = ops.value.some((o) => o.id === op.id);
     if (!exists) {
       ops.value = [op, ...ops.value];

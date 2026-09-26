@@ -21,8 +21,8 @@ release — and it lays itself out **right to left** for the languages that read
 that way.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.46.0/explorer-grid-dark.png">
-  <img src="docs/screenshots/v0.46.0/explorer-grid-light.png" alt="filex explorer — thumbnail grid" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.47.0/explorer-grid-dark.png">
+  <img src="docs/screenshots/v0.47.0/explorer-grid-light.png" alt="filex explorer — thumbnail grid" width="900">
 </picture>
 
 </div>
@@ -138,7 +138,8 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
   exceed its verbs, leave its folder or outlive its expiry (`403 token_ceiling`).
   The tenant boundary is enforced on every route that names a row, not only on the
   ones that list them, and instance-wide settings are reserved to the supertenant.
-- **Boringly deployable** — one binary or one container; SQLite by default, Postgres/MySQL
+- **Boringly deployable** — one binary or one container, on a host of its own or under a
+  sub-path of one you share; SQLite by default, Postgres/MySQL
   when you want them; every driver switched by env vars. All three engines are
   migrated, compared against each other and written to by CI on every change,
   because "supported" used to mean "compiles" ([docs/DATABASES.md](docs/DATABASES.md)).
@@ -195,85 +196,85 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 
 | Define the boxes — name each one and say whose it is; the document comes next | Place them — choose a box, tap the page where it goes |
 |---|---|
-| ![Defining the boxes of a signature request](docs/screenshots/v0.46.0/signing/sign-define-1440.png) | ![Placing the boxes on the document](docs/screenshots/v0.46.0/signing/sign-place-1440.png) |
+| ![Defining the boxes of a signature request](docs/screenshots/v0.47.0/signing/sign-define-1440.png) | ![Placing the boxes on the document](docs/screenshots/v0.47.0/signing/sign-place-1440.png) |
 
 | The partner's link — filex's one public screen, in your instance's name, behind a PIN | …and what it opens: only their own boxes — here a name typed in the face the requester chose (drawn and uploaded are the other two) |
 |---|---|
-| ![The outside signer's PIN gate](docs/screenshots/v0.46.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](docs/screenshots/v0.46.0/signing/sign-outside-fill-1440.png) |
+| ![The outside signer's PIN gate](docs/screenshots/v0.47.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](docs/screenshots/v0.47.0/signing/sign-outside-fill-1440.png) |
 
 | While it is out — the document frozen for everybody, who has signed in its details | Installing an app — every permission it asks for, in plain words, before anything runs |
 |---|---|
-| ![The document locked, its Signatures panel open](docs/screenshots/v0.46.0/signing/sign-status-1440.png) | ![The install wizard's permission review](docs/screenshots/v0.46.0/apps/apps-install-review-1440.png) |
+| ![The document locked, its Signatures panel open](docs/screenshots/v0.47.0/signing/sign-status-1440.png) | ![The install wizard's permission review](docs/screenshots/v0.47.0/apps/apps-install-review-1440.png) |
 
 | An installed app — where it came from, its fingerprint, and every permission it holds in plain words (its settings and its actions follow, further down the page) | The converter, another app — every target under its category, three steps |
 |---|---|
-| ![An installed app's detail](docs/screenshots/v0.46.0/apps/apps-detail-1440.png) | ![The converter's wizard](docs/screenshots/v0.46.0/apps/convert-wizard-1440.png) |
+| ![An installed app's detail](docs/screenshots/v0.47.0/apps/apps-detail-1440.png) | ![The converter's wizard](docs/screenshots/v0.47.0/apps/convert-wizard-1440.png) |
 
 | Every app on the instance, and a **language pack** among them — a manifest with nothing that runs, which says how much of this filex it translates and leaves with it |
 |---|
-| ![The Apps list, a language pack among the apps](docs/screenshots/v0.46.0/langpack/apps-list-1440.png) |
+| ![The Apps list, a language pack among the apps](docs/screenshots/v0.47.0/langpack/apps-list-1440.png) |
 
 ### Your own things, wherever you are
 
 | The bell — the unread count on it, every row going where it says | All of your notifications, inside the explorer — for everybody, not only administrators |
 |---|---|
-| ![The bell with its unread badge, open](docs/screenshots/v0.46.0/signing/bell-badge-1440.png) | ![The full notification list over the explorer](docs/screenshots/v0.46.0/signing/notifications-list-1440.png) |
+| ![The bell with its unread badge, open](docs/screenshots/v0.47.0/signing/bell-badge-1440.png) | ![The full notification list over the explorer](docs/screenshots/v0.47.0/signing/notifications-list-1440.png) |
 
 | My shares — the links you created, and their PINs when you need to pass one on | Every admin table — one pinned **Actions** menu per row, the same menu the explorer's ⋮ opens |
 |---|---|
-| ![My shares with a row's Actions menu open](docs/screenshots/v0.46.0/signing/my-shares-1440.png) | ![Admin → Shares, a row's Actions menu open](docs/screenshots/v0.46.0/signing/admin-table-actions-1440.png) |
+| ![My shares with a row's Actions menu open](docs/screenshots/v0.47.0/signing/my-shares-1440.png) | ![Admin → Shares, a row's Actions menu open](docs/screenshots/v0.47.0/signing/admin-table-actions-1440.png) |
 
 ### Your brand
 
 | Appearance — compose a theme in your own colours, previewed as you type | Made the default, it is what everybody's explorer wears… |
 |---|---|
-| ![The theme editor](docs/screenshots/v0.46.0/appearance/theme-editor-1440.png) | ![The explorer wearing the operator's theme](docs/screenshots/v0.46.0/appearance/themed-explorer-1440.png) |
+| ![The theme editor](docs/screenshots/v0.47.0/appearance/theme-editor-1440.png) | ![The explorer wearing the operator's theme](docs/screenshots/v0.47.0/appearance/themed-explorer-1440.png) |
 
 | …and the sign-in page, before anybody has signed in | A symlink filex will not follow says so — in the listing, and in words in its details |
 |---|---|
-| ![The sign-in page wearing the operator's theme](docs/screenshots/v0.46.0/appearance/themed-signin-1440.png) | ![A symlink that leaves the storage, badged](docs/screenshots/v0.46.0/symlinks/symlink-badge-1440.png) |
+| ![The sign-in page wearing the operator's theme](docs/screenshots/v0.47.0/appearance/themed-signin-1440.png) | ![A symlink that leaves the storage, badged](docs/screenshots/v0.47.0/symlinks/symlink-badge-1440.png) |
 
 ### The file manager
 
 | Sharing — PIN, expiry, download limit, one-line `curl` | Markdown viewer |
 |---|---|
-| ![Share modal](docs/screenshots/v0.46.0/share-modal.png) | ![Markdown viewer](docs/screenshots/v0.46.0/viewer-markdown.png) |
+| ![Share modal](docs/screenshots/v0.47.0/share-modal.png) | ![Markdown viewer](docs/screenshots/v0.47.0/viewer-markdown.png) |
 
 | …and what the person at the other end opens. filex has ONE outward-facing screen — a shared file, a folder, a file request, an app's signing page and the PIN in front of any of them are all this page, in your instance's name |
 |---|
-| ![A public share link, as its recipient sees it](docs/screenshots/v0.46.0/public-share.png) |
+| ![A public share link, as its recipient sees it](docs/screenshots/v0.47.0/public-share.png) |
 
 | Admin panel | Demo landing |
 |---|---|
-| ![Admin dashboard](docs/screenshots/v0.46.0/admin-dashboard.png) | ![Demo landing](docs/screenshots/v0.46.0/demo-landing.png) |
+| ![Admin dashboard](docs/screenshots/v0.47.0/admin-dashboard.png) | ![Demo landing](docs/screenshots/v0.47.0/demo-landing.png) |
 
 | The shell — what everybody lands on | Searching this folder; `⌘K` / `Ctrl K` hands the query to the palette |
 |---|---|
-| ![The filex shell](docs/screenshots/v0.46.0/driveshell/driveshell-hero-1440.png) | ![Searching a folder](docs/screenshots/v0.46.0/driveshell/driveshell-search-1440.png) |
+| ![The filex shell](docs/screenshots/v0.47.0/driveshell/driveshell-hero-1440.png) | ![Searching a folder](docs/screenshots/v0.47.0/driveshell/driveshell-search-1440.png) |
 
 | Navigation panel — Home, Shared with me, My shares, Recent, Starred, Trash, and the storages you can reach | Collapsed to the icon rail |
 |---|---|
-| ![Navigation panel](docs/screenshots/v0.46.0/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/v0.46.0/sidenav/sidenav-rail-1440.png) |
+| ![Navigation panel](docs/screenshots/v0.47.0/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/v0.47.0/sidenav/sidenav-rail-1440.png) |
 
 | Tags — your own, or your team's; a tag opens every file carrying it, from every folder they live in | Trash — what was deleted, where it came from, and how long is left before it goes |
 |---|---|
-| ![Personal and team tags](docs/screenshots/v0.46.0/tags/tags-kinds-1440.png) | ![The trash view](docs/screenshots/v0.46.0/sidenav/view-trash-1440.png) |
+| ![Personal and team tags](docs/screenshots/v0.47.0/tags/tags-kinds-1440.png) | ![The trash view](docs/screenshots/v0.47.0/sidenav/view-trash-1440.png) |
 
 | Shared with me — folders other people granted you, no mount instructions | Embedded in another product's page |
 |---|---|
-| ![Shared with me](docs/screenshots/v0.46.0/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/v0.46.0/sidenav/embed-webcomponent-1440.png) |
+| ![Shared with me](docs/screenshots/v0.47.0/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/v0.47.0/sidenav/embed-webcomponent-1440.png) |
 
 | How to connect — the guides, built from *your* deployment | API keys — mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry) |
 |---|---|
-| ![How to connect](docs/screenshots/v0.46.0/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.46.0/sidenav/apikeys-minted-1440.png) |
+| ![How to connect](docs/screenshots/v0.47.0/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.47.0/sidenav/apikeys-minted-1440.png) |
 
 | Reaching filex from anything — S3, SFTP, FTPS, NFS, WebDAV. Every command is built from *your* deployment |
 |---|
-| ![Connection guide](docs/screenshots/v0.46.0/connections-guide.png) |
+| ![Connection guide](docs/screenshots/v0.47.0/connections-guide.png) |
 
 | A storage filex does not ship — installed as a plugin on **Plugins → Storage plugins**, describing its own config form |
 |---|
-| ![Plugins](docs/screenshots/v0.46.0/admin-plugins.png) |
+| ![Plugins](docs/screenshots/v0.47.0/admin-plugins.png) |
 
 ## Quick start — binary
 
@@ -318,6 +319,11 @@ ready-made stacks live in [`deploy/`](deploy/):
 
 Step-by-step instructions for each tier are in
 [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+filex runs at the root of a host of its own or under a path of one it shares
+(`https://example.com/filex/`): one setting, `FILEX_BASE_PATH`, and a proxy
+that passes the full path — Caddy, nginx and Helm examples in
+[docs/DEPLOYMENT.md → Serving filex under a sub-path](docs/DEPLOYMENT.md#serving-filex-under-a-sub-path).
 
 ## Embed in your app
 
@@ -401,7 +407,7 @@ the web UI and the embeds render, not a separate half-copy:
 - **Mount as a drive** — one button in Settings attaches the server as a drive of the
   operating system over WebDAV, and one detaches it; the account's own token is the
   credential and never appears on a command line. Measured on Windows; the macOS and
-  Linux paths are there but not yet verified ([docs/DESKTOP.md](docs/DESKTOP.md)).
+  Linux paths are there but not yet verified ([docs/DESKTOP.md](docs/DESKTOP.md#mounting-the-server-as-a-drive)).
 - **⌘K searches every account** on the rail, grouped under one badge per account, each
   searched, downloaded and dragged out with its own sign-in ([docs/SEARCH.md](docs/SEARCH.md)).
 - **Signs in through your browser**, so SSO and MFA behave exactly as they do on the web.
@@ -420,9 +426,11 @@ brew install brf-tech/filex/filex-app       # macOS 13+ (Apple Silicon)
 sudo snap install filex-app                 # Ubuntu and other Linux with snapd
 ```
 
-Installer, portable `.exe`, AppImage, `.deb`, `.rpm` and `.dmg` are also attached to the
+On Windows it is also in the [Microsoft Store](https://apps.microsoft.com/detail/9PKXDJLVZWXW) (*filex File Manager*),
+signed by Microsoft and kept up to date by the Store. Installer, portable `.exe`, AppImage,
+`.deb`, `.rpm` and `.dmg` are attached to the
 [latest release](https://github.com/BRF-Tech/filex/releases/latest) — not code-signed yet,
-so expect a SmartScreen prompt on Windows. A Microsoft Store build is on its way. Details:
+so expect a SmartScreen prompt from the Windows installer. Details:
 [docs/DESKTOP.md](docs/DESKTOP.md). The CLI alone: `brew install brf-tech/filex/filex` or
 `winget install BRFTech.filex` ([docs/CLI.md](docs/CLI.md)).
 
@@ -516,6 +524,15 @@ again. `FILEX_PLUGIN_TRUSTED_KEYS` makes signed modules mandatory (a GitHub
 install carries no signature, so on such an instance upload the module with its
 signature instead). Apps are off in demo mode.
 
+**They keep themselves up to date.** Once a day (and on **Check for updates**)
+filex asks where each app came from — its GitHub releases, a language pack's
+branch, or the manifest address it was installed from — for a newer version
+this filex can run, and installs it when it asks for no new permission; one
+that asks for more waits under *Needs approval* until you have reviewed it.
+Each app can be switched to "tell me, don't install". An app says which filex
+versions it works with (`"filex": ">=0.47.0"` in its manifest), and filex will
+not install it outside that range.
+
 **Operator's guide:** [docs/APP-PLUGINS.md](docs/APP-PLUGINS.md) — installing and
 controlling apps, the signing round end to end, the converter, scheduled
 wake-ups, and what guards an app's public links. **Writing one** (stock Go,
@@ -530,7 +547,7 @@ of plugin, a storage backend: [docs/PLUGINS.md](docs/PLUGINS.md).
 - **Multi-storage** — mount many storages at once (local, S3, FTP, SFTP, WebDAV, SMB/NAS); each appears as a top-level folder. Each also carries an address that never moves: the storage's name is the first path segment on WebDAV, SFTP, NFS and the S3 API, so renaming one would re-address it — a mount written against its **uid** survives every rename. **Copy or cut in one and paste in another**: filex streams the tree between the two drivers, keeps each file's timestamp, and only removes the original once the copy is verified. A store that is down is reported within seconds, and only silence is timed out, never a transfer that keeps moving (S3, WebDAV and FTP: [docs/STORAGE.md](docs/STORAGE.md)).
 - **Drag files out to your desktop** — in the desktop app, drag a selection into Explorer/Finder or another program and it lands as separate real files and folders, not an archive; in a browser, a single file drags out the same way — in the admin app too, through a one-file link that lasts a minute and works once ([docs/DESKTOP.md](docs/DESKTOP.md#dragging-files-out)).
 - **Storage plugins** — a storage filex has never heard of is a **separate program** you install from the admin panel: it describes its own config form, filex speaks a small HTTP/JSON protocol to it, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods. filex **probes every capability a plugin claims** — at install, and again against the configuration you type when you save a storage on it — and refuses one that cannot do what it says, because a half-working driver produces failures that look like filex being broken. Upgrades replace the binary in place and roll back if the new one does not come up ([docs/PLUGINS.md](docs/PLUGINS.md)).
-- **Apps** — a second kind of plugin: a **sandboxed WebAssembly** module that adds actions to the file menu (*Request signatures…*, *Convert…*), screens filex draws for it, a section in a file's details, a home screen under **Apps** in the navigation, and links an outside participant opens without an account. Installed from a GitHub repository through a **permission review** — the app gets exactly what you approved and nothing else: no filesystem, no network, no program on your server; the heavy engines (ffmpeg, LibreOffice, …) are the server's own, offered one permission at a time. The screens filex draws obey filex's rules whoever wrote them — every choice visible rather than hidden in a dropdown, nothing folded behind "advanced", one question per step. The link an app sends to an outside signer is an ordinary **share**, so you see and revoke it in the same list as everything else, and it is never worth more than its creator: a job started from it passes the same checks as one started inside filex (an action you switched off stays off, the creator's access to the document is read again), and it stops working when the creator's account is switched off — until it is switched back on. An app you grant `schedule` is woken once an hour to do its own work at the minute it chose, as an ordinary job in the queue. Two ship as public repositories: **e-Signature** and **Convert** ([Apps](#apps), [docs/APP-PLUGINS.md](docs/APP-PLUGINS.md), [write one](docs/PLUGIN-KIT.md)).
+- **Apps** — a second kind of plugin: a **sandboxed WebAssembly** module that adds actions to the file menu (*Request signatures…*, *Convert…*), screens filex draws for it, a section in a file's details, a home screen under **Apps** in the navigation, and links an outside participant opens without an account. Installed from a GitHub repository through a **permission review** — the app gets exactly what you approved and nothing else: no filesystem, no network, no program on your server; the heavy engines (ffmpeg, LibreOffice, …) are the server's own, offered one permission at a time. The screens filex draws obey filex's rules whoever wrote them — every choice visible rather than hidden in a dropdown, nothing folded behind "advanced", one question per step. The link an app sends to an outside signer is an ordinary **share**, so you see and revoke it in the same list as everything else, and it is never worth more than its creator: a job started from it passes the same checks as one started inside filex (an action you switched off stays off, the creator's access to the document is read again), and it stops working when the creator's account is switched off — until it is switched back on. An app you grant `schedule` is woken once an hour to do its own work at the minute it chose, as an ordinary job in the queue. Apps update themselves from where they came from when a new version asks for nothing new, and say which filex versions they work with. Two ship as public repositories: **e-Signature** and **Convert** ([Apps](#apps), [docs/APP-PLUGINS.md](docs/APP-PLUGINS.md), [write one](docs/PLUGIN-KIT.md)).
 - **e-Signature** ([`BRF-Tech/filex-sign`](https://github.com/BRF-Tech/filex-sign), an app) — sign a PDF yourself, or ask others to: people on this filex sign inside it, from a notification that opens the right screen; anybody else gets a private link, behind a PIN by default — one filex keeps for you (see *Sharing*). The boxes are **defined first** — a name, whose it is, required or not, a date's layout — and **placed on the page after**, two questions on two screens. The document can be **frozen** for everybody, administrators included, while it is out; reminders and the deadline run on their own; the requester follows every signer in the file's details and on the app's home screen; and the result is a PAdES-signed PDF that is **certified** by its first signature and **sealed by filex** after its last, so a reader reports any change made afterwards as not permitted — with the **SHA-256 of the sealed bytes** and the seal's fingerprint sent to the requester and every signer, an **audit trail PDF** when you ask for one, a receipt for every signer, and an option to keep the finished file locked until an administrator lifts it. **Verify** reports any signed PDF: every signature, the certification, the seal, and whether this is the file whose hash was sent. Signing keys never leave the server: the instance's own certificate authority, or one you import, issues each signer a certificate, and the key that made a signature is destroyed seconds later ([docs/APP-PLUGINS.md](docs/APP-PLUGINS.md#signing-documents-end-to-end)).
 - **Convert, as an app** ([`BRF-Tech/filex-convert`](https://github.com/BRF-Tech/filex-convert)) — *Convert…* on any file or selection: images, video, audio, documents, e-books, archives, data, subtitles and fonts. The target is a button under its category, then only the settings that matter for it, then a review; most routes run in pure Go inside the sandbox, the rest through the server's engines, and a target that needs a missing engine is listed as such rather than silently absent ([docs/APP-PLUGINS.md](docs/APP-PLUGINS.md#converting-files)). Separate from the optional converter side-car below.
 - **Protocol gateway** — the same tree is reachable as **S3** (SigV4; aws-cli, rclone, restic, mc, s3fs), **SFTP** (OpenSSH, WinSCP, FileZilla, sshfs), **FTPS** (explicit TLS, for the equipment that only learned FTP; hand it your reverse proxy's auto-renewing certificate — it is re-read on change), **NFSv3** (LAN NAS clients, media players) and **WebDAV** — each with its own credential you can revoke on its own, and all of them behind the same permissions, trash and quota as the UI ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)).

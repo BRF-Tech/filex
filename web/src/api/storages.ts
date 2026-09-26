@@ -67,6 +67,9 @@ function toSyncRun(b: BackendSyncRun): SyncRun {
   };
 }
 
+/** How long deleting a storage may take (StoragesApi.remove). */
+export const STORAGE_DELETE_TIMEOUT_MS = 10 * 60_000;
+
 export const StoragesApi = {
   async list(opts: { role?: 'primary' | 'replica' } = {}): Promise<StorageRef[]> {
     const { data } = await api.get<StorageRef[]>('/admin/storages', {
@@ -90,8 +93,14 @@ export const StoragesApi = {
     return data;
   },
 
+  /**
+   * ⚠ Minutes, not the client's 30 s: deleting a storage removes every one of
+   * its rows. The server finishes the delete whoever stops waiting, but a page
+   * that gave up said "the server could not be reached" about a delete that
+   * was working.
+   */
   async remove(id: number): Promise<void> {
-    await api.delete(`/admin/storages/${id}`);
+    await api.delete(`/admin/storages/${id}`, { timeout: STORAGE_DELETE_TIMEOUT_MS });
   },
 
   /** #57 — the WHOLE order as the administrator sees it, first = top; `[]`

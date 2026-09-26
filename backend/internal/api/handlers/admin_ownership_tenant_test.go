@@ -241,6 +241,8 @@ var crossings = []crossing{
 		func(f *ownedFixture) string { return fmt.Sprintf("/api/admin/shares/%d", f.share) }, nil, true},
 	{"purge another tenant's trash entry", http.MethodDelete,
 		func(f *ownedFixture) string { return fmt.Sprintf("/api/admin/trash/%d", f.trashed) }, nil, true},
+	{"purge another tenant's trash entry as a job", http.MethodDelete,
+		func(f *ownedFixture) string { return fmt.Sprintf("/api/admin/trash/%d?queued=1", f.trashed) }, nil, true},
 
 	// Reads that disclose another tenant's operational detail.
 	{"read another tenant's sync run detail", http.MethodGet,

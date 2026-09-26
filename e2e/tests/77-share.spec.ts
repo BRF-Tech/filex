@@ -31,6 +31,7 @@
  *   - GET    /api/admin/shares
  */
 import { test as base, expect, request as pwRequest, type APIRequestContext } from '@playwright/test';
+import { underBase } from '../helpers/base';
 import {
   dropStorageByName,
   seedLocalStorage,
@@ -193,7 +194,7 @@ test.describe('Share — create + public access (path + node_id shapes)', () => 
 
     // The /s/ endpoint is public (no auth header). Use a fresh anon ctx.
     const anon = await pwRequest.newContext({ baseURL });
-    const res = await anon.get(`/s/${noPin.share.token}`, { maxRedirects: 0 });
+    const res = await anon.get(underBase(`/s/${noPin.share.token}`), { maxRedirects: 0 });
     expect(res.status(), `public download status ${res.status()}`).toBe(200);
     const body = await res.text();
     expect(body).toBe(FILE_BODY);
@@ -238,7 +239,7 @@ test.describe('Share — create + public access (path + node_id shapes)', () => 
     // deliberately shows this interstitial instead of streaming straight
     // away, because an `attachment` Content-Disposition hijacks the page and
     // the user would never learn whether the PIN matched (share.go:727).
-    const unlocked = await anon.post(`/s/${token}`, { form: { pin: pin! }, maxRedirects: 0 });
+    const unlocked = await anon.post(underBase(`/s/${token}`), { form: { pin: pin! }, maxRedirects: 0 });
     expect(unlocked.status(), `unlock status ${unlocked.status()}`).toBe(200);
     expect(unlocked.headers()['content-type'] ?? '').toMatch(/text\/html/);
     const page = await unlocked.text();
@@ -247,7 +248,7 @@ test.describe('Share — create + public access (path + node_id shapes)', () => 
     expect(page).toContain(`?confirmed=1`);
 
     // Step 2 — the confirmed request streams the actual bytes.
-    const res = await anon.post(`/s/${token}?confirmed=1`, {
+    const res = await anon.post(underBase(`/s/${token}?confirmed=1`), {
       form: { pin: pin! },
       maxRedirects: 0,
     });
@@ -256,7 +257,7 @@ test.describe('Share — create + public access (path + node_id shapes)', () => 
     expect(body).toBe(FILE_BODY);
 
     // A wrong PIN must still not get through either step.
-    const wrong = await anon.post(`/s/${token}?confirmed=1`, {
+    const wrong = await anon.post(underBase(`/s/${token}?confirmed=1`), {
       form: { pin: '00000000' },
       maxRedirects: 0,
     });

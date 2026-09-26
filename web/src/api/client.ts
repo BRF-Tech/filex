@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosInstance } from 'axios';
 import type { Router } from 'vue-router';
 import {
+  codeWords,
   foreignText,
   kindOfMethod,
   noteRequestFailed,
@@ -21,7 +22,8 @@ import {
 // Go binary so relative paths "just work". The baseURL here is only the boot
 // default; the request interceptor re-reads it from runtimeConfig on every call
 // so the Electron shell can point at a remote server chosen at login time
-// (see runtimeConfig.ts). The web build never overrides it, so it stays '/api'.
+// (see runtimeConfig.ts). The web build never overrides it, so it stays the
+// same-origin default: '/api', under the base path when filex is served at one.
 export const api: AxiosInstance = axios.create({
   baseURL: DEFAULT_API_BASE,
   withCredentials: true,
@@ -42,6 +44,17 @@ export const api: AxiosInstance = axios.create({
   },
 });
 
+// ⚠⚠ The base is read per request from the FIRST request on, not from when
+// installAxiosInterceptors runs (after the app is created). main.ts fetches the
+// instance palette and the operator stylesheet before that, and under a base
+// path (FILEX_BASE_PATH) those two went to `/api/…` on the host's root — the
+// DEFAULT_API_BASE the instance was created with. Measured by the sub-path e2e
+// run (e2e/lib/subpath-proxy.mjs), 2026-09-26.
+api.interceptors.request.use((config) => {
+  config.baseURL = getApiBaseUrl();
+  return config;
+});
+
 interface InterceptorOpts {
   router: Router;
   onUnauthorized?: () => void;
@@ -55,10 +68,9 @@ export function installAxiosInterceptors(opts: InterceptorOpts): void {
   interceptorsInstalled = true;
 
   api.interceptors.request.use((config) => {
-    // Re-read the API base per request so a runtime override (Electron pointing
-    // at a remote server) takes effect without rebuilding the instance. Defaults
-    // to '/api' in the web build, so same-origin behaviour is unchanged.
-    config.baseURL = getApiBaseUrl();
+    // (The API base is re-read per request by the interceptor installed with
+    // the instance, above — a runtime override such as Electron's takes effect
+    // without rebuilding it.)
     // Same story for credentials: the web build keeps sending cookies, while
     // Electron turns them off because a credentialed request cannot legally be
     // answered with `Access-Control-Allow-Origin: *` — which is what filex
@@ -149,6 +161,11 @@ export function extractError(err: unknown, fallback?: string): string {
     // and reason in their own language instead. One place, so every page that
     // shows a refused write says the same thing.
     if (err.response?.status === 423) return lockedText(err.response.data);
+    // A refusal the server names in a `code` (the queue's doors:
+    // NOT_CANCELLABLE, FINISHED, TOO_MANY…) is said in the reader's language,
+    // in the explorer's words (core lib/errorWords) — its `error` is English.
+    const byCode = codeWords(err.response?.data, String(i18n.global.locale.value));
+    if (byCode) return byCode;
     // ⚠ `message` FIRST when both are present. A response that carries both is
     // one where `error` is a machine code and `message` is the sentence
     // written for the person reading it (`supertenant_only` +

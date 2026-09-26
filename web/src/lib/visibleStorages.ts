@@ -30,6 +30,7 @@
 
 import type { StorageRef } from '@/api/types';
 import { readBearerToken, readCsrfCookie } from '@/lib/explorerConfig';
+import { getServerRoot } from '@/api/runtimeConfig';
 
 export interface VisibleStorage {
   name: string;
@@ -155,7 +156,7 @@ export function withStorageUsage(
 /** Best-effort read of the per-storage usage endpoint. */
 async function fetchStorageUsage(): Promise<unknown> {
   try {
-    const res = await fetch('/api/files/quota/storages', {
+    const res = await fetch(`${getServerRoot()}/api/files/quota/storages`, {
       headers: fileApiHeaders(),
       credentials: 'include',
     });
@@ -182,7 +183,7 @@ export async function fetchVisibleStorages(
 ): Promise<VisibleStorage[]> {
   if (adminItems.length) return fromAdminStorages(adminItems);
   try {
-    const res = await fetch('/api/files/manager?action=index&path=', {
+    const res = await fetch(`${getServerRoot()}/api/files/manager?action=index&path=`, {
       headers: fileApiHeaders(),
       credentials: 'include',
     });

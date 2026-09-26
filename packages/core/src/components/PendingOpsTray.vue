@@ -17,7 +17,7 @@ import { watch } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import type { PendingOp } from '../composables/usePendingOps';
 import type { OperationKind, OperationsStore, OperationStatus } from '../composables/useOperations';
-import { opPercent } from '../lib/opProgress';
+import { opObjects, opPercent } from '../lib/opProgress';
 import { opFailure } from '../lib/errorWords';
 import { useLocale } from '../composables/useLocale';
 
@@ -61,7 +61,9 @@ function mapStatus(op: PendingOp): OperationStatus {
   return 'running'; // pending | running
 }
 
-const DRAWN_KINDS: ReadonlySet<string> = new Set(['copy', 'move', 'delete', 'plugin', 'archive-create', 'archive-extract']);
+const DRAWN_KINDS: ReadonlySet<string> = new Set([
+  'copy', 'move', 'delete', 'rename', 'restore', 'purge', 'plugin', 'archive-create', 'archive-extract',
+]);
 
 /** A queue kind the center can draw. Anything it has no glyph for is shown as
  *  a generic job (`plugin`), never folded into delete. */
@@ -87,6 +89,27 @@ function mayCancel(op: PendingOp): boolean {
 /* issue #27 — bytes when a cross-storage transfer reports them, no fake 0%
  * otherwise; the rule is shared with the admin tray (lib/opProgress). */
 const percentOf = (op: PendingOp): number | null => opPercent(op);
+/**
+ * The row's title. A trash empty names no file: its kind is its title. A
+ * restore or a permanent delete names trash entries by id — no destination,
+ * no source folder — so it says how many it works on; it read its bare kind
+ * ("Restore") before.
+ */
+function nameOf(op: PendingOp): string {
+  if (op.op_type === 'trash-empty') return '';
+  const named = op.label || op.target_path || op.source_dir || '';
+  if (named) return named;
+  if (op.op_type === 'restore' || op.op_type === 'purge') {
+    return t('opc.trash_items', { n: op.progress_total || op.source_count });
+  }
+  return '';
+}
+
+/** "25 of 100 items" for one source whose objects the server counts. */
+function itemsOf(op: PendingOp): { itemsDone?: number; itemsTotal?: number } {
+  const objects = opObjects(op);
+  return objects ? { itemsDone: objects.done, itemsTotal: objects.total } : {};
+}
 
 watch(
   () => props.ops,
@@ -97,8 +120,7 @@ watch(
         input: {
           id: op.id,
           kind: mapKind(op),
-          /* A trash empty names no file: its kind is its title. */
-          name: op.op_type === 'trash-empty' ? '' : op.label || op.target_path || op.source_dir || '',
+          name: nameOf(op),
           percent: percentOf(op),
           status: mapStatus(op),
           error: op.status === 'error' ? failureOf(op).text : null,
@@ -107,6 +129,7 @@ watch(
           cancelling: op.status === 'cancelling',
           doneCount: op.progress_done,
           totalCount: op.progress_total,
+          ...itemsOf(op),
           cancellable: mayCancel(op),
           retryable: false,
           message: op.message ?? null,

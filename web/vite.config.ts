@@ -32,7 +32,19 @@ function i18nCatalogue() {
 
 // Vite config for the filex admin UI.
 // The bundle is emitted to dist/ and consumed by the Go binary via go:embed.
-// `base` MUST stay '/admin/' — the backend mounts the SPA there.
+// `base` MUST stay '/admin/' — the backend mounts the SPA there, and the SAME
+// index.html is served at /admin/, /drive/, /s/<token>, /d/<token> and
+// /files/edit, at any depth, so a relative asset URL in it would resolve
+// against whichever deep link served it.
+//
+// ⚠⚠ Built once, run anywhere: filex can be served under a sub-path
+// (FILEX_BASE_PATH, https://example.com/filex/). Nothing here knows the prefix.
+// The JavaScript and CSS find their neighbours RELATIVE TO THEIR OWN URL
+// (`renderBuiltUrl` below), and the only two documents that spell out an
+// address — index.html and manifest.webmanifest — are rewritten by the server
+// as it serves them under a base (backend/internal/api/spa_shell.go), which is
+// also where the app learns its base (`<meta name="filex-base">`, read by the
+// core's lib/appBase). At the root the server serves both exactly as built.
 //
 // ⚠ PWA scope boundary (Dilim 1, trap #2): the manifest + service worker live
 // ONLY in this standalone SPA build. `@brftech/filex-core` (the embeddable
@@ -158,7 +170,11 @@ export default defineConfig({
         // They still load fine over the network on demand — they are simply
         // not part of the offline shell.
         globIgnores: ['**/editor.main-*.js', '**/*.worker-*.js', '**/model-viewer-*.js'],
-        navigateFallback: '/admin/index.html',
+        // ⚠ RELATIVE, resolved against the worker's own URL: `/admin/index.html`
+        // at the root, `/filex/admin/index.html` under a base path. The
+        // absolute '/admin/index.html' is not in the precache under a base, and
+        // workbox then refuses every navigation ("non-precached-url").
+        navigateFallback: 'index.html',
         // Never let the SW intercept the API — those must always hit the
         // network (and, in Electron, a remote origin).
         navigateFallbackDenylist: [/^\/api\//],
@@ -192,6 +208,19 @@ export default defineConfig({
     }),
   ],
   base: '/admin/',
+  experimental: {
+    // ⚠ Every URL a SCRIPT or a STYLESHEET holds — a lazy chunk's preload list,
+    // an imported image, a font in the CSS — is written relative to the file
+    // holding it (`new URL('./x.js', import.meta.url)`, `url(./font.woff2)`),
+    // not as '/admin/assets/…'. That is what makes the one build work under
+    // any base path: the files move together, so their distances do not change.
+    // index.html keeps the absolute form (the default) and the server rewrites
+    // it; see the header of this file.
+    renderBuiltUrl(_filename: string, { hostType }: { hostType: 'js' | 'css' | 'html' }) {
+      if (hostType === 'js' || hostType === 'css') return { relative: true };
+      return undefined;
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),

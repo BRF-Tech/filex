@@ -19,6 +19,11 @@
 //   3. The target Windows VERSIONS: hard-coded to 10.0.14316.0 for both
 //      MinVersion and MaxVersionTested. uap10 needs Windows 10 2004
 //      (10.0.19041.0); Electron 31 does not run on anything older anyway.
+//   4. The TILE NAME. The template writes `appx.displayName` into both the
+//      package's Properties/DisplayName and the Start menu tile. The Store
+//      checks the first against the names reserved in Partner Center —
+//      "filex File Manager", because "filex" was taken (2026-09-26) — while
+//      the tile is the app's own name, "filex", as on every other platform.
 //
 // ⚠ Only the manifest changes. The app itself still reports its real version
 // (0.43.1) in Settings and in every request it makes — the Store number is a
@@ -33,6 +38,9 @@ const path = require('node:path');
 
 const MIN_VERSION = '10.0.19041.0';
 const MAX_VERSION_TESTED = '10.0.26100.0';
+
+/** What the Start menu tile says: the app's name, not the Store's. */
+const TILE_NAME = 'filex';
 
 const NAMESPACES = {
   uap3: 'http://schemas.microsoft.com/appx/manifest/uap/windows10/3',
@@ -110,6 +118,9 @@ function patchManifest(xml, version) {
   // 3. TargetDeviceFamily.
   out = out.replace(/(<TargetDeviceFamily\b[^>]*?\bMinVersion=")[^"]*(")/, `$1${MIN_VERSION}$2`);
   out = out.replace(/(<TargetDeviceFamily\b[^>]*?\bMaxVersionTested=")[^"]*(")/, `$1${MAX_VERSION_TESTED}$2`);
+
+  // 4. The Start menu tile: VisualElements' own DisplayName attribute.
+  out = out.replace(/(<uap:VisualElements\b[^>]*?\bDisplayName=")[^"]*(")/s, `$1${TILE_NAME}$2`);
 
   return out;
 }

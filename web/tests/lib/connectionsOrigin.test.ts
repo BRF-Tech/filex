@@ -38,6 +38,16 @@ describe('connectionsOrigin', () => {
     expect(connectionsOrigin(cfg({ apiBase: '' }), undefined)).toBe(window.location.origin);
   });
 
+  // filex under a sub-path (FILEX_BASE_PATH): the guide's address keeps the
+  // path, or `https://example.com/dav/` — the host's root — is what it prints.
+  it('keeps the path of the API base: the desktop app, and the admin app under a sub-path', () => {
+    expect(connectionsOrigin(cfg({ apiBase: 'https://example.com/filex' }), null)).toBe('https://example.com/filex');
+    expect(connectionsOrigin(cfg({ apiBase: 'https://example.com/filex/' }), null)).toBe('https://example.com/filex');
+    expect(connectionsOrigin(cfg({ apiBase: '/filex' }), undefined)).toBe(`${window.location.origin}/filex`);
+    // what the server says still wins, and already carries its path
+    expect(connectionsOrigin(cfg({ apiBase: '/filex' }), 'https://example.com/filex')).toBe('https://example.com/filex');
+  });
+
   it('ignores a public_url that is not an absolute http(s) address', () => {
     expect(connectionsOrigin(cfg({ apiBase: 'https://fm.example.org' }), 'localhost:5212')).toBe('https://fm.example.org');
     expect(connectionsOrigin(cfg({ apiBase: 'https://fm.example.org' }), '   ')).toBe('https://fm.example.org');

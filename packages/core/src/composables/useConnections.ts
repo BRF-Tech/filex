@@ -63,6 +63,11 @@ export function connectionsBase(config: ExplorerConfig): string {
  *      that talk to filex directly);
  *   3. the page's own origin (the admin SPA, which the same binary serves).
  *
+ * ⚠ Rungs 2 and 3 keep the API base's PATH. filex can live under a sub-path
+ * (`https://example.com/filex`, FILEX_BASE_PATH): the desktop app then has
+ * that as its apiBase and the admin app `/filex`, and a guide that kept only
+ * the origin printed `https://example.com/dav/` — the host's root, not filex.
+ *
  * ⚠⚠ The first rung is new and it is the fix. Without it an explorer embedded
  * in ANOTHER app — which proxies `/api` to filex under its own origin, the way
  * work.example.com and fishapp do — printed `https://<that app>/dav/`: an address
@@ -76,12 +81,15 @@ export function connectionsOrigin(config: ExplorerConfig, publicUrl?: string | n
   const base = connectionsBase(config);
   if (/^https?:\/\//i.test(base)) {
     try {
-      return new URL(base).origin;
+      const u = new URL(base);
+      return u.origin + u.pathname.replace(/\/+$/, '');
     } catch {
       return base;
     }
   }
-  if (typeof window !== 'undefined' && window.location) return window.location.origin;
+  if (typeof window !== 'undefined' && window.location) {
+    return window.location.origin + (base.startsWith('/') ? base : '');
+  }
   return base;
 }
 

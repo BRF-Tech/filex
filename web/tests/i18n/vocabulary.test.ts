@@ -177,8 +177,8 @@ const SEN: Rule[] = [
     wrong: tr('\\p{L}(ır|ir|ur|ür|ar|er|maz|mez|acak|ecek|dı|di|du|dü|tı|ti|tu|tü)(san|sen)>'),
   },
   {
-    use: 'siz (a possessive or participle the sweep found: "aramanızla", "açtığınızda", "yetkiniz")',
-    wrong: tr('<(aramanla|uygulamandaki|uygulamanla|cihazına|bulunduğun|açtığın|yazdığında|istediğini|hesabınla)>|<yetkin (yok|olmalı)|^Lütfen .* et$'),
+    use: 'siz (a possessive or participle the sweep found: "aramanızla", "açtığınızda", "yetkiniz", "bırakılan")',
+    wrong: tr('<(aramanla|uygulamandaki|uygulamanla|cihazına|bulunduğun|açtığın|bıraktığın|yazdığında|istediğini|hesabınla)>|<yetkin (yok|olmalı)|^Lütfen .* et$'),
   },
   {
     use: 'siz (a sentence that ends in a bare command: "Tekrar deneyin.")',

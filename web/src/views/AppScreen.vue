@@ -26,6 +26,7 @@ import { PluginPageView, useFileApi } from '@brftech/filex-core';
 import type { ExplorerConfig } from '@brftech/filex-core';
 
 import { explorerAuth } from '@/lib/explorerConfig';
+import { getServerRoot } from '@/api/runtimeConfig';
 import { currentMountBase } from '@/router';
 import { useAppHomeRoute } from '@/composables/useAppHomeRoute';
 
@@ -39,7 +40,7 @@ const { plugin, view, section, onSection, title, icon, uiLocale, theme } = useAp
 // ⚠ `locale` rides in the config: every call carries it as Accept-Language
 // and the plugin answers in it (the same reason AppPage.vue passes it).
 const api = computed(() =>
-  useFileApi({ apiBase: '', auth: explorerAuth(), locale: uiLocale.value } as ExplorerConfig),
+  useFileApi({ apiBase: getServerRoot(), auth: explorerAuth(), locale: uiLocale.value } as ExplorerConfig),
 );
 
 /** The explorer — where a queued job's tray is, and "back to the files". */

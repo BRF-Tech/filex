@@ -25,6 +25,7 @@
 import { test, expect, request as pwRequest, type Page, type Locator } from '@playwright/test';
 import { loginAs, apiLogin } from '../helpers/auth';
 import { seedLocalStorage, dropStorageByName } from '../helpers/seed';
+import { BASE_PATH } from '../helpers/base';
 
 const STORAGE = `e2e-dragout71-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;
@@ -153,7 +154,10 @@ test.describe('Admin SPA — dragging a file out rides a minted link (#71)', () 
     const { mime, name, url } = parsePayload(got[0].url);
     expect(mime).toMatch(/^text\/plain/);
     expect(name).toBe(FILE.name);
-    expect(new URL(url).pathname).toMatch(/^\/z\/[A-Za-z0-9_-]{20,}$/);
+    // Under the base path when the run serves filex at one (run.mjs --base-path):
+    // the link has to name the address the browser can reach.
+    expect(new URL(url).pathname.startsWith(`${BASE_PATH}/z/`), new URL(url).pathname).toBe(true);
+    expect(new URL(url).pathname.slice(BASE_PATH.length)).toMatch(/^\/z\/[A-Za-z0-9_-]{20,}$/);
     // The drag is still filex's own inside the window (a move onto a folder).
     expect(got[0].types).toContain('application/x-brf-files');
 
@@ -239,7 +243,7 @@ test.describe('Admin SPA — dragging a file out rides a minted link (#71)', () 
       await dragOnce(page, row);
       const all = await drags(page);
       return all[all.length - 1].url;
-    }, { timeout: 10_000 }).toMatch(/:https?:\/\/[^/]+\/z\//);
+    }, { timeout: 10_000 }).toMatch(new RegExp(`:https?://[^/]+${BASE_PATH}/z/`));
   });
 
   test('a folder asks for no link', async ({ page }) => {
@@ -274,7 +278,7 @@ test.describe('Admin SPA — dragging a file out rides a minted link (#71)', () 
     expect(mints, 'no mint: the cookie travels with the plain URL').toEqual([]);
     const got = await drags(page);
     const { url } = parsePayload(got[0].url);
-    expect(new URL(url).pathname).toBe('/api/files/manager');
+    expect(new URL(url).pathname).toBe(`${BASE_PATH}/api/files/manager`);
   });
 
   test('the drop is in the audit log, for the admin who dragged it', async ({ request }) => {

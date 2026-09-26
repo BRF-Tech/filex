@@ -67,6 +67,11 @@ independently — an edit, an overwrite, a move or a restore changes the actor a
 leaves the owner alone. The listing's **Owner** column and the filter row's
 **Owner** chip read the first one; quota reads it too.
 
+A third column, `nodes.deleted_by` (migration `00061`), records **who put the
+thing in the trash**. It changes nothing about whose bytes they are: a trashed
+file stays on its owner's quota until it is purged. See
+[Trash & Versioning](TRASH-VERSIONING.md#who-deleted-it).
+
 ⚠ That changed a quota behaviour, deliberately. An overwrite by another user
 used to *move* the bytes to the writer; a file that already has an owner now
 keeps it, so user B can grow the total user A is billed for by overwriting A's

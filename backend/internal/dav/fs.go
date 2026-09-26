@@ -273,6 +273,10 @@ func (f *davFS) RemoveAll(ctx context.Context, name string) error {
 	if err != nil {
 		return mapErr(err)
 	}
+	// From here the storage changes, and a client that gives up on a folder's
+	// DELETE must not leave it half in the trash (storage.DetachMutation).
+	ctx, cancel := storage.DetachMutation(ctx)
+	defer cancel()
 
 	// DAV DELETE is a SOFT delete, mirroring the manager UI: the bytes are
 	// renamed into `.filex-trash/<key>` so they stay restorable via the trash
@@ -280,19 +284,19 @@ func (f *davFS) RemoveAll(ctx context.Context, name string) error {
 	// covers the single-rename case, the per-object walk an object store needs
 	// for a folder, and the Copy+Delete fallback for drivers without Move.
 	//
-	// The DB bookkeeping below runs on a WithoutCancel context: once the bytes
-	// have moved, a client that hangs up mid-DELETE must not leave the node row
-	// pointing at a path the file no longer occupies.
+	// The bytes and the DB bookkeeping below both run detached (above): once
+	// the bytes have moved, a client that hangs up mid-DELETE must not leave
+	// the node row pointing at a path the file no longer occupies.
 	out, terr := trash.Put(ctx, drv, rel)
 	switch {
 	case terr == nil && out.Trashed:
-		f.h.syncTrash(context.WithoutCancel(ctx), st, rel, out.Key)
+		f.h.syncTrash(ctx, st, rel, out.Key)
 		return nil
 
 	case terr == nil && out.Missing:
 		// Source already gone (stale index / out-of-band delete): drop the
 		// cache rows outright rather than trashing a phantom.
-		f.h.syncDelete(context.WithoutCancel(ctx), st, rel)
+		f.h.syncDelete(ctx, st, rel)
 		return nil
 
 	case errors.Is(terr, trash.ErrUnsupported):
@@ -322,7 +326,7 @@ func (f *davFS) RemoveAll(ctx context.Context, name string) error {
 		} else if err := del.Delete(ctx, rel); err != nil && !errors.Is(err, storage.ErrNotFound) {
 			return mapErr(err)
 		}
-		f.h.syncDelete(context.WithoutCancel(ctx), st, rel)
+		f.h.syncDelete(ctx, st, rel)
 		return nil
 
 	default:
@@ -367,6 +371,10 @@ func (f *davFS) Rename(ctx context.Context, oldName, newName string) error {
 	if err != nil {
 		return mapErr(err)
 	}
+	// From here the storage changes: a folder MOVE the client gives up on is
+	// finished all the same (storage.DetachMutation).
+	ctx, cancel := storage.DetachMutation(ctx)
+	defer cancel()
 	if err := mv.Move(ctx, relSrc, relDst); err != nil {
 		if obj.Kind != storage.KindDirectory {
 			return mapErr(err)

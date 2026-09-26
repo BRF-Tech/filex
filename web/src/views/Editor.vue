@@ -20,6 +20,7 @@ import { useI18n } from 'vue-i18n';
 import { PreviewModal, isExternalUsable, type FileNode, type ExternalServiceStatus } from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
 import { effectiveTheme } from '@/lib/theme';
+import { getServerRoot } from '@/api/runtimeConfig';
 
 const { locale } = useI18n();
 const route = useRoute();
@@ -28,10 +29,13 @@ function readBearerToken(): string | null {
   return sessionStorage.getItem('filex.bearer');
 }
 
+// Every address below is under the server root — '' at the root, `/filex`
+// under a sub-path (FILEX_BASE_PATH; runtimeConfig.getServerRoot).
+const api = (path: string) => `${getServerRoot()}${path}`;
 const previewUrl = (p: string) =>
-  `/api/files/manager?action=preview&path=${encodeURIComponent(p)}`;
+  api(`/api/files/manager?action=preview&path=${encodeURIComponent(p)}`);
 const downloadUrl = (p: string) =>
-  `/api/files/manager?action=download&path=${encodeURIComponent(p)}`;
+  api(`/api/files/manager?action=download&path=${encodeURIComponent(p)}`);
 
 function authHeaders(): Record<string, string> {
   const token = readBearerToken();
@@ -62,7 +66,7 @@ const callerAdmin = ref(false);
 const capsLoaded = ref(false);
 async function loadCapabilities(): Promise<void> {
   try {
-    const res = await fetch('/api/files/capabilities', {
+    const res = await fetch(api('/api/files/capabilities'), {
       credentials: 'same-origin',
       headers: authHeaders(),
     });
@@ -181,10 +185,10 @@ onBeforeUnmount(() => {
       :preview-url="previewUrl"
       :download-url="downloadUrl"
       :only-office-base="onlyOfficeBase"
-      :only-office-config-endpoint="'/api/files/onlyoffice/config'"
+      :only-office-config-endpoint="api('/api/files/onlyoffice/config')"
       :can-configure="callerAdmin"
       :drawio-url="drawioUrl"
-      :save-text-endpoint="'/api/files/save-text'"
+      :save-text-endpoint="api('/api/files/save-text')"
       :auth-headers="authHeaders"
       :auth-credentials="'same-origin'"
       :locale="locale"

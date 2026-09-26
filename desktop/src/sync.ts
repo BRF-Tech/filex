@@ -32,7 +32,8 @@ import {
   takeHolds,
   type SyncStatus,
 } from './syncstatus.js';
-import { wantedWatchers, watchArgs, type WatchPrefs } from './sync-policy.js';
+import { restartAgain, restartDelay, watchArgs, watchersWanted, type WatchPrefs } from './sync-policy.js';
+import { log } from './log.js';
 
 export type { SyncActivity, SyncStatus, LiveState, PairHealth, LocalNote } from './syncstatus.js';
 
@@ -129,14 +130,12 @@ function run(args: string[], env: NodeJS.ProcessEnv = {}): Promise<string> {
   });
 }
 
-export async function listPairs(): Promise<Pair[]> {
-  try {
-    return JSON.parse(await run(['sync', 'list', '--json'])) as Pair[];
-  } catch {
-    // No engine, or nothing paired yet. Either way there is nothing to show,
-    // and the panel says which.
-    return [];
-  }
+/** The pair list, or a rejection when it could not be read — no engine, or a
+ *  pairs.json it could not read. ⚠ Which is NOT the same as nothing being
+ *  paired: it used to be caught here and answered as `[]`, and every watcher
+ *  was stopped for it (sync-policy.ts watchersWanted). */
+export async function readPairs(): Promise<Pair[]> {
+  return JSON.parse(await run(['sync', 'list', '--json'])) as Pair[];
 }
 
 export async function addPair(
@@ -203,7 +202,15 @@ export interface SupervisorHooks {
   /** The bandwidth limits and sync window a watcher is started with (read at
    *  start; a change means stop + reconcile). */
   watchPrefs?: () => WatchPrefs;
+  /** Look at the accounts again (the caller's reconcile): how an engine that
+   *  stopped on its own is started again, after restartDelay. Awaited: a
+   *  restart that brought no engine up is tried again (restartAgain). */
+  restart?: () => void | Promise<unknown>;
 }
+
+/** A run longer than this was healthy: a crash after it starts the backoff
+ *  over rather than counting on (restartDelay). */
+const HEALTHY_RUN_MS = 2 * 60_000;
 
 /**
  * Keeps one `filex sync run --watch` process alive per signed-in account.
@@ -220,12 +227,63 @@ export class SyncSupervisor {
   private readonly onSignedOut: (accountId: string) => void;
   private readonly onHold: (accountId: string, pairId: string, count: number) => void;
   private readonly watchPrefs: () => WatchPrefs;
+  private readonly restart: () => void | Promise<unknown>;
+  /** Per account: crashes in a row, and the pending restart. */
+  private crashes = new Map<string, number>();
+  private restartTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(hooks: SupervisorHooks) {
     this.onChange = hooks.onChange;
     this.onSignedOut = hooks.onSignedOut ?? (() => {});
     this.onHold = hooks.onHold ?? (() => {});
     this.watchPrefs = hooks.watchPrefs ?? (() => ({}));
+    this.restart = hooks.restart ?? (() => {});
+  }
+
+  private cancelRestart(accountId: string): void {
+    const t = this.restartTimers.get(accountId);
+    if (t) clearTimeout(t);
+    this.restartTimers.delete(accountId);
+  }
+
+  /** Starts the account's engine again after restartDelay(crashesInARow),
+   *  and says when (status.restartAt). */
+  private scheduleRestart(accountId: string, st: SyncStatus, crashesInARow: number): void {
+    this.crashes.set(accountId, crashesInARow);
+    const delay = restartDelay(crashesInARow);
+    st.restartAt = Date.now() + delay;
+    this.cancelRestart(accountId);
+    this.restartTimers.set(
+      accountId,
+      setTimeout(() => {
+        this.restartTimers.delete(accountId);
+        void this.restartNow(accountId);
+      }, delay),
+    );
+  }
+
+  /**
+   * The restart itself, and ⚠ what happens when it brings no engine up: tried
+   * again, one step further along the backoff (sync-policy.ts restartAgain).
+   * The timer used to be armed only when a process closed, so a restart that
+   * started none was the last one.
+   */
+  private async restartNow(accountId: string): Promise<void> {
+    try {
+      await this.restart();
+    } catch {
+      /* the hook says why in its own log line */
+    }
+    const st = this.status.get(accountId);
+    const again = restartAgain({
+      stopping: this.stopping,
+      running: this.procs.has(accountId),
+      pending: this.restartTimers.has(accountId),
+      status: st,
+    });
+    if (!again || !st) return;
+    this.scheduleRestart(accountId, st, (this.crashes.get(accountId) ?? 0) + 1);
+    this.onChange();
   }
 
   statuses(): SyncStatus[] {
@@ -236,8 +294,13 @@ export class SyncSupervisor {
    *  whenever pairs or accounts change. */
   async reconcile(accounts: Account[], tokenFor: (id: string) => string | null): Promise<void> {
     if (this.stopping) return;
-    const pairs = await listPairs();
-    const wanted = wantedWatchers(accounts, pairs);
+    // ⚠ A list that could not be read keeps what runs (watchersWanted): it
+    // used to read as "nothing paired" and stop every watcher.
+    const pairs = await readPairs().catch((e: unknown) => {
+      log('sync', 'could not read the pair list', String((e as Error)?.message ?? e));
+      return null;
+    });
+    const wanted = watchersWanted(accounts, pairs, new Set([...this.procs.keys(), ...this.status.keys()]));
 
     for (const [id, proc] of this.procs) {
       if (!wanted.has(id)) {
@@ -252,13 +315,19 @@ export class SyncSupervisor {
     }
     // A running watcher is not restarted for an unpaired folder (it re-reads
     // pairs.json between passes), so the folder's last state goes here.
-    for (const [id, st] of this.status) {
-      retainPairs(st, new Set(pairs.filter((p) => p.account === id).map((p) => p.id)));
+    if (pairs) {
+      for (const [id, st] of this.status) {
+        retainPairs(st, new Set(pairs.filter((p) => p.account === id).map((p) => p.id)));
+      }
     }
     for (const acc of accounts) {
       if (wanted.has(acc.id) && !this.procs.has(acc.id)) {
+        this.cancelRestart(acc.id);
         this.start(acc, tokenFor(acc.id));
       }
+    }
+    for (const id of [...this.restartTimers.keys()]) {
+      if (!wanted.has(id)) this.cancelRestart(id);
     }
     this.onChange();
   }
@@ -280,6 +349,7 @@ export class SyncSupervisor {
     const st: SyncStatus = newStatus(acc.id);
     this.status.set(acc.id, st);
     this.procs.set(acc.id, proc);
+    const startedAt = Date.now();
 
     // The server refused the token. Said once per watcher; an older engine
     // that keeps looping on the 401 instead of exiting is stopped here.
@@ -332,6 +402,16 @@ export class SyncSupervisor {
       markExited(st, code, this.stopping, signal);
       holds();
       signedOut();
+      // ⚠ An engine that stopped on its own is started again, less often the
+      // more it keeps stopping (restartDelay). It used to stay stopped until
+      // something else — a folder added, a setting changed — made the app
+      // look at its accounts again, with one English line to show for it.
+      if (!this.stopping && !refused && st.exited) {
+        const n = Date.now() - startedAt > HEALTHY_RUN_MS ? 1 : (this.crashes.get(acc.id) ?? 0) + 1;
+        this.scheduleRestart(acc.id, st, n);
+      } else if (!st.exited) {
+        this.crashes.delete(acc.id);
+      }
       this.onChange();
     });
   }
@@ -340,6 +420,7 @@ export class SyncSupervisor {
    *  a watcher mid-round holds the old paths in memory and would read the
    *  half-moved tree as a mass local delete. reconcile() restarts it. */
   stop(accountId: string): void {
+    this.cancelRestart(accountId);
     const proc = this.procs.get(accountId);
     if (proc) {
       proc.kill();
@@ -355,6 +436,7 @@ export class SyncSupervisor {
 
   stopAll(): void {
     this.stopping = true;
+    for (const id of [...this.restartTimers.keys()]) this.cancelRestart(id);
     for (const p of this.procs.values()) p.kill();
     this.procs.clear();
   }

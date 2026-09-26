@@ -22,6 +22,8 @@ package handlers
 import (
 	"net/http"
 	"strings"
+
+	"github.com/brf-tech/filex/backend/internal/basepath"
 )
 
 // publicShellQueryEscapes are the query parameters that mean "I am not asking
@@ -96,7 +98,7 @@ func acceptsHTML(accept string) bool {
 // what makes a browser, a mail client and a crawler all agree on that.
 func RetiredPagePrefix() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/s/"+retiredToken(r.URL.Path), http.StatusMovedPermanently)
+		http.Redirect(w, r, basepath.Path(r.Context(), "/s/"+retiredToken(r.URL.Path)), http.StatusMovedPermanently)
 	})
 }
 
@@ -111,7 +113,7 @@ func RetiredPageAPI() http.Handler {
 		if tail != "" && tail != "view" {
 			target += "/" + tail
 		}
-		http.Redirect(w, r, target, http.StatusMovedPermanently)
+		http.Redirect(w, r, basepath.Path(r.Context(), target), http.StatusMovedPermanently)
 	})
 }
 

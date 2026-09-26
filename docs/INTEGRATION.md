@@ -486,6 +486,13 @@ const config = { apiBase: 'https://files.example.com',
 
 `error`, `file-opened`, `share-created`, `upload-progress`, `selection-change`.
 
+A change the server refuses (rename, move, copy, paste, duplicate, delete, new
+folder, delete permanently) is said by the explorer in a toast **and** emitted
+as `error`. If your host answers `error` with its own message, set
+`refusalToasts: false` in the config so the reader is not told twice; the event
+still fires, and a dialog that is still open keeps showing the words itself
+([API → Events](API.md#events-customevent-on-the-element)).
+
 ## 4b. Multi-tenant root confinement (lock to a sub-folder)
 
 For multi-tenant hosts (e.g. one explorer per project) you must confine each
@@ -596,8 +603,10 @@ on the credential:
   URL, through `apiBase` like every other call (so a host proxy that covers
   `/api/files/*` covers it too).
 - **A bearer token** — a short-lived, single-use link the server mints for that
-  one file (`POST …/archive/download {"mode":"file"}` → `/z/<ticket>` on the
-  API's origin; [API.md](API.md#a-single-file-the-drag-out-link)).
+  one file (`POST …/archive/download {"mode":"file"}` → `/z/<ticket>` under the
+  API base, path included — see
+  [Serving filex under a sub-path](#serving-filex-under-a-sub-path);
+  [API.md](API.md#a-single-file-the-drag-out-link)).
   The component asks for it while the pointer rests on the row, because
   `dragstart` cannot wait for the network; a drag that beats it carries
   nothing rather than a URL that would `401`. Against a server older than this
@@ -616,9 +625,36 @@ config.dragOut = {
   // `ready` for — a native drag replaces the HTML5 one and cannot be undone
   // mid-gesture.
   start: (items) => shell.start(items),
-  onProgress: (cb) => { /* … */ },
+  // Optional. The drag ended inside the explorer (an internal move): stop
+  // waiting for a drop somewhere else.
+  cancel: () => shell.cancel(),
+  // What the shell is doing, before the drag and after a drop it fills in:
+  //   { done, total, name?, dropped?, finished?, error?, files? }
+  onProgress: (cb) => shell.onProgress(cb),
+  // Optional. Stop filling in a drop that has landed; the explorer offers
+  // "Stop" only when this is supplied.
+  stop: () => shell.stop(),
 };
 ```
+
+**Progress.** `done` / `total` count the dragged items. `dropped` is set once a
+drop has landed and the shell is filling it in (a shell that hands the OS
+placeholders downloads the real content afterwards), and `files` counts the
+files written into it so far, inside folders too — a dragged folder is one
+item, so `done` alone says nothing until the whole folder has arrived.
+`finished: true` ends it, with `error` when it did not complete: `'cancelled'`
+after a Stop, `'drop_not_found'` when the shell could not find where it was
+dropped, otherwise the shell's own message, shown as it is. While a drop is
+being filled in the explorer keeps one line on screen — *Downloading into the
+folder you dropped on — 42 files so far…* — and replaces it with the end. Report
+at a pace a person can read: the desktop app sends at most four reports a
+second, always the first and the last.
+
+**`stop()`** takes no argument. The explorer's line is about the drop it heard
+from last, so that is the drop to stop when several are being filled in at
+once. Stop should take effect at once — the file in flight too, not only the
+ones after it — keep what had fully arrived, and report
+`{ finished: true, error: 'cancelled' }` for that drop, once.
 
 ⚠ While a native drag is in flight the component's own drop targets no longer
 see `application/x-brf-files` — they see an OS file drag. The component keeps the
@@ -706,6 +742,32 @@ endpoint accepts with no credentials at all. Two consequences worth knowing:
 ⚠ If your proxy injects a **root-confined** token (§4b/§4c), thumbnails obey the
 confinement too: a node outside the token's subtree answers 404 rather than
 rendering.
+
+### Serving filex under a sub-path
+
+When filex is served under a path — `https://example.com/filex/`
+(`FILEX_BASE_PATH`, [DEPLOYMENT.md](DEPLOYMENT.md#serving-filex-under-a-sub-path))
+— give the explorer that address as its `apiBase`, path included:
+
+```js
+el.config = { apiBase: 'https://example.com/filex', auth: { kind: 'bearer', token } };
+```
+
+`apiBase` is always **the server root** — what `/api/…` hangs off — and the
+component keeps its path in every address it builds: the API calls, the
+thumbnails, a selection's ZIP and the drag-out link (`/z/<ticket>`), the
+"open in a new tab" editor route, the connection guides.
+
+The same holds for a host that proxies filex under a path of its **own**
+(`apiBase: '/your/files'` in §4c): the addresses the server hands out in its
+answers — `thumb_url`, the `/z/<ticket>` of a download — are **relative to the
+server root**, and the component joins them onto `apiBase`, so a proxy route
+that covers `/your/files/z/*` and `/your/files/api/*` covers all of them.
+(Before 0.47.0 the `/z/` link kept only the origin of `apiBase` and missed a
+proxy's path.)
+
+A host proxying to a filex that itself runs under `/filex` forwards to that
+path: `"/your/files/*" → "https://example.com/filex/*"`.
 
 That's it — drop the component in, give it `apiBase` + a token, and the file
 manager is live. See `demo/` for runnable references.

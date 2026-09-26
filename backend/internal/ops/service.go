@@ -88,11 +88,18 @@ type Op struct {
 	// BytesTotal / BytesDone are a running cross-storage transfer's byte
 	// counters (issue #27), merged in from memory by Get/List — never stored.
 	// BytesTotal 0 with BytesDone > 0 means the total is not known (yet).
-	BytesTotal int64  `json:"bytes_total,omitempty"`
-	BytesDone  int64  `json:"bytes_done,omitempty"`
-	Failed     int    `json:"failed"`
-	Status     string `json:"status"`
-	Error      string `json:"error,omitempty"`
+	BytesTotal int64 `json:"bytes_total,omitempty"`
+	BytesDone  int64 `json:"bytes_done,omitempty"`
+	// ObjectsTotal / ObjectsDone count the objects a running same-storage
+	// copy, move or delete has found and finished inside its sources: one
+	// folder on an object store is one source and minutes of objects, which
+	// the source counts above cannot show. From the storage driver's tally
+	// (storage.Tally); live counters like the bytes, never stored.
+	ObjectsTotal int64  `json:"objects_total,omitempty"`
+	ObjectsDone  int64  `json:"objects_done,omitempty"`
+	Failed       int    `json:"failed"`
+	Status       string `json:"status"`
+	Error        string `json:"error,omitempty"`
 	// ErrorCode / ErrorEngine classify a failed APP job for the client, which
 	// says it in the person's language (lib/errorWords `jobFailure`) and keeps
 	// `Error` — English, sometimes plumbing — for an administrator's second
@@ -123,6 +130,10 @@ type Op struct {
 	// answers, which carry its counts only.
 	trash  trashParams
 	tenant string
+	// resumed is a row claimed once before, by a process that stopped before
+	// it ended (claimWhere): a rename carries on what it had started
+	// (runRename).
+	resumed bool
 }
 
 // shape finishes a scanned row. An OpTrashEmpty row stores its request where
@@ -177,6 +188,11 @@ type Service struct {
 	trashMu      sync.Mutex
 	trashDone    sync.Map // op id -> chan struct{}, closed when the run ends
 
+	// restorer brings a trash entry back for an OpRestore (rename_restore.go).
+	restorer Restorer
+	// purger takes a trash entry out for good for an OpPurge (rename_restore.go).
+	purger Purger
+
 	// life is what background runs live in; Stop ends it and waits (bg).
 	lifeMu     sync.Mutex
 	life       context.Context
@@ -187,9 +203,21 @@ type Service struct {
 	// archiveWake pokes the archive lane (runArchiveLane): archive jobs are
 	// claimed there, never by the queue's single worker.
 	archiveWake chan struct{}
-	stopMu      sync.Mutex
-	stop        chan struct{}
-	stopWg      sync.WaitGroup
+	// finishWake pokes the finishing lane (runFinishingLane): renames,
+	// restores and purges are claimed there, never by the single worker.
+	finishWake chan struct{}
+	// finishMu admits one finishing job at a time, across a Stop and a Run
+	// too: a lane started by the next Run waits for the job the previous one
+	// is still finishing.
+	finishMu sync.Mutex
+	// finishWg is the finishing lane, which Stop waits for at most
+	// finishGrace (0: defaultFinishGrace) — see Stop.
+	finishWg    sync.WaitGroup
+	finishGrace time.Duration
+
+	stopMu sync.Mutex
+	stop   chan struct{}
+	stopWg sync.WaitGroup
 }
 
 // Job is handler-owned background work. progress reports completed units;
@@ -354,6 +382,7 @@ func NewForDialect(database *sql.DB, dialect string, resolver func(int64) (stora
 		deleteWorkers:   DefaultDeleteWorkers,
 		wakeup:          make(chan struct{}, 1),
 		archiveWake:     make(chan struct{}, 1),
+		finishWake:      make(chan struct{}, 1),
 		stop:            make(chan struct{}),
 	}
 }
@@ -391,8 +420,14 @@ func (s *Service) q(query string) string {
 // copy, move and delete died on "relation pending_ops does not exist" while
 // the server reported itself healthy (issue #19).
 func (s *Service) Migrate(ctx context.Context) error {
-	// Any row left in `running` is from a previous crash — re-queue it.
-	if _, err := s.db.ExecContext(ctx, `UPDATE pending_ops SET status='pending', started_at=NULL WHERE status='running'`); err != nil {
+	// Any row left in `running` is from a previous crash — re-queue it. A
+	// rename, a restore or a purge keeps its started_at: it says the job had
+	// begun, which is how a rename knows the half-moved folder holding its
+	// new name is its own (claimWhere, runRename).
+	if _, err := s.db.ExecContext(ctx, `UPDATE pending_ops SET status='pending', started_at=NULL WHERE status='running' AND kind NOT IN (`+finishingKinds+`)`); err != nil {
+		return fmt.Errorf("ops: requeue stale running rows: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE pending_ops SET status='pending' WHERE status='running' AND kind IN (`+finishingKinds+`)`); err != nil {
 		return fmt.Errorf("ops: requeue stale running rows: %w", err)
 	}
 	if _, err := s.db.ExecContext(ctx, `UPDATE pending_ops SET status='cancelled', finished_at=CURRENT_TIMESTAMP WHERE status='cancelling'`); err != nil {
@@ -467,7 +502,7 @@ func (s *Service) SubmitJobWithCleanup(ctx context.Context, kind string, storage
 // queue had nowhere to put the target's storage.
 func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStorageID int64, sources []string, dest string) (*Op, error) {
 	switch kind {
-	case OpCopy, OpMove, OpDelete, OpUploadCommit, OpPluginAction:
+	case OpCopy, OpMove, OpDelete, OpUploadCommit, OpPluginAction, OpRename, OpRestore, OpPurge:
 	default:
 		return nil, fmt.Errorf("ops: unknown kind %q", kind)
 	}
@@ -479,6 +514,16 @@ func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStor
 	}
 	if (kind == OpCopy || kind == OpMove || kind == OpPluginAction) && dest == "" {
 		return nil, errors.New("ops: dest required")
+	}
+	if kind == OpRename {
+		if err := checkRename(sources, dest); err != nil {
+			return nil, err
+		}
+	}
+	if kind == OpRestore || kind == OpPurge {
+		if _, err := trashIDs(sources); err != nil {
+			return nil, err
+		}
 	}
 	if destStorageID == 0 {
 		destStorageID = storageID
@@ -495,7 +540,7 @@ func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStor
 			return nil, err
 		}
 	}
-	if kind == OpDelete || kind == OpUploadCommit || kind == OpPluginAction {
+	if kind == OpDelete || kind == OpUploadCommit || kind == OpPluginAction || kind == OpRename || kind == OpRestore || kind == OpPurge {
 		// None of these has a destination storage; a stray id here would only
 		// be able to lie.
 		destStorageID = storageID
@@ -505,7 +550,11 @@ func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStor
 	if err != nil {
 		return nil, fmt.Errorf("ops: insert: %w", err)
 	}
-	s.poke()
+	if finishesOnceStarted(kind) {
+		s.pokeFinishing()
+	} else {
+		s.poke()
+	}
 	return s.Get(ctx, id)
 }
 
@@ -549,7 +598,7 @@ func (s *Service) Get(ctx context.Context, id int64) (*Op, error) {
 		if s.decorator != nil {
 			s.decorator(ctx, []*Op{op})
 		}
-		op.Cancellable = op.Status == StatusPending || op.Status == StatusRunning
+		op.Cancellable = cancellable(op)
 	}
 	return op, err
 }
@@ -591,6 +640,15 @@ func (s *Service) ListFor(ctx context.Context, status string, v Viewer) ([]*Op, 
 	if status != "" {
 		where = append(where, `status=?`)
 		args = append(args, status)
+	}
+	if v.Own {
+		// Somebody's own rows only; a viewer who is nobody sees none (a row's
+		// actor_id is a user id, never 0 or less).
+		if v.Actor <= 0 {
+			return []*Op{}, nil
+		}
+		where = append(where, `actor_id=?`)
+		args = append(args, v.Actor)
 	}
 	if !v.All {
 		var either []string
@@ -637,7 +695,7 @@ func (s *Service) ListFor(ctx context.Context, status string, v Viewer) ([]*Op, 
 		_ = json.Unmarshal([]byte(srcJSON), &op.Sources)
 		shape(op)
 		s.attachLive(op)
-		op.Cancellable = op.Status == StatusPending || op.Status == StatusRunning
+		op.Cancellable = cancellable(op)
 		out = append(out, op)
 	}
 	if err := rows.Err(); err != nil {
@@ -667,11 +725,18 @@ func (s *Service) Run(ctx context.Context) {
 	// A trash empty the previous process left behind carries on.
 	s.resumeTrashEmpties(ctx)
 
-	// Archive jobs have their own lane beside this one (runArchiveLane).
+	// Archive jobs have their own lane beside this one (runArchiveLane), and
+	// so do renames, restores and purges (runFinishingLane) — which Stop does
+	// not wait for without bound (finishWg).
 	s.stopWg.Add(1)
 	go func() {
 		defer s.stopWg.Done()
 		s.runArchiveLane(ctx, stop)
+	}()
+	s.finishWg.Add(1)
+	go func() {
+		defer s.finishWg.Done()
+		s.runFinishingLane(ctx, stop)
 	}()
 
 	t := time.NewTicker(5 * time.Second)
@@ -690,6 +755,14 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 // Stop signals the worker to exit and waits for it.
+//
+// ⚠ The finishing lane is waited for at most finishGrace. A rename, a restore
+// or a purge runs its storage work to the end whatever happens around it
+// (rename_restore.go), and a large folder on an object store is minutes of
+// it: Stop used to wait for all of it. Past the grace the job carries on in
+// the background for as long as the process does; its row stays `running`
+// until the job writes how it ended, and a row still `running` at the next
+// boot is requeued (Migrate) and carried on (runRename resumes).
 func (s *Service) Stop() {
 	s.stopMu.Lock()
 	stop := s.stop
@@ -704,7 +777,33 @@ func (s *Service) Stop() {
 		close(stop)
 	}
 	s.stopWg.Wait()
+	s.waitFinishing()
 	s.stopBackground()
+}
+
+// defaultFinishGrace is how long Stop waits for a running rename, restore or
+// purge (see Stop).
+const defaultFinishGrace = 10 * time.Second
+
+// waitFinishing waits for the finishing lane, at most finishGrace.
+func (s *Service) waitFinishing() {
+	done := make(chan struct{})
+	go func() {
+		s.finishWg.Wait()
+		close(done)
+	}()
+	grace := s.finishGrace
+	if grace <= 0 {
+		grace = defaultFinishGrace
+	}
+	t := time.NewTimer(grace)
+	defer t.Stop()
+	select {
+	case <-done:
+	case <-t.C:
+		slog.Warn("ops: stopping while a rename, restore or purge is still running; its row stays running and the next start carries it on",
+			slog.Duration("waited", grace))
+	}
 }
 
 func (s *Service) poke() {
@@ -717,6 +816,13 @@ func (s *Service) poke() {
 func (s *Service) pokeArchive() {
 	select {
 	case s.archiveWake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Service) pokeFinishing() {
+	select {
+	case s.finishWake <- struct{}{}:
 	default:
 	}
 }
@@ -784,8 +890,9 @@ func (s *Service) drain(ctx context.Context) {
 func (s *Service) claimNext(ctx context.Context) (*Op, bool, error) {
 	// A trash empty is never the worker's: it runs in its own goroutine
 	// (trash_empty.go) and would hold the whole queue for as long as it runs.
-	// Nor is an archive job: it has its own lane (runArchiveLane).
-	return s.claimWhere(ctx, `kind <> 'trash-empty' AND kind NOT IN (`+archiveKinds+`)`)
+	// Nor is an archive job (runArchiveLane), nor a rename, a restore or a
+	// purge (runFinishingLane): each lasts as long as its folder does.
+	return s.claimWhere(ctx, `kind <> 'trash-empty' AND kind NOT IN (`+archiveKinds+`) AND kind NOT IN (`+finishingKinds+`)`)
 }
 
 // claimWhere is claimNext restricted to the rows cond selects.
@@ -795,9 +902,9 @@ func (s *Service) claimWhere(ctx context.Context, cond string) (*Op, bool, error
 		return nil, false, err
 	}
 	defer tx.Rollback()
-	var id int64
-	row := tx.QueryRowContext(ctx, `SELECT id FROM pending_ops WHERE status='pending' AND `+cond+` ORDER BY id ASC LIMIT 1`)
-	if err := row.Scan(&id); err != nil {
+	var id, begun int64
+	row := tx.QueryRowContext(ctx, `SELECT id, CASE WHEN started_at IS NULL THEN 0 ELSE 1 END FROM pending_ops WHERE status='pending' AND `+cond+` ORDER BY id ASC LIMIT 1`)
+	if err := row.Scan(&id, &begun); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, false, nil
 		}
@@ -813,6 +920,7 @@ func (s *Service) claimWhere(ctx context.Context, cond string) (*Op, bool, error
 	if err != nil {
 		return nil, false, err
 	}
+	op.resumed = begun == 1
 	return op, true, nil
 }
 
@@ -861,18 +969,33 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 	}
 
 	// Every running op can be cancelled (Cancel): the handle ends this
-	// context, and a plugin instance or a transfer loop stops with it.
+	// context, and a plugin instance or a transfer loop stops with it. A
+	// rename or a restore cannot, once running (rename_restore.go).
 	parent := ctx
 	ctx, cancelOp := context.WithCancel(ctx)
 	defer cancelOp()
 	ch := &cancelHandle{}
 	ch.cancel = func() { ch.cancelled.Store(true); cancelOp() }
-	s.cancels.Store(op.ID, ch)
-	defer s.cancels.Delete(op.ID)
+	if !finishesOnceStarted(op.Kind) {
+		s.cancels.Store(op.ID, ch)
+		defer s.cancels.Delete(op.ID)
+	}
 
 	if op.Kind == OpPluginAction {
 		s.executePlugin(ctx, parent, op, ch)
 		return
+	}
+
+	// A same-storage copy, move or delete counts its objects: the driver works
+	// through a folder's objects inside ONE call, and says how far it has got
+	// on the context's tally (storage.Tally; attachLive hands it out). So does
+	// a rename, a restore and a purge — a folder each, and on an object store
+	// just as many objects.
+	if !s.isCross(op) && countsObjects(op.Kind) {
+		lp := &liveProgress{}
+		s.live.Store(op.ID, lp)
+		defer s.live.Delete(op.ID)
+		ctx = storage.WithTally(ctx, &lp.objects)
 	}
 
 	if s.isCross(op) {
@@ -886,6 +1009,13 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 				lp.total.Store(total)
 			}
 		}(append([]string(nil), op.Sources...))
+	}
+
+	if finishesOnceStarted(op.Kind) {
+		// Its sources are walked from the first one on every run: a row
+		// requeued after a restart counts again from nothing (an entry done
+		// before is done again at once — already restored, already purged).
+		op.Done, op.Failed = 0, 0
 	}
 
 	var lastErr error
@@ -930,6 +1060,18 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		}
 	}
 
+	if finishesOnceStarted(op.Kind) && ctx.Err() != nil && op.Done+op.Failed < len(op.Sources) {
+		// ⚠ The server is stopping between two of its entries (nobody can
+		// cancel one of these once it runs, so a dead context is the
+		// shutdown). The entry in hand was finished; the rest were not
+		// started. Not `cancelled`: that is terminal, and the entries not
+		// reached would silently stay where they were (a restore's in the
+		// trash). The row stays `running`, and the next boot requeues it.
+		_, _ = s.db.ExecContext(context.WithoutCancel(ctx), s.q(
+			`UPDATE pending_ops SET done=?, failed=? WHERE id=?`), op.Done, op.Failed, op.ID)
+		return
+	}
+
 	status := StatusOK
 	errMsg := ""
 	switch {
@@ -938,7 +1080,10 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 	case op.Failed == 0 && left != nil:
 		status = StatusPartial
 		errMsg = left.Error()
-	case errors.Is(ctx.Err(), context.Canceled):
+	case errors.Is(ctx.Err(), context.Canceled) && !finishesOnceStarted(op.Kind):
+		// A finishing job that got here did every entry, and says how that
+		// went: a rename completed while the server stopped is `ok`, not
+		// `cancelled`.
 		status = StatusCancelled
 	case op.Failed == 0:
 		status = StatusOK
@@ -957,6 +1102,16 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 	_, _ = s.db.ExecContext(context.WithoutCancel(ctx), s.q(
 		`UPDATE pending_ops SET status=?, error=?, done=?, failed=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`),
 		status, errMsg, op.Done, op.Failed, op.ID)
+}
+
+// countsObjects is a kind whose job works through a folder's objects on one
+// storage and counts them (storage.Tally).
+func countsObjects(kind string) bool {
+	switch kind {
+	case OpCopy, OpMove, OpDelete, OpRename, OpRestore, OpPurge:
+		return true
+	}
+	return false
 }
 
 // executePlugin runs an OpPluginAction row as one unit through the injected
@@ -1038,6 +1193,12 @@ func (s *Service) executeJob(ctx context.Context, op *Op) {
 
 func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op, src string) error {
 	switch op.Kind {
+	case OpRename:
+		return s.runRename(ctx, drv, op, src)
+	case OpRestore:
+		return s.runRestore(ctx, op, src)
+	case OpPurge:
+		return s.runPurge(ctx, op, src)
 	case OpUploadCommit:
 		// `src` is the staged upload id. The committer owns the driver write
 		// and every post-write hook; this worker only owns the retry/progress
@@ -1347,6 +1508,10 @@ var ErrIntoOwnDescendant = errors.New("ops: a folder cannot be moved or copied i
 //   - a copy or move destination is named, not replaced: the worker
 //     de-collides (UniqueDest / MoveDest), so nothing already there is
 //     overwritten.
+//   - a rename TAKES its source and WRITES its new name, the way the
+//     explorer's own rename is judged; a taken name fails the op.
+//   - a restore's and a purge's sources are trash entry ids, not paths: the
+//     handler judges each entry before it queues them (handlers.Trash).
 //
 // Every one of them is judged on filex's own names — a copy INTO
 // `.filex-trash` is a file nobody can find, a move OUT of `.filex-open` takes
@@ -1354,19 +1519,22 @@ var ErrIntoOwnDescendant = errors.New("ops: a folder cannot be moved or copied i
 // Upload commits are not judged here: their sources are staged-upload ids,
 // and the target was judged when the upload began (StagedUpload.Begin).
 func Targets(kind string, sources []string, dest string) (src, dst []writegate.Target) {
-	if kind == OpUploadCommit {
+	if kind == OpUploadCommit || kind == OpRestore || kind == OpPurge {
 		return nil, nil
 	}
 	for _, raw := range sources {
 		rel := opRel(raw)
 		switch kind {
-		case OpMove, OpDelete:
+		case OpMove, OpDelete, OpRename:
 			src = append(src, writegate.Writes(rel))
 		default:
 			src = append(src, writegate.Names(rel))
 		}
 		if kind == OpCopy || kind == OpMove {
 			dst = append(dst, writegate.Names(opRel(dest)), writegate.Names(opRel(joinIntoDir(dest, raw))))
+		}
+		if kind == OpRename {
+			dst = append(dst, writegate.Writes(opRel(dest)))
 		}
 	}
 	return src, dst

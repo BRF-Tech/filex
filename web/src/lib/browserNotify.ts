@@ -26,7 +26,7 @@
 // CONTENT and never a credential. The strings here come from the server's
 // `title`/`body` fields, which are the same strings the bell shows.
 
-import { BRAND_BADGE_URL, BRAND_ICON_URL, brandName } from './brand';
+import { brandBadgeUrl, brandIconUrl, brandName } from './brand';
 
 const ENABLED_KEY = 'filex.notify.browser';
 const ASKED_KEY = 'filex.notify.browserAsked';
@@ -180,8 +180,8 @@ export function brandedNotification(opts: BrowserNotifyOptions): {
   const body = opts.body ? `${opts.title} — ${opts.body}` : opts.title;
   const options: NotificationOptions = {
     body,
-    icon: BRAND_ICON_URL,
-    badge: BRAND_BADGE_URL,
+    icon: brandIconUrl(),
+    badge: brandBadgeUrl(),
     tag: opts.tag,
     data: { url: opts.url ?? '' },
   };

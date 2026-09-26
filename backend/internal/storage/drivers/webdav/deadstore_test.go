@@ -376,7 +376,14 @@ func TestDeadStore_SlowDownloadAndSlowReaderAreNeverCut(t *testing.T) {
 	if _, err := io.ReadFull(rc, half); err != nil {
 		t.Fatalf("first half: %v", err)
 	}
-	time.Sleep(2500 * time.Millisecond)
+	// ⚠ 3.5 s, not 2.5: the first half cannot arrive faster than the store
+	// sends it (2 s at 2 MB/s), so the whole read takes at least 2 + 3.5 s
+	// however much the pause lets pile up. With 2.5 s the store could finish
+	// the second half into the kernel's socket buffers while the reader was
+	// away (large loopback buffers under WSL), the rest came out at once, and
+	// the run ended at 4.5 s, under the 5 s this test needs: red on a machine
+	// whose driver was fine (2026-09-26, the v0.47.0 release gate).
+	time.Sleep(3500 * time.Millisecond)
 	rest, err := io.ReadAll(rc)
 	if err != nil {
 		t.Fatalf("the download was cut after %.1fs: %v", time.Since(start).Seconds(), err)

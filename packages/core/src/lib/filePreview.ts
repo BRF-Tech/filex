@@ -399,11 +399,16 @@ export interface FilePreviewLoader {
   dispose: () => void;
 }
 
+/** Between a key's path and its version: a character no path or version
+ *  holds. ⚠ Written as an expression, never as the byte itself — a raw NUL
+ *  made git treat this whole file as binary and hide its diffs. */
+const KEY_SEP = String.fromCharCode(0);
+
 /** path + version: an edited file re-reads, an untouched one never does. */
 function keyOf(node: FileNode): string {
   const etag = typeof node.etag === 'string' ? node.etag : '';
   const version = etag || String(node.last_modified ?? '') || String(node.size ?? '');
-  return `${node.path} ${version}`;
+  return `${node.path}${KEY_SEP}${version}`;
 }
 
 export function createFilePreviews(opts: PreviewLoaderOptions): FilePreviewLoader {

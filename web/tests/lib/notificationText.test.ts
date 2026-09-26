@@ -344,3 +344,48 @@ describe("an app notice in the reader's own language", () => {
     expect(renderNotification(german, 'tr', { lang: 'tr' }).body).toBe('e-İmza: “sözleşme.pdf” imzanızı bekliyor');
   });
 });
+
+// The four notices filex writes about an app following its source
+// (wasmplugin/updates.go announce). They are operator alarms, outside the
+// subscribable catalogue the event-catalogue gate reads, so this is the test
+// that holds their words: the app's LABEL in the reader's language, the
+// versions from the row's meta, and never the event id.
+describe('an app update notice', () => {
+  const row = (event: string, meta: Record<string, unknown>): NotificationLike => ({
+    event,
+    title: 'lang-es updated to 0.1.4', // the server's English, for webhooks
+    meta: {
+      plugin: 'lang-es',
+      plugin_label_en: 'Spanish language pack',
+      plugin_label_tr: 'İspanyolca dil paketi',
+      version: '0.1.4',
+      from: '0.1.3',
+      ...meta,
+    },
+  });
+
+  it('says an automatic update in each reader language', () => {
+    expect(renderNotification(row('app_updated', {}), 'en')).toEqual({
+      title: 'Spanish language pack updated to 0.1.4',
+      body: 'It moved from 0.1.3 by itself.',
+    });
+    expect(renderNotification(row('app_updated', {}), 'tr')).toEqual({
+      title: 'İspanyolca dil paketi 0.1.4 sürümüne güncellendi',
+      body: '0.1.3 sürümünden kendiliğinden geçti.',
+    });
+  });
+
+  it('names what a version waiting for approval adds', () => {
+    const r = renderNotification(row('app_update_needs_approval', { added: 'mail:send, http:freetsa.org' }), 'tr');
+    expect(r.title).toBe('İspanyolca dil paketi 0.1.4 onayınızı bekliyor');
+    expect(r.body).toBe('mail:send, http:freetsa.org');
+  });
+
+  it('says an available and a failed update without the server’s English', () => {
+    expect(renderNotification(row('app_update_available', {}), 'tr').title).toBe('İspanyolca dil paketi 0.1.4 yayında');
+    const failed = renderNotification(row('app_update_failed', { error: 'describe: version mismatch' }), 'tr');
+    expect(failed.title).toBe('İspanyolca dil paketi 0.1.4 kurulamadı');
+    expect(failed.body).toBe('Önceki sürüm 0.1.3 çalışmaya devam ediyor.');
+    expect(failed.body).not.toContain('describe');
+  });
+});

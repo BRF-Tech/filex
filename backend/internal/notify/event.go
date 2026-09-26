@@ -72,6 +72,28 @@ const (
 	// version moving is exactly the kind of change an operator must find in
 	// the log even if nobody was watching when it happened.
 	EventUpdateApplied EventType = "update_applied"
+
+	// An installed app following the source it came from
+	// (wasmplugin/updates.go). Operator alarms like the two above: an app is
+	// the platform operator's to manage, so nobody else is told. Meta carries
+	// `plugin` (its name), `plugin_label_<lang>` (its label in every language
+	// it has), `version` (the version found or reached) and, per event,
+	// `from`, `added`, `error`.
+	//
+	// EventAppUpdated: an app moved to a newer version by itself.
+	EventAppUpdated EventType = "app_updated"
+	// EventAppUpdateAvailable: a newer version waits for the administrator —
+	// automatic updates are off for the app, or the instance only runs signed
+	// apps. Once per version.
+	EventAppUpdateAvailable EventType = "app_update_available"
+	// EventAppUpdateNeedsApproval: a newer version asks for permissions the
+	// app was not granted (meta `added`), or a language pack now brings a
+	// module (meta `adds_module`). Nothing moves until an administrator
+	// reviews it. Once per version.
+	EventAppUpdateNeedsApproval EventType = "app_update_needs_approval"
+	// EventAppUpdateFailed: an automatic update was tried and undone — the
+	// app runs the version it had (meta `error`). Once per version.
+	EventAppUpdateFailed EventType = "app_update_failed"
 )
 
 // operatorEvents are the alarms above: things only an administrator can act on
@@ -96,6 +118,7 @@ var operatorEvents = []EventType{
 	EventReplicaFail, EventReplicaFailSpike, EventReplicaReconcileDone, EventReplicaStatusReport,
 	EventPrimaryReadFail, EventQuotaNearFull, EventQuotaFull, EventQueueStuck, EventAuthFailSpike,
 	EventDiskFull, EventUpdateAvailable, EventUpdateApplied,
+	EventAppUpdated, EventAppUpdateAvailable, EventAppUpdateNeedsApproval, EventAppUpdateFailed,
 }
 
 // Canonical file/share events (webhook v2 — "Bağlan" (Connect) wave). Emitted

@@ -25,6 +25,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { loginAs, apiLogin, ADMIN_EMAIL, ADMIN_PASSWORD } from '../helpers/auth';
+import { BASE_PATH } from '../helpers/base';
 // panel:tek-satir — the four panels below moved onto the shared admin table,
 // and a row's verbs moved with them: one pinned "Actions" control per row
 // holding what used to be loose `Revoke` / `Remove` buttons. The menu
@@ -186,7 +187,7 @@ test.describe('storage connections', () => {
 
     // The real host, not a documentation placeholder.
     const host = new URL(baseURL ?? 'http://localhost:5212').host;
-    await expect(facts).toContainText(`${new URL(baseURL!).origin}/dav/`);
+    await expect(facts).toContainText(`${new URL(baseURL!).origin}${BASE_PATH}/dav/`);
     await expect(facts).toContainText(host);
     // The caller's own account is the WebDAV username.
     await expect(facts).toContainText(ADMIN_EMAIL);
@@ -225,7 +226,7 @@ test.describe('storage connections', () => {
 
     await page.getByTestId('guide-tab-rclone').click();
     await expect(page.locator('.fe-guide__body')).toContainText('type = webdav');
-    await expect(page.locator('.fe-guide__body')).toContainText(`url = ${new URL(baseURL!).origin}/dav`);
+    await expect(page.locator('.fe-guide__body')).toContainText(`url = ${new URL(baseURL!).origin}${BASE_PATH}/dav`);
   });
 
   test('the panel is translated on SCREEN, not just in its config', async ({ page }) => {
@@ -297,7 +298,7 @@ test.describe('storage connections', () => {
     expect(akid).toMatch(/^FLX[A-Z0-9]+$/);
 
     // …and the commands now carry it, with the endpoint the server named.
-    const endpoint = `${new URL(baseURL!).origin}/s3`;
+    const endpoint = `${new URL(baseURL!).origin}${BASE_PATH}/s3`;
     await expect(page.getByTestId('guide-facts')).toContainText(akid);
     await expect(page.getByTestId('guide-facts')).toContainText(endpoint);
 

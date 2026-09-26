@@ -187,40 +187,76 @@ export function resolveSyncTwin(
   opts: { platform?: NodeJS.Platform } = {},
 ): SyncTwin | null {
   const platform = opts.platform ?? process.platform;
-  const win = platform === 'win32';
-  const api = win ? nodePath.win32 : nodePath.posix;
-  const norm = (p: string) => {
-    const n = api.normalize(String(p ?? '')).replace(/[\\/]+$/, '');
-    return win ? n.toLowerCase() : n;
-  };
-  const target = norm(localPath);
+  const target = localPathForm(localPath, platform);
   if (!target) return null;
 
   let best: SyncTwin | null = null;
-  let bestLen = -1;
+  let bestDepth = -1;
   for (const p of pairs) {
     if (p.paused) continue;
-    const local = norm(p.local);
-    if (!local) continue;
+    const local = localPathForm(p.local, platform);
+    if (!local || !local.keyParts.length) continue;
+    const depth = local.keyParts.length;
+    if (depth <= bestDepth) continue;
     if (p.file) {
-      if (local === target && local.length > bestLen) {
+      if (local.key === target.key) {
         best = { pairId: p.id, remote: p.remote };
-        bestLen = local.length;
+        bestDepth = depth;
       }
       continue;
     }
-    const prefix = local.endsWith(api.sep) ? local : local + api.sep;
-    if (!target.startsWith(prefix)) continue;
-    if (local.length <= bestLen) continue;
-    // The relative part comes from the ORIGINAL path, case preserved: the
-    // comparison is case-insensitive on Windows, the wire path is not.
-    const relRaw = api.normalize(localPath).slice(prefix.length);
-    const segs = relRaw.split(/[\\/]/).filter((s) => s && s !== '.' && s !== '..');
-    if (!segs.length) continue;
+    // Inside it, compared part by part — never by cutting the path at the
+    // folder's length, which a lower-cased "İ" makes one character longer.
+    if (target.keyParts.length <= depth) continue;
+    if (!local.keyParts.every((part, i) => part === target.keyParts[i])) continue;
+    // The rest comes from the ORIGINAL parts, case preserved: the comparison
+    // is case-insensitive on Windows, the wire path is not.
+    const segs = target.parts.slice(depth);
     best = { pairId: p.id, remote: joinRemote(p.remote, segs) };
-    bestLen = local.length;
+    bestDepth = depth;
   }
   return best;
+}
+
+/** A local path in the one form this app compares paths by (localPathForm). */
+export interface LocalPathForm {
+  /** Resolved, and case-folded on Windows: equal keys are the same file. */
+  key: string;
+  /** Its folders and name, as written (case preserved). */
+  parts: string[];
+  /** The same, case-folded on Windows: compared part by part. */
+  keyParts: string[];
+}
+
+/**
+ * The one rule for "is this the same file / inside this folder on this
+ * computer": the path is resolved (`..`, a trailing separator), and on Windows
+ * compared case-insensitively — `C:\Docs\a.docx` and `c:\docs\A.DOCX` are one
+ * file. null for no path at all.
+ *
+ * ⚠ ONE rule: main.ts, OpeningDocs and resolveSyncTwin each lower-cased
+ * Windows paths their own way. And "inside" is decided part by part:
+ * `"İ".toLowerCase()` is two characters, so cutting the original path at a
+ * lower-cased folder's length lost a letter of the file name.
+ */
+export function localPathForm(p: string, platform: NodeJS.Platform = process.platform): LocalPathForm | null {
+  const raw = String(p ?? '');
+  if (!raw.trim()) return null;
+  const win = platform === 'win32';
+  const resolved = (win ? nodePath.win32 : nodePath.posix).resolve(raw);
+  const parts = resolved.split(win ? /[\\/]+/ : /\/+/).filter(Boolean);
+  return {
+    key: win ? resolved.toLowerCase() : resolved,
+    parts,
+    keyParts: win ? parts.map((s) => s.toLowerCase()) : parts,
+  };
+}
+
+/** Two paths naming the same file on this computer (localPathForm). */
+export function sameLocalPath(a: string, b: string, platform: NodeJS.Platform = process.platform): boolean {
+  const fa = localPathForm(a, platform);
+  const fb = localPathForm(b, platform);
+  return !!fa && !!fb && fa.key === fb.key;
 }
 
 /** `docs://` + [a,b] → `docs://a/b`; `docs://x` + [a] → `docs://x/a`. */
@@ -584,4 +620,40 @@ export function orphanScratchEntries(
     .filter((e) => e.basename && !known.has(e.basename))
     .filter((e) => typeof e.lastModified === 'number' && now - e.lastModified > maxAge)
     .map((e) => e.basename);
+}
+
+/**
+ * The documents being opened right now: between the double-click and the
+ * editor window, while the working copy goes up (up to 256 MB).
+ *
+ * ⚠ "Is it already open?" only knew documents whose editor was up, so a second
+ * double-click in that time opened a second session of the same document: two
+ * working copies writing back to one path, the last save winning and the other
+ * edit gone without a word. A path is taken here for as long as it is being
+ * opened; one opened, or failed, may be opened again.
+ */
+export class OpeningDocs {
+  private readonly keys = new Set<string>();
+  private readonly platform: NodeJS.Platform;
+
+  constructor(platform: NodeJS.Platform) {
+    this.platform = platform;
+  }
+
+  /** One key per document — the app's one rule for it (localPathForm). */
+  private key(p: string): string {
+    return localPathForm(p, this.platform)?.key ?? '';
+  }
+
+  /** Takes the document; false when it is already being opened. */
+  begin(p: string): boolean {
+    const k = this.key(p);
+    if (this.keys.has(k)) return false;
+    this.keys.add(k);
+    return true;
+  }
+
+  end(p: string): void {
+    this.keys.delete(this.key(p));
+  }
 }

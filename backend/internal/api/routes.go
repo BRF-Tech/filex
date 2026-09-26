@@ -8,7 +8,7 @@ package api
 
 import (
 	"context"
-	"embed"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -25,6 +25,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/archivecli"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/authsetup"
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	cloudpkg "github.com/brf-tech/filex/backend/internal/cloud" /* kimlik:e3 cloud */
 	"github.com/brf-tech/filex/backend/internal/config"
@@ -106,9 +107,12 @@ type Deps struct {
 	// with AppPluginsDisabledReason.
 	AppPlugins               *wasmplugin.Registry
 	AppPluginsDisabledReason string
-	Embed                    embed.FS // web/dist + admin
-	LocalAuth                auth.LoginDriver
-	OIDCAuth                 auth.OIDCDriver
+	// Embed holds the built web app (admin/) and the web component (web/) —
+	// the binary's go:embed tree (backend/embed). An fs.FS so a test can hand
+	// the router a small fake build; nil or empty means "not bundled".
+	Embed     fs.FS
+	LocalAuth auth.LoginDriver
+	OIDCAuth  auth.OIDCDriver
 	// AuthLive is the running set of sign-in providers (internal/authsetup):
 	// the Identity providers page changes it, and LocalAuth / OIDCAuth /
 	// Directory are its proxies, so a change applies without a restart.
@@ -264,8 +268,19 @@ func BuildRouter(d *Deps) http.Handler {
 		})
 	}
 
-	r.Use(Logger)
+	r.Use(LoggerAt(d.Cfg.BasePath))
 	r.Use(Recoverer)
+	// A sub-path deployment (https://example.com/filex/, FILEX_BASE_PATH):
+	// the base comes off here, so every route below, and every middleware
+	// that reads the path (APINoStore, the demo guard, confine), sees the paths
+	// it always saw, and anything outside the base is a 404 before any auth
+	// chain runs. At the root it is not in the chain at all. See
+	// internal/basepath for the contract (the proxy passes the full path).
+	//
+	// ⚠ Below the S3-host dispatch above — a dedicated S3 host is served at
+	// ITS root, never under the app's base — and below Logger, so a request
+	// refused for arriving outside the base is still in the access log.
+	r.Use(basepath.Middleware(d.Cfg.BasePath))
 	// Per-user answers stay out of shared caches — see APINoStore. ⚠ Above
 	// CORS and the demo guard, so an answer those write themselves (a
 	// preflight, a demo refusal) carries the default as well: "every /api
@@ -454,7 +469,7 @@ func BuildRouter(d *Deps) http.Handler {
 	pubAPI.AttachLocale(d.Cfg.DefaultLocale)
 	// The SPA shell for /s/ and /d/ when a JavaScript browser asks for HTML;
 	// the Go pages below stay as the no-JS answer. See handlers.PublicShell.
-	publicShell := publicShellHandler(d.Embed)
+	publicShell := publicShellHandler(d.Embed, d.Cfg.BasePath)
 	sh.AttachShell(publicShell)
 	dh.AttachShell(publicShell)
 	// …and the no-JS body of an app link: the copies the app exposed, as
@@ -466,6 +481,8 @@ func BuildRouter(d *Deps) http.Handler {
 		// owns that DB logic, so inject it as the worker's DBSync hook —
 		// without this, async move/delete/copy don't reflect in the UI.
 		d.Ops.SetSync(mh)
+		// …and a folder rename asked with `queued=1` runs on it (vfRename).
+		mh.AttachOps(d.Ops)
 		// …and the staged-upload transfer, for the same reason: the bytes move
 		// in the worker, but the node/index/thumb/writehook side of a write
 		// lives in the handler layer.
@@ -494,6 +511,15 @@ func BuildRouter(d *Deps) http.Handler {
 	th.AttachSigner(thumbSigner)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
 	ch.Archive = archiveEngine
+	// What the explorer and the admin's Trash page may ask to run on the queue
+	// (queued=1), and only what is wired: the manager renames on it, the trash
+	// handler restores and purges on it.
+	if d.Ops != nil {
+		ch.Queued = []string{"rename"}
+		if d.Trash != nil {
+			ch.Queued = append(ch.Queued, "restore", "purge")
+		}
+	}
 	ch.E2EEscrow = d.E2EEscrow /* wiring:e2 */
 	// ⚠ Only a non-nil mailer: a nil *mailer.Service stored in the interface
 	// would make the field say "not ready" on a build that never had mail
@@ -575,6 +601,10 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.Ops != nil && d.Trash != nil {
 		d.Ops.SetTrashEmptier(d.Trash)
 		trashH.AttachOps(d.Ops)
+		// …and so do a restore and a permanent delete asked with `queued=1`
+		// (ops.OpRestore, ops.OpPurge).
+		d.Ops.SetRestorer(trashH)
+		d.Ops.SetPurger(trashH)
 	}
 	metaH := handlers.NewMeta(d.Store)
 	// Starred / recent / tag rows carry the caller's `perm` like a folder
@@ -1303,6 +1333,8 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Route("/app-plugins", func(r chi.Router) {
 				r.Get("/", apAdm.List)
 				r.Post("/", apAdm.Install)
+				// Static, so chi matches it before /{id}/upgrade.
+				r.Post("/updates/check", apAdm.CheckUpdates)
 				r.Get("/{id}", apAdm.Get)
 				r.Patch("/{id}", apAdm.Patch)
 				r.Post("/{id}/upgrade", apAdm.Upgrade)
@@ -1675,11 +1707,11 @@ func BuildRouter(d *Deps) http.Handler {
 	// non-demo deployments render a sign-in form. Either way the SPA
 	// owns the user-facing entry.
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
-		http.Redirect(w, req, "/admin/", http.StatusFound)
+		http.Redirect(w, req, basepath.Path(req.Context(), "/admin/"), http.StatusFound)
 	})
 
 	// ────── embedded static ──────
-	wireStatic(r, d.Embed)
+	wireStatic(r, d.Embed, d.Cfg.BasePath)
 
 	return r
 }
@@ -1703,8 +1735,13 @@ const UserUIPrefix = "/drive"
 // /embed.js + /embed.css + neighbouring map files are served from the
 // `web/` subtree so consumers can <script src="/embed.js"> regardless
 // of where the iife was actually filed.
-func wireStatic(r chi.Router, fs embed.FS) {
-	adminFS, err := stripPrefix(fs, "admin")
+//
+// Under a base path (internal/basepath) the two documents that name their own
+// address — index.html and the PWA manifest — are served rewritten for it
+// (spa_shell.go); every other file is served byte for byte, which is what lets
+// one build run at the root and under any prefix.
+func wireStatic(r chi.Router, fsys fs.FS, base string) {
+	adminFS, err := stripPrefix(fsys, "admin")
 	if err != nil {
 		// embed/admin missing entirely (likely local dev where the
 		// frontend hasn't been built). Surface the error so the
@@ -1713,11 +1750,12 @@ func wireStatic(r chi.Router, fs embed.FS) {
 			http.Error(w, "admin SPA not bundled — frontend build missing", http.StatusNotFound)
 		})
 	} else {
-		spa := spaHandler{root: adminFS, urlPrefix: "/admin"}
+		shell := newShellDocs(adminFS, base)
+		spa := spaHandler{root: adminFS, urlPrefix: "/admin", shell: shell}
 		// The translator's catalogue context names THIS binary's version
 		// (catalogue_version.go), not the one the web build guessed.
 		r.Get("/admin/"+catalogueContextPath, catalogueContext(adminFS.ReadFile))
-		r.Handle("/admin", http.RedirectHandler("/admin/", http.StatusMovedPermanently))
+		r.Handle("/admin", redirectUnderBase("/admin/"))
 		r.Handle("/admin/", spa)
 		r.Handle("/admin/*", spa)
 		// vue-router carves out a few "shareable" URLs outside the
@@ -1725,7 +1763,7 @@ func wireStatic(r chi.Router, fs embed.FS) {
 		// (FileExplorer's `openPageBase` config). These need the same
 		// SPA fallback so a fresh browser tab loads index.html and
 		// vue-router takes over.
-		filesSPA := spaHandler{root: adminFS, urlPrefix: ""}
+		filesSPA := spaHandler{root: adminFS, urlPrefix: "", shell: shell}
 		r.Handle("/files/edit", filesSPA)
 		r.Handle("/files/edit/*", filesSPA)
 
@@ -1742,13 +1780,13 @@ func wireStatic(r chi.Router, fs embed.FS) {
 		// ⚠ /drive, not /files: `files` is already a route INSIDE the SPA
 		// (the admin file-lookup page, and /files/edit above), so a top-level
 		// /files would collide with both.
-		userSPA := spaHandler{root: adminFS, urlPrefix: UserUIPrefix}
-		r.Handle(UserUIPrefix, http.RedirectHandler(UserUIPrefix+"/", http.StatusMovedPermanently))
+		userSPA := spaHandler{root: adminFS, urlPrefix: UserUIPrefix, shell: shell}
+		r.Handle(UserUIPrefix, redirectUnderBase(UserUIPrefix+"/"))
 		r.Handle(UserUIPrefix+"/", userSPA)
 		r.Handle(UserUIPrefix+"/*", userSPA)
 	}
 
-	webFS, err := stripPrefix(fs, "web")
+	webFS, err := stripPrefix(fsys, "web")
 	if err != nil {
 		r.Get("/embed.js", func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "embed.js not bundled — packages/webcomponent build missing", http.StatusNotFound)
@@ -1834,16 +1872,20 @@ func wireStatic(r chi.Router, fs embed.FS) {
 // nil when the frontend is not bundled — a development build, or a binary
 // built without `pnpm build:web`. The Go pages below then answer every
 // visitor, which is exactly the no-JS fallback, so nothing is unreachable.
-func publicShellHandler(fs embed.FS) http.Handler {
-	adminFS, err := stripPrefix(fs, "admin")
+func publicShellHandler(fsys fs.FS, base string) http.Handler {
+	adminFS, err := stripPrefix(fsys, "admin")
 	if err != nil {
 		return nil
 	}
+	shell := newShellDocs(adminFS, base)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, err := adminFS.ReadFile("index.html")
 		if err != nil {
 			http.Error(w, "admin SPA missing index.html", http.StatusInternalServerError)
 			return
+		}
+		if shell != nil && shell.index != nil {
+			data = shell.index
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		// ⚠ no-store, not no-cache: this document is served at a public link,
@@ -1859,6 +1901,9 @@ func publicShellHandler(fs embed.FS) http.Handler {
 type spaHandler struct {
 	root      *embedSubFS
 	urlPrefix string
+	// shell is the index.html and manifest rewritten for a base path; nil at
+	// the root, where every file is served as built.
+	shell *shellDocs
 }
 
 func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1885,6 +1930,14 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		rel = "index.html"
 	}
+	if h.shell != nil {
+		switch {
+		case rel == "index.html" && h.shell.index != nil:
+			data = h.shell.index
+		case rel == "manifest.webmanifest" && h.shell.manifest != nil:
+			data = h.shell.manifest
+		}
+	}
 
 	ct := contentTypeForName(rel)
 	if ct != "" {
@@ -1900,29 +1953,31 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
-// embedSubFS is a thin wrapper around embed.FS that prepends a directory
-// prefix to every ReadFile call. We can't use fs.Sub because embed.FS's
-// reflection layer doesn't compose cleanly here — a manual wrapper is
-// 6 lines and gives us the path-strip behavior the SPA handler needs.
+// embedSubFS is a thin wrapper around the embedded tree that prepends a
+// directory prefix to every ReadFile call — the path-strip behavior the SPA
+// handler needs, in six lines.
 type embedSubFS struct {
-	root   embed.FS
+	root   fs.FS
 	prefix string
 }
 
-func stripPrefix(fs embed.FS, prefix string) (*embedSubFS, error) {
+func stripPrefix(fsys fs.FS, prefix string) (*embedSubFS, error) {
+	if fsys == nil {
+		return nil, &emptyEmbedErr{prefix: prefix}
+	}
 	// Probe: does the prefix exist + contain at least one entry?
-	entries, err := fs.ReadDir(prefix)
+	entries, err := fs.ReadDir(fsys, prefix)
 	if err != nil {
 		return nil, err
 	}
 	if len(entries) == 0 {
 		return nil, &emptyEmbedErr{prefix: prefix}
 	}
-	return &embedSubFS{root: fs, prefix: prefix}, nil
+	return &embedSubFS{root: fsys, prefix: prefix}, nil
 }
 
 func (e *embedSubFS) ReadFile(name string) ([]byte, error) {
-	return e.root.ReadFile(e.prefix + "/" + name)
+	return fs.ReadFile(e.root, e.prefix+"/"+name)
 }
 
 type emptyEmbedErr struct{ prefix string }

@@ -315,6 +315,7 @@ export type { PdfFieldRule, PdfRuleKind, PdfRuleError } from './lib/pdfFieldRule
 export { lockOf, anyLocked, lockedRefusal, lockWords, lockUntilText, lockReasonText } from './lib/appLock';
 /* How a failure is SAID — one table of words for every screen (lib/errorWords). */
 export {
+  codeWords,
   jobFailure,
   looksTechnical,
   networkFailure,
@@ -369,8 +370,14 @@ export type { NavApp } from './components/SideNav.vue';
 
 /* issue #27 — the one "how far along is this queued op" rule, shared by the
  * explorer's operations center and a host's own tray (the admin app's). */
-export { opPercent } from './lib/opProgress';
+export { opObjects, opPercent } from './lib/opProgress';
 export type { OpProgressLike } from './lib/opProgress';
+
+/* The one follower of a storage's scan and deletion (the list's `running`
+ * flag, one poll for everything followed): the explorer's "Catalog
+ * everything" and the admin app's "Sync now" and delete. */
+export { createStorageWatch, STORAGE_WATCH_MS } from './lib/storageWatch';
+export type { StorageWatch, ScanEnd, WatchedStorageRow } from './lib/storageWatch';
 
 /* #48 — how an archive format is written (ZIP, TAR.GZ, 7z), for the explorer's
  * create dialog and a host's own archive settings alike. */
@@ -390,6 +397,10 @@ export {
   triggerFileNavigation,
 } from './lib/downloadSelection';
 export type { ArchiveTicket } from './lib/downloadSelection';
+/* The base path the web app is served under (FILEX_BASE_PATH, a sub-path
+ * deployment) — the ONE reader of it, shared by the admin app and every
+ * default in this package — and the join that keeps an API base's path. */
+export { APP_BASE_META, appBase, readAppBase, underApiBase, withAppBase } from './lib/appBase';
 
 // ——— Types ———
 export type {

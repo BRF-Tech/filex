@@ -1,5 +1,6 @@
 import { net, shell } from 'electron';
 import crypto from 'node:crypto';
+import { normalizeServerUrl } from './server-url.js';
 
 // Desktop half of the browser authorization flow.
 //
@@ -23,19 +24,8 @@ function b64url(buf: Buffer): string {
   return buf.toString('base64url');
 }
 
-/** Normalizes what a human types: "fm.example.com", "https://fm.example.com/", "…/admin". */
-export function normalizeServerUrl(input: string): string {
-  let s = (input || '').trim();
-  if (!s) throw new Error('server address required');
-  if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
-  const u = new URL(s);
-  // Defaulting to https matters: a bare host typed into a desktop app must not
-  // silently become a cleartext session carrying a durable token.
-  if (u.protocol !== 'https:' && u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') {
-    throw new Error('server must be https (localhost excepted)');
-  }
-  return `${u.protocol}//${u.host}`;
-}
+// What a human types, normalized — server-url.ts, where node:test can reach it.
+export { normalizeServerUrl };
 
 /** Opens the server's own login page in the system browser and returns the
  *  material needed to finish. */

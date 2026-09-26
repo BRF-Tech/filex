@@ -2,10 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.46.1"
+version: "0.47.0"
 releaseNotes: |-
-  filex v0.46.1 — 2026-09-26
-  • The version line no longer runs off the menu.
+  filex v0.47.0 — 2026-09-26
+  • The desktop app is in the Microsoft Store
+  • filex runs under a sub-path — https://example.com/filex/ behind a reverse proxy — as well as at the root of its own host
+  • Apps follow their source and update themselves, and say which filex versions they work with.
+  • The Trash says who deleted each item.
+  • Renaming a folder, restoring from the trash and deleting permanently run as jobs of the operations queue.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

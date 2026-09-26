@@ -22,6 +22,7 @@
 import { computed, ref } from 'vue';
 import type { PublicBranding } from '../types/Public';
 import { setLocalesFromBranding } from '../lib/uiLocales';
+import { apiRootOr } from '../lib/appBase';
 
 /** The product's own name, used until (and unless) an operator renames it. */
 export const DEFAULT_BRAND_NAME = 'filex';
@@ -146,7 +147,7 @@ export function usePublicBranding(opts: PublicBrandingOptions = {}) {
   async function load(): Promise<PublicBranding | null> {
     const doFetch = opts.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
     if (!doFetch) return null;
-    const origin = (opts.base ?? '').replace(/\/+$/, '');
+    const origin = apiRootOr(opts.base);
     for (const path of ['/api/public/branding', '/api/branding']) {
       try {
         const res = await doFetch(`${origin}${path}`, {

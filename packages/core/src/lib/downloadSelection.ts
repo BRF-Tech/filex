@@ -37,6 +37,7 @@
  */
 
 import type { FileApi } from '../composables/useFileApi';
+import { underApiBase } from './appBase';
 
 /** What the mint returns. Mirrors `archiveDownloadInfo` in the Go handler. */
 export interface ArchiveTicket {
@@ -69,17 +70,28 @@ export function archiveTicketUrl(managerUrl: string): string {
   return base.replace(/\/manager$/, '/archive/download');
 }
 
+/** The manager endpoint's tail when it was derived from `apiBase`. */
+const MANAGER_TAIL = '/api/files/manager';
+
 /**
  * Where the ticket URL should be fetched from.
  *
- * The server answers a server-relative `/z/<token>`, which is correct for the
- * same-origin case and wrong for an embed whose API lives on another host. The
- * origin comes from the manager URL, which is the one thing that is always
- * right.
+ * The server answers `/z/<token>` RELATIVE TO ITS ROOT — it cannot know where
+ * its reader sees it. The reader's server root is the manager URL minus
+ * `/api/files/manager`, and it keeps its PATH: `/filex` for the admin app
+ * under a sub-path (FILEX_BASE_PATH), `https://host.example/files-proxy` for an
+ * embed whose host proxies filex under a path of its own. Keeping only the
+ * origin (what this did before) sent both to the host's root, where the
+ * ticket 404s — a multi-selection ZIP or a drag-out that silently fails.
+ *
+ * A manager endpoint the host named itself, not ending in
+ * `/api/files/manager`, says nothing about the server root; the origin is the
+ * best evidence left, as before.
  */
 export function absoluteTicketUrl(managerUrl: string, ticketUrl: string): string {
   if (/^https?:\/\//i.test(ticketUrl)) return ticketUrl;
   const base = managerUrl.split('?')[0];
+  if (base.endsWith(MANAGER_TAIL)) return underApiBase(base.slice(0, -MANAGER_TAIL.length), ticketUrl);
   const m = /^(https?:\/\/[^/]+)/i.exec(base);
   return m ? m[1] + ticketUrl : ticketUrl;
 }

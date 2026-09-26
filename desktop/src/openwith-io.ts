@@ -8,6 +8,7 @@
 import { net } from 'electron';
 
 import { WHOLE_FILE_RANGE, wholeFileVerdict } from './download-guard.js';
+import { serverUrl } from './server-url.js';
 import { OFFICE_MIME_TYPES, SCRATCH_DIR_NAME, type RemoteStat } from './openwith.js';
 
 export interface RemoteContext {
@@ -64,7 +65,7 @@ function request(
 }
 
 function managerUrl(ctx: RemoteContext, params: Record<string, string>): string {
-  const url = new URL('/api/files/manager', ctx.serverUrl);
+  const url = serverUrl(ctx.serverUrl, '/api/files/manager');
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   return url.toString();
 }

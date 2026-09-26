@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/httpx"
 )
 
@@ -26,14 +27,30 @@ import (
 // S3 presigned credentials on /s3, and people's search text. `action` is the one
 // value taken from it, only on /api/files/manager, and only as one of the
 // manager's own verbs (managerAction).
-func Logger(next http.Handler) http.Handler {
+func Logger(next http.Handler) http.Handler { return LoggerAt("")(next) }
+
+// LoggerAt is Logger for a router served under a base path
+// (internal/basepath). It runs OUTSIDE the base middleware, so a request that
+// never reaches a handler — one outside the base, the classic sign of a proxy
+// that strips the prefix — is still logged, with the path exactly as it
+// arrived; the manager's verb is read from the path with the base taken off.
+func LoggerAt(base string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return loggerFor(base, next)
+	}
+}
+
+func loggerFor(base string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		ww := &statusWriter{ResponseWriter: w, status: 200}
 		// ⚠ Read BEFORE the handler runs. confine.Middleware rewrites the
 		// query of this very request (it shares the url.URL), so afterwards
 		// it is not the query the caller sent.
-		action := managerAction(r)
+		action := ""
+		if p, ok := basepath.Strip(base, r.URL.Path); ok {
+			action = managerAction(p, r)
+		}
 		// Authentication happens further in, on contexts this function never
 		// sees; auth.WithUser / auth.WithToken and the tenant resolver write
 		// into this holder on their way past (httpx.RequestLog).
@@ -82,8 +99,8 @@ var managerVerbs = map[string]bool{
 // `q` is read as the verb ONLY here, because it is the manager's legacy
 // spelling of `action` (handlers.Manager.List). On /api/files/search the same
 // name is the search text.
-func managerAction(r *http.Request) string {
-	if r.URL.Path != managerPath {
+func managerAction(path string, r *http.Request) string {
+	if path != managerPath {
 		return ""
 	}
 	q := r.URL.Query()

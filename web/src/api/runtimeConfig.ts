@@ -9,7 +9,9 @@
 // has no cookie jar and injects a self-service token instead.
 //
 // The contract that keeps the web build byte-for-byte unchanged:
-//   - default base stays '/api'
+//   - default base stays '/api' — under the base path the server serves the
+//     app at (FILEX_BASE_PATH, read by the core's `appBase`), which is '' at
+//     the root: `/filex/api` for https://example.com/filex/, `/api` otherwise
 //   - the bearer falls back to sessionStorage('filex.bearer') exactly as before
 //   - nothing here runs unless something calls the setters or injects the global
 //
@@ -17,6 +19,8 @@
 // initRuntimeConfig() (called from main.ts) picks it up. In the plain web build
 // that global is never present, so every code path below no-ops to the old
 // behaviour.
+
+import { appBase } from '@brftech/filex-core';
 
 export interface FilexRuntimeConfig {
   /** Absolute API base, e.g. "https://fm.example.com/api". Overrides the '/api' default. */
@@ -54,10 +58,20 @@ declare global {
  *  web deployment's behaviour never changes. */
 export const DEFAULT_API_BASE = '/api';
 
+/**
+ * The same-origin default for THIS document: `/api` under the base path the
+ * server served it at (`/filex/api` in a sub-path deployment). Read at request
+ * time, like everything here.
+ */
+export function defaultApiBase(): string {
+  return appBase() + DEFAULT_API_BASE;
+}
+
 /** Cookies ride along by default — that is the web app's identity. */
 export const DEFAULT_USE_CREDENTIALS = true;
 
-let apiBaseUrl: string = DEFAULT_API_BASE;
+/** An explicitly set base (Electron, the login screen); null = the default. */
+let apiBaseUrl: string | null = null;
 let bearerToken: string | null = null;
 let useCredentials: boolean = DEFAULT_USE_CREDENTIALS;
 
@@ -76,13 +90,26 @@ export function initRuntimeConfig(): void {
 
 /** The base every request should use, read at REQUEST time (not import time). */
 export function getApiBaseUrl(): string {
-  return apiBaseUrl;
+  return apiBaseUrl ?? defaultApiBase();
+}
+
+/**
+ * The server root the API hangs off — the API base without its `/api`: `''`
+ * at the root, `/filex` under a sub-path, `https://example.com/filex` in the
+ * desktop app. It is what the core's components take as `apiBase`, and what a
+ * server-root-relative address (`thumb_url`, `/z/<ticket>`) is joined onto.
+ *
+ * ⚠ The ONE place this is derived; a page that wrote `apiBase: ''` itself
+ * talked to the host's root under a sub-path.
+ */
+export function getServerRoot(): string {
+  return getApiBaseUrl().replace(/\/api\/?$/, '');
 }
 
 /** Set the API base at runtime (login screen server field). Empty/blank resets
  *  to the same-origin default so a cleared field can never brick requests. */
 export function setApiBaseUrl(url: string | null | undefined): void {
-  apiBaseUrl = url && url.trim() ? url.trim() : DEFAULT_API_BASE;
+  apiBaseUrl = url && url.trim() ? url.trim() : null;
 }
 
 /**

@@ -43,6 +43,7 @@ const UserSettingsModal = defineAsyncComponent(
 import { effectiveTheme } from '@/lib/theme';
 import { explorerAuth, openTriggerPref } from '@/lib/explorerConfig';
 import { currentMountBase } from '@/router';
+import { getServerRoot } from '@/api/runtimeConfig';
 import { fetchVisibleStorages, type VisibleStorage } from '@/lib/visibleStorages';
 // ⚠ `#<storage>/<folder>` → `<storage>://<path>` is converted by the module
 // that owns both shapes, never by slicing a string here. See its note.
@@ -630,9 +631,11 @@ const opensOnHome = computed(() => route.name === 'home');
  * the other is moved — so the explorer's config is this one plus its own keys.
  */
 const panelConfig = computed<ExplorerConfig>(() => ({
-  apiBase: '',
-  endpoint: '/api/files/manager',
-  capabilities: '/api/files/capabilities',
+  // The server root: '' at the root, `/filex` under a sub-path
+  // (FILEX_BASE_PATH) — see runtimeConfig.getServerRoot.
+  apiBase: getServerRoot(),
+  endpoint: `${getServerRoot()}/api/files/manager`,
+  capabilities: `${getServerRoot()}/api/files/capabilities`,
   auth: explorerAuth(),
   theme: currentTheme.value,
   // ⚠ The ACTIVE language, whatever it is — a language pack's included. This
@@ -692,8 +695,8 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     // and only those prefixes fall back to index.html on the server — a bare
     // `/apps/…` is a 404 (routes.go → wireStatic).
     pluginPageBase: currentMountBase(),
-    saveText: '/api/files/save-text',
-    onlyOfficeConfig: '/api/files/onlyoffice/config',
+    saveText: `${getServerRoot()}/api/files/save-text`,
+    onlyOfficeConfig: `${getServerRoot()}/api/files/onlyoffice/config`,
   };
 });
 

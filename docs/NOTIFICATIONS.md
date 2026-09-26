@@ -194,7 +194,7 @@ each target additionally persists its own last delivery — final HTTP status
 **Canonical events** filex emits itself:
 
 ⚠ Read the **Emitted** column before you build an alert on one of these. Seven
-of the twelve operational alert ids below are declared in
+of the sixteen operational alert ids below are declared in
 `internal/notify/event.go` and **no code emits them** — the id is accepted by a
 webhook target's allow-list, the target saves, and the event never arrives. A
 subscription that can never fire looks exactly like a subsystem that never has
@@ -214,6 +214,10 @@ a problem, which is the worst way to learn your monitoring was never wired.
 | `disk_full` | critical | **no** ⚠ | The host disk is out of space. |
 | `update_available` | info | yes | A newer release was published. Fires **once** per release — the announcement is persisted, so a restart loop cannot turn it into a stream. |
 | `update_applied` | info | **no** ⚠ | A self-upgrade replaced the binary. |
+| `app_updated` | info | yes | An installed app moved to a newer version by itself ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). Meta: `plugin`, `plugin_label_<lang>`, `version`, `from`. |
+| `app_update_available` | info | yes | A newer version of an app waits for the administrator — its automatic updates are off, or the instance only runs signed apps. **Once** per version. |
+| `app_update_needs_approval` | warning | yes | A newer version of an app asks for permissions it was not granted (meta `added`), or a language pack now brings a module (`adds_module`). **Once** per version. |
+| `app_update_failed` | warning | yes | An automatic app update was tried and undone; the version it had keeps running. **Once** per version. |
 
 **File and share events** (webhook v2) — the subscribable catalogue, every one
 of them tickable on a target in **Admin → Webhooks**:
@@ -337,6 +341,7 @@ otherwise hit:
 | `share.created` | `share` — the token | The event is "a link now exists"; the link is the thing. |
 | `admin_test` · `webhook_test` | `none` | |
 | `update_available` · `update_applied` | `none` | Not about a file. |
+| `app_updated` · `app_update_available` · `app_update_needs_approval` · `app_update_failed` | `none` | About an app, which is managed on the admin Apps tab. |
 | `replica_fail` · `replica_fail_spike` · `replica_reconcile_done` · `replica_status_report` · `primary_read_fail` | **`none` — honestly cannot** | These carry a path and nothing else (`internal/replica/`): a bare path does not name a storage, and guessing which storage it belongs to would send a click into another tenant's folder whenever two storages share a folder name. |
 | `quota_near_full` · `quota_full` · `queue_stuck` · `auth_fail_spike` · `disk_full` | `none` | Declared but **not emitted** by any code — see the Emitted column above. |
 
@@ -583,7 +588,8 @@ and marking it changes the caller's bell and nobody else's:
   stays read for everyone; nothing is backfilled.
 
 ⚠ **Operator alarms reach administrators only.** `update_available`,
-`update_applied` and the replica, quota, queue, auth and disk alarms are
+`update_applied`, the four `app_update*` notices and the replica, quota,
+queue, auth and disk alarms are
 recorded as broadcasts, but a non-administrator's list and unread count leave
 them out — they are about a server that person cannot touch (a plain user's
 bell used to read "filex v0.42.2 is available — this server runs 0.1.0-dev").

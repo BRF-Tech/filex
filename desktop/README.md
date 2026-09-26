@@ -357,8 +357,17 @@ matters when working on this code:
 The Store signs it (no certificate of ours), hosts it and updates it; Store
 installs get no SmartScreen warning. The NSIS installer and the portable `.exe`
 stay on filex.sh for machines without the Store. Listing text, certification
-notes and the IARC answers: `store/microsoft/listing.md`. CI leg (not yet in
-the public workflow): `../packaging/ci/release-desktop-store.patch`.
+notes and the IARC answers: `store/microsoft/listing.md`.
+
+**Every release submits itself** (since 0.47.0): the public workflow's Store
+job builds the package, checks it (`e2e:store`), keeps it as the
+`msix-<tag>` artifact and hands it to `scripts/msstore-submit.ps1`, which
+uploads it, sets "What's new" to the GitHub Release and sends the submission
+to certification. It signs in as an Entra ID app with the Manager role in
+Partner Center (`MSSTORE_*` secrets, `MSSTORE_PRODUCT_ID` variable). While an
+earlier submission is still in certification it leaves the Store alone and
+says so; upload the artifact by hand once that one is live. A Store problem is
+a warning on the run, never a failed release.
 
 - **Version.** The Store refuses a first number of 0 and keeps the fourth for
   itself, so the package carries a mapping that `scripts/appx-manifest.cjs`
@@ -368,7 +377,9 @@ the public workflow): `../packaging/ci/release-desktop-store.patch`.
   The app itself keeps reporting its real version.
 - **Identity.** `appx.identityName`, `publisher` and `publisherDisplayName`
   in `electron-builder.yml` must be Partner Center's *Product identity* values,
-  character for character. The committed ones are placeholders.
+  character for character (`BRFTech.filexapp`, Store ID `9PKXDJLVZWXW`). The
+  package's display name is the reserved Store name, "filex File Manager"; the
+  Start menu tile says "filex" (`scripts/appx-manifest.cjs`).
 - **Nothing is registered at runtime.** Registry writes from inside a package
   land in its private hive, so the `filex://` link, "Open with filex" and the
   login item are declared in `build/appx-extensions.xml`. The login item is a
@@ -387,8 +398,12 @@ the public workflow): `../packaging/ci/release-desktop-store.patch`.
 - `pnpm run e2e:store` (Windows, Developer Mode) installs an e2e *variant* —
   own identity, own `filex-e2e://` scheme, own userData name, so it cannot touch
   a real installation — and checks it as a Store copy: manifest, a cold
-  protocol launch, the running app's channel, AppData redirection, the startup
-  task. The variant is removed afterwards.
+  protocol launch, the running app's channel, a toast Windows files under the
+  package (Action Center), AppData redirection, the startup task. The variant
+  is removed afterwards. ⚠ The GitHub runner cannot activate a package, so
+  those checks only warn there; the local release run is where they are
+  strict (`scripts/release/plan.mjs`, "desktop: the Store package works as a
+  Store copy").
 
 ## Security posture (do not loosen)
 

@@ -27,6 +27,7 @@ import {
 } from '@brftech/filex-core';
 
 import { explorerAuth } from '@/lib/explorerConfig';
+import { getServerRoot } from '@/api/runtimeConfig';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 
 /** One row of the panel's "Apps" section. */
@@ -52,7 +53,7 @@ export function usePluginHomeApps() {
 
   // The DEFAULT plugin endpoints — the same ones the explorer and the `page`
   // view derive, from the same auth block (lib/explorerConfig).
-  const api = useFileApi({ apiBase: '', auth: explorerAuth() } as ExplorerConfig);
+  const api = useFileApi({ apiBase: getServerRoot(), auth: explorerAuth() } as ExplorerConfig);
 
   // Nothing is requested while the feature is off: with `app_plugins.enabled`
   // false the panel makes zero plugin calls, exactly like the explorer.

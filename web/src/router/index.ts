@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
+import { appBase } from '@brftech/filex-core';
 import { useAuthStore } from '@/stores/auth';
 import { stashDesktopHandoff } from '@/lib/desktopHandoff';
 import { applyDocumentTitle } from '@/lib/documentTitle';
@@ -53,15 +54,32 @@ const PUBLIC_BASES: Array<[string, PublicKind]> = [
 // The existing /files/edit carve-out proves it — a browser sent to the bare
 // /files/edit has its address rewritten to /admin/files/edit the moment the
 // router hydrates (measured 2026-09-04, before this change).
+//
+// ⚠ Under a base path (FILEX_BASE_PATH, https://example.com/filex/) every one
+// of these prefixes sits below it — `/filex/admin/`, `/filex/drive/` — so the
+// base comes off before the prefix is read, and goes back on for the history
+// (below) and for every address the browser follows (`currentMountBase`,
+// `userDoor`). The prefixes themselves stay base-less: they name the door, not
+// the host.
 const mountBase = pickMountBase(typeof window !== 'undefined' ? window.location.pathname : '');
 
-/** Which prefix a document path was served from. Exported for the tests. */
-export function pickMountBase(pathname: string): string {
-  if (pathname === '/drive' || pathname.startsWith(USER_BASE)) return USER_BASE;
+/**
+ * Which prefix a document path was served from. `root` is the base path the
+ * app is served under (the core's `appBase()`, '' at the root). Exported for
+ * the tests.
+ */
+export function pickMountBase(pathname: string, root: string = appBase()): string {
+  const own = root && pathname.startsWith(`${root}/`) ? pathname.slice(root.length) : pathname;
+  if (own === '/drive' || own.startsWith(USER_BASE)) return USER_BASE;
   for (const [base] of PUBLIC_BASES) {
-    if (pathname.startsWith(base)) return base;
+    if (own.startsWith(base)) return base;
   }
   return ADMIN_BASE;
+}
+
+/** The end-user front door as the browser addresses it: `/drive/`, under the base. */
+export function userDoor(): string {
+  return appBase() + USER_BASE;
 }
 
 /** Which kind of public link this document is, or '' when it is the app. */
@@ -75,7 +93,9 @@ export function onUserBase(): boolean {
 }
 
 /**
- * The prefix this document was served from (`/admin/`, `/drive/`, `/p/`).
+ * The prefix this document was served from (`/admin/`, `/drive/`, `/p/`), as
+ * the browser addresses it — under the base path when there is one
+ * (`/filex/drive/`).
  *
  * ⚠ Read by anything that builds an address the BROWSER will follow rather
  * than a route the router will push — an app plugin's page opens in a new
@@ -83,7 +103,7 @@ export function onUserBase(): boolean {
  * the base is a server 404 (routes.go → wireStatic serves only these three).
  */
 export function currentMountBase(): string {
-  return mountBase;
+  return appBase() + mountBase;
 }
 
 /**
@@ -560,9 +580,11 @@ const routes: RouteRecordRaw[] = [
 ];
 
 const router = createRouter({
-  // Whichever prefix served this document. Vite's build `base` stays '/admin/'
-  // — asset URLs are absolute, so the same index.html works from any mount.
-  history: createWebHistory(mountBase),
+  // Whichever prefix served this document, under the base path the server
+  // published (lib/appBase in the core). Vite's build `base` stays '/admin/' —
+  // index.html's asset URLs are absolute (and rewritten by the server under a
+  // base), so the same document works from any mount.
+  history: createWebHistory(appBase() + mountBase),
   routes: onPublicPageBase() ? publicRoutes(currentPublicKind() as PublicKind) : routes,
   scrollBehavior(_to, _from, saved) {
     return saved ?? { top: 0 };
@@ -647,7 +669,7 @@ router.beforeEach(async (to) => {
     // or Home is not admin-only, so without this line a non-admin who saved
     // one would be left sitting on /admin/explore. Measured 2026-09-12.
     if (!auth.isAdmin && !onUserBase()) {
-      window.location.replace(USER_BASE);
+      window.location.replace(userDoor());
       return false;
     }
     const want = startRouteName({ isAdmin: auth.isAdmin, userBase: onUserBase() });
@@ -671,7 +693,7 @@ router.beforeEach(async (to) => {
       // this line: a desktop pairing is stashed in sessionStorage a few lines
       // up and sessionStorage survives a same-tab navigation (measured), and
       // the explorer's remembered folder lives in localStorage.
-      window.location.replace(USER_BASE);
+      window.location.replace(userDoor());
       return false;
     }
     return { name: 'home' };

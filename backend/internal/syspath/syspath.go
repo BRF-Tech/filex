@@ -131,6 +131,15 @@ func InDir(rel string) bool {
 	return false
 }
 
+// InTrash reports whether rel is the soft-delete bin at the storage root, or
+// lies inside it: the path a trashed row carries (trash.NewKey mints
+// `.filex-trash/<key>`). Anchored at the root, unlike InDir — the one place a
+// row's bytes can have been put in the trash.
+func InTrash(rel string) bool {
+	clean := strings.Trim(rel, "/")
+	return clean == Trash || strings.HasPrefix(clean, Trash+"/")
+}
+
 // Hidden reports whether a person must never be shown rel: it is inside an
 // internal directory, or it is a keep marker. The rule every person-facing
 // listing, search, recent/starred/tag view, share and notification applies.

@@ -139,6 +139,20 @@ export function hostOf(origin: string): string {
 }
 
 /**
+ * The path a server address lives under: `https://example.com/filex` →
+ * `/filex`, `https://fm.example.com` → `''`. filex can be served under a sub-path
+ * (FILEX_BASE_PATH), and a guide that asks for a host and a path separately
+ * has to put it in the path.
+ */
+export function pathOf(origin: string): string {
+  try {
+    return new URL(origin).pathname.replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+}
+
+/**
  * The username a client should be given. Falls back to a placeholder so a
  * guide rendered before `/api/auth/me` answers is still readable rather
  * than showing `undefined` in the middle of a command line.
@@ -284,7 +298,7 @@ export const buildWebdavGuide: GuideBuilder = (ctx, t) => {
           steps: [
             t('conn.guide.webdav.duck.s1'),
             t('conn.guide.webdav.duck.s2', { host: hostOf(origin) }),
-            t('conn.guide.webdav.duck.s3', { path: ctx.storage ? `/dav/${ctx.storage}/` : '/dav/' }),
+            t('conn.guide.webdav.duck.s3', { path: pathOf(origin) + (ctx.storage ? `/dav/${ctx.storage}/` : '/dav/') }),
             t('conn.guide.webdav.duck.s4', { user }),
           ],
         },

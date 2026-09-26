@@ -12,8 +12,10 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
@@ -53,7 +55,7 @@ func (e errsString) Error() string { return string(e) }
 
 // opsRequest is the body of POST /api/files/ops.
 type opsRequest struct {
-	Kind      string `json:"kind"` // copy, move, delete
+	Kind      string `json:"kind"` // copy, move, delete (clientKinds)
 	StorageID int64  `json:"storage_id"`
 	// DestStorageID targets another storage for copy/move (cross-depo paste).
 	// Omitted or 0 means "same storage as the sources".
@@ -61,6 +63,21 @@ type opsRequest struct {
 	Sources       []string `json:"sources"`
 	Dest          string   `json:"dest,omitempty"`
 }
+
+// clientKinds are the kinds a client may name on POST /api/files/ops: the
+// three this handler knows how to judge.
+//
+// ⚠⚠ Not whatever ops.SubmitTo accepts. The queue's funnel also takes the
+// kinds other handlers queue AFTER judging them in their own terms — a rename
+// (vfRename: the storage's read-only flag, the new name's spelling), a
+// restore (mayRestore: the entry's tenant, root, lock and original path), a
+// purge (Purge: the entry's tenant), an upload commit, an app's action — and
+// this handler judges none of that. Passing the client's kind straight through
+// let `{"kind":"restore","storage_id":<own>,"sources":["<any node id>"]}`
+// restore another tenant's trash entry, a hidden open-with copy or a node
+// outside a root token, and a rename skip its name checks (2026-09-26 review
+// of PR #61, which added those kinds to the funnel).
+var clientKinds = map[string]bool{ops.OpCopy: true, ops.OpMove: true, ops.OpDelete: true}
 
 // Submit queues a new op and returns the opID.
 func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +88,13 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 	var req opsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	if !clientKinds[req.Kind] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "kind must be copy, move or delete",
+			"code":  "BAD_KIND",
+		})
 		return
 	}
 	// Tenancy FIRST, before the ACL — because the ACL cannot answer this
@@ -89,6 +113,38 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 	if destID := req.DestStorageID; destID != 0 && !ownsStorage(w, r, destID, "storage") {
 		return
 	}
+	// The storage-relative form of every path the op names, read once for the
+	// checks below.
+	destID := req.DestStorageID
+	if destID == 0 {
+		destID = req.StorageID
+	}
+	rels := make([]string, 0, len(req.Sources))
+	for _, s := range req.Sources {
+		rels = append(rels, bareRel(s))
+	}
+	drel := bareRel(req.Dest)
+	writesDest := req.Kind != ops.OpDelete && req.Dest != ""
+	// A `root:` token (or an X-Filex-Root) stays inside its root here too.
+	//
+	// ⚠ confine.Middleware cannot do it for this door: it rewrites the body
+	// keys it knows (`source`, `target`, `path`, …) and this body names its
+	// paths `sources` and `dest`, beside a bare `storage_id` — so a confined
+	// caller could queue a copy, move or delete of anything in the storage
+	// (lesson #543).
+	for i, rel := range rels {
+		if !rootAllows(r.Context(), o.Store, req.StorageID, rel) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": confine.ErrOutOfRoot.Error() + ": " + req.Sources[i]})
+			return
+		}
+	}
+	if writesDest && !rootAllows(r.Context(), o.Store, destID, drel) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": confine.ErrOutOfRoot.Error() + " (dest)"})
+		return
+	}
+	if o.refuseReadOnly(w, r, req.Kind, req.StorageID, destID) {
+		return
+	}
 	// Names and app locks first (ops.Targets — the same list SubmitTo judges):
 	// a frozen document is answered 423 with who froze it, before the
 	// permission check below reads the lock's viewer cap as a plain 403.
@@ -96,50 +152,20 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// RBAC: require ≥editor on each source (and, for copy/move, the dest).
-	for _, s := range req.Sources {
-		_, rel := splitAdapterPath(s)
-		if rel == "" {
-			rel = strings.Trim(s, "/")
-		}
+	for i, rel := range rels {
 		if !aclAllowID(r.Context(), o.ACL, o.Store, req.StorageID, rel, acl.LevelEditor) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + s})
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + req.Sources[i]})
 			return
 		}
 	}
-	if req.Kind != "delete" && req.Dest != "" {
-		_, drel := splitAdapterPath(req.Dest)
-		if drel == "" {
-			drel = strings.Trim(req.Dest, "/")
-		}
-		destID := req.DestStorageID
-		if destID == 0 {
-			destID = req.StorageID
-		}
-		if !aclAllowID(r.Context(), o.ACL, o.Store, destID, drel, acl.LevelEditor) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission (dest)"})
-			return
-		}
+	if writesDest && !aclAllowID(r.Context(), o.ACL, o.Store, destID, drel, acl.LevelEditor) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission (dest)"})
+		return
 	}
 
 	/* wiring:e2 — same boundary rule for the unified endpoint. */
-	if req.Kind != "delete" {
+	if req.Kind != ops.OpDelete {
 		if lk, ok := o.Store.(e2e.NodeByPathLookup); ok {
-			destID := req.DestStorageID
-			if destID == 0 {
-				destID = req.StorageID
-			}
-			rels := make([]string, 0, len(req.Sources))
-			for _, s := range req.Sources {
-				_, rel := splitAdapterPath(s)
-				if rel == "" {
-					rel = strings.Trim(s, "/")
-				}
-				rels = append(rels, rel)
-			}
-			_, drel := splitAdapterPath(req.Dest)
-			if drel == "" {
-				drel = strings.Trim(req.Dest, "/")
-			}
 			if err := e2e.GuardTransfer(r.Context(), lk, req.StorageID, rels, destID, drel); err != nil {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 				return
@@ -281,14 +307,10 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 			if !ownsStorage(w, r, destStorageID, "storage") {
 				return
 			}
-			if st.ReadOnly {
-				writeJSON(w, http.StatusForbidden, map[string]string{
-					"error": "destination storage is read-only: " + st.Name,
-					"hint":  "paste into a writable storage, or clear the read-only flag on " + st.Name,
-				})
-				return
-			}
 		}
+	}
+	if o.refuseReadOnly(w, r, kind, storageID, destStorageID) {
+		return
 	}
 
 	// RBAC: copy/move write into the destination dir — require ≥editor there,
@@ -327,6 +349,64 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"op": op})
+}
+
+// bareRel is a path of POST /api/files/ops as the storage-relative path the
+// checks ask about: an `<adapter>://` prefix dropped, no surrounding slashes.
+func bareRel(p string) string {
+	if _, rel := splitAdapterPath(p); rel != "" {
+		return rel
+	}
+	return strings.Trim(p, "/")
+}
+
+// refuseReadOnly answers 403 for an op that would change a read-only storage,
+// and reports whether it did: a move or a delete takes its sources out of
+// theirs, a copy or a move puts something into the destination's.
+//
+// ⚠ Both ends, on both doors. The per-verb endpoints asked only about a
+// destination named with an adapter, and the generic endpoint about nothing:
+// a delete or a move OUT of a read-only storage was queued and carried out,
+// and a copy into one through POST /api/files/ops as well (2026-09-26). The
+// storage's flag is its administrator's "nothing here changes", and the
+// worker, which runs with nobody's permissions, never reads it.
+func (o *Ops) refuseReadOnly(w http.ResponseWriter, r *http.Request, kind string, storageID, destStorageID int64) bool {
+	if destStorageID == 0 {
+		destStorageID = storageID
+	}
+	if kind == ops.OpMove || kind == ops.OpDelete {
+		if st := readOnlyStorage(r.Context(), o.Store, storageID); st != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "storage is read-only: " + st.Name,
+				"code":  "READ_ONLY",
+			})
+			return true
+		}
+	}
+	if kind == ops.OpCopy || kind == ops.OpMove {
+		if st := readOnlyStorage(r.Context(), o.Store, destStorageID); st != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "destination storage is read-only: " + st.Name,
+				"code":  "READ_ONLY",
+				"hint":  "paste into a writable storage, or clear the read-only flag on " + st.Name,
+			})
+			return true
+		}
+	}
+	return false
+}
+
+// readOnlyStorage is the storage behind id when it is read-only, nil when it
+// is writable or cannot be read (the worker then fails on it, as before).
+func readOnlyStorage(ctx context.Context, store db.Store, id int64) *model.Storage {
+	if store == nil {
+		return nil
+	}
+	st, err := store.GetStorage(ctx, id)
+	if err != nil || st == nil || !st.ReadOnly {
+		return nil
+	}
+	return st
 }
 
 // adapterOf returns the `<adapter>` of an `<adapter>://<rel>` path, or "" when
@@ -401,10 +481,11 @@ func (o *Ops) List(w http.ResponseWriter, r *http.Request) {
 	}
 	status := r.URL.Query().Get("status")
 	// The tray is a plain authenticated user route, and the rows it returns
-	// carry storage_id, dest_storage_id, sources_json and dest — another
-	// tenant's live file paths, spelled out. Restrict the query to the storages
-	// this caller can reach. `nil` (unscoped / supertenant) keeps the previous
-	// instance-wide query verbatim, so single-tenant installs are unchanged.
+	// carry storage_id, dest_storage_id, sources_json and dest — live file
+	// paths, spelled out. Restrict the query to the storages this caller can
+	// reach (unscoped / supertenant: every storage), and below an
+	// administrator to the rows this caller queued, on a single-tenant install
+	// too (opsViewer).
 	//
 	// A trash empty is its TENANT's (ops.Viewer): it may name no storage at
 	// all, and its counts describe that tenant's trash.
@@ -433,11 +514,33 @@ func readerCtx(r *http.Request) context.Context {
 // caller or the supertenant, a tenant's storages' rows and its own trash
 // empties otherwise (ops.ViewerOf, from the same tenant scope
 // confinedScope reads).
+//
+// ⚠ And within that, only an administrator follows everybody's operations.
+// Anyone else is shown the rows they queued (ops.Viewer.Own): a row spells out
+// its sources and its destination, and the tenant scope says nothing about
+// which of that tenant's folders a member may see. Every member of a tenant
+// was handed every other member's paths here — on a production install, a
+// colleague's move into a folder of client records, whatever the reader's
+// grants — and in full, by sequential id, on GET /ops/{id}.
+//
+// ⚠⚠ "An administrator" is the CREDENTIAL, not the account
+// (auth.CallerMayAdminister), and a caller confined to a folder is never one
+// here. A read-scoped token minted on an administrator's account, a `root:`
+// token, or an administrator's own session narrowed by X-Filex-Root is a
+// credential for one folder — and was handed every operation on the instance,
+// with every id walkable, because the account behind it was an admin.
 func opsViewer(r *http.Request) ops.Viewer {
-	if _, confined := confinedScope(r.Context()); !confined {
-		return ops.Viewer{All: true}
+	v := ops.Viewer{All: true}
+	if _, confined := confinedScope(r.Context()); confined {
+		v = ops.ViewerOf(r.Context())
 	}
-	return ops.ViewerOf(r.Context())
+	if _, rooted := callerRoot(r.Context()); rooted || !auth.CallerMayAdminister(r.Context()) {
+		v.Own = true
+		if u := auth.UserFrom(r.Context()); u != nil {
+			v.Actor = u.ID
+		}
+	}
+	return v
 }
 
 // listSourcesPreview is how many of an op's sources one LIST row carries.
@@ -504,9 +607,12 @@ func commonSourceDir(sources []string) string {
 	return strings.Join(common, "/")
 }
 
-// Cancel ends a pending or running op the caller may see. A row already
-// finished answers 409; an unknown (or another tenant's) id 404, in the same
-// words Status uses so the id range cannot be probed.
+// Cancel ends a pending or running op the caller may see: their own, or any
+// in reach for an administrator (opsViewer). A row already finished answers
+// 409 FINISHED, and a running one that finishes what it starts (a rename, a
+// restore, a purge) 409 NOT_CANCELLABLE; an unknown id, another tenant's or
+// another person's, 404, in the same words Status uses so the id range cannot
+// be probed.
 func (o *Ops) Cancel(w http.ResponseWriter, r *http.Request) {
 	if o.Service == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ops queue unavailable"})
@@ -522,15 +628,11 @@ func (o *Ops) Cancel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
 		return
 	}
+	// The person who queued it, or an administrator: opsViewer already narrows
+	// everybody else to their own rows. A row that names nobody (written before
+	// actor_id existed) is an administrator's to stop.
 	if !opsViewer(r).Sees(op) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
-		return
-	}
-	// The person who queued it, or an administrator. A row written before
-	// actor_id existed names nobody and stays cancellable by anyone who can
-	// see it, as before.
-	if u := auth.UserFrom(r.Context()); u != nil && op.ActorID != nil && *op.ActorID != u.ID && !u.IsAdmin() {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "not your operation"})
 		return
 	}
 	ok, err := o.Service.Cancel(r.Context(), id)
@@ -539,7 +641,20 @@ func (o *Ops) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "already finished"})
+		// Read again: the row may have been claimed between the read above
+		// and the cancel. A rename, a restore or a purge that has started
+		// runs to its end (ops.Op.Cancellable is false) — it is not finished,
+		// and saying so sent the person looking for a result that was still
+		// on its way.
+		if cur, gerr := o.Service.Get(r.Context(), id); gerr == nil &&
+			(cur.Status == ops.StatusPending || cur.Status == ops.StatusRunning) {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "this operation cannot be stopped once it has started; it finishes on its own",
+				"code":  "NOT_CANCELLABLE",
+			})
+			return
+		}
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "already finished", "code": "FINISHED"})
 		return
 	}
 	op, _ = o.Service.Get(readerCtx(r), id)
@@ -564,9 +679,10 @@ func (o *Ops) Status(w http.ResponseWriter, r *http.Request) {
 	}
 	// Ownership on the single-row read, matching the listing. The refusal wears
 	// the same "unknown op" the miss above already produces, so probing the id
-	// range cannot count another tenant's operations. An op is the caller's if
-	// EITHER end is in reach — a cross-storage copy belongs to both sides —
-	// and a trash empty is its tenant's (ops.Viewer).
+	// range cannot count another tenant's — or another person's — operations.
+	// An op is in reach if EITHER end is — a cross-storage copy belongs to both
+	// sides — and a trash empty is its tenant's (ops.Viewer); below an
+	// administrator, only the caller's own row is (opsViewer).
 	if !opsViewer(r).Sees(op) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
 		return

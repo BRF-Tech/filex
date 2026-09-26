@@ -4,7 +4,7 @@ import { AuthApi } from '@/api/auth';
 import type { LoginRequest, User } from '@/api/types';
 import { extractError } from '@/api/client';
 import { attachViewPrefsHttp, detachViewPrefsStore, forgetPersonalPrefs } from '@brftech/filex-core';
-import { getApiBaseUrl, getBearerToken, getUseCredentials } from '@/api/runtimeConfig';
+import { getBearerToken, getServerRoot, getUseCredentials } from '@/api/runtimeConfig';
 
 /**
  * The per-person view document (`@brftech/filex-core` → lib/viewPrefs) —
@@ -26,9 +26,8 @@ function attachViewPrefsFor(userId: number | null): void {
   detachViewPrefsStore();
   viewPrefsFor = userId;
   if (userId === null) return;
-  const api = getApiBaseUrl().replace(/\/api\/?$/, '');
   attachViewPrefsHttp({
-    apiBase: api,
+    apiBase: getServerRoot(),
     headers: (): Record<string, string> => {
       const bearer = getBearerToken();
       return bearer ? { Authorization: `Bearer ${bearer}` } : {};

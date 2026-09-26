@@ -85,7 +85,9 @@ test('the store page: product page once the Store ID is known, the updates page 
   assert.equal(storePageUrl('snap'), 'snap://filex-app');
   assert.equal(storePageUrl('aur'), 'https://aur.archlinux.org/packages/filex-app-bin');
   // The AUR has no app: its web page.
-  assert.equal(storePageUrl('aur', ids), 'https://aur.archlinux.org/packages/filex-app-bin');
+  assert.equal(storePageUrl('aur', ids), 'https://aur.archlinux.org/packages/filex-app-bin');  // The Store ID Partner Center assigned (2026-09-26): the MSIX copy's
+  // "update" and "rate" links open the product page itself.
+  assert.equal(storePageUrl('msstore'), 'ms-windows-store://pdp/?ProductId=9PKXDJLVZWXW');
 });
 
 test('only the MSIX copy moves Explorer-visible files out of AppData', () => {

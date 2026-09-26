@@ -38,6 +38,7 @@ import { OFFICE_EXTS } from '../lib/serviceGate';
 import { requestFailure, sayFailure } from '../lib/errorWords';
 import { createArchivePreviewCache } from '../lib/archivePreviewCache';
 import { isTextualMime } from '../lib/textMime';
+import { withAppBase } from '../lib/appBase';
 
 const props = defineProps<{
   open: boolean;
@@ -345,9 +346,11 @@ function buildAndOpenStandalone(mode: 'view' | 'edit'): void {
   // Keep the adapter-qualified path intact so the editor route
   // resolves the storage from the URL (stripping it falls back to
   // storages[0] and 404s for any non-default adapter). Default base
-  // is the SFC's standalone /files/edit route; embedders override via
-  // viewerBaseUrl when they mount us elsewhere.
-  const base = props.viewerBaseUrl || '/files/edit';
+  // is the SFC's standalone /files/edit route — under the base path this
+  // document was served from (lib/appBase), '' everywhere but the admin app
+  // under a sub-path; embedders override via viewerBaseUrl when they mount us
+  // elsewhere.
+  const base = props.viewerBaseUrl || withAppBase('/files/edit');
   const sep = base.includes('?') ? '&' : '?';
   const url =
     `${base}${sep}path=${encodeURIComponent(props.file.path)}` +

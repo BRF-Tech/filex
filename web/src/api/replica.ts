@@ -41,13 +41,16 @@ export const ReplicaApi = {
     return data.count;
   },
 
-  async fixAll(): Promise<{ queued: number }> {
-    const { data } = await api.post<{ queued: number }>('/admin/replica/fix');
+  /** `already_queued`: failures whose retry was still waiting in the queue,
+   *  left alone (an older server does not send it). */
+  async fixAll(): Promise<{ queued: number; already_queued?: number }> {
+    const { data } = await api.post<{ queued: number; already_queued?: number }>('/admin/replica/fix');
     return data;
   },
 
-  async fixOne(path: string, op: string): Promise<{ ok: boolean }> {
-    const { data } = await api.post<{ ok: boolean }>('/admin/replica/fix-one', { path, op });
+  /** `queued: false`: a retry of this failure was already waiting. */
+  async fixOne(path: string, op: string): Promise<{ ok: boolean; queued?: boolean }> {
+    const { data } = await api.post<{ ok: boolean; queued?: boolean }>('/admin/replica/fix-one', { path, op });
     return data;
   },
 

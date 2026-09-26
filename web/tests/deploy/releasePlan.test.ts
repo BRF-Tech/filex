@@ -32,6 +32,7 @@ const REQUIRED: Record<string, Record<string, string>> = {
     'migrations on sqlite, postgres AND mysql': 'the parity tests skip without a DSN',
     'web unit (TZ=UTC': 'lesson #448: v0.43.0 CI failed in UTC',
     'desktop: typecheck + unit': '0.43.x shipped a desktop window that never parsed (#52)',
+    'the Store package works as a Store copy': 'the GitHub runner never activates an MSIX; release.yml submits what it builds (2026-09-26)',
     'docker: full image': 'v0.43.0: npm published, images never built',
     'docker: slim image': 'v0.43.0',
     'both images report the release': 'the version is baked in',
@@ -85,11 +86,24 @@ describe("this repository's release plan", () => {
 
   it('names the workflow guards by titles that exist, so a rename cannot make the gate vacuous', () => {
     const guards = p.exportGates.find((g: { vitest?: unknown }) => g.vitest).vitest.mustPass as string[];
-    const sources = ['releaseGatesImages.test.ts', 'goreleaserTemplates.test.ts'].map((f) =>
+    const sources = ['releaseGatesImages.test.ts', 'goreleaserTemplates.test.ts', 'wingetCla.test.ts', 'msstoreSubmit.test.ts'].map((f) =>
       fs.readFileSync(path.join(REPO, 'web', 'tests', 'deploy', f), 'utf8'),
     );
     expect(guards.length).toBeGreaterThanOrEqual(5);
     for (const title of guards) expect(sources.some((s) => s.includes(title)), title).toBe(true);
+  });
+
+  // ⚠ The export gate runs a LIST of files, not the whole suite. v0.47.0's
+  // first export: the winget CLA and Store guards were named in
+  // WORKFLOW_GUARDS but their files were not in that list, so the gate said
+  // they never ran — after an hour of pretag. Every guard title has to live
+  // in a file the gate runs.
+  it('runs every workflow guard in the export gate, not only names it', () => {
+    const gate = p.exportGates.find((g: { vitest?: unknown }) => g.vitest).vitest as { files: string[]; mustPass: string[] };
+    const inGate = gate.files.map((f) => fs.readFileSync(path.join(REPO, 'web', f), 'utf8'));
+    for (const title of gate.mustPass) {
+      expect(inGate.some((s) => s.includes(title)), `"${title}" is in no file the export gate runs`).toBe(true);
+    }
   });
 
   it('signs with the maintainer key and keeps only the contact addresses public', () => {

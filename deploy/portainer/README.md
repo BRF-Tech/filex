@@ -18,7 +18,7 @@ Then **App Templates** → *filex* → adjust env → **Deploy the container**.
 
 | Env | Required | Notes |
 |---|---|---|
-| `FILEX_PUBLIC_URL` | yes | The URL users open (`http://<host>:5212` or your proxy domain) — share links are built from it. |
+| `FILEX_PUBLIC_URL` | yes | The URL users open (`http://<host>:5212` or your proxy domain) — share links are built from it. A path in it (`https://example.com/filex`) is the sub-path filex is served under, and the proxy must pass that path through ([Base path](../../docs/CONFIGURATION.md#base-path)). |
 | `FILEX_ADMIN_EMAIL` / `FILEX_ADMIN_PASSWORD` | no | Empty → random `admin@local` password, printed once in the container logs. |
 
 Volumes `/data` (DB/index/thumbs) and `/srv/files` (managed files) are created

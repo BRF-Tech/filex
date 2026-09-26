@@ -53,6 +53,23 @@ describe('buildWebdavGuide', () => {
     expect(codeOf(g, 'rclone')).toContain('rclone lsl filex:depo');
   });
 
+  // filex under a sub-path (FILEX_BASE_PATH): every address in the guide is
+  // under it, including the one guide that asks for host and path apart.
+  it('keeps the prefix of a sub-path deployment in every address', () => {
+    const g = buildWebdavGuide({ ...ctx, origin: 'https://example.com/filex', storage: 'depo' }, t);
+    expect(g.facts[0].value).toBe('https://example.com/filex/dav/depo/');
+    expect(codeOf(g, 'windows')).toContain('net use Z: "https://example.com/filex/dav/depo/"');
+    // Cyberduck asks for the host and the path apart: the prefix is the path's.
+    // (A translator that shows its arguments — the key alone hides them.)
+    const withVars = (key: string, vars: Record<string, string | number> = {}) => `${key} ${JSON.stringify(vars)}`;
+    const duck = codeOf(buildWebdavGuide({ ...ctx, origin: 'https://example.com/filex', storage: 'depo' }, withVars), 'cyberduck');
+    expect(duck).toContain('conn.guide.webdav.duck.s2 {"host":"example.com"}');
+    expect(duck).toContain('conn.guide.webdav.duck.s3 {"path":"/filex/dav/depo/"}');
+    // …and at the root the path is what it always was.
+    const rootDuck = codeOf(buildWebdavGuide({ ...ctx, storage: 'depo' }, withVars), 'cyberduck');
+    expect(rootDuck).toContain('conn.guide.webdav.duck.s3 {"path":"/dav/depo/"}');
+  });
+
   it('carries the three Windows limits that look like filex bugs', () => {
     const win = codeOf(buildWebdavGuide(ctx, t), 'windows');
     // 4 GB, not the 50,000,000-byte default that stops transfers at ~47.7 MB.

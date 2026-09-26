@@ -34,17 +34,18 @@ describe('submitRename shows its failure in the dialog', () => {
 
   it('clears the last failure before it tries again', () => {
     // Retrying the SAME taken name produces the identical sentence: without
-    // this line the ref never changes, the dialog (which cleared its line when
-    // the name was edited) shows nothing, and Save reads as broken.
+    // clearing, the ref never changes, the dialog (which cleared its line when
+    // the name was edited) shows nothing, and Save reads as broken. The clearing
+    // is composables/useDialogRequest's `begin` (tests/composables/dialogRequest).
     const beforeTry = submit.slice(0, submit.indexOf('try {'));
-    expect(beforeTry).toMatch(/renameError\.value = null/);
+    expect(beforeTry).toMatch(/const ticket = renameReq\.begin\(\);/);
   });
 
   it('any other failure is shown too, not only emitted', () => {
-    expect(failure).toMatch(/renameError\.value = /);
-    // Still reported to the host too — through reportMutationError, the one
-    // path every mutation's failure takes (it also says a lock refusal).
-    expect(failure).toContain("reportMutationError(err, { op: 'rename' })");
+    // In the dialog while it is on screen, as a toast once it is not; reported
+    // to the host too — refuseInDialog goes through reportMutationError, the
+    // one path every mutation's failure takes (it also says a lock refusal).
+    expect(failure).toContain("refuseInDialog(renameReq, ticket, err, { op: 'rename' }, words)");
   });
 
   it('the dialog is given the message', () => {
@@ -52,6 +53,8 @@ describe('submitRename shows its failure in the dialog', () => {
   });
 
   it('a reopened dialog does not carry the last attempt’s error', () => {
-    expect(EXPLORER).toMatch(/watch\(showRename, \(open\) => \{\s*if \(open\) renameError\.value = null;/);
+    // Every opening is a new session of composables/useDialogRequest.
+    expect(EXPLORER).toMatch(/const renameReq = useDialogRequest\(showRename\);/);
+    expect(EXPLORER).toMatch(/const \{ busy: renameBusy, error: renameError \} = renameReq;/);
   });
 });

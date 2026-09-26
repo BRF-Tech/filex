@@ -14,7 +14,17 @@
  *
  * Upgrade is the same dialog against `…/{id}/upgrade`: same bodies, same
  * review, one extra refusal (`permissions_changed`) when the new version
- * asks for more than the installed one was granted.
+ * asks for more than the installed one was granted. The review of an upgrade
+ * also says the version jump and how the grant changes (`review.upgrade`).
+ *
+ * "Review update" (the Apps list, `update` prop) is an upgrade from the
+ * app's OWN source: no source step to fill — the server finds and fetches the
+ * newer version exactly as the update check does (`from_source`) and the
+ * dialog opens on its review.
+ *
+ * ⚠ An app whose `filex` range leaves this server out is said at the review
+ * (`review.compat.ok === false`) and cannot be installed from it; the server
+ * refuses it too (`incompatible`).
  *
  * ⚠ What the dry run knows is said AT THE REVIEW (release-candidate sweep,
  * 2026-09-21): an app of the same name already installed (with "upgrade it
@@ -37,6 +47,7 @@ import {
   type AppPluginInstallSource,
 } from '@/api/appPlugins';
 import { extractError } from '@/api/client';
+import { refusalSentence } from '@/lib/appPluginRefusal';
 import { pluginLabelOf, type PluginText } from '@brftech/filex-core';
 
 import Button from '@/components/ui/Button.vue';
@@ -54,6 +65,11 @@ const props = defineProps<{
   requiresSignature: boolean;
   /** Set → the dialog upgrades this app instead of installing a new one. */
   upgrade?: AppPlugin | null;
+  /**
+   * Set → the dialog upgrades this app FROM ITS OWN SOURCE to the newer
+   * version the update check found, opening straight on the review.
+   */
+  update?: AppPlugin | null;
   /** The installed apps: what "upgrade it instead" switches to, by id. */
   installed?: AppPlugin[];
 }>();
@@ -89,8 +105,12 @@ const missing = ref<string[]>([]);
 const switchedTo = ref<AppPlugin | null>(null);
 
 /** The app being upgraded, whichever way this dialog came to upgrade it. */
-const upgradeTarget = computed<AppPlugin | null>(() => props.upgrade ?? switchedTo.value);
+const upgradeTarget = computed<AppPlugin | null>(() => props.update ?? props.upgrade ?? switchedTo.value);
 const isUpgrade = computed(() => !!upgradeTarget.value);
+/** Upgrading from the app's own source: there is no source to fill in. */
+const fromSource = computed(() => !!props.update);
+/** Where that source is, as the list row names it. */
+const sourceText = computed(() => props.update?.manifest_url || props.update?.source_url || '');
 const title = computed(() =>
   isUpgrade.value
     ? t('appPlugins.wizard.upgradeTitle', { name: upgradeTarget.value?.name ?? '' })
@@ -119,7 +139,10 @@ function reset() {
 watch(
   () => props.modelValue,
   (open) => {
-    if (open) reset();
+    if (!open) return;
+    reset();
+    // Nothing to fill in: straight to the review of what the source has.
+    if (props.update) void toReview();
   },
 );
 
@@ -144,6 +167,7 @@ function onManifest(e: Event) {
 
 /** The body for the chosen source, or the message saying what is missing. */
 function buildSource(): AppPluginInstallSource | string {
+  if (fromSource.value) return { kind: 'update' };
   if (source.value === 'github') {
     const r = repo.value.trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/\/+$/, '');
     if (!/^[\w.-]+\/[\w.-]+$/.test(r)) return t('appPlugins.wizard.errRepo');
@@ -165,55 +189,15 @@ function buildSource(): AppPluginInstallSource | string {
   return { kind: 'url', url: u || undefined, manifest_url: m, sha256: h || undefined };
 }
 
-const FETCH_REASONS = [
-  'bad_repo',
-  'manifest_not_found',
-  'module_not_found',
-  'unreachable',
-  'http_status',
-  'bad_url',
-  'missing_url',
-  'too_large',
-];
-
 /**
  * Map a refused install onto the sentence written for it, in the reader's
- * language. ⚠ `err.message` is the server's English, for the log: it is only
- * ever a parameter of `manifest_invalid` (the manifest's own complaint),
- * never the sentence itself.
+ * language — the one table the Apps list reads an update's failure from too
+ * (lib/appPluginRefusal).
  */
 function explain(e: unknown): string {
   const err = appPluginError(e);
   missing.value = err?.missing ?? [];
-  const known = [
-    'permissions_incomplete',
-    'permissions_changed',
-    'sha256_mismatch',
-    'sha256_required',
-    'manifest_invalid',
-    'signature_required',
-    'signature_invalid',
-    'name_taken',
-    'describe_mismatch',
-    'too_large',
-    'demo_refused',
-    'not_found',
-  ];
-  if (err?.code === 'fetch_failed') {
-    const reason = FETCH_REASONS.includes(err.reason) ? err.reason : 'unreachable';
-    return t(`appPlugins.wizard.errors.fetch.${reason}`, {
-      where: err.where || '—',
-      refs: err.refs.join(', ') || '—',
-      status: err.status || '—',
-    });
-  }
-  if (err && known.includes(err.code)) {
-    return t(`appPlugins.wizard.errors.${err.code}`, {
-      missing: err.missing.join(', ') || '—',
-      message: err.message || '—',
-    });
-  }
-  return extractError(e, t('errors.generic'));
+  return (err && refusalSentence(err, t)) || extractError(e, t('errors.generic'));
 }
 
 /** Step 1 → 2: the dry run. */
@@ -277,10 +261,22 @@ function reasonOf(id: string, fromReview: PluginText | string | undefined): stri
   );
 }
 
+/** The review's range verdict: false when this filex is outside the app's range. */
+const compatible = computed(() => review.value?.compat?.ok !== false);
+
+/** The permissions this upgrade adds to the grant — the ones being approved. */
+const added = computed(() => new Set(review.value?.upgrade?.added ?? []));
+
 // An install whose name is taken cannot go through: the review says so and
-// offers the upgrade instead of letting "Install" be the one to find out.
+// offers the upgrade instead of letting "Install" be the one to find out. An
+// app whose range leaves this filex out cannot either.
 const canInstall = computed(
-  () => understood.value && !busy.value && review.value !== null && !(review.value.installed && !isUpgrade.value),
+  () =>
+    understood.value &&
+    !busy.value &&
+    review.value !== null &&
+    compatible.value &&
+    !(review.value.installed && !isUpgrade.value),
 );
 
 /** Step 2 → 3: the real thing. */
@@ -336,7 +332,14 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
 
       <!-- 1. Source -->
       <form v-if="step === 'source'" class="space-y-4" @submit.prevent="toReview">
-        <div class="flex gap-2">
+        <p
+          v-if="fromSource"
+          class="break-words text-sm text-zinc-600 dark:text-zinc-400"
+          data-testid="app-plugin-from-source"
+        >
+          {{ t('appPlugins.wizard.fromSource', { source: sourceText }) }}
+        </p>
+        <div v-if="!fromSource" class="flex gap-2">
           <Button
             v-for="s in (['github', 'file', 'url'] as const)"
             :key="s"
@@ -350,7 +353,8 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
           </Button>
         </div>
 
-        <template v-if="source === 'github'">
+        <template v-if="fromSource" />
+        <template v-else-if="source === 'github'">
           <Input v-model="repo" :label="t('appPlugins.wizard.repo')" placeholder="BRF-Tech/filex-sign" monospace data-testid="app-plugin-repo" />
           <p class="-mt-2 text-xs text-zinc-500">{{ t('appPlugins.wizard.repoHint') }}</p>
           <Input v-model="gitRef" :label="t('appPlugins.wizard.ref')" placeholder="v1.0.0" monospace />
@@ -437,6 +441,44 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
           </dl>
         </div>
 
+        <!-- An upgrade says the jump, and how the grant changes: what is
+             being approved is what it ADDS. -->
+        <div
+          v-if="review.upgrade"
+          class="space-y-1 rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800"
+          data-testid="app-plugin-upgrade-diff"
+        >
+          <p class="font-medium" data-testid="app-plugin-upgrade-jump">
+            {{ t('appPlugins.wizard.jump', { from: review.upgrade.from, to: manifest.version }) }}
+          </p>
+          <p v-if="review.upgrade.added?.length" class="text-amber-800 dark:text-amber-200" data-testid="app-plugin-upgrade-added">
+            {{ t('appPlugins.wizard.addedPermissions', { permissions: review.upgrade.added.join(', ') }) }}
+          </p>
+          <p v-if="review.upgrade.removed?.length" class="text-zinc-600 dark:text-zinc-400" data-testid="app-plugin-upgrade-removed">
+            {{ t('appPlugins.wizard.removedPermissions', { permissions: review.upgrade.removed.join(', ') }) }}
+          </p>
+          <p v-if="review.upgrade.adds_module" class="text-amber-800 dark:text-amber-200" data-testid="app-plugin-upgrade-module">
+            {{ t('appPlugins.wizard.addsModule') }}
+          </p>
+          <p
+            v-if="!review.upgrade.added?.length && !review.upgrade.removed?.length && !review.upgrade.adds_module"
+            class="text-zinc-600 dark:text-zinc-400"
+          >
+            {{ t('appPlugins.wizard.samePermissions') }}
+          </p>
+        </div>
+
+        <!-- The app's range leaves this filex out: it cannot be installed
+             here, and the review says so before anybody ticks a box. -->
+        <div
+          v-if="review.compat && !review.compat.ok"
+          class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200"
+          role="alert"
+          data-testid="app-plugin-incompatible"
+        >
+          {{ t('appPlugins.wizard.incompatible', { name: manifest.name, version: manifest.version, requires: review.compat.requires, filex: review.compat.filex }) }}
+        </div>
+
         <!-- Said at the review: the name is taken. The operator's way on is
              upgrading the installed app from this same source. -->
         <div
@@ -480,6 +522,9 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
               <div class="flex flex-wrap items-center gap-2">
                 <Badge tone="brand" size="xs"><span class="font-mono">{{ perm.id }}</span></Badge>
                 <span class="text-sm font-medium">{{ perm.label }}</span>
+                <Badge v-if="added.has(perm.id)" tone="amber" size="xs" :data-testid="`perm-new-${perm.id}`">
+                  {{ t('appPlugins.wizard.newPermission') }}
+                </Badge>
               </div>
               <p class="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
                 {{ reasonOf(perm.id, perm.reason) || t('appPlugins.wizard.noReason') }}
@@ -495,10 +540,11 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
         </p>
 
         <div class="flex justify-between gap-2">
-          <Button type="button" size="sm" variant="ghost" :disabled="busy" @click="step = 'source'">
+          <Button v-if="!fromSource" type="button" size="sm" variant="ghost" :disabled="busy" @click="step = 'source'">
             <ArrowLeft class="h-4 w-4" />
             {{ t('appPlugins.wizard.back') }}
           </Button>
+          <span v-else />
           <Button type="button" size="sm" variant="primary" :disabled="!canInstall" :loading="busy" data-testid="app-plugin-install" @click="install">
             <Upload class="h-4 w-4" />
             {{ isUpgrade ? t('appPlugins.wizard.upgrade') : t('appPlugins.wizard.install') }}

@@ -175,6 +175,25 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
     en: { title: 'filex {version} is available', body: 'This server runs {current}.' },
     tr: { title: 'filex {version} yayınlandı', body: 'Bu sunucu {current} sürümünde çalışıyor.' },
   },
+  // wasmplugin/updates.go announce: meta.{plugin_label_<lang>, version, from,
+  // added}. `{plugin}` is the app's label in the reader's language, as for
+  // plugin.notice.
+  app_updated: {
+    en: { title: '{plugin} updated to {version}', body: 'It moved from {from} by itself.' },
+    tr: { title: '{plugin} {version} sürümüne güncellendi', body: '{from} sürümünden kendiliğinden geçti.' },
+  },
+  app_update_available: {
+    en: { title: '{plugin} {version} is available', body: 'It waits for you under Apps.' },
+    tr: { title: '{plugin} {version} yayında', body: 'Uygulamalar altında sizi bekliyor.' },
+  },
+  app_update_needs_approval: {
+    en: { title: '{plugin} {version} needs your approval', body: '{added}' },
+    tr: { title: '{plugin} {version} onayınızı bekliyor', body: '{added}' },
+  },
+  app_update_failed: {
+    en: { title: '{plugin} {version} could not be installed', body: 'The version it had, {from}, keeps running.' },
+    tr: { title: '{plugin} {version} kurulamadı', body: 'Önceki sürüm {from} çalışmaya devam ediyor.' },
+  },
   // replica/recorder.go NotifyReplicaFail: meta.{path,op,error}
   replica_fail: {
     en: { title: 'Replica {op} failed: {name}', body: '{error}' },
@@ -293,6 +312,8 @@ export function notificationVars(
     actor: str(asRecord(meta.actor).email),
     version: str(meta.version),
     current: str(meta.current),
+    // app_update_needs_approval: the permissions the new version adds.
+    added: str(meta.added),
     op: str(meta.op),
     error: str(meta.error) || str(meta.primary_error),
     failed: num(meta.failed_count),

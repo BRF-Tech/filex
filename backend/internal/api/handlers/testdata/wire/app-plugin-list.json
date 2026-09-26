@@ -2,6 +2,7 @@
   "plugins": [
     {
       "actions": 1,
+      "auto_update": true,
       "created_at": "2026-09-20T10:00:00Z",
       "description": {
         "en": "Send a document out for signature.",
@@ -26,8 +27,19 @@
       "sha256": "a9950e0d84a62a1b30c952736b097e5f3cde019564724dc3c0432a36f7c0d091",
       "signed": true,
       "source": "github",
-      "source_url": "https://github.com/BRF-Tech/filex-sign",
+      "source_url": "https://github.com/BRF-Tech/filex-sign@v1.2.0",
       "state": "",
+      "update": {
+        "added": [
+          "mail:send"
+        ],
+        "announced": "needs_approval@1.3.0",
+        "checked_at": "2026-09-26T03:00:00Z",
+        "ref": "v1.3.0",
+        "status": "needs_approval",
+        "version": "1.3.0"
+      },
+      "update_source": "github",
       "updated_at": "2026-09-20T10:00:00Z",
       "version": "1.2.0",
       "views": 1
@@ -35,11 +47,18 @@
   ],
   "runtime": {
     "arch_ok": true,
+    "compat_enforced": true,
     "disabled_reason": "",
     "enabled": true,
+    "engine_names": {
+      "ffmpeg": "FFmpeg"
+    },
     "engines": {
       "ffmpeg": true
     },
-    "requires_signature": false
+    "filex_version": "0.47.0",
+    "requires_signature": false,
+    "update_check": true,
+    "updates_checked_at": "2026-09-26T03:00:00Z"
   }
 }

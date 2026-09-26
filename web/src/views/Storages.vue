@@ -5,6 +5,8 @@ import { useI18n } from 'vue-i18n';
 import { Database, GripVertical, Plus, RefreshCcw, RotateCcw } from 'lucide-vue-next';
 
 import { useStoragesStore } from '@/stores/storages';
+import { useSyncNow } from '@/composables/useSyncNow';
+import { useStorageDelete } from '@/composables/useStorageDelete';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { StorageRef } from '@/api/types';
@@ -32,9 +34,9 @@ const router = useRouter();
 const storages = useStoragesStore();
 const toast = useToastStore();
 
-const syncingId = ref<number | null>(null);
 const deleteTarget = ref<StorageRef | null>(null);
-const deleting = ref(false);
+const del = useStorageDelete();
+const deleting = del.busy;
 
 // Replica targets live in their own `replication_targets` table now
 // (v0.1.18+). `storages.items` only contains primaries; no client-side
@@ -44,30 +46,15 @@ async function load() {
   await storages.fetch();
 }
 
-async function syncOne(s: StorageRef) {
-  syncingId.value = s.id;
-  try {
-    await storages.syncNow(s.id);
-    toast.success(t('storages.syncStarted'));
-  } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.generic')));
-  } finally {
-    syncingId.value = null;
-  }
+const syncNow = useSyncNow();
+
+function syncOne(s: StorageRef) {
+  void syncNow.press(s.id, s.name);
 }
 
 async function confirmDelete() {
   if (!deleteTarget.value) return;
-  deleting.value = true;
-  try {
-    await storages.remove(deleteTarget.value.id);
-    toast.success(t('storages.deletedOk'));
-    deleteTarget.value = null;
-  } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.generic')));
-  } finally {
-    deleting.value = false;
-  }
+  if (await del.remove(deleteTarget.value)) deleteTarget.value = null;
 }
 
 /* === #57 — the order everybody's navigation panel starts from ============
@@ -163,19 +150,22 @@ const columns = computed<DataColumn<StorageRef>[]>(() => [
 
 function rowActions(s: StorageRef): ContextAction[] {
   const i = rows.value.findIndex((r) => r.id === s.id);
+  // Nothing is offered on a storage the server is still deleting but moving
+  // it in the order: it is about to leave the list.
+  const going = storages.deleting(s.id);
   return [
-    { key: 'sync', label: t('common.syncNow'), icon: 'refresh', disabled: syncingId.value === s.id },
-    { key: 'edit', label: t('common.edit'), icon: 'rename' },
+    { key: 'sync', label: t('common.syncNow'), icon: 'refresh', disabled: going || syncNow.isBusy(s.id) },
+    { key: 'edit', label: t('common.edit'), icon: 'rename', disabled: going },
     { divider: true, key: 'order-sep', label: '' },
     { key: 'move-up', label: t('storages.order.moveUp'), icon: 'move-up', disabled: i <= 0 },
     { key: 'move-down', label: t('storages.order.moveDown'), icon: 'move-down', disabled: i >= rows.value.length - 1 },
     { divider: true, key: 'delete-sep', label: '' },
-    { key: 'delete', label: t('common.delete'), icon: 'delete', danger: true },
+    { key: 'delete', label: t('common.delete'), icon: 'delete', danger: true, disabled: going },
   ];
 }
 
 function onRowAction(key: string, s: StorageRef) {
-  if (key === 'sync') void syncOne(s);
+  if (key === 'sync') syncOne(s);
   else if (key === 'edit') void router.push({ name: 'storages.edit', params: { id: s.id } });
   else if (key === 'move-up') void saveOrder(moveStorage(keyed.value, String(s.id), -1));
   else if (key === 'move-down') void saveOrder(moveStorage(keyed.value, String(s.id), 1));
@@ -294,7 +284,10 @@ onMounted(load);
                by the backend (handlers/storages.go), so the badge was naming
                the OPPOSITE mode to the one running. The state in words
                (syncStateLabel), not the wire value "ok". -->
-          <Badge :tone="syncTone(row.last_sync_state)" dot data-testid="storage-sync-state">
+          <Badge v-if="storages.deleting(row.id)" tone="amber" dot data-testid="storage-sync-state">
+            {{ t('storages.deleting') }}
+          </Badge>
+          <Badge v-else :tone="syncTone(row.last_sync_state)" dot data-testid="storage-sync-state">
             {{ syncStateLabel(row.last_sync_state, t) || t('storages.modeLabel.' + (row.sync_mode || 'poll')) }}
           </Badge>
         </template>

@@ -7,14 +7,28 @@
  * signed-only instance. Then the list (the explorer's own table, DataTable —
  * resizable, sortable, its Actions control pinned right), the install wizard
  * and the detail drawer.
+ *
+ * Updates (wasmplugin/updates.go): "Check for updates" asks every app's
+ * source now (the daily check does it by itself); the Version cell says what
+ * the last check found — and when the installed version is outside its own
+ * `filex` range for this server; the row's menu switches its automatic
+ * updates and "Review update" opens the wizard on the newer version the
+ * source has.
+ *
+ * ⚠ In the Version cell, not in columns of their own: two more columns
+ * (Updates 240 px, Auto-update 130 px) squeezed every other column at 958 px
+ * until the State badge read "Runnin" and a pack's "Language pack" badge was
+ * cut (measured by e2e 171). The update is a fact about the version.
  */
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
-import { ArrowUpFromLine, Blocks, Info, Plus, RefreshCcw, Trash2, TriangleAlert } from 'lucide-vue-next';
+import { ArrowUpFromLine, Blocks, CloudDownload, Info, Plus, RefreshCcw, Trash2, TriangleAlert } from 'lucide-vue-next';
 
 import { AppPluginsApi, engineName, type AppPlugin, type AppPluginRuntime, type AppPluginState } from '@/api/appPlugins';
 import { extractError } from '@/api/client';
+import { updateRank, updateView } from '@/lib/appPluginUpdates';
+import { formatDate } from '@/lib/format';
 import { useToastStore } from '@/stores/toast';
 import { pluginLabelOf, invalidatePluginActions } from '@brftech/filex-core';
 
@@ -44,6 +58,9 @@ const busyId = ref<number | null>(null);
 
 const wizardOpen = ref(false);
 const upgradeOf = ref<AppPlugin | null>(null);
+/** "Review update": the app whose source's newer version the wizard reviews. */
+const updateOf = ref<AppPlugin | null>(null);
+const checking = ref(false);
 
 async function load() {
   loading.value = true;
@@ -128,8 +145,55 @@ function onInstalled(p: AppPlugin) {
 function onUpgraded(p: AppPlugin) {
   toast.success(t('appPlugins.upgraded', { name: labelFor(p) }));
   upgradeOf.value = null;
+  updateOf.value = null;
   void reload();
 }
+
+/**
+ * "Check for updates": every app's source, now. What may be applied is
+ * installed by the server; the answer is the list redrawn and what moved.
+ */
+async function checkUpdates() {
+  checking.value = true;
+  try {
+    const res = await AppPluginsApi.checkUpdates();
+    items.value = res.plugins;
+    runtime.value = res.runtime;
+    const r = res.report;
+    const waiting = (r?.available?.length ?? 0) + (r?.needs_approval?.length ?? 0);
+    const updated = r?.updated?.length ?? 0;
+    const failed = r?.failed?.length ?? 0;
+    if (updated || waiting) toast.success(t('appPlugins.updates.checked', { updated, waiting }));
+    // What could not be read or installed is said on its own, and the row
+    // says why — never folded into "0 updated" as if nothing had happened.
+    if (failed) toast.warn(t('appPlugins.updates.failed', { count: failed }, failed));
+    if (!updated && !waiting && !failed) toast.success(t('appPlugins.updates.none'));
+    if (updated) {
+      // An updated pack may bring new strings; an updated app new menu rows.
+      invalidatePluginActions();
+      void loadOfferedLocales();
+    }
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.generic')));
+  } finally {
+    checking.value = false;
+  }
+}
+
+async function setAutoUpdate(p: AppPlugin, on: boolean) {
+  busyId.value = p.id;
+  try {
+    Object.assign(p, await AppPluginsApi.setAutoUpdate(p.id, on));
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.updateFailed')));
+    await load();
+  } finally {
+    busyId.value = null;
+  }
+}
+
+/** What each row's Version cell says about its updates, in the reader's words. */
+const updates = computed(() => new Map(items.value.map((p) => [p.id, updateView(p, t, locale.value)])));
 
 const engines = computed(() => Object.entries(runtime.value?.engines ?? {}));
 
@@ -139,7 +203,14 @@ const engines = computed(() => Object.entries(runtime.value?.engines ?? {}));
  * trouble first when reversed, the permissions by how many. */
 const STATE_RANK: Record<string, number> = { running: 0, disabled: 1, refused: 2, failed: 3 };
 const columns = computed<DataColumn<AppPlugin>[]>(() => [
-  { id: 'name', label: t('appPlugins.fields.name'), sortable: true, width: 200 },
+  /* ⚠⚠ The declared widths add up to 1090 (plus the pinned Actions column)
+   * ON PURPOSE. DataTable shrinks every column in proportion when they are
+   * wider than the box, so a column widened anywhere narrows `label` — and
+   * at 1280 a language pack's name needs 135px of it. 0.47.0's update
+   * lines took `version` from 100 to 170 (1160 in all) and the name came
+   * out cut at 126px, which e2e/shots/langpack.mjs refused. Widen one
+   * column only by narrowing another. */
+  { id: 'name', label: t('appPlugins.fields.name'), sortable: true, width: 180 },
   {
     /* ⚠ 240, not the 200 the other name-ish columns get: a language pack's
      * cell is the widest thing this table draws — the pack's name AND the
@@ -155,19 +226,22 @@ const columns = computed<DataColumn<AppPlugin>[]>(() => [
     width: 240,
     sortValue: (p) => labelFor(p),
   },
+  /* The version, and under it what the last update check found and whether
+   * the version is inside its own `filex` range here. Sorted most urgent
+   * first (appPluginUpdates `updateRank`), then by version. Its lines wrap,
+   * so 140 is enough for them. */
   {
     id: 'version',
     label: t('appPlugins.fields.version'),
     sortable: true,
-    width: 100,
-    format: (p) => p.version || '—',
-    sortValue: (p) => p.version || null,
+    width: 140,
+    sortValue: (p) => `${String(updateRank(p) + 10).padStart(3, '0')} ${p.version || ''}`,
   },
   {
     id: 'state',
     label: t('appPlugins.fields.state'),
     sortable: true,
-    width: 170,
+    width: 150,
     sortValue: (p) => STATE_RANK[p.state] ?? 9,
   },
   /* uyan:s1 — a column of its own, and deliberately not a second thing
@@ -205,8 +279,25 @@ const columns = computed<DataColumn<AppPlugin>[]>(() => [
  *  only one of the three with no name on screen. `remove()` keeps its own
  *  confirmation. */
 function rowActions(row: AppPlugin): ContextAction[] {
+  const review: ContextAction[] = updates.value.get(row.id)?.reviewable
+    ? [{ key: 'update', label: t('appPlugins.actions.reviewUpdate'), icon: 'refresh' }]
+    : [];
+  // The per-app switch, as a verb with two faces (an app with no source has
+  // nothing to follow, so no switch).
+  const auto: ContextAction[] = row.update_source
+    ? [
+        {
+          key: 'auto-update',
+          label: row.auto_update ? t('appPlugins.actions.autoUpdateOff') : t('appPlugins.actions.autoUpdateOn'),
+          icon: 'refresh',
+          disabled: busyId.value === row.id,
+        },
+      ]
+    : [];
   return [
     { key: 'details', label: t('appPlugins.actions.details'), icon: 'details' },
+    ...review,
+    ...auto,
     { key: 'upgrade', label: t('appPlugins.actions.upgrade'), icon: 'upload' },
     {
       key: 'remove',
@@ -222,6 +313,8 @@ function rowActions(row: AppPlugin): ContextAction[] {
 function onRowAction(key: string, row: AppPlugin) {
   if (key === 'details') void router.push({ name: 'plugins.app', params: { name: row.name } });
   else if (key === 'upgrade') upgradeOf.value = row;
+  else if (key === 'update') updateOf.value = row;
+  else if (key === 'auto-update') void setAutoUpdate(row, !row.auto_update);
   else if (key === 'remove') void remove(row);
 }
 </script>
@@ -237,6 +330,17 @@ function onRowAction(key: string, row: AppPlugin) {
         <Button variant="outline" size="sm" :loading="loading" @click="load">
           <RefreshCcw class="h-4 w-4" />
           {{ t('common.refresh') }}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          :loading="checking"
+          :disabled="runtime !== null && !runtime.enabled"
+          data-testid="app-plugins-check-updates"
+          @click="checkUpdates"
+        >
+          <CloudDownload class="h-4 w-4" />
+          {{ t('appPlugins.checkUpdates') }}
         </Button>
         <Button
           variant="primary"
@@ -279,6 +383,18 @@ function onRowAction(key: string, row: AppPlugin) {
           <p v-if="!runtime.arch_ok">{{ t('appPlugins.runtime.archBad') }}</p>
           <p v-if="runtime.disabled_reason" class="break-words">{{ runtime.disabled_reason }}</p>
           <p v-if="runtime.requires_signature">{{ t('appPlugins.runtime.signature') }}</p>
+          <p v-if="runtime.enabled && !runtime.compat_enforced" data-testid="app-plugins-dev-build">
+            {{ t('appPlugins.runtime.devBuild', { version: runtime.filex_version }) }}
+          </p>
+          <p v-if="runtime.enabled" data-testid="app-plugins-update-check">
+            {{
+              !runtime.update_check
+                ? t('appPlugins.runtime.updateCheckOff')
+                : runtime.updates_checked_at
+                  ? t('appPlugins.runtime.lastCheck', { when: formatDate(runtime.updates_checked_at, locale) })
+                  : t('appPlugins.runtime.neverChecked')
+            }}
+          </p>
           <div v-if="engines.length" class="flex flex-wrap items-center gap-1 pt-1">
             <span class="text-xs">{{ t('appPlugins.runtime.engines') }}:</span>
             <Badge
@@ -371,6 +487,40 @@ function onRowAction(key: string, row: AppPlugin) {
             <AppPluginLanguages v-if="row.languages?.length" class="mt-1" :languages="row.languages" />
           </div>
         </template>
+        <!-- ⚠ ONE wrapper (lesson #433): the version and the badges share a
+             line of their own INSIDE it, and the lines under them are its
+             children too — never a Badge beside another root of the cell. -->
+        <template #cell-version="{ row }">
+          <div class="min-w-0 py-1" :data-testid="`app-plugin-updates-${row.name}`">
+            <div class="flex min-w-0 flex-wrap items-center gap-1">
+              <span :data-testid="`app-plugin-version-${row.name}`">{{ row.version || '—' }}</span>
+              <!-- ⚠ The label WRAPS inside its badge (max-w-full + a wrapping
+                   span; a Badge is nowrap), because a 958 px table squeezes
+                   this column below "Not compatible with this filex" and a
+                   nowrap badge was cut mid-word (e2e 171 measures it). -->
+              <Badge
+                v-for="b in updates.get(row.id)?.badges"
+                :key="b.testid"
+                :tone="b.tone"
+                size="xs"
+                :pill="false"
+                class="max-w-full"
+                :title="b.title"
+                :data-testid="b.testid"
+              >
+                <span class="whitespace-normal">{{ b.label }}</span>
+              </Badge>
+            </div>
+            <div
+              v-for="(line, i) in updates.get(row.id)?.lines"
+              :key="i"
+              class="line-clamp-2 break-words text-[11px] text-zinc-500"
+              :title="line"
+            >
+              {{ line }}
+            </div>
+          </div>
+        </template>
         <template #cell-state="{ row }">
           <div>
             <Badge :tone="stateTone(row.state)" :title="row.state_error || ''" dot>
@@ -415,11 +565,12 @@ function onRowAction(key: string, row: AppPlugin) {
     </template>
 
     <AppPluginInstallWizard
-      :model-value="wizardOpen || !!upgradeOf"
+      :model-value="wizardOpen || !!upgradeOf || !!updateOf"
       :requires-signature="runtime?.requires_signature === true"
       :upgrade="upgradeOf"
+      :update="updateOf"
       :installed="items"
-      @update:model-value="(v: boolean) => { if (!v) { wizardOpen = false; upgradeOf = null; } }"
+      @update:model-value="(v: boolean) => { if (!v) { wizardOpen = false; upgradeOf = null; updateOf = null; } }"
       @installed="onInstalled"
       @upgraded="onUpgraded"
     />

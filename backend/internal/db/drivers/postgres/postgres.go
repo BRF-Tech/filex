@@ -76,6 +76,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	}}}
 	// The admin's storage order (00060), written once in internal/db.
 	s.StorageOrderSQL = &db.StorageOrderSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// Who put a row in the trash (00061), written once in internal/db.
+	s.NodeDeletedBySQL = &db.NodeDeletedBySQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	return s
 }
 
@@ -91,6 +93,8 @@ type Store struct {
 	*db.CatalogueFolderSQL
 	// SetStorageOrder (internal/db storage_order_sql.go).
 	*db.StorageOrderSQL
+	// SetNodeDeletedBy (internal/db node_deleted_by_sql.go).
+	*db.NodeDeletedBySQL
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
@@ -690,7 +694,7 @@ func (s *Store) SoftDeleteAndRetag(ctx context.Context, id int64, trashPath, tra
 		Scan(&storageID, &nodeType, &curPath)
 	_, err := s.conn(ctx).ExecContext(ctx, `
 		UPDATE nodes
-		SET deleted_at=NOW(), updated_at=NOW(), parent_id=NULL,
+		SET deleted_at=NOW(), deleted_by=NULL, updated_at=NOW(), parent_id=NULL,
 		    name=$1, path=$2, path_hash=$3, storage_key=$4
 		WHERE id=$5`, base, trashPath, trashHash, origPath, id)
 	if err != nil || scanErr != nil {
@@ -709,7 +713,7 @@ func (s *Store) retagTrashedSubtree(ctx context.Context, storageID int64, origPa
 		id   int64
 		path string
 	}
-	prefixes := pgSubtreePrefixVariants(origPaths)
+	prefixes := db.SubtreePrefixVariants(origPaths)
 	if len(prefixes) == 0 {
 		return
 	}
@@ -718,7 +722,7 @@ func (s *Store) retagTrashedSubtree(ctx context.Context, storageID int64, origPa
 		rows, err := s.conn(ctx).QueryContext(ctx, `
 			SELECT id, path FROM nodes
 			WHERE storage_id=$1 AND deleted_at IS NULL AND SUBSTR(path,1,$2)=$3`,
-			storageID, prefixChars(pfx), pfx)
+			storageID, db.PrefixChars(pfx), pfx)
 		if err != nil {
 			continue
 		}
@@ -737,7 +741,7 @@ func (s *Store) retagTrashedSubtree(ctx context.Context, storageID int64, origPa
 			continue
 		}
 		seen[c.id] = true
-		suffix := pgSubtreeSuffix(c.path, prefixes)
+		suffix := db.SubtreeSuffix(c.path, prefixes)
 		if suffix == "" {
 			continue
 		}
@@ -745,7 +749,7 @@ func (s *Store) retagTrashedSubtree(ctx context.Context, storageID int64, origPa
 		newHash := pathkey.Hash(storageID, newPath)
 		_, _ = s.conn(ctx).ExecContext(ctx, `
 			UPDATE nodes
-			SET deleted_at=NOW(), updated_at=NOW(),
+			SET deleted_at=NOW(), deleted_by=NULL, updated_at=NOW(),
 			    path=$1, path_hash=$2, storage_key=$3
 			WHERE id=$4`, newPath, newHash, c.path, c.id)
 	}
@@ -756,7 +760,7 @@ func (s *Store) restoreTrashedSubtree(ctx context.Context, storageID int64, tras
 		id   int64
 		path string
 	}
-	prefixes := pgSubtreePrefixVariants(trashPaths)
+	prefixes := db.SubtreePrefixVariants(trashPaths)
 	if len(prefixes) == 0 {
 		return
 	}
@@ -765,7 +769,7 @@ func (s *Store) restoreTrashedSubtree(ctx context.Context, storageID int64, tras
 		rows, err := s.conn(ctx).QueryContext(ctx, `
 			SELECT id, path FROM nodes
 			WHERE storage_id=$1 AND deleted_at IS NOT NULL AND SUBSTR(path,1,$2)=$3`,
-			storageID, prefixChars(pfx), pfx)
+			storageID, db.PrefixChars(pfx), pfx)
 		if err != nil {
 			continue
 		}
@@ -784,7 +788,7 @@ func (s *Store) restoreTrashedSubtree(ctx context.Context, storageID int64, tras
 			continue
 		}
 		seen[c.id] = true
-		suffix := pgSubtreeSuffix(c.path, prefixes)
+		suffix := db.SubtreeSuffix(c.path, prefixes)
 		if suffix == "" {
 			continue
 		}
@@ -792,49 +796,14 @@ func (s *Store) restoreTrashedSubtree(ctx context.Context, storageID int64, tras
 		newHash := pathkey.Hash(storageID, newPath)
 		_, _ = s.conn(ctx).ExecContext(ctx, `
 			UPDATE nodes
-			SET deleted_at=NULL, updated_at=NOW(),
+			SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW(),
 			    path=$1, path_hash=$2, storage_key=$3
 			WHERE id=$4`, newPath, newHash, newPath, c.id)
 	}
 }
 
-// prefixChars is the length SUBSTR needs for a path prefix: SQL counts
-// CHARACTERS (SQLite, MySQL and PostgreSQL alike), Go's len counts bytes. Passing
-// len() made every folder whose path is not plain ASCII match none of its own
-// rows — "/Müşteri/" is 9 characters and 11 bytes — so the folder went to the
-// trash and its contents stayed live, and a restore left them in the trash.
-func prefixChars(p string) int { return utf8.RuneCountInString(p) }
-
-// pgSubtreePrefixVariants — postgres copy of the sqlite driver helper.
-func pgSubtreePrefixVariants(paths []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, p := range paths {
-		norm := strings.TrimRight(path.Clean("/"+strings.Trim(p, "/")), "/")
-		if norm == "" || norm == "/" {
-			continue
-		}
-		for _, v := range []string{norm + "/", strings.TrimPrefix(norm, "/") + "/"} {
-			if !seen[v] {
-				seen[v] = true
-				out = append(out, v)
-			}
-		}
-	}
-	return out
-}
-
-func pgSubtreeSuffix(p string, prefixes []string) string {
-	for _, pfx := range prefixes {
-		if strings.HasPrefix(p, pfx) {
-			return strings.TrimPrefix(p, pfx)
-		}
-	}
-	return ""
-}
-
 func (s *Store) SoftDeleteNode(ctx context.Context, id int64) error {
-	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET deleted_at=NOW() WHERE id=$1`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET deleted_at=NOW(), deleted_by=NULL WHERE id=$1`, id)
 	return err
 }
 
@@ -1960,7 +1929,7 @@ func (s *Store) FinishSyncRun(ctx context.Context, id int64, cursorAfter string,
 }
 
 func (s *Store) GetLastSyncRun(ctx context.Context, storageID int64) (*model.SyncRun, error) {
-	return scanSyncRun(s.conn(ctx).QueryRowContext(ctx, `SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'') FROM sync_runs WHERE storage_id=$1 ORDER BY started_at DESC LIMIT 1`, storageID))
+	return scanSyncRun(s.conn(ctx).QueryRowContext(ctx, `SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'') FROM sync_runs WHERE storage_id=$1 ORDER BY started_at DESC, id DESC LIMIT 1`, storageID))
 }
 
 func (s *Store) GetLastSyncRunByStatus(ctx context.Context, storageID int64, status string) (*model.SyncRun, error) {
@@ -2239,7 +2208,7 @@ type rowScanner interface {
 // what there were, and a column added to `nodes` reached the ordinary listing,
 // the search rebuild — and silently missed the tag and starred reads, whose
 // scan then failed at runtime on a path the suite only walks in one test.
-const nodeColumnsFmt = `%[1]sid, %[1]sstorage_id, %[1]sparent_id, %[1]sname, %[1]spath, %[1]spath_hash, COALESCE(%[1]sstorage_key,''), %[1]stype, %[1]ssize, COALESCE(%[1]smime,''), COALESCE(%[1]setag,''), %[1]sbackend_mtime, %[1]sdb_mtime, %[1]ssync_state, COALESCE(%[1]stransfer_state,'stored'), %[1]sseen_at, %[1]sdeleted_at, %[1]screated_at, %[1]supdated_at, %[1]sowner_id, %[1]slast_actor_id, COALESCE(%[1]sexternal_upload,FALSE)`
+const nodeColumnsFmt = `%[1]sid, %[1]sstorage_id, %[1]sparent_id, %[1]sname, %[1]spath, %[1]spath_hash, COALESCE(%[1]sstorage_key,''), %[1]stype, %[1]ssize, COALESCE(%[1]smime,''), COALESCE(%[1]setag,''), %[1]sbackend_mtime, %[1]sdb_mtime, %[1]ssync_state, COALESCE(%[1]stransfer_state,'stored'), %[1]sseen_at, %[1]sdeleted_at, %[1]screated_at, %[1]supdated_at, %[1]sowner_id, %[1]slast_actor_id, COALESCE(%[1]sexternal_upload,FALSE), %[1]sdeleted_by`
 
 var (
 	// nodeColumnList is the unqualified list; nodeColumnsN is the "n."-aliased
@@ -2252,7 +2221,7 @@ func nodeColumns() string { return nodeColumnList }
 
 func scanNode(r rowScanner) (*model.Node, error) {
 	n := &model.Node{}
-	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.LastActorID, &n.ExternalUpload)
+	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.LastActorID, &n.ExternalUpload, &n.DeletedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -3143,7 +3112,7 @@ func (s *Store) CountTrashedExpired(ctx context.Context, before time.Time) (map[
 
 // RestoreNode flips deleted_at back to NULL.
 func (s *Store) RestoreNode(ctx context.Context, id int64) error {
-	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET deleted_at=NULL, updated_at=NOW() WHERE id=$1`, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE nodes SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW() WHERE id=$1`, id)
 	return err
 }
 
@@ -3170,7 +3139,7 @@ func (s *Store) ListTrashed(ctx context.Context, storageID *int64, limit, offset
 	offPlace := fmt.Sprintf("$%d", len(args))
 	rows, err := s.conn(ctx).QueryContext(ctx,
 		`SELECT `+nodeColumns()+` FROM nodes `+where+
-			` ORDER BY deleted_at DESC LIMIT `+limPlace+` OFFSET `+offPlace, args...)
+			` ORDER BY deleted_at DESC, id DESC LIMIT `+limPlace+` OFFSET `+offPlace, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -3205,7 +3174,7 @@ func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, or
 	if parentID == nil {
 		if _, err := s.conn(ctx).ExecContext(ctx, `
 			UPDATE nodes
-			SET deleted_at=NULL, updated_at=NOW(), parent_id=NULL,
+			SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW(), parent_id=NULL,
 			    name=$1, path=$2, path_hash=$3, storage_key=$4
 			WHERE id=$5`, name, clean, hash, clean, id); err != nil {
 			return err
@@ -3213,7 +3182,7 @@ func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, or
 	} else {
 		if _, err := s.conn(ctx).ExecContext(ctx, `
 			UPDATE nodes
-			SET deleted_at=NULL, updated_at=NOW(), parent_id=$1,
+			SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW(), parent_id=$1,
 			    name=$2, path=$3, path_hash=$4, storage_key=$5
 			WHERE id=$6`, *parentID, name, clean, hash, clean, id); err != nil {
 			return err
@@ -4590,12 +4559,13 @@ func nullTime(t time.Time) any {
 // PostgreSQL spelling of drivers/sqlite/app_plugins.go: $n placeholders,
 // RETURNING id, plain key (not reserved here).
 
-const appPluginCols = `id, name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error, created_at, updated_at`
+const appPluginCols = `id, name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error, manifest_url, auto_update, update_json, created_at, updated_at`
 
 func scanAppPlugin(r rowScanner) (*model.AppPlugin, error) {
 	p := &model.AppPlugin{}
 	if err := r.Scan(&p.ID, &p.Name, &p.Version, &p.LabelJSON, &p.ManifestJSON, &p.WasmPath, &p.SHA256,
-		&p.Source, &p.SourceURL, &p.Signed, &p.PermissionsJSON, &p.Enabled, &p.LastError, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.Source, &p.SourceURL, &p.Signed, &p.PermissionsJSON, &p.Enabled, &p.LastError,
+		&p.ManifestURL, &p.AutoUpdate, &p.UpdateJSON, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -4604,10 +4574,11 @@ func scanAppPlugin(r rowScanner) (*model.AppPlugin, error) {
 func (s *Store) CreateAppPlugin(ctx context.Context, p *model.AppPlugin) (*model.AppPlugin, error) {
 	var id int64
 	err := s.conn(ctx).QueryRowContext(ctx,
-		`INSERT INTO app_plugins (name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+		`INSERT INTO app_plugins (name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error, manifest_url, auto_update, update_json)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
 		p.Name, p.Version, orJSON(p.LabelJSON, "{}"), orJSON(p.ManifestJSON, "{}"), p.WasmPath, p.SHA256,
-		p.Source, p.SourceURL, p.Signed, orJSON(p.PermissionsJSON, "[]"), p.Enabled, p.LastError).Scan(&id)
+		p.Source, p.SourceURL, p.Signed, orJSON(p.PermissionsJSON, "[]"), p.Enabled, p.LastError,
+		p.ManifestURL, p.AutoUpdate, p.UpdateJSON).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
@@ -4641,10 +4612,11 @@ func (s *Store) ListAppPlugins(ctx context.Context) ([]*model.AppPlugin, error) 
 
 func (s *Store) UpdateAppPlugin(ctx context.Context, p *model.AppPlugin) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
-		`UPDATE app_plugins SET version=$1, label_json=$2, manifest_json=$3, wasm_path=$4, sha256=$5, source=$6, source_url=$7, signed=$8, permissions_json=$9, enabled=$10, last_error=$11, updated_at=CURRENT_TIMESTAMP
-		 WHERE id=$12`,
+		`UPDATE app_plugins SET version=$1, label_json=$2, manifest_json=$3, wasm_path=$4, sha256=$5, source=$6, source_url=$7, signed=$8, permissions_json=$9, enabled=$10, last_error=$11,
+		 manifest_url=$12, auto_update=$13, update_json=$14, updated_at=CURRENT_TIMESTAMP
+		 WHERE id=$15`,
 		p.Version, orJSON(p.LabelJSON, "{}"), orJSON(p.ManifestJSON, "{}"), p.WasmPath, p.SHA256, p.Source, p.SourceURL,
-		p.Signed, orJSON(p.PermissionsJSON, "[]"), p.Enabled, p.LastError, p.ID)
+		p.Signed, orJSON(p.PermissionsJSON, "[]"), p.Enabled, p.LastError, p.ManifestURL, p.AutoUpdate, p.UpdateJSON, p.ID)
 	return err
 }
 

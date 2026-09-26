@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -667,5 +668,46 @@ func TestRebuild_ReExtractOnlyOnTheManualPath(t *testing.T) {
 	}
 	if hits, _ := idx.SearchScoped(ctx, "quarterly", 10, ScopeContent); len(hits) != 1 {
 		t.Error("even a re-extracting rebuild must not blank content while extraction is queued")
+	}
+}
+
+// TestStats_SayHowTheLastRebuildEnded: `rebuilding` turns false when a
+// rebuild fails as much as when it goes live, so the stats also say how the
+// latest one ended.
+//
+// RED PROOF (PR #66, 2026-09-26): nothing in the stats told the two apart, and
+// the admin page announced "the rebuilt index is live" after a rebuild the
+// disk had refused.
+func TestStats_SayHowTheLastRebuildEnded(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "search.bleve")
+	nodes := issueNodes()
+	writeLegacyIndex(t, dir, nodes, nil)
+	idx, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = idx.Close() }()
+	if st := idx.Stats(); st.LastRebuildAt != nil || st.LastRebuildError != "" {
+		t.Fatalf("no rebuild has ended yet: %+v", st)
+	}
+
+	idx.FreeBytes = func(string) (uint64, error) { return 1024, nil }
+	if err := idx.StartRebuild(stubLister{nodes: nodes}, RebuildOptions{Reason: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	waitRebuild(t, idx)
+	st := idx.Stats()
+	if st.LastRebuildAt == nil || !strings.Contains(st.LastRebuildError, "not enough free disk space") {
+		t.Fatalf("a refused rebuild must say so: at=%v err=%q", st.LastRebuildAt, st.LastRebuildError)
+	}
+
+	idx.FreeBytes = func(string) (uint64, error) { return 1 << 40, nil }
+	if err := idx.StartRebuild(stubLister{nodes: nodes}, RebuildOptions{Reason: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	waitRebuild(t, idx)
+	st = idx.Stats()
+	if st.LastRebuildAt == nil || st.LastRebuildError != "" {
+		t.Fatalf("a rebuild that went live must say so: at=%v err=%q", st.LastRebuildAt, st.LastRebuildError)
 	}
 }

@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { PendingOp } from './ops';
 
 export interface TrashEntry {
   id: number;
@@ -11,6 +12,11 @@ export interface TrashEntry {
   deleted_at: string;
   /** Days remaining before automatic purge. */
   ttl_days?: number;
+  /** Who put it in the trash; every key absent when nobody is named (the
+   *  scanner found it gone, or it was trashed before filex kept this). */
+  deleted_by_id?: number;
+  deleted_by_name?: string;
+  deleted_by_self?: boolean;
 }
 
 export interface TrashList {
@@ -66,6 +72,22 @@ export const trashApi = {
   async purge(nodeId: number) {
     const res = await api.delete(`/admin/trash/${nodeId}`);
     return res.data;
+  },
+
+  /**
+   * Restore as jobs of the operations queue, on a server whose capabilities
+   * list `restore` under `queued`: answered at once, one job per storage. A
+   * folder comes back one object at a time, longer than this client waits.
+   */
+  async restoreQueued(nodeIds: number[]): Promise<{ ops: PendingOp[] }> {
+    const res = await api.post<{ ops?: PendingOp[] }>('/files/manager/restore?queued=1', { node_ids: nodeIds });
+    return { ops: res.data?.ops ?? [] };
+  },
+
+  /** Permanently delete as a job of the queue (capabilities `queued`: `purge`). */
+  async purgeQueued(nodeId: number): Promise<{ op: PendingOp | null }> {
+    const res = await api.delete<{ op?: PendingOp }>(`/admin/trash/${nodeId}?queued=1`);
+    return { op: res.data?.op ?? null };
   },
 
   /**

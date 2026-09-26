@@ -17,6 +17,7 @@ import Modal from '@/components/ui/Modal.vue';
 import CopyButton from '@/components/ui/CopyButton.vue';
 import { DataTable, splitList, type ContextAction, type DataColumn } from '@brftech/filex-core';
 import { driverName } from '@/lib/storageWords';
+import { getServerRoot } from '@/api/runtimeConfig';
 
 const { t, te, locale } = useI18n();
 const toast = useToastStore();
@@ -58,7 +59,10 @@ const storageOptions = computed(() => [
   ...storages.value,
 ]);
 
-const origin = window.location.origin;
+// The server as an absolute address — under the base path when filex is
+// served at one (FILEX_BASE_PATH; runtimeConfig.getServerRoot), because an
+// agent is configured with this line and cannot guess a prefix.
+const origin = new URL(`${getServerRoot()}/`, window.location.origin).href.replace(/\/$/, '');
 const mcpUrl = `${origin}/api/ai/mcp`;
 const restBase = `${origin}/api/ai`;
 

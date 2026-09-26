@@ -327,7 +327,19 @@ beside the figure).
 
 An administrator sees **Catalog everything** on the strip in behaviour B. It
 starts the ordinary full sync (`POST /api/admin/storages/{id}/sync`; the id is
-looked up at click time, so the listing never carries it).
+looked up at click time, so the listing never carries it) and says so once the
+server has answered — "already running" when a scan held the storage before the
+press (the server starts no second walk and answers `status: "running"`). It
+then follows the scan to its end the way the admin panel's **Sync now** does,
+through the same follower (`lib/storageWatch`): the storage list's `running`
+flag (`GET /api/admin/storages`) until it drops, then `last_sync_state` for how
+it ended — one read of the list per tick for every storage followed. Meanwhile
+the strip says that storage is being cataloged and its button reads
+"Cataloging…" (other storages' buttons are not held); the end is a notice that
+stays up long enough to read — done (and the listing is read again), failed
+(why is under the storage's sync runs in the admin panel), stopped, the storage
+removed meanwhile, or, when the list could not be read for a minute, where the
+admin panel shows how it ends.
 
 ## Admin and observability
 

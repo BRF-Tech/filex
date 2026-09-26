@@ -4,7 +4,7 @@
 // ⚠ No `electron` import, so node:test can drive it (same boundary as
 // src/notifications.ts).
 
-import { pairView, type SyncActivity, type SyncStatus } from './syncstatus.ts';
+import { pairView, unexpectedExitLine, type SyncActivity, type SyncStatus } from './syncstatus.ts';
 
 /** The slice of an account this module reads. */
 export interface PolicyAccount {
@@ -40,6 +40,10 @@ export function wantedWatchers(accounts: readonly PolicyAccount[], pairs: readon
 export interface WatchGate {
   /** Settings / tray → Pause sync. Stored, so it survives a restart. */
   paused?: boolean;
+  /** Accounts whose local filex folder is being moved. Their watcher was
+   *  stopped for the move and must not be started again before it ends: one
+   *  reading half-moved mirrors sees a mass local delete. */
+  moving?: ReadonlySet<string>;
 }
 
 /**
@@ -54,7 +58,7 @@ export interface WatchGate {
  */
 export function watcherAccounts<A extends PolicyAccount>(accounts: readonly A[], gate: WatchGate): A[] {
   if (gate.paused) return [];
-  return accounts.filter((a) => !a.signedOut);
+  return accounts.filter((a) => !a.signedOut && !gate.moving?.has(a.id));
 }
 
 // ── bandwidth limits and the sync window ────────────────────────────────
@@ -154,7 +158,9 @@ export type FolderView =
   | ({ kind: 'active' } & Omit<SyncActivity, 'pairId'>)
   | { kind: 'busy'; detail: string }
   | { kind: 'window'; window: string }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; exited?: string; reason?: string; restartAt?: number }
+  | { kind: 'pending' }
+  | { kind: 'moving' }
   | { kind: 'watching' }
   | { kind: 'stopped' };
 
@@ -169,9 +175,14 @@ export function folderView(input: {
   pairId: string;
   paused: boolean;
   signedOut: boolean;
+  /** Its account's local filex folder is being moved (its watcher is off). */
+  moving?: boolean;
   status: SyncStatus | null | undefined;
   minuteOfDay: number;
 }): FolderView {
+  // Before everything: the move is what is happening to it, and its stopped
+  // watcher read "stopped" in red for the hours a copy to another drive takes.
+  if (input.moving) return { kind: 'moving' };
   if (input.paused) return { kind: 'paused' };
   if (input.signedOut) return { kind: 'signed-out' };
   const st = input.status;
@@ -186,13 +197,117 @@ export function folderView(input: {
   // an error left from before it was taken is not what is true of it now —
   // and this is not a failure, the folder IS being synced.
   if (st.running && view.busy) return { kind: 'busy', detail: view.busy.detail };
-  // Its own error, or the engine's (which is every folder's).
+  // Its own error, or the engine's (which is every folder's). An engine that
+  // stopped on its own carries its exit code, so the page says so in its
+  // language, and when the supervisor starts it again.
+  // ⚠ And WHY, when the engine said: its last line (lastError) used to be
+  // replaced on screen by the code alone. The line the app writes itself for
+  // an engine that said nothing is no reason and is left out.
   const own = view.error;
-  if (own) return { kind: 'error', message: own };
+  if (own) {
+    if (own === st.lastError && st.exited) {
+      return {
+        kind: 'error',
+        message: own,
+        exited: st.exited,
+        ...(own !== unexpectedExitLine(st.exited) ? { reason: own } : {}),
+        ...(st.restartAt ? { restartAt: st.restartAt } : {}),
+      };
+    }
+    return { kind: 'error', message: own };
+  }
   if (st.waitingWindow && !windowContains(st.waitingWindow, input.minuteOfDay)) {
     return { kind: 'window', window: st.waitingWindow };
   }
-  return st.running ? { kind: 'watching' } : { kind: 'stopped' };
+  // ⚠ "Watching for changes" only for a folder a pass has finished for: one
+  // just added, waiting behind the others for its first sync, read like a
+  // folder that is in step.
+  if (st.running) return view.passed ? { kind: 'watching' } : { kind: 'pending' };
+  return { kind: 'stopped' };
+}
+
+/**
+ * How long the supervisor waits before starting an engine that stopped on its
+ * own again, by how many times in a row it has: 5 s, 15 s, a minute, then
+ * every five minutes. A run that lasted a while starts the count again
+ * (sync.ts). It used to stay stopped until something else — a folder added, a
+ * setting changed — made the app look at its accounts again.
+ */
+export function restartDelay(crashesInARow: number): number {
+  const steps = [5_000, 15_000, 60_000, 300_000];
+  return steps[Math.min(Math.max(crashesInARow, 1), steps.length) - 1];
+}
+
+/**
+ * After the supervisor's restart of an engine that stopped on its own:
+ * whether to try again later (after restartDelay of one more crash).
+ *
+ * ⚠ The timer used to be armed only when a process CLOSED. A restart that
+ * started no process — the pair list could not be read, the engine could not
+ * be launched — was therefore the last one: the folder said "starting it
+ * again shortly" for good, with a time long past. Tried again while the
+ * account still has its stopped engine's status (reconcile drops the status
+ * of an account that no longer gets a watcher: paused, moving, nothing
+ * paired), nothing runs, no restart is pending and the server has not signed
+ * it out.
+ */
+export function restartAgain(after: {
+  stopping: boolean;
+  running: boolean;
+  pending: boolean;
+  status: Pick<SyncStatus, 'exited' | 'signedOut'> | null | undefined;
+}): boolean {
+  if (after.stopping || after.running || after.pending) return false;
+  const st = after.status;
+  return !!st && !!st.exited && st.signedOut !== true;
+}
+
+/**
+ * The accounts that keep or get a watcher, from the pair list — or, when the
+ * list could not be READ (`pairs` null), the accounts that already have one
+ * (running, or stopped and waiting for its restart: `current`).
+ *
+ * ⚠ A list that could not be read is not an empty list. `filex sync list`
+ * failing — the CLI could not be run, pairs.json could not be read for a
+ * moment — used to answer "nothing is paired": every watcher was killed, every
+ * folder's state dropped, and nothing was started again. `accounts` is still
+ * the gate (watcherAccounts): a paused or signed-out account is left out,
+ * read or not.
+ */
+export function watchersWanted(
+  accounts: readonly PolicyAccount[],
+  pairs: readonly PolicyPair[] | null,
+  current: ReadonlySet<string>,
+): Set<string> {
+  if (pairs) return wantedWatchers(accounts, pairs);
+  return new Set(accounts.filter((a) => current.has(a.id)).map((a) => a.id));
+}
+
+/** What the tray's tooltip says (trayTooltip). */
+export interface TrayFacts {
+  paused: boolean;
+  /** The unread count in words, or null. */
+  unreadLabel: string | null;
+  /** An engine is in the middle of a pass. */
+  syncing: boolean;
+  /** A folder, or an engine, is failing. */
+  failing: boolean;
+}
+
+/**
+ * The tray icon's tooltip, the one thing on screen when the window is closed.
+ *
+ * ⚠ One sentence from every fact, built in one place: the pause set it, and
+ * the unread count's own tooltip overwrote it the same moment, so a paused
+ * client looked like any other. Sync itself was not in it at all.
+ */
+export function trayTooltip(f: TrayFacts, words: { paused: string; syncing: string; failing: string }): string {
+  const parts = ['filex'];
+  if (f.paused) parts.push(words.paused);
+  else if (f.failing) parts.push(words.failing);
+  else if (f.syncing) parts.push(words.syncing);
+  if (f.unreadLabel) parts.push(f.unreadLabel);
+  return parts.join(' — ');
 }
 
 // ── held items ───────────────────────────────────────────────────────────
@@ -242,4 +357,40 @@ export async function answerHold(steps: {
 export function heldItems(p: HoldingPair): number {
   if (p.hold_new !== true) return 0;
   return typeof p.held === 'number' && Number.isFinite(p.held) && p.held > 0 ? Math.floor(p.held) : 0;
+}
+
+/**
+ * Whether removing a folder ("Stop syncing") has to stop its account's watcher
+ * first: a pass of that folder is under way. The watcher only re-reads its
+ * folders between passes, so the pass went on — for hours, for a first sync —
+ * after the folder's card had gone, with nothing on screen to show it.
+ */
+export function stopForRemoval(st: SyncStatus | null | undefined, pairId: string): boolean {
+  return !!st && st.running && st.active?.pairId === pairId;
+}
+
+/**
+ * Takes a folder out of sync — Settings' "Stop syncing" and the explorer's
+ * "Keep online only" alike: its account's watcher is stopped first when a pass
+ * of THIS folder is under way (stopForRemoval), the pair is removed, and the
+ * pair list is read again — which starts the watcher without it — whether the
+ * remove worked or not.
+ *
+ * ⚠ One helper for both, because there were two ways and only one of them
+ * stopped the pass: "Keep online only" removed the pair without it, and could
+ * then move the folder to the Trash while that very pass was walking it.
+ */
+export async function removeFolder(steps: {
+  status: SyncStatus | null | undefined;
+  pairId: string;
+  stop: () => void;
+  remove: () => Promise<void>;
+  refresh: () => Promise<void>;
+}): Promise<void> {
+  if (stopForRemoval(steps.status, steps.pairId)) steps.stop();
+  try {
+    await steps.remove();
+  } finally {
+    await steps.refresh();
+  }
 }

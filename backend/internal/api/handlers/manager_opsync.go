@@ -57,6 +57,43 @@ func (h *Manager) SyncMove(ctx context.Context, storageID int64, src, dst string
 	emitMoved(storageID, normalizeDBPath(src), normalizeDBPath(dst))
 }
 
+// NameTaken implements ops.RenameSync: the rule the explorer's rename is
+// refused on (destinationTaken), asked again by the worker for a queued one.
+func (h *Manager) NameTaken(ctx context.Context, storageID int64, src, dst string) (bool, error) {
+	drv, err := h.StorageResolver(storageID)
+	if err != nil {
+		return false, err
+	}
+	return destinationTaken(ctx, h.Store, drv, storageID, src, dst)
+}
+
+// SyncRename implements ops.RenameSync: vfRename's catalogue side for a queued
+// rename (finishRename).
+func (h *Manager) SyncRename(ctx context.Context, storageID int64, src, dst string) {
+	h.finishRename(ctx, storageID, src, dst, writehook.OriginOps)
+}
+
+// finishRename is everything a rename does once the storage has renamed: the
+// rows follow, it is announced as a rename rather than a move (the event
+// carries `rename`), and the folder the item is in is told the old and the new
+// name. The explorer's rename (vfRename) and a queued one (SyncRename) both end
+// here; only who did it (origin) differs.
+//
+// ⚠ One function, because the two had already drifted: vfRename told the
+// folder the REQUEST named (`path`, the listing on the client's screen), not
+// the one holding the item, so a rename made from anywhere else — a search
+// result, a starred list — reached nobody watching the item's own folder.
+func (h *Manager) finishRename(ctx context.Context, storageID int64, src, dst, origin string) {
+	h.applyDBMove(ctx, storageID, src, dst)
+	srcClean, dstClean := normalizeDBPath(src), normalizeDBPath(dst)
+	/* bag:b3 event */
+	writehook.OnFileMoved(ctx, storageID, srcClean, dstClean, path.Base(dstClean),
+		origin, map[string]any{"rename": true})
+	emitFolderChange(storageID, path.Dir(srcClean), realtime.ChangeEvent{
+		Action: "rename", Name: path.Base(srcClean), NewName: path.Base(dstClean),
+	})
+}
+
 // emitMoved tells both ends of a move. srcClean/dstClean are normalized
 // storage-relative paths. A rename inside one folder is the same room twice,
 // so it is announced once — carrying both names, which is what lets the hub

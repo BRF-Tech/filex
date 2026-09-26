@@ -168,6 +168,14 @@ type Registry struct {
 	// cat is the interface's string catalogue, for language coverage
 	// (langpack.go SetCatalogue). Nil until set: coverage unknown.
 	cat catalogueRef
+
+	// upgradeMu serialises every upgrade (an administrator's and the update
+	// check's) and lets Close wait for the one in flight; closing refuses
+	// the next.
+	upgradeMu sync.Mutex
+	closing   bool
+	// updates is the update check's own state (updates.go).
+	updates updateState
 }
 
 // New prepares the registry (no plugin is loaded until Load).
@@ -257,8 +265,13 @@ func (r *Registry) SetOutputSink(s OutputSink) { r.sink = s }
 // knows storages, tenants and the ACL.
 func (r *Registry) SetHomeResolver(f func(ctx context.Context, u *model.User) string) { r.home = f }
 
-// Close frees every compiled module and the runtime.
+// Close frees every compiled module and the runtime. It waits for an upgrade
+// in flight — an automatic one included — to finish its swap, and refuses any
+// after it, so a shutdown never leaves an app half-replaced.
 func (r *Registry) Close(ctx context.Context) {
+	r.upgradeMu.Lock()
+	r.closing = true
+	r.upgradeMu.Unlock()
 	r.mu.Lock()
 	for _, p := range r.byID {
 		p.mu.Lock()
@@ -283,6 +296,7 @@ func (r *Registry) Load(ctx context.Context) error {
 		return err
 	}
 	for _, row := range rows {
+		r.recoverInterruptedUpgrade(row)
 		p, err := r.entryFor(row)
 		if err != nil {
 			r.log.Warn("app-plugins: row unreadable", slog.String("plugin", row.Name), slog.Any("err", err))
@@ -295,8 +309,68 @@ func (r *Registry) Load(ctx context.Context) error {
 		} else {
 			p.setState(StateDisabled, "")
 		}
+		// ⚠ An app whose range leaves this filex out (filex was upgraded
+		// past it) KEEPS RUNNING: the range is the author's promise, not a
+		// proof, every host call is still held to the grant, and switching it
+		// off here would take a language — or a signing flow — away from
+		// everybody at the moment filex was upgraded, with nobody having
+		// decided it. The administrator is told (the Apps list marks it; the
+		// log says it here) and the update check looks for a version that
+		// does fit.
+		if c := compatOf(p.Manifest); c != nil && !c.OK {
+			p.log("warn", p.Row.Name+" "+p.Row.Version+" says it works with filex "+c.Requires+"; this is filex "+FilexVersion()+". It keeps running; the update check looks for a version that fits.")
+		}
 	}
 	return nil
+}
+
+// recoverInterruptedUpgrade puts an app's files back the way its row says
+// they are when the process stopped in the middle of an upgrade — a crash, a
+// kill, a power cut. (A clean shutdown waits for the swap: Close.)
+//
+// Upgrade stashes the old files as <name>.prev, writes the new ones, and only
+// once the new module has proven itself writes the row and drops the stash.
+// So at start, with a stash on disk:
+//
+//   - the directory holds what the row describes (its manifest, and the
+//     module — or for a language pack the manifest — hashing to the row's
+//     sha256): the row was written, the stash is left over and goes;
+//   - anything else (no directory, a half-written one, the new files beside
+//     the old row): the row still describes the stash, and it goes back.
+//
+// ⚠ No `.prev` can be an app of its own: a name has no dot (nameRe).
+func (r *Registry) recoverInterruptedUpgrade(row *model.AppPlugin) {
+	dir := filepath.Join(r.opts.Dir, row.Name)
+	prev := dir + ".prev"
+	if fi, err := os.Stat(prev); err != nil || !fi.IsDir() {
+		return
+	}
+	if dirMatchesRow(dir, row) {
+		_ = os.RemoveAll(prev)
+		return
+	}
+	_ = os.RemoveAll(dir)
+	if err := os.Rename(prev, dir); err != nil {
+		r.log.Warn("app-plugins: an interrupted upgrade could not be undone", slog.String("plugin", row.Name), slog.Any("err", err))
+		return
+	}
+	r.log.Warn("app-plugins: an upgrade was interrupted; the previous version is back", slog.String("plugin", row.Name), slog.String("version", row.Version))
+}
+
+// dirMatchesRow reports whether dir holds the files row describes.
+func dirMatchesRow(dir string, row *model.AppPlugin) bool {
+	manifest, err := os.ReadFile(filepath.Join(dir, "filex-app.json"))
+	if err != nil || string(manifest) != row.ManifestJSON {
+		return false
+	}
+	payload := manifest
+	if row.WasmPath != "" {
+		if payload, err = os.ReadFile(filepath.Join(dir, row.WasmPath)); err != nil {
+			return false
+		}
+	}
+	h := sha256.Sum256(payload)
+	return strings.EqualFold(hex.EncodeToString(h[:]), row.SHA256)
 }
 
 // upgradeLegacyOverrides rewrites an app's override rows that still hold a
@@ -536,9 +610,12 @@ type Status struct {
 	StateError  string    `json:"state_error,omitempty"`
 	Source      string    `json:"source"`
 	SourceURL   string    `json:"source_url,omitempty"`
-	SHA256      string    `json:"sha256"`
-	Signed      bool      `json:"signed"`
-	Permissions []string  `json:"permissions"`
+	// ManifestURL: where a URL install reads its manifest (the update check's
+	// address; SourceURL is the module's for an app with one).
+	ManifestURL string   `json:"manifest_url,omitempty"`
+	SHA256      string   `json:"sha256"`
+	Signed      bool     `json:"signed"`
+	Permissions []string `json:"permissions"`
 	// Scheduled says this app is woken once an hour and runs work of its
 	// own choosing — the one thing on this row that happens with nobody
 	// present, so the list can mark it.
@@ -553,8 +630,20 @@ type Status struct {
 	// Languages are the languages this app adds to filex itself, each with
 	// how much of the CURRENT catalogue it covers. Absent when it adds none.
 	Languages []LanguageRow `json:"languages,omitempty"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
+	// Compat is the manifest's `filex` range against the running filex
+	// (compat.go); absent when it names none. `ok: false` on an installed app
+	// is a warning, not a stop: it keeps running (Load says why).
+	Compat *Compat `json:"compat,omitempty"`
+	// AutoUpdate: newer versions are installed by themselves when they ask
+	// for nothing more (updates.go).
+	AutoUpdate bool `json:"auto_update"`
+	// UpdateSource is where newer versions are looked for: github | url, or
+	// absent when there is nowhere to ask (an uploaded app).
+	UpdateSource string `json:"update_source,omitempty"`
+	// Update is what the last check found; absent before the first one.
+	Update    *UpdateInfo `json:"update,omitempty"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 // StatusOf builds the list row. ⚠ Nil-safe receiver: the wire-fixture test
@@ -565,14 +654,20 @@ func (r *Registry) StatusOf(p *Installed) *Status {
 	for _, x := range p.Perms {
 		perms = append(perms, string(x))
 	}
+	var upd *UpdateInfo
+	if info := updateInfoOf(p.Row); info.Status != "" || info.Auto != nil {
+		upd = &info
+	}
+	src, _ := sourceOf(p)
 	return &Status{
 		ID: p.Row.ID, Name: p.Row.Name, Version: p.Row.Version,
 		Label: p.Manifest.Label, Description: p.Manifest.Description, Icon: p.Manifest.Icon, Homepage: p.Manifest.Homepage,
 		Enabled: p.Row.Enabled, State: state, StateError: serr,
-		Source: p.Row.Source, SourceURL: p.Row.SourceURL, SHA256: p.Row.SHA256, Signed: p.Row.Signed,
+		Source: p.Row.Source, SourceURL: p.Row.SourceURL, ManifestURL: p.Row.ManifestURL, SHA256: p.Row.SHA256, Signed: p.Row.Signed,
 		Permissions: perms, Scheduled: p.Grants.Has(PermSchedule),
 		Actions: len(p.Manifest.Actions), Views: len(p.Manifest.Views), PublicPages: len(p.Manifest.PublicPages),
 		Kind: kindOf(p.Manifest), Languages: r.LanguageRows(p.Manifest),
+		Compat: compatOf(p.Manifest), AutoUpdate: p.Row.AutoUpdate, UpdateSource: src.Kind, Update: upd,
 		CreatedAt: p.Row.CreatedAt, UpdatedAt: p.Row.UpdatedAt,
 	}
 }
@@ -612,6 +707,10 @@ type InstallError struct {
 	Where   string   // the repository or the URL that was being fetched
 	Refs    []string // the refs a repository install tried
 	Status  int      // the HTTP status that came back, when one did
+	// Requires and Filex narrow an `incompatible`: the range the manifest
+	// declares and the filex it leaves out (compat.go).
+	Requires string
+	Filex    string
 }
 
 func (e *InstallError) Error() string { return e.Code + ": " + e.Message }
@@ -633,6 +732,12 @@ const (
 	ErrCodeDemo                  = "demo_refused"
 	ErrCodeFetch                 = "fetch_failed"
 	ErrCodeNotFound              = "not_found"
+	// ErrCodeIncompatible: the manifest's `filex` range leaves the running
+	// filex out (compat.go).
+	ErrCodeIncompatible = "incompatible"
+	// ErrCodeUpToDate: "upgrade from its source" found nothing newer there
+	// (updates.go FetchUpdate).
+	ErrCodeUpToDate = "up_to_date"
 )
 
 // Why a fetch failed (InstallError.Reason on fetch_failed).
@@ -657,6 +762,9 @@ const (
 	FetchReasonMissingURL = "missing_url"
 	// FetchReasonTooLarge: the answer was larger than the cap.
 	FetchReasonTooLarge = "too_large"
+	// FetchReasonChanged: the source answered a different version between
+	// the update check's read and the install's (updates.go).
+	FetchReasonChanged = "changed"
 )
 
 // InstallInput is one install or upgrade request after the HTTP layer has
@@ -670,6 +778,13 @@ type InstallInput struct {
 	Signature string
 	Source    string
 	SourceURL string
+	// ManifestURL is where a URL install read the manifest — what the update
+	// check re-reads (SourceURL is the module's address for an app).
+	ManifestURL string
+	// Pinned: the administrator gave the SHA-256 themselves (a URL install).
+	// "Exactly these bytes" is not something an automatic update may
+	// overrule, so such an install starts with automatic updates off.
+	Pinned bool
 	// Granted is the permission list the admin approved. It must equal the
 	// manifest's set exactly.
 	Granted []string
@@ -707,6 +822,47 @@ type DryRunAnswer struct {
 	// EnginesMissing are the engines the manifest asks for that this server
 	// does not have: the app installs, and whatever needs them will not work.
 	EnginesMissing []DryRunEngine `json:"engines_missing,omitempty"`
+	// Compat is the manifest's `filex` range judged against this filex
+	// (compat.go); absent when it names none. `ok: false` is said HERE, at
+	// the review, and the install or upgrade itself answers `incompatible`.
+	Compat *Compat `json:"compat,omitempty"`
+	// Upgrade is what an upgrade's review shows on top of an install's: the
+	// version it replaces and how the grant changes. Nil on an install.
+	Upgrade *DryRunUpgrade `json:"upgrade,omitempty"`
+}
+
+// DryRunUpgrade is the jump an upgrade makes. Added are the permissions the
+// new version asks for that the installed one was not granted — what the
+// administrator is asked to approve; Removed are the ones it no longer asks
+// for (the grant narrows by itself). AddsModule: a language pack that now
+// brings a module — code that runs, where there was none.
+type DryRunUpgrade struct {
+	From       string   `json:"from"`
+	Added      []string `json:"added,omitempty"`
+	Removed    []string `json:"removed,omitempty"`
+	AddsModule bool     `json:"adds_module,omitempty"`
+}
+
+// upgradeOf compares a staged manifest with the installed app: the version it
+// leaves, the permissions it adds to and drops from the grant, and whether a
+// language pack becomes an app with a module. ONE comparison, for the upgrade
+// review and for the update check's decision (updates.go), so "needs
+// approval" means the same thing on both.
+func upgradeOf(p *Installed, m *Manifest) *DryRunUpgrade {
+	u := &DryRunUpgrade{From: p.Row.Version}
+	for _, perm := range m.Perms {
+		if !p.Grants.Has(perm) {
+			u.Added = append(u.Added, string(perm))
+		}
+	}
+	next := NewGrants(m.Perms)
+	for _, perm := range p.Perms {
+		if !next.Has(perm) {
+			u.Removed = append(u.Removed, string(perm))
+		}
+	}
+	u.AddsModule = p.Manifest.IsLanguagePack() && !m.IsLanguagePack()
+	return u
 }
 
 // DryRunInstalled names the installed app a new install would collide with.
@@ -726,10 +882,14 @@ type DryRunEngine struct {
 // may do, and — because the dry run already knows — whether an app of that
 // name is installed (installing only) and which engines it asks for that
 // this server lacks.
-func (r *Registry) dryRun(ctx context.Context, st *staged, lang string, installing bool) *DryRunAnswer {
+func (r *Registry) dryRun(ctx context.Context, st *staged, lang string, upgrading *Installed) *DryRunAnswer {
+	installing := upgrading == nil
 	ans := &DryRunAnswer{
 		Manifest: &st.m.Manifest, Permissions: PermissionRows(st.m, lang), Signed: st.signd,
-		Kind: kindOf(st.m), Languages: r.LanguageRows(st.m),
+		Kind: kindOf(st.m), Languages: r.LanguageRows(st.m), Compat: compatOf(st.m),
+	}
+	if upgrading != nil {
+		ans.Upgrade = upgradeOf(upgrading, st.m)
 	}
 	if st.wasm == nil {
 		ans.ManifestSHA256 = st.sum
@@ -767,6 +927,12 @@ func (r *Registry) stage(in *InstallInput) (*staged, error) {
 	}
 	m, err := ParseManifest(in.Manifest)
 	if err != nil {
+		return nil, installErr(ErrCodeManifestInvalid, err.Error())
+	}
+	// A range that does not parse is a broken manifest, refused here like
+	// any other. Whether the range lets THIS filex in is decided after the
+	// review (refuseIncompatible), so the review can say it first.
+	if _, err := compatRange(m); err != nil {
 		return nil, installErr(ErrCodeManifestInvalid, err.Error())
 	}
 	if m.IsLanguagePack() {
@@ -840,7 +1006,10 @@ func (r *Registry) Install(ctx context.Context, in *InstallInput) (*Status, *Dry
 		return nil, nil, err
 	}
 	if in.DryRun {
-		return nil, r.dryRun(ctx, st, in.Lang, true), nil
+		return nil, r.dryRun(ctx, st, in.Lang, nil), nil
+	}
+	if err := refuseIncompatible(st.m); err != nil {
+		return nil, nil, err
 	}
 	if err := r.checkGrant(st.m, in.Granted, ErrCodePermissionsIncomplete); err != nil {
 		return nil, nil, err
@@ -867,7 +1036,7 @@ func (r *Registry) Install(ctx context.Context, in *InstallInput) (*Status, *Dry
 	row, err := r.opts.Store.CreateAppPlugin(ctx, &model.AppPlugin{
 		Name: st.m.Name, Version: st.m.Version, LabelJSON: jsonOf(st.m.Label), ManifestJSON: string(in.Manifest),
 		WasmPath: st.wasmPath(), SHA256: st.sum, Source: sourceOr(in.Source), SourceURL: in.SourceURL, Signed: st.signd,
-		PermissionsJSON: permsJSON, Enabled: true,
+		ManifestURL: in.ManifestURL, PermissionsJSON: permsJSON, Enabled: true, AutoUpdate: !in.Pinned,
 	})
 	if err != nil {
 		_ = os.RemoveAll(filepath.Join(r.opts.Dir, st.m.Name))
@@ -908,7 +1077,26 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 		return nil, nil, installErr(ErrCodeManifestInvalid, "the new manifest names "+st.m.Name+", the installed plugin is "+p.Row.Name)
 	}
 	if in.DryRun {
-		return nil, r.dryRun(ctx, st, in.Lang, false), nil
+		return nil, r.dryRun(ctx, st, in.Lang, p), nil
+	}
+	if err := refuseIncompatible(st.m); err != nil {
+		return nil, nil, err
+	}
+	// ⚠ One upgrade at a time, and none once the registry is closing. The
+	// update check (updates.go) runs upgrades with nobody watching, so an
+	// administrator's own upgrade of the same app can now meet one: both
+	// would stash the same directory, and the second would swap out the
+	// module the first just compiled. And Close frees the runtime a compile
+	// is using — a shutdown waits here for the swap in flight to finish.
+	r.upgradeMu.Lock()
+	defer r.upgradeMu.Unlock()
+	if r.closing {
+		return nil, nil, errors.New("app-plugins: the server is shutting down")
+	}
+	// Re-read under the lock: an upgrade that finished while this one waited
+	// replaced the entry.
+	if p, ok = r.ByID(id); !ok {
+		return nil, nil, installErr(ErrCodeNotFound, "no such plugin")
 	}
 	granted := in.Granted
 	if len(granted) == 0 {
@@ -944,6 +1132,7 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 	p.Row.Signed = st.signd
 	p.Row.Source = sourceOr(in.Source)
 	p.Row.SourceURL = in.SourceURL
+	p.Row.ManifestURL = in.ManifestURL
 	p.Row.PermissionsJSON = permsJSONOf(st.m)
 	np, err := r.entryFor(p.Row)
 	if err != nil {
@@ -954,23 +1143,48 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 	}
 	np.logs = p.logs
 	r.compile(ctx, np)
-	if state, serr := np.State(); state != StateRunning && p.Row.Enabled {
+	// ⚠ The new module proves itself whether or not the app is switched on:
+	// an upgrade that was let through because the app happened to be off
+	// left a module that did not describe itself as its manifest says, to be
+	// found the day somebody switched it back on (and the update check now
+	// upgrades apps that are off, too).
+	if state, serr := np.State(); state != StateRunning {
 		*p.Row = oldRow
 		_ = os.RemoveAll(dir)
 		_ = os.Rename(backup, dir)
-		r.compile(ctx, p)
+		// ⚠⚠ The failed compile wrote its error through the row it shares
+		// with the old entry — the NEW version, manifest and hash included
+		// (persistError). Unless the old row is written back, the database
+		// says v2 while the disk holds v1 again, and the next start refuses
+		// the app for a hash mismatch: a rolled-back upgrade broke the app
+		// one restart later.
+		if err := r.opts.Store.UpdateAppPlugin(ctx, p.Row); err != nil {
+			r.log.Warn("app-plugins: rolled-back row not written", slog.String("plugin", p.Row.Name), slog.Any("err", err))
+		}
+		if p.Row.Enabled {
+			r.compile(ctx, p)
+		}
+		np.log("error", "upgrade to "+st.m.Version+" rolled back: "+serr)
 		return nil, nil, installErr(ErrCodeDescribeMismatch, serr)
 	}
+	// The upgrade settles what the update check had found, when this version
+	// is at least that one (updates.go).
+	settleUpdate(p.Row, st.m.Version)
 	if err := r.opts.Store.UpdateAppPlugin(ctx, p.Row); err != nil {
 		return nil, nil, fmt.Errorf("app-plugins: update row: %w", err)
 	}
 	p.mu.Lock()
 	if p.compiled != nil {
 		_ = p.compiled.Close(ctx)
+		p.compiled = nil
 	}
 	p.mu.Unlock()
 	_ = os.RemoveAll(backup)
 	r.put(np)
+	if !np.Row.Enabled {
+		// Proven, and still off: what the administrator switched off stays off.
+		r.unload(ctx, np)
+	}
 	np.log("info", "upgraded to "+st.m.Version)
 	return r.StatusOf(np), nil, nil
 }
@@ -1007,15 +1221,20 @@ func (r *Registry) SetEnabled(ctx context.Context, id int64, on bool) (*Status, 
 	if on {
 		r.compile(ctx, p)
 	} else {
-		p.mu.Lock()
-		if p.compiled != nil {
-			_ = p.compiled.Close(ctx)
-			p.compiled = nil
-		}
-		p.mu.Unlock()
-		p.setState(StateDisabled, "")
+		r.unload(ctx, p)
 	}
 	return r.StatusOf(p), nil
+}
+
+// unload frees an app's module and marks it off.
+func (r *Registry) unload(ctx context.Context, p *Installed) {
+	p.mu.Lock()
+	if p.compiled != nil {
+		_ = p.compiled.Close(ctx)
+		p.compiled = nil
+	}
+	p.mu.Unlock()
+	p.setState(StateDisabled, "")
 }
 
 // Remove uninstalls a plugin: module, row and everything keyed on it.

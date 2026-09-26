@@ -36,7 +36,7 @@ vi.mock('@/api/client', () => ({
   },
 }));
 
-import { AppPluginsApi, INSTALL_TIMEOUT_MS, appPluginError, type AppPluginField } from '@/api/appPlugins';
+import { AppPluginsApi, INSTALL_TIMEOUT_MS, UPDATE_CHECK_TIMEOUT_MS, appPluginError, refusalOf, type AppPluginField } from '@/api/appPlugins';
 import { api } from '@/api/client';
 import { pluginLabelOf, storageFieldOf } from '@brftech/filex-core';
 
@@ -48,7 +48,21 @@ describe('AppPluginsApi', () => {
   it('list: GET /admin/app-plugins, with defaults for what the server leaves out', async () => {
     const res = await AppPluginsApi.list();
     expect(calls[0]).toMatchObject({ method: 'get', url: '/admin/app-plugins' });
-    expect(res.runtime).toEqual({ enabled: true, arch_ok: true, disabled_reason: '', requires_signature: false, engines: { ffmpeg: true }, engine_names: {} });
+    expect(res.runtime).toEqual({
+      enabled: true,
+      arch_ok: true,
+      disabled_reason: '',
+      requires_signature: false,
+      engines: { ffmpeg: true },
+      engine_names: {},
+      // What a server that says nothing about ranges and updates means:
+      // ranges are not a development build's (no "not checked" line), and
+      // no daily check is said to run.
+      filex_version: '',
+      compat_enforced: true,
+      update_check: false,
+      updates_checked_at: undefined,
+    });
     expect(res.plugins).toEqual([]);
   });
 
@@ -254,5 +268,39 @@ describe('AppPluginsApi against the server\'s own answers', () => {
     }
     expect(dry.signed).toBe(true);
     expect(dry.wasm_bytes).toBeGreaterThan(0);
+  });
+});
+
+describe('AppPluginsApi — updates', () => {
+  beforeEach(() => {
+    calls.length = 0;
+  });
+
+  it('checkUpdates: POST /admin/app-plugins/updates/check, waiting for the installs it may run', async () => {
+    await AppPluginsApi.checkUpdates();
+    expect(calls[0]).toMatchObject({ method: 'post', url: '/admin/app-plugins/updates/check', body: {} });
+    expect((calls[0].cfg as { timeout?: number }).timeout).toBe(UPDATE_CHECK_TIMEOUT_MS);
+    expect(UPDATE_CHECK_TIMEOUT_MS).toBeGreaterThan(INSTALL_TIMEOUT_MS);
+  });
+
+  it('setAutoUpdate: PATCH the one switch, nothing else', async () => {
+    await AppPluginsApi.setAutoUpdate(7, false);
+    expect(calls[0]).toEqual({ method: 'patch', url: '/admin/app-plugins/7', body: { auto_update: false } });
+  });
+
+  it('an upgrade from the app’s own source sends `from_source`, not a source', async () => {
+    await AppPluginsApi.upgradeDryRun(7, { kind: 'update' });
+    expect(calls[0]).toMatchObject({ method: 'post', url: '/admin/app-plugins/7/upgrade', body: { from_source: true, permissions: [] } });
+    await AppPluginsApi.upgrade(7, { kind: 'update' }, ['files:read']);
+    expect(calls[1]).toMatchObject({ body: { from_source: true, permissions: ['files:read'] }, cfg: { timeout: INSTALL_TIMEOUT_MS } });
+  });
+
+  it('refusalOf reads the server’s own incompatible refusal — the range and this filex', () => {
+    const wire = JSON.parse(
+      readFileSync(path.resolve(__dirname, '../../../backend/internal/api/handlers/testdata/wire/app-plugin-incompatible.json'), 'utf8'),
+    );
+    expect(refusalOf(wire)).toMatchObject({ code: 'incompatible', requires: '>=0.48.0', filex: '0.47.0' });
+    expect(refusalOf({})).toBeNull();
+    expect(refusalOf(undefined)).toBeNull();
   });
 });

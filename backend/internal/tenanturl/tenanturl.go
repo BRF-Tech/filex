@@ -36,6 +36,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -136,8 +137,24 @@ func (rv Resolver) ForStorage(ctx context.Context, storageID int64) string {
 // origin assembles the base. host comes from a provider row, never from the
 // request, and any port the client dialled is dropped — a tenant is reached on
 // the proxy's standard port.
+//
+// ⚠ Under a base path (FILEX_BASE_PATH) the tenant's origin carries it: the
+// router serves every host under the same prefix, and config.Load guarantees
+// PublicURL ends with it, so its path IS the base. Without it a tenant's share
+// link pointed at https://tenant.example.com/s/… while filex answered at
+// https://tenant.example.com/filex/s/….
 func (rv Resolver) origin(host, scheme string) string {
-	return scheme + "://" + strings.ToLower(strings.TrimRight(host, "/"))
+	return scheme + "://" + strings.ToLower(strings.TrimRight(host, "/")) + rv.basePath()
+}
+
+// basePath is the path of PublicURL (the install's base path), "" at the
+// root. A PublicURL that is not an absolute URL has no path to offer.
+func (rv Resolver) basePath() string {
+	u, err := url.Parse(rv.Fallback())
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return strings.TrimRight(u.EscapedPath(), "/")
 }
 
 // scheme picks http vs https for a tenant host. r may be nil (no request in

@@ -27,9 +27,12 @@
 //
 // ⚠ Both paths take their icon and badge from PNGs. Chromium's notification
 // decoder has no SVG, so `icon.svg` there is not a small logo, it is none.
-
-const FILEX_ICON = '/admin/icons/icon-192.png';
-const FILEX_BADGE = '/admin/icons/badge-96.png';
+//
+// ⚠ Resolved against the WORKER's own address (`<base>/admin/sw.js`), not
+// written as '/admin/…': filex can be served under a sub-path
+// (FILEX_BASE_PATH), and the host's root is then somebody else's server.
+const FILEX_ICON = new URL('icons/icon-192.png', self.location.href).href;
+const FILEX_BADGE = new URL('icons/badge-96.png', self.location.href).href;
 
 self.addEventListener('notificationclick', (event) => {
   const notification = event.notification;

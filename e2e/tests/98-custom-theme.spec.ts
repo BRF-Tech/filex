@@ -21,6 +21,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { loginAs, dismissInstallBanner, logout } from '../helpers/auth';
+import { underBase } from '../helpers/base';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage } from '../helpers/seed';
 
 const STORAGE = `e2e-theme98-${Date.now()}`;
@@ -368,13 +369,13 @@ test.describe('tema:v1 — the escape hatch cannot lock anybody out', () => {
 
     // GUARD B — even with guard A defeated, the @scope donut hole keeps the
     // panel out of the sheet's reach. Force the served sheet in and measure.
-    await page.evaluate(async () => {
-      const { css } = await (await fetch('/api/me/custom-css', { credentials: 'include' })).json();
+    await page.evaluate(async (url) => {
+      const { css } = await (await fetch(url, { credentials: 'include' })).json();
       const el = document.createElement('style');
       el.setAttribute('data-guard-b-probe', '');
       el.textContent = css;
       document.head.appendChild(el);
-    });
+    }, underBase('/api/me/custom-css'));
 
     // The sheet is demonstrably active on this very document…
     expect(await page.evaluate(() => getComputedStyle(document.body).outlineColor)).toBe(

@@ -5,6 +5,7 @@
 // how that destination is reached inside a Vue SPA.
 
 import type { Router } from 'vue-router';
+import { appBase } from '@brftech/filex-core';
 import { useAuthStore } from '@/stores/auth';
 import {
   notificationRoute,
@@ -33,7 +34,7 @@ export async function openNotificationTarget(
   if (dest.kind === 'share') {
     // A public share page is served by the backend, not by the SPA — a real
     // navigation, not a route.
-    window.location.assign(shareHref(dest.token));
+    window.location.assign(shareHref(dest.token, appBase()));
     return;
   }
 

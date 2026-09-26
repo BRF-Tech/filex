@@ -78,6 +78,24 @@ describe('absoluteTicketUrl', () => {
     );
   });
 
+  // ⚠ The ticket is relative to the SERVER ROOT, and the root keeps its path:
+  // the admin app under a sub-path (FILEX_BASE_PATH) and an embed whose host
+  // proxies filex under a path of its own both lost it when only the origin
+  // was kept — the ZIP or the drag-out went to the host's root and 404'd.
+  it('keeps the API base path: a sub-path deployment, and a proxying embed', () => {
+    expect(absoluteTicketUrl('/filex/api/files/manager', '/z/abc')).toBe('/filex/z/abc');
+    expect(absoluteTicketUrl('https://example.com/filex/api/files/manager', '/z/abc')).toBe(
+      'https://example.com/filex/z/abc',
+    );
+    expect(absoluteTicketUrl('https://host.example/files-proxy/api/files/manager?x=1', '/z/abc')).toBe(
+      'https://host.example/files-proxy/z/abc',
+    );
+  });
+
+  it('a manager endpoint the host named itself says nothing about the root: its origin, as before', () => {
+    expect(absoluteTicketUrl('https://host.example/my-files-endpoint', '/z/abc')).toBe('https://host.example/z/abc');
+  });
+
   it('leaves an absolute ticket alone', () => {
     expect(absoluteTicketUrl('/api/files/manager', 'https://cdn.example.com/z/abc')).toBe(
       'https://cdn.example.com/z/abc',

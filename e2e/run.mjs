@@ -28,6 +28,7 @@
  *   node e2e/run.mjs local
  *   node e2e/run.mjs local --s3                 # + a MinIO container and an s3 storage
  *   node e2e/run.mjs local --binary ../bin/filex.exe --keep
+ *   node e2e/run.mjs local --base-path /filex   # served under a sub-path, behind a proxy
  *   node e2e/run.mjs cypress
  *   node e2e/run.mjs cypress --spec "cypress/e2e/13-navigation-ui.cy.ts"
  *   node e2e/run.mjs deployment --url https://fm.example.com
@@ -43,6 +44,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { unknownOptions, unknownOptionMessage } from './lib/args.mjs';
+import { REPORT_PATH } from './lib/subpath-proxy.mjs';
 
 const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(E2E_DIR, '..');
@@ -71,6 +73,8 @@ if (!PROFILES.includes(profile)) {
   console.error('    --keep            leave the server (and data dir) running afterwards');
   console.error('    --grep <pattern>  pass through to playwright');
   console.error('    --grep-invert <p> pass through to playwright (leave these OUT)');
+  console.error('    --base-path <p>   serve filex under this sub-path (FILEX_BASE_PATH, e.g. /filex)');
+  console.error('                      behind a proxy that passes the full path (lib/subpath-proxy.mjs)');
   console.error('');
   console.error('  cypress     hermetic Cypress run against the same kind of instance');
   console.error('    --binary / --build / --port / --keep as above');
@@ -90,6 +94,14 @@ if (!PROFILES.includes(profile)) {
 const strays = unknownOptions(argv.slice(1));
 if (strays.length) {
   console.error(unknownOptionMessage(strays));
+  process.exit(2);
+}
+
+// A sub-path deployment (FILEX_BASE_PATH): the server is started under this
+// base and the suite reaches it through lib/subpath-proxy.mjs. '' = the root.
+const BASE_PATH = value('base-path', '');
+if (BASE_PATH && !/^(\/[A-Za-z0-9_~.-]+)+$/.test(BASE_PATH)) {
+  console.error(`--base-path ${BASE_PATH}: a path like /filex (leading slash, no trailing slash)`);
   process.exit(2);
 }
 
@@ -296,6 +308,12 @@ async function startServer(binary) {
   // probe and Playwright both hit this, and it looks exactly like a server that
   // failed to start.
   const baseURL = `http://127.0.0.1:${port}`;
+  // Under --base-path the suite talks to a proxy, and the server's public URL
+  // is the proxy's address plus the base; the harness itself (seeding, the
+  // freshness check) talks to the server directly, under the base.
+  const proxyPort = BASE_PATH ? await freePort() : 0;
+  const publicURL = BASE_PATH ? `http://127.0.0.1:${proxyPort}${BASE_PATH}` : baseURL;
+  const apiRoot = `${baseURL}${BASE_PATH}`;
 
   log(`starting ${path.basename(binary)} on ${baseURL}`);
   log(`data dir ${dataDir}`);
@@ -324,7 +342,8 @@ async function startServer(binary) {
       ...process.env,
       FILEX_DATA_DIR: dataDir,
       FILEX_LISTEN: `127.0.0.1:${port}`,
-      FILEX_PUBLIC_URL: baseURL,
+      FILEX_PUBLIC_URL: publicURL,
+      ...(BASE_PATH ? { FILEX_BASE_PATH: BASE_PATH } : {}),
       FILEX_ADMIN_EMAIL: ADMIN_EMAIL,
       FILEX_ADMIN_PASSWORD: ADMIN_PASSWORD,
       // The prepared-copy cache normally starts at 64 MiB. 86-slow-storage-cache
@@ -390,6 +409,10 @@ async function startServer(binary) {
       if (fs.existsSync(logFile)) {
         fs.copyFileSync(logFile, path.join(keepDir, 'server.log'));
       }
+      const proxyLogFile = path.join(dataDir, 'subpath-proxy.log');
+      if (fs.existsSync(proxyLogFile)) {
+        fs.copyFileSync(proxyLogFile, path.join(keepDir, 'subpath-proxy.log'));
+      }
     } catch (err) {
       log(`could not keep the server log: ${err.message}`);
     }
@@ -402,9 +425,67 @@ async function startServer(binary) {
     const tail = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8').slice(-2000) : '';
     throw new Error(`${err.message}${exited ? ` (process exited: ${exited})` : ''}\n${tail}`);
   }
-  await assertOurOwnInstance(baseURL, () => exited, logFile);
+  await assertOurOwnInstance(apiRoot, () => exited, logFile);
   log('server is up');
-  return { baseURL, dataDir };
+  if (!BASE_PATH) return { baseURL, apiRoot, dataDir, proxy: null };
+
+  // ⚠ Its own process, logging to a file descriptor — the same two reasons
+  // the server gets them (see above, and lib/subpath-proxy.mjs).
+  const proxyURL = `http://127.0.0.1:${proxyPort}`;
+  const proxyLog = fs.openSync(path.join(dataDir, 'subpath-proxy.log'), 'a');
+  const proxyChild = spawn(
+    process.execPath,
+    [path.join(E2E_DIR, 'lib', 'subpath-proxy.mjs'), '--base', BASE_PATH, '--upstream', baseURL, '--port', String(proxyPort)],
+    { stdio: ['ignore', proxyLog, proxyLog] },
+  );
+  cleanups.push(() => {
+    proxyChild.kill();
+    try {
+      fs.closeSync(proxyLog);
+    } catch {
+      /* already gone */
+    }
+  });
+  await waitFor(`${proxyURL}${REPORT_PATH}`, 'the sub-path proxy', 20_000);
+  await waitFor(`${proxyURL}${BASE_PATH}/healthz`, 'filex through the sub-path proxy', 20_000);
+  log(`sub-path proxy on ${proxyURL}, filex under ${BASE_PATH} (public URL ${publicURL})`);
+  return { baseURL: proxyURL, apiRoot, dataDir, proxy: proxyURL };
+}
+
+/**
+ * The verdict of a --base-path run: every request the APP made went under the
+ * base (lib/subpath-proxy.mjs says why that is the question). Returns the
+ * exit code to report.
+ */
+async function subpathVerdict(proxyURL, code) {
+  let r;
+  let lastErr = null;
+  // ⚠ A few tries: the connection the readiness probe left in fetch's pool has
+  // long been closed by the proxy when the suite ends, and the first reuse of
+  // it fails with a bare "fetch failed".
+  for (let i = 0; i < 5 && !r; i++) {
+    try {
+      r = await (await fetch(`${proxyURL}${REPORT_PATH}`, { headers: { connection: 'close' } })).json();
+    } catch (err) {
+      lastErr = err;
+      await new Promise((ok) => setTimeout(ok, 300));
+    }
+  }
+  if (!r) {
+    console.error(`[e2e] ✗ could not read the sub-path proxy's report: ${lastErr?.message} ${lastErr?.cause?.message ?? ''}`);
+    return code || 1;
+  }
+  log(`sub-path proxy: ${r.forwarded} requests under ${BASE_PATH}, ${r.rescued} test-made ones redirected into it`);
+  if (r.rescuedSamples.length) log(`  e.g. ${r.rescuedSamples.slice(0, 5).join(' · ')}`);
+  if (!r.violations.length) {
+    log('sub-path proxy: the app made no request outside the base');
+    return code;
+  }
+  console.error(`[e2e] ✗ the APP made ${r.violations.length} request(s) outside ${BASE_PATH}:`);
+  for (const v of r.violations.slice(0, 50)) {
+    console.error(`[e2e]   ${v.method} ${v.url}  (site=${v.site} dest=${v.dest} referer=${v.referer})`);
+  }
+  return code || 1;
 }
 
 /**
@@ -667,12 +748,12 @@ async function main() {
   }
 
   const binary = flag('build') ? build() : resolveBinary();
-  const { baseURL, dataDir } = await startServer(binary);
+  const { baseURL, apiRoot, dataDir, proxy } = await startServer(binary);
   const storageRootDir = path.join(dataDir, 'storages');
   fs.mkdirSync(storageRootDir, { recursive: true });
 
   if (profile === 'cypress') {
-    const storageName = await seedCypressStorage(baseURL, dataDir);
+    const storageName = await seedCypressStorage(apiRoot, dataDir);
     log('running the Cypress suite');
     return cypress({
       // ⚠ CYPRESS_BASE_URL, not a --config flag: cypress.config.ts reads this
@@ -699,14 +780,17 @@ async function main() {
     E2E_STORAGE_ROOT: storageRootDir,
   };
   if (flag('s3')) {
-    const s3 = await startS3(baseURL);
+    const s3 = await startS3(apiRoot);
     env.E2E_S3_STORAGE = s3.storageName;
     env.E2E_S3_STORAGE_B = s3.secondStorageName;
   }
 
+  if (BASE_PATH) env.E2E_BASE_PATH = BASE_PATH;
+
   const specs = localSpecs().map((f) => `tests/${f}`);
   log(`running ${specs.length} spec files`);
-  return playwright(specs, env);
+  const code = playwright(specs, env);
+  return proxy ? await subpathVerdict(proxy, code) : code;
 }
 
 let code = 1;

@@ -6,8 +6,9 @@
 //	POST   /api/admin/app-plugins[?dry_run=1]    — install: multipart {wasm?, manifest, signature?, grant} | JSON {github_repo, ref?, permissions} | JSON {url?, manifest_url, sha256?, permissions}
 //	                                             (no module — `wasm`/`url` — for a language pack; wire.Manifest.IsLanguagePack)
 //	GET    /api/admin/app-plugins/{id}
-//	PATCH  /api/admin/app-plugins/{id}           — {"enabled": bool}
+//	PATCH  /api/admin/app-plugins/{id}           — {"enabled"?: bool, "auto_update"?: bool}
 //	POST   /api/admin/app-plugins/{id}/upgrade   — same bodies as install
+//	POST   /api/admin/app-plugins/updates/check  — check every app's source now (updates.go)
 //	DELETE /api/admin/app-plugins/{id}
 //	GET/PUT /api/admin/app-plugins/{id}/settings
 //	GET/PUT /api/admin/app-plugins/{id}/overrides
@@ -73,19 +74,32 @@ func (h *AppPluginsAdmin) disabledMessage() string {
 }
 
 // runtimeFacts is the header of the list answer.
-func (h *AppPluginsAdmin) runtimeFacts() map[string]any {
+//
+// `filex_version` / `compat_enforced`: the filex apps' `filex` ranges are
+// judged against, and whether they are at all (not on a development build —
+// wasmplugin/compat.go). `update_check`: the daily update check runs;
+// `updates_checked_at`: when the last check ran (absent: never).
+func (h *AppPluginsAdmin) runtimeFacts(ctx context.Context) map[string]any {
 	if h.Registry == nil {
 		return map[string]any{
 			"enabled": false, "arch_ok": wasmplugin.ArchSupported(), "disabled_reason": h.disabledMessage(),
 			"requires_signature": false, "engines": map[string]bool{},
+			"filex_version": wasmplugin.FilexVersion(), "compat_enforced": wasmplugin.CompatEnforced(), "update_check": false,
 		}
 	}
-	return map[string]any{
+	facts := map[string]any{
 		"enabled": true, "arch_ok": true, "disabled_reason": "",
 		"requires_signature": h.Registry.RequiresSignature(), "engines": h.Registry.Engines(),
-		"engine_names": engineNames(),
-		"dir":          h.Registry.Dir(),
+		"engine_names":    engineNames(),
+		"dir":             h.Registry.Dir(),
+		"filex_version":   wasmplugin.FilexVersion(),
+		"compat_enforced": wasmplugin.CompatEnforced(),
+		"update_check":    h.Registry.BackgroundUpdates(),
 	}
+	if t := h.Registry.LastUpdateCheck(ctx); !t.IsZero() {
+		facts["updates_checked_at"] = t
+	}
+	return facts
 }
 
 // engineNames is every engine id with the name a person reads
@@ -106,13 +120,41 @@ func (h *AppPluginsAdmin) List(w http.ResponseWriter, r *http.Request) {
 	}
 	// The list is answered even when the runtime is off, so the panel can
 	// show WHY there is nothing to list instead of a bare 503.
+	writeJSON(w, http.StatusOK, h.listBody(r.Context()))
+}
+
+// listBody is the answer of GET /api/admin/app-plugins, and the part of
+// "Check now"'s answer the list redraws from.
+func (h *AppPluginsAdmin) listBody(ctx context.Context) map[string]any {
 	list := []*wasmplugin.Status{}
 	if h.Registry != nil {
 		for _, p := range h.Registry.All() {
 			list = append(list, h.Registry.StatusOf(p))
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"runtime": h.runtimeFacts(), "plugins": list})
+	return map[string]any{"runtime": h.runtimeFacts(ctx), "plugins": list}
+}
+
+// CheckUpdates asks every app's source for a newer version now, applies
+// what may be applied, and answers what happened with the list redrawn:
+// POST /api/admin/app-plugins/updates/check. A check already running (the
+// daily one) is waited for rather than doubled.
+//
+// ⚠ Detached from the request: a check installs apps, and an administrator
+// who closes the tab must not cut one in half (Upgrade holds its own swap
+// either way).
+func (h *AppPluginsAdmin) CheckUpdates(w http.ResponseWriter, r *http.Request) {
+	if !h.gate(w, r) {
+		return
+	}
+	rep, err := h.Registry.CheckUpdates(context.WithoutCancel(r.Context()))
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	body := h.listBody(r.Context())
+	body["report"] = rep
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (h *AppPluginsAdmin) Get(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +244,7 @@ func (h *AppPluginsAdmin) fail(w http.ResponseWriter, err error) {
 	if errors.As(err, &ie) {
 		code := http.StatusBadRequest
 		switch ie.Code {
-		case wasmplugin.ErrCodeNameTaken, wasmplugin.ErrCodeDescribeMismatch, wasmplugin.ErrCodePermissionsChanged:
+		case wasmplugin.ErrCodeNameTaken, wasmplugin.ErrCodeDescribeMismatch, wasmplugin.ErrCodePermissionsChanged, wasmplugin.ErrCodeIncompatible:
 			code = http.StatusConflict
 		case wasmplugin.ErrCodeNotFound:
 			code = http.StatusNotFound
@@ -210,6 +252,8 @@ func (h *AppPluginsAdmin) fail(w http.ResponseWriter, err error) {
 			code = http.StatusForbidden
 		case wasmplugin.ErrCodeTooLarge:
 			code = http.StatusRequestEntityTooLarge
+		case wasmplugin.ErrCodeUpToDate:
+			code = http.StatusConflict
 		case wasmplugin.ErrCodeFetch:
 			code = http.StatusBadGateway
 		}
@@ -225,29 +269,19 @@ func (h *AppPluginsAdmin) fail(w http.ResponseWriter, err error) {
 //
 // fetch_failed says WHY (`reason`) and WHAT (`where`, `refs`, `status`), so
 // the wizard writes the sentence in the reader's language and says what to
-// check; the English `message` stays for the API and the log.
-func installErrorBody(ie *wasmplugin.InstallError) map[string]any {
-	body := map[string]any{"error": ie.Code, "message": ie.Message}
-	if len(ie.Missing) > 0 {
-		body["missing"] = ie.Missing
-	}
-	if ie.Reason != "" {
-		body["reason"] = ie.Reason
-	}
-	if ie.Where != "" {
-		body["where"] = ie.Where
-	}
-	if len(ie.Refs) > 0 {
-		body["refs"] = ie.Refs
-	}
-	if ie.Status != 0 {
-		body["status"] = ie.Status
-	}
-	return body
+// check; `incompatible` says the range (`requires`) and this filex (`filex`);
+// the English `message` stays for the API and the log. The shape is
+// wasmplugin.InstallRefusal — the same one an update check's failure is
+// stored in, so the Apps list explains it with the wizard's sentences.
+func installErrorBody(ie *wasmplugin.InstallError) *wasmplugin.InstallRefusal {
+	return wasmplugin.RefusalOf(ie)
 }
 
-// readInstall gathers an InstallInput from any of the three bodies.
-func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request) (*wasmplugin.InstallInput, bool) {
+// readInstall gathers an InstallInput from any of the three bodies — or, for
+// an upgrade (upgradeID > 0), from `{"from_source": true}`: the newer version
+// the app's own source has, found and fetched exactly as the update check
+// does (wasmplugin.FetchUpdate).
+func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, upgradeID int64) (*wasmplugin.InstallInput, bool) {
 	ct := r.Header.Get("Content-Type")
 	dry := r.URL.Query().Get("dry_run") == "1" || r.URL.Query().Get("dry_run") == "true"
 	if strings.HasPrefix(ct, "multipart/form-data") {
@@ -326,6 +360,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request) (*
 	var req struct {
 		wasmplugin.GitHubInput
 		wasmplugin.URLInput
+		FromSource  bool     `json:"from_source"`
 		Permissions []string `json:"permissions"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -334,9 +369,19 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request) (*
 	}
 	var in *wasmplugin.InstallInput
 	switch {
+	case req.FromSource && upgradeID > 0:
+		in, err = h.Registry.FetchUpdate(r.Context(), upgradeID)
+	case req.FromSource:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest_invalid", "message": "from_source upgrades an installed app; an install names its source"})
+		return nil, false
 	case strings.TrimSpace(req.Repo) != "":
 		in, err = h.Registry.FetchGitHub(r.Context(), req.GitHubInput)
-	case strings.TrimSpace(req.URL) != "":
+	// ⚠ The MANIFEST address decides a URL install, not the module's: a
+	// language pack has no module, so its body is `{"url": "", "manifest_url":
+	// …}` — and keyed on `url` alone it fell through to "give github_repo, or
+	// url + manifest_url", refusing every pack the wizard's From-a-URL tab and
+	// the docs offer. FetchURL says what is missing for an app with a module.
+	case strings.TrimSpace(req.URL) != "" || strings.TrimSpace(req.ManifestURL) != "":
 		in, err = h.Registry.FetchURL(r.Context(), req.URLInput)
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest_invalid", "message": "give github_repo, or url + manifest_url, or a multipart upload"})
@@ -356,7 +401,7 @@ func (h *AppPluginsAdmin) Install(w http.ResponseWriter, r *http.Request) {
 	if !h.gate(w, r) {
 		return
 	}
-	in, ok := h.readInstall(w, r)
+	in, ok := h.readInstall(w, r, 0)
 	if !ok {
 		return
 	}
@@ -380,7 +425,7 @@ func (h *AppPluginsAdmin) Upgrade(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	in, ok := h.readInstall(w, r)
+	in, ok := h.readInstall(w, r, p.Row.ID)
 	if !ok {
 		return
 	}
@@ -405,16 +450,26 @@ func (h *AppPluginsAdmin) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Enabled *bool `json:"enabled"`
+		Enabled    *bool `json:"enabled"`
+		AutoUpdate *bool `json:"auto_update"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "enabled (bool) required"})
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.Enabled == nil && req.AutoUpdate == nil) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "enabled or auto_update (bool) required"})
 		return
 	}
-	st, err := h.Registry.SetEnabled(r.Context(), p.Row.ID, *req.Enabled)
-	if err != nil {
-		h.fail(w, err)
-		return
+	var st *wasmplugin.Status
+	var err error
+	if req.AutoUpdate != nil {
+		if st, err = h.Registry.SetAutoUpdate(r.Context(), p.Row.ID, *req.AutoUpdate); err != nil {
+			h.fail(w, err)
+			return
+		}
+	}
+	if req.Enabled != nil {
+		if st, err = h.Registry.SetEnabled(r.Context(), p.Row.ID, *req.Enabled); err != nil {
+			h.fail(w, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, st)
 }

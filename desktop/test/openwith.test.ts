@@ -13,6 +13,7 @@ import test from 'node:test';
 
 import {
   OFFICE_EXTENSIONS,
+  OpeningDocs,
   SessionStore,
   classifyArgv,
   extensionOf,
@@ -24,6 +25,7 @@ import {
   orphanScratchEntries,
   recoveryPathFor,
   resolveSyncTwin,
+  sameLocalPath,
   scratchBasename,
   scratchRemoteDir,
   scratchRemotePath,
@@ -161,4 +163,43 @@ test('write-back keeps the document readable by whoever could read it before', a
   } finally {
     await fs.promises.rm(dir, { recursive: true, force: true });
   }
+});
+
+// ── a document being opened is opened once (Y14) ──
+//
+// ⚠ "Is it already open?" only knew documents whose editor was up, and the
+// editor comes up after the working copy has been uploaded (up to 256 MB). A
+// second double-click in that time opened a second session of the same
+// document: two working copies writing back to one path, the last save
+// winning and the other edit gone.
+
+test('a document already being opened is not opened again', () => {
+  const opening = new OpeningDocs('darwin');
+  assert.equal(opening.begin('/Users/ada/Rapor.docx'), true);
+  assert.equal(opening.begin('/Users/ada/Rapor.docx'), false, 'the second double-click opened it again');
+  assert.equal(opening.begin('/Users/ada/Başka.docx'), true, 'another document is not held up');
+  opening.end('/Users/ada/Rapor.docx');
+  assert.equal(opening.begin('/Users/ada/Rapor.docx'), true, 'once it has opened (or failed), it may be opened again');
+});
+
+test('on Windows, one document whatever the case of its path', () => {
+  const opening = new OpeningDocs('win32');
+  assert.equal(opening.begin('C:\\Docs\\a.docx'), true);
+  assert.equal(opening.begin('c:\\docs\\A.DOCX'), false);
+});
+
+// ⚠ "Is this the same file?" was answered three times over — main.ts
+// pathsEqual, OpeningDocs and resolveSyncTwin each lower-cased Windows paths
+// their own way. One rule now (sameLocalPath / localPathForm).
+test('one rule for "the same file on this computer"', () => {
+  assert.equal(sameLocalPath('C:\\Docs\\a.docx', 'c:\\docs\\A.DOCX', 'win32'), true);
+  assert.equal(sameLocalPath('C:\\Docs\\x\\..\\a.docx', 'C:\\Docs\\a.docx', 'win32'), true, 'spelled with ..');
+  assert.equal(sameLocalPath('C:\\Docs\\a.docx', 'C:\\Docs\\b.docx', 'win32'), false);
+  assert.equal(sameLocalPath('/home/ada/A.docx', '/home/ada/a.docx', 'linux'), false, 'case matters off Windows');
+  assert.equal(sameLocalPath('/home/ada/docs/', '/home/ada/docs', 'linux'), true, 'a trailing slash is the same folder');
+  assert.equal(sameLocalPath('', '', 'linux'), false, 'no path is no file');
+  const opening = new OpeningDocs('win32');
+  const doc = 'C:\\Users\\İsmail\\Rapor.docx';
+  assert.equal(opening.begin(doc), true);
+  assert.equal(opening.begin(doc.toLowerCase()), false, 'the same rule as everywhere else');
 });

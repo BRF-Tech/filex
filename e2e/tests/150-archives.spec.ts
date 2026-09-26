@@ -158,6 +158,41 @@ test.describe('Archives', () => {
     expect(await got.text()).toBe('hello from a tarball');
   });
 
+  // Before it can queue an extraction the server downloads the whole archive
+  // and inspects it. Enter in the dialog's box sent the form again meanwhile
+  // (the buttons' `disabled` does not reach Enter): a second download, a
+  // second job. Held here so the second Enter lands inside that wait.
+  test('"Extract to folder" sends once, Enter included, while the server reads the archive', async ({ page }) => {
+    await openStorage(page);
+    const name = `once-${STAMP}.tar.gz`;
+    await upload(page, name, tarGz(tarMember('bir.txt', '0', 'bir')));
+    await page.reload();
+    await expect(row(page, name)).toBeVisible({ timeout: 15_000 });
+
+    let posts = 0;
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    await page.route('**/api/files/archive/extract', async (route) => {
+      posts += 1;
+      await held;
+      await route.continue();
+    });
+
+    await pick(page, name, /^(Extract archive…|Arşivi çıkar…)$/);
+    const box = page.locator('.fe-modal__card input.fe-input').first();
+    await box.fill(`once-${STAMP}`);
+    await box.press('Enter');
+    await expect.poll(() => posts).toBe(1);
+    await box.press('Enter', { timeout: 1_000 }).catch(() => {
+      /* a shut box refuses the key, which is the point */
+    });
+    await page.waitForTimeout(500);
+    expect(posts, 'the second Enter sent it again').toBe(1);
+
+    release();
+    await expect(row(page, `once-${STAMP}`)).toBeVisible({ timeout: 20_000 });
+  });
+
   test('a .tar.gz with a symlink is refused, and "Extract here" says so', async ({ page }) => {
     await openStorage(page);
     const name = `evil-${STAMP}.tar.gz`;

@@ -29,6 +29,7 @@ import { PluginPageView, useFileApi } from '@brftech/filex-core';
 import type { ExplorerConfig } from '@brftech/filex-core';
 
 import { explorerAuth } from '@/lib/explorerConfig';
+import { getServerRoot } from '@/api/runtimeConfig';
 import { currentMountBase } from '@/router';
 import { useAppHomeRoute } from '@/composables/useAppHomeRoute';
 
@@ -41,7 +42,7 @@ const { plugin, view, section, onSection, title, icon, uiLocale, theme } = useAp
 
 // ⚠ The DEFAULT plugin endpoints, not a copy of them — the same `useFileApi`
 // the explorer and the new-tab page view derive theirs from.
-const api = useFileApi({ apiBase: '', auth: explorerAuth() } as ExplorerConfig);
+const api = useFileApi({ apiBase: getServerRoot(), auth: explorerAuth() } as ExplorerConfig);
 
 /**
  * Where a job queued from this screen can be watched. The panel has a Queue

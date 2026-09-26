@@ -361,7 +361,9 @@ named in `error` — a **move** then keeps its source. Full behaviour:
 [Moving files between storages](STORAGE.md#moving-files-between-storages).
 
 **Refusals** are at submit time, not in the worker: `400` unknown target adapter
-· `403` read-only target storage (with a `hint`) · `403` no editor permission on
+· `403 { "code": "READ_ONLY" }` when the op would change a read-only storage —
+a copy or a move into it (with a `hint`), a move or a delete out of it; a copy
+out of it is fine · `403` no editor permission on
 the source, or on the target folder **in the destination's storage** · `400`
 mixed-adapter *sources* (one batch, one source storage).
 
@@ -376,6 +378,28 @@ The unified form behind the three per-verb endpoints:
   "sources": ["a.txt"], "dest": "hedef/" }
 ```
 `dest_storage_id` may be omitted or `0`, which means "the sources' storage".
+`kind` is `copy`, `move` or `delete`; any other kind is refused with
+`400 { "code": "BAD_KIND" }`. The queue runs more kinds than these (a rename,
+a restore, a purge, an upload commit, an app's action), but each of them is
+queued by the endpoint that judges it (`?action=rename&queued=1`,
+`POST /api/files/manager/restore?queued=1`, …), never through this one.
+
+The same refusals as the per-verb endpoints apply, `READ_ONLY` included (up to
+v0.46.0 this endpoint asked neither end of the op about the read-only flag, and
+the per-verb ones only the destination).
+
+A caller confined to a folder (a `root:` token, or `X-Filex-Root`) is held to
+it here as on every other door: a source or a destination outside the root —
+another storage included — answers `403 path outside confined root`. Up to
+v0.46.0 this endpoint was the one that did not: the confinement layer rewrites
+the path fields it knows (`source`, `target`, …), and this body names its
+paths `sources` and `dest` beside a bare `storage_id`.
+
+⚠ Up to v0.46.0 this endpoint passed the client's `kind` straight to the
+queue (an upload commit or an app's action could be queued here unjudged), and
+once the queue also ran restores, `{"kind":"restore","sources":["<node id>"]}`
+would have restored any trash entry by id — another tenant's included —
+without the restore's own checks.
 
 ### `POST /api/files/mkdir` ![user](https://img.shields.io/badge/-user-blue)
 ```json
@@ -402,6 +426,50 @@ person chose this one.
 trash — and its catalogue row was dropped with its version history, shares and
 comments. A folder renamed onto another folder's name on an object store was
 merged into it.
+
+**Finished even if the client leaves.** Once a rename has passed its checks it
+runs to the end, whether or not anybody is still waiting for the answer. A
+closed tab, or a proxy that stops waiting (nginx after 60 s by default), no
+longer stops it half-way. The same holds for the synchronous `?action=move`
+and `?action=delete`, `POST /api/files/manager/restore`,
+`DELETE /api/admin/trash/{id}`, `POST /api/ai/move` and `/api/ai/delete`
+(with the MCP tools behind them), and WebDAV's `DELETE` and `MOVE` of a
+folder. A client that gave up lists the folder again to see the result.
+
+⚠ Before this, the request's cancellation stopped the work between two
+objects. A folder on an object store, which is changed one object at a time,
+was left in two places with the catalogue still describing the old one, and a
+retry answered `409` because the half that had arrived held the name.
+
+**As a job: `?action=rename&queued=1`.** The same body and the same checks, so a
+refusal is still answered at once, as above. What they allow is queued instead
+of run: **202** `{ "op": { "kind": "rename", "sources": ["reports/old"],
+"dest": "reports/new", … } }`, followed with `GET /api/files/ops` like a move.
+The explorer asks for it for a folder, which on an object store is one request
+per object, when the server lists `rename` under `capabilities.queued`; a file
+is still renamed inside the request. The job never picks another name the way a
+move does: a name taken by the time it runs fails it (`something with that
+name already exists here`), and nothing is replaced. Once running it is not
+cancelled half-way; while it waits in the queue it can be. A server with no
+queue renames inside the request, as above.
+
+Queued renames, restores and purges run **one at a time on a lane of their
+own**, beside the worker that runs copies, moves, deletes and upload commits:
+a large folder renamed, restored or purged on an object store no longer holds
+every other queued operation of the instance behind it.
+
+A server that stops while one runs does not record it as `cancelled`: the
+entry in hand is finished (a rename that completes is `ok`), and a restore or
+purge of several entries stops between two of them and stays `running`; the
+next start requeues it and carries it on. A rename the process died in the
+middle of is carried on too: on an object store part of the folder is already
+at the new name, and that half is the rename's own, not a name taken by
+something else — the job finishes the move instead of failing with `something
+with that name already exists here` (which is what it did up to this release,
+leaving the folder in two places). Stopping waits for it at most ten
+seconds. Up to this release the job was recorded `cancelled` — terminal, so
+the entries it had not reached stayed in the trash — and stopping waited for
+the whole folder.
 
 ### `POST /api/files/delete` ![user](https://img.shields.io/badge/-user-blue)
 ```json
@@ -1132,6 +1200,21 @@ Copy / extract / archive create kick off background ops.
 ### `GET /api/files/ops` ![user](https://img.shields.io/badge/-user-blue)
 List the caller's ops, newest first (at most 200). `?status=running` filters.
 
+Whose ops that is: an administrator's view covers every op in reach (a
+tenant's administrator the tenant's storages, the supertenant and a
+single-tenant install's administrators every storage); everybody else is
+shown only the ops they queued. A row names its sources and its destination,
+and nothing about a storage says which of its folders a member may see. A row
+that names nobody (queued before `actor_id` was recorded, or by something that
+is not a person, such as a scheduled app job) is an administrator's only.
+
+"An administrator" here is the **credential**, not the account behind it: an
+administrator's session, or a token that carries the `admin` scope and no
+`root:` confinement. A token minted on an administrator's account without the
+`admin` scope, a `root:` token, and a session narrowed with `X-Filex-Root` are
+all shown only the ops they queued — here, on `GET /api/files/ops/{id}` and on
+its cancel.
+
 **Response 200**
 ```json
 {
@@ -1157,6 +1240,14 @@ List the caller's ops, newest first (at most 200). `?status=running` filters.
   walk finishes, or when the tree is too large to measure; draw a moving
   indicator then, not a percentage. They are live counters in the worker's
   memory and are gone once the operation ends.
+- `objects_total` / `objects_done` appear while a copy, move, delete, rename,
+  restore or purge **within one storage** runs on a driver that works through
+  a folder object by object (S3 and the S3-compatible stores, and the trash's
+  own per-object walk). They count the objects found inside the sources and
+  the objects finished, so one folder is no longer just `0` of `1`; the empty
+  folder-marker objects cleaned up after a folder are not counted. `objects_total` grows as each source's
+  listing arrives. Like the bytes, they are live counters and are gone once the
+  operation ends. A local disk moves a folder in one rename and reports none.
 - `sources` is a **preview** in this list: the first 5 paths, with
   `sources_truncated: true` when there were more. `source_count` is the full
   count, and `source_dir` the deepest folder holding every source (omitted at
@@ -1168,12 +1259,15 @@ List the caller's ops, newest first (at most 200). `?status=running` filters.
   It names no files: no `sources`, no `dest`; `total` / `done` / `failed`
   count trashed rows, and `bytes_total` / `bytes_done` the bytes their files
   hold and the bytes freed so far. It is its tenant's — listed, read and
-  cancelled by the tenant that asked for it (a supertenant sees every one) —
-  and it runs beside the queue, never in the worker's line.
+  cancelled by the administrators of the tenant that asked for it (a
+  supertenant sees every one) — and it runs beside the queue, never in the
+  worker's line.
 
 ### `GET /api/files/ops/:id` ![user](https://img.shields.io/badge/-user-blue)
 Single op detail with **every** source (no `source_count` / `source_dir`),
-plus `error` when it failed.
+plus `error` when it failed. The same ops as the list: the caller's own, or
+any in reach for an administrator. Anything else answers `404`, as an id that
+does not exist does, so walking the sequential ids counts nothing.
 
 `status` is one of `pending | running | ok | failed | partial | cancelled` —
 `partial` when some sources failed and others did not, `cancelled` when
@@ -1181,9 +1275,12 @@ somebody stopped it.
 
 ### `POST /api/files/ops/:id/cancel` ![user](https://img.shields.io/badge/-user-blue)
 Stops an op: a pending one never runs, a running one stops at its next item
-(an item already under way is finished). `200` with the op; `409` when it has
-already ended; `403` for somebody else's op unless the caller is an
-administrator; `404` for an op the caller cannot see.
+(an item already under way is finished). `200` with the op; `409
+{ "code": "FINISHED" }` when it has already ended; `409 { "code":
+"NOT_CANCELLABLE" }` for a rename, a restore or a purge that has started —
+those run to their end (the row's `cancellable` is `false`), and the result is
+still on its way; `404` for an op the caller cannot see — somebody else's,
+unless the caller is an administrator.
 
 ---
 
@@ -1369,6 +1466,10 @@ exactly like one that does not exist); nothing is written then.
 ```
 **Response 200** `{ "id": 7, "name": "Hetzner archive", ... }`
 
+A storage is created **enabled** unless the body says `"enabled": false`. (Until
+this release a body without the key, which is what the admin panel's form sends,
+created it disabled.)
+
 `config.scan_exclude` — every driver — holds the storage's
 [scan exclusions](STORAGE.md#scan-exclusions): glob patterns, one per line (a
 JSON array of strings is accepted too). A pattern that would exclude
@@ -1395,9 +1496,25 @@ every change** — the operator may have just pointed it at a different bucket,
 and a configuration that half works fails the same way a half-working plugin
 does: in the user's hands, looking like filex.
 
+The change applies without a restart. The storage's scanner is rebuilt only
+when the save changed something a scan reads: the driver, its configuration
+(root, credentials, scan exclusions), the sync mode, the interval, or
+`enabled`. A rebuild stops every scan of the storage, including one started by
+`POST …/sync`, and records it as `aborted`. Renaming the storage, switching it
+read-only, changing its access control or pairing a replica leaves a running
+scan alone.
+
 ### `DELETE /api/admin/storages/:id` ![admin](https://img.shields.io/badge/-admin-red)
 Removes the storage and its DB cache rows. Files in the underlying backend
 are **not** deleted.
+
+A large storage takes minutes to remove. The delete finishes even when the
+client stops waiting, bounded at 30 minutes. If it fails, the storage keeps
+its scanner, as it was before the request. The admin panel, when its request
+outlives the proxy, reads `GET /api/admin/storages` again until the storage has
+left it (one read per tick, shared with any scan it is following): meanwhile
+the row says **Deleting…** and offers nothing but its place in the order, and
+the end is said.
 
 ### `POST /api/admin/storages/:id/sync` ![admin](https://img.shields.io/badge/-admin-red)
 Triggers an immediate **full** scan of the storage. The scan runs in the
@@ -1408,8 +1525,14 @@ background, so the answer comes at once:
 ```
 
 `status: "running"` (still `202`) means a scan was already walking this storage
-and no second one was started. There is no run id in the answer: watch the run
-under `GET /api/admin/storages/:id/sync-runs` or `GET /api/admin/sync-runs`.
+and no second one was started. The answer comes only once the scan holds the
+storage, so a second request straight after the first is answered `"running"`.
+
+There is no run id in the answer. `GET /api/admin/storages` says whether a scan is
+walking each storage right now (`running`); the run itself is under
+`GET /api/admin/storages/:id/sync-runs` or `GET /api/admin/sync-runs`. The scan
+belongs to the storage's scanner: a save that changes its scan settings, a
+delete, or a shutdown stops it.
 
 **`?path=<folder>` rescans one catalogued folder** instead of the whole storage
 — its subtree only, with the same rules as a full scan: new objects are
@@ -1446,8 +1569,10 @@ create form, which has no storage to name yet.
 ## App plugins
 
 The sandboxed WebAssembly apps of [APP-PLUGINS.md](APP-PLUGINS.md). The admin
-routes are listed there; these are the ones the explorer and the public page
-call. All under the user block unless marked public. Every answer when the
+routes are listed there ([Admin API](APP-PLUGINS.md#admin-api) — install,
+upgrade, `PATCH /{id} {enabled, auto_update}`, `POST /updates/check` and the
+rest; [APP-PLUGINS-API.md](APP-PLUGINS-API.md) has the shapes); these are the
+ones the explorer and the public page call. All under the user block unless marked public. Every answer when the
 runtime is off: `404 app_plugins_disabled`.
 
 ### `GET /api/files/plugins/actions` ![user](https://img.shields.io/badge/-user-blue)

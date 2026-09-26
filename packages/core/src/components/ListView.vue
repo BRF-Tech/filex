@@ -26,6 +26,9 @@ import { linkWordsFor } from '../lib/symlink'; /* issue #34 — a link that will
 import { checkMod, clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
 import {
   arrivedFromOutside,
+  deletedByViewer,
+  deleterIdOf,
+  deleterNameOf,
   ownedByViewer,
   ownerIdOf,
   ownerNameOf,
@@ -428,7 +431,11 @@ function locationLabel(n: FileNode): string {
  * since deletion, never below zero). No count, no claim.
  */
 function remainingLabel(n: FileNode): string {
-  const meta = (n as Record<string, unknown>).extra_metadata as { ttl_days?: number | null } | undefined;
+  const meta = (n as Record<string, unknown>).extra_metadata as
+    | { ttl_days?: number | null; purging?: boolean }
+    | undefined;
+  // A permanent delete is on its way for it: no time is left to count.
+  if (meta?.purging) return t('trash.purging');
   const ttl = meta?.ttl_days;
   return trashTimeLeft(ttl, t);
 }
@@ -500,7 +507,10 @@ function onSort(p: { key: string; dir: 'asc' | 'desc' }) {
 /** Which optional columns this listing is willing to draw at all, before any
  *  question of the person's own choices. */
 const candidateCols = computed<ColumnId[]>(() => {
-  if (props.trash) return ['type', 'location', 'modified', 'remaining', 'size'];
+  /* The Trash has no owner to show (its listing carries none), and it draws
+     WHO DELETED IT on that track instead — the way the date track says when
+     it was deleted and the location track where from. */
+  if (props.trash) return ['type', 'location', 'owner', 'modified', 'remaining', 'size'];
   const out: ColumnId[] = ['type'];
   /* Location only where the rows come from more than one folder. In an
      ordinary folder every row shares one location and the column would be a
@@ -544,10 +554,10 @@ const columns = computed<DataColumn<FileNode>[]>(() => [
   },
   {
     id: 'owner',
-    label: t('col.owner'),
+    label: props.trash ? t('col.deleted_by') : t('col.owner'),
     class: 'fe-list__col--owner',
-    format: ownerLabel,
-    title: ownerTitle,
+    format: props.trash ? deleterLabel : ownerLabel,
+    title: props.trash ? deleterTitle : ownerTitle,
   },
   {
     id: 'modified',
@@ -709,6 +719,23 @@ function ownerTitle(n: FileNode): string {
     parts.push(t('owner.last_actor', { who: t('owner.system') }));
   }
   return parts.join(' · ');
+}
+
+/* ── Deleted by (the Trash) ───────────────────────────────────────────────
+ *
+ * "You", the account's name, or a dash. ⚠ Not "System": a row nobody is named
+ * on may have been removed outside filex (the scanner found it gone) OR
+ * trashed before filex kept this, and "System" would be a false answer for
+ * the second. The dash says "not recorded", and its hover text says why. */
+function deleterLabel(n: FileNode): string {
+  if (deletedByViewer(n)) return t('owner.you');
+  if (deleterIdOf(n) === null) return '—';
+  return deleterNameOf(n) || t('owner.unknown');
+}
+
+function deleterTitle(n: FileNode): string | undefined {
+  if (deleterIdOf(n) === null && !deletedByViewer(n)) return t('trash.deleted_by_nobody');
+  return deleterLabel(n);
 }
 
 const segments = computed<DateRun<FileNode>[]>(() =>

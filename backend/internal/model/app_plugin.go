@@ -40,11 +40,23 @@ type AppPlugin struct {
 	// array of permission strings. It is what host functions check — never
 	// the manifest's list, so an upgrade cannot widen it without a new
 	// approval.
-	PermissionsJSON string    `json:"-"`
-	Enabled         bool      `json:"enabled"`
-	LastError       string    `json:"last_error,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	PermissionsJSON string `json:"-"`
+	Enabled         bool   `json:"enabled"`
+	LastError       string `json:"last_error,omitempty"`
+	// ManifestURL is where a URL install read filex-app.json (SourceURL is
+	// the module's address for an app with one) — what the update check
+	// re-reads. Empty for GitHub (SourceURL says repo@ref) and uploads
+	// (migration 00063).
+	ManifestURL string `json:"manifest_url,omitempty"`
+	// AutoUpdate: a newer version found at the source is applied without
+	// asking, as long as it asks for nothing the administrator has not
+	// already approved (wasmplugin/updates.go). On by default.
+	AutoUpdate bool `json:"auto_update"`
+	// UpdateJSON is what the last update check found (wasmplugin.UpdateInfo),
+	// kept so the Apps list can say it after a restart. "" = never checked.
+	UpdateJSON string    `json:"-"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // AppPluginOverride is the admin's change to one action of a plugin. A

@@ -996,6 +996,10 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		// FILEX_APP_PLUGINS_DISABLED never gets here, because it leaves
 		// appPlugins nil.
 		appPlugins.StartScheduler(ctx)
+		// The daily update check (wasmplugin/updates.go): after the notifier,
+		// which tells the administrators what moved. Demo mode turns it off
+		// from the inside, FILEX_APP_PLUGIN_UPDATE_CHECK=0 from here.
+		appPlugins.StartUpdater(ctx, cfg.AppPluginUpdateCheck)
 	}
 
 	// Handlers see the tenant-scoped store: storage listings are confined to the
@@ -1164,9 +1168,21 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// internal/dav). FILEX_DAV=0 disables the surface; log the state so the
 	// kill switch is visible in boot output.
 	if cfg.DAV.Enabled {
-		slog.Info("webdav: enabled", slog.String("prefix", "/dav"))
+		slog.Info("webdav: enabled", slog.String("prefix", cfg.BasePath+"/dav"))
 	} else {
 		slog.Info("webdav: disabled (FILEX_DAV=0)")
+	}
+	// Which base the web app, the API and every link are served under — the
+	// first thing to check when a proxy in front of filex answers 404 (it has
+	// to pass the full path: docs/DEPLOYMENT.md, "Serving filex under a
+	// sub-path").
+	if cfg.BasePath != "" {
+		slog.Info("http: serving under a base path",
+			slog.String("base_path", cfg.BasePath),
+			slog.String("from", cfg.BasePathFrom),
+			slog.String("public_url", cfg.PublicURL))
+	} else {
+		slog.Info("http: serving at the root of the host (no base path)")
 	}
 
 	// The staging directory itself is created here (not lazily in the router)

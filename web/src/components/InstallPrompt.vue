@@ -36,6 +36,7 @@
 // its full-width bottom band — see the template.
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import { withAppBase } from '@brftech/filex-core';
 import { useDesktopDownloads, useInstallPrompt } from '@/composables/useInstallPrompt';
 import { placeChip, probeDom } from '@/lib/keepClear';
 
@@ -50,9 +51,12 @@ import { placeChip, probeDom } from '@/lib/keepClear';
 // it globally from main.ts, this import becomes redundant rather than extra.
 import '@brftech/filex-core/style.css';
 
-// Public-asset base ('/admin/' today). Used for the icon below — see the
-// comment on the <img> for why it must not be a static src.
-const baseUrl = import.meta.env.BASE_URL;
+// Public-asset base: the build's '/admin/', under the base path the server
+// serves the app at (FILEX_BASE_PATH; the core's `withAppBase`). Used for the
+// icon below — see the comment on the <img> for why it must not be a static
+// src. ⚠ Not `import.meta.env.BASE_URL` alone: that is baked in at build time
+// and knows nothing of a sub-path.
+const baseUrl = withAppBase(import.meta.env.BASE_URL);
 
 // ⚠ The download rows were hardcoded English while their own card title came
 // from the catalogue, so a Turkish visitor met a Turkish heading over two

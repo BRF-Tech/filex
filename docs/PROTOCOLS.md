@@ -114,6 +114,17 @@ switch that off with `auth.ldap.protocol_login: false`.
 > web app's HTML — rclone reports *"XML syntax error on line 10"*, which says nothing
 > about what is wrong. Never point `FILEX_S3_DOMAIN` at the host the app itself serves.
 
+**Under a base path** ([filex served under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path),
+`FILEX_BASE_PATH=/filex`) the path-style endpoint is `https://example.com/filex/s3`
+and works as it does at the root: the client signs `/filex/s3/<bucket>/<key>`, and
+filex verifies the signature against exactly that path — the one the client sent —
+though the prefix is taken off before the request is routed. Tested with the AWS
+SDK's own signer, header- and query-signed (presigned URLs). The reverse proxy
+must pass the path unchanged: a proxy that strips or rewrites it changes what was
+signed and every request answers *SignatureDoesNotMatch*. A dedicated host
+(`FILEX_S3_DOMAIN`) is served at its own root, never under the app's base, and
+is not affected by it.
+
 > ⚠ A bucket you cannot reach answers **NoSuchBucket**, never AccessDenied — the same
 > thing S3 does cross-account, because the alternative is an existence oracle. A *write*
 > you are not allowed answers **AccessDenied**, because a client told "no such key" would

@@ -15,7 +15,7 @@ app-store repo (icon/screenshot URLs already point at the filex GitHub repo).
 
 | Setting | Why |
 |---|---|
-| `FILEX_PUBLIC_URL` | Set to `http://<NAS-IP>:5212` (or your domain) — share links + SSO redirects are built from it. Only truly required change. |
+| `FILEX_PUBLIC_URL` | Set to `http://<NAS-IP>:5212` (or your domain) — share links + SSO redirects are built from it. Only truly required change. A path in it (`https://example.com/filex`) is the sub-path filex is served under, and the proxy must pass that path through ([Base path](../../docs/CONFIGURATION.md#base-path)). |
 | `/DATA/AppData/filex/data` → `/data` | DB, search index, thumbnails, first-run secret. |
 | `/DATA/AppData/filex/files` → `/srv/files` | Default storage seeded on first boot. |
 | `/DATA` → `/media/DATA` | Optional: add as an extra "local" storage in the admin UI to manage all NAS files. |

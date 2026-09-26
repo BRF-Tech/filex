@@ -41,6 +41,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/brf-tech/filex/backend/internal/basepath"
 )
 
 // Errors a caller maps onto S3 error codes.
@@ -256,7 +258,7 @@ func canonicalRequest(r *http.Request, sr *Request) (string, error) {
 	}
 	return strings.Join([]string{
 		r.Method,
-		canonicalURI(r.URL),
+		basepath.From(r.Context()) + canonicalURI(r.URL),
 		canonicalQuery(r.URL, sr.Presigned),
 		headers,
 		strings.Join(sr.SignedHeaders, ";"),
@@ -265,6 +267,13 @@ func canonicalRequest(r *http.Request, sr *Request) (string, error) {
 }
 
 // canonicalURI is the escaped path, unnormalized.
+//
+// ⚠ It is the path the router saw. Under a base path (FILEX_BASE_PATH) the
+// client signed `/filex/s3/bucket/key` and the base was taken off before the
+// request got here, so canonicalRequest puts it back: the signature covers the
+// path the CLIENT sent, and nothing a proxy in between could have changed
+// without also breaking the signature. A dedicated S3 host is served at its
+// own root and never has a base.
 //
 // ⚠ S3 is the exception among AWS services: it does NOT normalize the path and
 // does NOT double-encode it. `a//b` and `a/./b` are different keys, so

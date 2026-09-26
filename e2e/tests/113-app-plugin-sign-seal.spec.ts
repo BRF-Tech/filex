@@ -31,6 +31,7 @@ import { writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { test, expect, request as pwRequest, type APIRequestContext, type Page } from '@playwright/test';
 import { loginAs, apiLogin } from '../helpers/auth';
+import { underBase } from '../helpers/base';
 import { seedLocalStorage, dropStorageByName } from '../helpers/seed';
 import { guardFixture, installThroughWizard, minimalPDF, resolveApp } from '../helpers/appPlugin';
 import { removeApp } from '../helpers/surface';
@@ -327,7 +328,7 @@ test.describe('App plugin: sign — certified, sealed, hashed to everyone, locke
     const { pin } = (await (await request.get(`/api/shares/${delivery!.share!.id}/pin`)).json()) as { pin: string };
     // As a stranger fetches it: no session, the PIN, the confirmed download.
     const anon = await pwRequest.newContext({ baseURL });
-    const res = await anon.post(`/s/${url![1]}?confirmed=1`, { form: { pin }, maxRedirects: 0 });
+    const res = await anon.post(underBase(`/s/${url![1]}?confirmed=1`), { form: { pin }, maxRedirects: 0 });
     expect(res.status(), 'the delivery link hands out the file').toBe(200);
     signed = Buffer.from(await res.body());
     await anon.dispose();

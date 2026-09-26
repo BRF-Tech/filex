@@ -26,6 +26,7 @@
         "en": "The whole interface in Spanish.",
         "tr": "Tüm arayüz İspanyolca."
       },
+      "filex": ">=0.45.0 <0.47.0",
       "label": {
         "en": "Spanish language pack",
         "tr": "İspanyolca dil paketi"
@@ -57,6 +58,12 @@
   },
   "row": {
     "actions": 0,
+    "auto_update": true,
+    "compat": {
+      "filex": "0.47.0",
+      "ok": false,
+      "requires": ">=0.45.0 <0.47.0"
+    },
     "created_at": "2026-09-21T10:00:00Z",
     "description": {
       "en": "The whole interface in Spanish.",
@@ -98,6 +105,16 @@
     "source": "github",
     "source_url": "https://github.com/BRF-Tech/filex-lang-es@main",
     "state": "running",
+    "update": {
+      "auto": {
+        "at": "2026-09-26T09:30:00Z",
+        "from": "0.9.0",
+        "to": "1.0.0"
+      },
+      "checked_at": "2026-09-26T09:30:00Z",
+      "status": "current"
+    },
+    "update_source": "github",
     "updated_at": "2026-09-21T10:00:00Z",
     "version": "1.0.0",
     "views": 0

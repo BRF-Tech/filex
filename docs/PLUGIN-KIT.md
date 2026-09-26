@@ -88,7 +88,7 @@ function.
   "description": { "en": "Sign PDFs and ask others to sign." },
   "icon": "sign",
   "homepage": "https://github.com/BRF-Tech/filex-sign",
-  "min_filex": "0.43.0",
+  "filex": ">=0.47.0",
   "permissions": ["files:read", "files:write", "sign", "public_pages", "mail:send", "notify:send", "users:lookup", "state", "engines:libreoffice"],
   "permission_reasons": { "mail:send": { "en": "To invite outside signers by email." } },
   "languages": ["en", "tr"],
@@ -122,6 +122,9 @@ function.
 | Field | Meaning |
 |---|---|
 | `name` | `[a-z0-9][a-z0-9_-]{0,31}`, unique per instance; names the directory and every menu key (`plugin:<name>/<action>`). Not `cache`, `spool`, `public` or `assets` — the host's own directories beside the apps' |
+| `version` | a [semantic version](https://semver.org) (`1.2.0`): the update check moves an installed app only to a HIGHER one, and never to a pre-release (`1.3.0-rc.1`) — see [Publishing so updates are found](#publishing-so-updates-are-found) |
+| `filex` | the filex versions the app works with, a range: `">=0.47.0"`, `">=0.47.0 <0.60.0"` — see [Which filex it works with](#which-filex-it-works-with). Absent = any |
+| `min_filex` | the older, lower-bound-only form: `"0.43.0"` means `>=0.43.0`. Honoured together with `filex` |
 | `label`, `description` | `Text` = `{en, tr, …}`; `en` is required everywhere a Text appears, other languages fall back to it |
 | `permissions` | the closed list below; anything else is refused at install |
 | `permission_reasons` | shown beside each permission in the install review — say why |
@@ -137,6 +140,77 @@ function.
 
 Unknown fields are refused: a typo in `permisions` would otherwise install an
 app with no grants and every host call refused, which is a confusing failure.
+
+### Which filex it works with
+
+`filex` says which filex versions the app works with — a range, written as a
+small, standard subset of the npm/Cargo syntax:
+
+| You write | It means |
+|---|---|
+| `>=0.47.0` | 0.47.0 and every later filex |
+| `>=0.47.0 <0.60.0` | from 0.47.0 up to, not including, 0.60.0 — comparators joined by a space must **all** hold |
+| `>=0.47.0 <0.50.0 \|\| >=0.52.0` | either range — alternatives are joined by `\|\|` |
+| `0.47.0` or `=0.47.0` | exactly 0.47.0 |
+
+Operators are `>=`, `>`, `<=`, `<`, `=`; versions are `MAJOR.MINOR.PATCH` (a
+leading `v` is fine). No `^`, `~` or `x` wildcards, and no pre-release
+versions — `^0.47.0` means `>=0.47.0 <0.48.0` in npm, which is rarely what an
+author writing it for filex 0.47 means. A range that does not parse is
+refused at install (`manifest_invalid`).
+
+What filex does with it:
+
+- **Install and upgrade** refuse a version whose range leaves the running
+  filex out (`incompatible`, with `requires` and `filex`); the review says so
+  first.
+- **The update check** takes the newest version whose range lets the running
+  filex in — so you can publish a version for the next filex while servers
+  that have not upgraded yet stay on the one before.
+- **An installed app that filex is upgraded past keeps running**, marked *Not
+  compatible with this filex* on the Apps list. The range is your promise;
+  keep it honest.
+- A release candidate (`0.47.0-rc.1`) counts as its release. A development
+  build (`0.1.0-dev`, a `git describe` version) checks no range at all, so you
+  can install the app you are writing on the filex you are running from
+  source.
+
+⚠ **filex before 0.47.0 does not know `filex`** and refuses a manifest that
+carries it (`manifest: json: unknown field "filex"` — unknown fields are
+refused, above). Adding it to a manifest makes that version 0.47-and-later
+only. An app that must still install on an older filex says only
+`min_filex` (known since 0.43, honoured from 0.47), or leaves the range out.
+
+### Publishing so updates are found
+
+An installed app follows the source it was installed from (see
+[APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)); publish the way that
+source is read:
+
+- **An app with a module: GitHub releases.** Tag each release with its
+  version (`v0.2.0`), with `filex-app.json` at the repository root **at that
+  tag** — `version` equal to the tag, `wasm.url` pointing at the release asset
+  (`https://github.com/<owner>/<repo>/releases/download/{tag}/plugin.wasm`) and
+  `wasm.sha256` its hash — and attach `plugin.wasm` to the release. An app
+  installed at a tag follows the repository's releases: the newest one that is
+  not a draft or a pre-release and whose range fits. A tag with no *release*
+  is not seen; a pre-release (a GitHub pre-release, or a `-rc.1` version) is
+  never installed by itself. Do not move a tag after publishing it: servers
+  pin the module by the hash the manifest said.
+- **A language pack: the branch.** Bump `version` and push `filex-app.json` to
+  the branch it is installed from (`main`) — that is the whole release. A pack
+  needs no release, no tag and no `wasm` block.
+- **By address:** keep serving `filex-app.json` at the same address; the
+  module comes from the new manifest's `wasm.url` when it is a full address.
+- **Keep the permissions** if you want the update to arrive by itself. A
+  version that asks for one more permission — or a pack that grows a module —
+  waits for the administrator's approval, however small the change.
+- **Say the range** (`filex`) when a version needs a newer filex than the one
+  before it, so servers that have not upgraded keep the version that works.
+
+The template repository [BRF-Tech/filex-app-template](https://github.com/BRF-Tech/filex-app-template)
+publishes this way: its release workflow tags, stamps `wasm.sha256` and attaches
+the module and the manifest.
 
 ### Permissions
 
@@ -879,7 +953,11 @@ form for one of your categories.
 - On an instance that only accepts signed apps (`FILEX_PLUGIN_TRUSTED_KEYS`),
   sign the manifest's sha256 (hex, lower-case) the way you would a module's.
 
-To publish a new version, bump `version` and use **Upgrade** on the app's row.
+To publish a new version, bump `version` and push `filex-app.json`: a pack
+installed from GitHub or an address moves to it by itself at the next update
+check (once a day, or **Check for updates** on the Apps tab — see
+[Publishing so updates are found](#publishing-so-updates-are-found)); one
+installed from a file is upgraded with **Upgrade** on its row.
 Removing the pack removes its languages at once; a person who had chosen one
 falls back to their next choice (and gets it back if the pack returns).
 

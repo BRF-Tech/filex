@@ -80,6 +80,7 @@ export type DriveProblem =
   | 'plain-http' // the address is http:// and the client refuses Basic there
   | 'in-use' // the chosen letter / mount point is already taken
   | 'no-tool' // the OS mounter is not installed (gio / mount_webdav)
+  | 'mount-folder' // macOS: the folder to mount onto could not be made — `mountDir` names it
   | 'failed'; // anything else — `detail` carries the OS message
 
 /** What main.ts injects: the ability to run a helper and to log. Both are
@@ -197,9 +198,24 @@ export interface MountPlan {
 
 export type DriveWarning = 'plain-http' | 'windows-large-files';
 
+/**
+ * Where a drive is mounted when the caller names nowhere.
+ *
+ * ⚠ macOS used /Volumes/<leaf>. A user cannot make a folder under /Volumes
+ * ("Permission denied"; only the system's own mounts live there), so
+ * mount_webdav had no folder to mount onto and the drive could not have
+ * worked for anyone. It is a folder of the user's own under filex-drives/ —
+ * never ~/filex itself, which is the sync folder.
+ *
+ * Linux names the same folder. gio mounts under GVfs's own directory, so there
+ * this is only the place the window names — but ~/filex-<storage> named
+ * ~/filex itself for the whole server, and the sync folder was shown as the
+ * drive. Moving it broke no mount: mounts are remembered for the session only
+ * (main.ts driveMounts) and gio never mounted onto it.
+ */
 function defaultMountDir(req: MountRequest, home: string): string {
   const leaf = req.storage ? `filex-${req.storage}` : 'filex';
-  return req.platform === 'darwin' ? `/Volumes/${leaf}` : `${home}/${leaf}`;
+  return `${home}/filex-drives/${leaf}`;
 }
 
 export function planMount(req: MountRequest, exists: (p: string) => boolean, home = ''): MountPlan {
@@ -273,9 +289,10 @@ async function mountWindows(
   return { ok: false, problem, detail: parsed.code ? `windows error ${parsed.code}` : undefined };
 }
 
-// ⚠ macOS is left as a best-effort that has NOT been measured on a Mac (this
-// was built and tested on Windows). `mount_webdav` needs the mount point to
-// exist and empty, and takes the password over a pipe rather than an argument.
+// ⚠ macOS is left as a best-effort that has NOT been measured end to end on a
+// Mac (this was built and tested on Windows). `mount_webdav` needs the mount
+// point to exist and be empty, and takes the password over a pipe rather than
+// an argument.
 async function mountMac(
   req: MountRequest,
   plan: MountPlan,
@@ -283,7 +300,17 @@ async function mountMac(
   log: NonNullable<DriveDeps['log']>,
 ): Promise<MountResult> {
   const dir = plan.mountDir!;
-  await deps.exec('/bin/mkdir', ['-p', dir], '');
+  // The folder must exist before mount_webdav can use it. Its failure used to
+  // be ignored, and the mount then failed with nothing but an exit code.
+  // ⚠ Said as a code with the folder (`mount-folder`, `mountDir`), which the
+  // window words in its language; the OS's own words stay in `detail` for the
+  // log. An English sentence in `detail` ended up inside the Turkish one.
+  const made = await deps.exec('/bin/mkdir', ['-p', dir], '');
+  if (made.code !== 0) {
+    log('drive', 'mount mac: mkdir failed', { mountDir: dir, code: made.code, stderr: made.stderr.slice(0, 200) });
+    const why = made.stderr.trim().slice(0, 200) || `mkdir exited ${made.code}`;
+    return { ok: false, problem: 'mount-folder', mountDir: dir, detail: why };
+  }
   // -i makes mount_webdav read the credentials interactively; with no password
   // in the URL it prompts, and we feed username then password on stdin.
   const { code, stdout, stderr } = await deps.exec(

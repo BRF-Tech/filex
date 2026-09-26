@@ -31,7 +31,7 @@ function submit() {
 </script>
 
 <template>
-  <Modal :open="open" :title="t('archive.password_title')" size="sm" @close="emit('close')">
+  <Modal :open="open" :title="t('archive.password_title')" size="sm" :busy="busy" @close="emit('close')">
     <form class="fe-form" @submit.prevent="submit">
       <p class="fe-field__hint">{{ archiveName }}</p>
       <label class="fe-field">
@@ -54,7 +54,13 @@ function submit() {
       <button type="button" class="fe-btn" :disabled="busy" @click="emit('close')">
         {{ t('archive.cancel') }}
       </button>
-      <button type="button" class="fe-btn fe-btn--primary" :disabled="busy || !password" @click="submit">
+      <button
+        type="button"
+        class="fe-btn fe-btn--primary"
+        :disabled="busy || !password"
+        :aria-busy="busy ? 'true' : undefined"
+        @click="submit"
+      >
         {{ busy ? t('archive.opening') : t('archive.continue') }}
       </button>
     </template>

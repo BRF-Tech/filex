@@ -15,6 +15,10 @@ of changes is coalesced.
 | 1. mint a ticket | `POST /api/files/ws-ticket` | Answers `{"ticket":"…","ws_url":"wss://host/api/ws"}`. The ticket is single-use and short-lived (60 s). |
 | 2. open the socket | `GET /api/ws?ticket=<t>` | Also accepts the session cookie for a same-origin browser. |
 
+Under a [base path](CONFIGURATION.md#base-path) both live under it
+(`/filex/api/files/ws-ticket`, `/filex/api/ws`), and `ws_url` names it:
+`wss://host/filex/api/ws`.
+
 The ticket exists so an **embedded** explorer never holds a durable token: the
 host application proxies step 1 (injecting its own credential server-side) and
 hands the browser only the one-shot ticket, which the browser spends

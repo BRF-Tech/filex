@@ -29,6 +29,7 @@ Drop `--build` once you have a binary in `bin/`, or point at one with
 | `--keep` | leaves the server (and the data dir) up afterwards so you can poke at it |
 | `--port <n>` | fixed port instead of a free one |
 | `--grep <pattern>` | passed through to Playwright |
+| `--base-path <p>` | serves filex under a sub-path (`FILEX_BASE_PATH`, e.g. `/filex`) behind `lib/subpath-proxy.mjs`, which passes the full path like a real proxy, redirects the specs' own root-relative requests into the base, and **fails the run** when the app asks for anything outside it. `164-sub-path.spec.ts` asserts where each journey lands; at the root it asserts the root addresses. On Git Bash set `MSYS_NO_PATHCONV=1`, or `/filex` arrives as a Windows path |
 
 The **cypress** profile starts the same kind of instance and drives
 `web/cypress` instead. The two suites are not duplicates — Playwright walks

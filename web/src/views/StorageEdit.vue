@@ -13,6 +13,8 @@ import {
 
 import { StoragesApi } from '@/api/storages';
 import { useStoragesStore } from '@/stores/storages';
+import { useSyncNow } from '@/composables/useSyncNow';
+import { useStorageDelete } from '@/composables/useStorageDelete';
 import { useStorageDriversStore } from '@/stores/storageDrivers';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
@@ -79,7 +81,8 @@ async function copyUID() {
 
 const saving = ref(false);
 const showDelete = ref(false);
-const deleting = ref(false);
+const del = useStorageDelete();
+const deleting = del.busy;
 
 const testing = ref(false);
 const testResult = ref<{ ok: boolean; error?: string } | null>(null);
@@ -184,28 +187,20 @@ async function save() {
   }
 }
 
+// The runs table is read again when the scan starts and when it ends.
+const scan = useSyncNow({ onEnd: () => loadRuns() });
+
 async function syncNow() {
-  try {
-    await storages.syncNow(id.value);
-    toast.success(t('storages.syncStarted'));
-    await loadRuns();
-  } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.generic')));
-  }
+  await scan.press(id.value, name.value || storages.find(id.value)?.name || `#${id.value}`);
+  await loadRuns();
 }
 
 async function confirmDelete() {
-  deleting.value = true;
-  try {
-    await storages.remove(id.value);
-    toast.success(t('storages.deletedOk'));
-    router.replace({ name: 'storages' });
-  } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.generic')));
-  } finally {
-    deleting.value = false;
-    showDelete.value = false;
-  }
+  const gone = await del.remove({ id: id.value, name: name.value || `#${id.value}` });
+  showDelete.value = false;
+  // The list says "Deleting…" on a storage the server is still deleting, and
+  // drops it when it is done.
+  if (gone) router.replace({ name: 'storages' });
 }
 
 async function test() {
@@ -335,6 +330,8 @@ onMounted(load);
         <Button
           variant="outline"
           size="sm"
+          :loading="scan.isBusy(id)"
+          :disabled="storages.deleting(id)"
           @click="syncNow"
         >
           <RefreshCcw class="h-4 w-4" />

@@ -608,6 +608,12 @@ type Store interface {
 	GetNodeOwner(ctx context.Context, nodeID int64) (*int64, error)
 	SetNodeActor(ctx context.Context, nodeID int64, actorID *int64) error
 	SetNodeExternalUpload(ctx context.Context, nodeID int64, external bool) error
+	// SetNodeDeletedBy names who put a trashed row in the trash: the row and
+	// every trashed row under its path that names nobody yet (a folder's
+	// contents, trashed with it). A live row is left alone. Every soft delete
+	// clears the name first; internal/quotastore writes it after the delete,
+	// from the acting identity.
+	SetNodeDeletedBy(ctx context.Context, nodeID int64, by *int64) error
 	// GetUserDisplayNames resolves a batch of user ids to the label an Owner
 	// column shows. One query for a whole listing page, names only — never
 	// full user rows. See the sqlite driver for why.

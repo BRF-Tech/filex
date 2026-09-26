@@ -58,6 +58,15 @@ const WORKFLOW_GUARDS = [
   'every repository token is a single {{ .Env.NAME }}, as GoReleaser demands',
   // v0.45.1: a tolerated winget warning code still failed the desktop job.
   'ends with exit 0, because GitHub exits the step with $LASTEXITCODE',
+  // 0.46.1: the CLA bot asks on every winget pull request; the release signs.
+  'calls winget-cla.sh for the CLI and for the desktop app',
+  "uses the CLI's title as goreleaser writes it",
+  "uses the desktop app's title as wingetcreate submits it",
+  'posts the agreement the bot reads, and never fails the release',
+  // 0.47.0: every release goes to the Microsoft Store by itself.
+  'commits the submission through msstore-submit.ps1, never as a draft',
+  'leaves a submission still in certification alone, and never fails the release',
+  'keeps the Store package check soft on the runner; the local release run is the strict one',
 ];
 
 export default function plan({ repo, version, tag }) {
@@ -154,6 +163,23 @@ export default function plan({ repo, version, tag }) {
       { name: 'packages unit (TZ=UTC)', sh: "pnpm --filter './packages/*' test", env: { TZ: 'UTC' } },
       // 0.43.x shipped a desktop window whose script never parsed (#52).
       { name: 'desktop: typecheck + unit', sh: 'cd desktop && npx tsc --noEmit -p . && pnpm test' },
+      // A Store package proves itself only once Windows has installed AND
+      // activated it, and the GitHub runner never has (v0.44.2 to v0.46.1 its
+      // activation checks only warned). release.yml sends the package it
+      // builds from this commit to certification, so it is seen working here
+      // first, on a desktop, strictly: a protocol launch, the app answering
+      // from inside the package, its toast filed under the package, the
+      // startup task (desktop/scripts/store-e2e.mjs, needs Developer Mode).
+      IS_WIN
+        ? {
+            name: 'desktop: the Store package works as a Store copy',
+            sh: 'cd desktop && pnpm run build && node scripts/fetch-cli.mjs --platform win32 && node scripts/store-e2e.mjs',
+            env: (c) => ({ FILEX_CLI_BIN: path.resolve(c.repo, bin) }),
+          }
+        : {
+            name: 'desktop: the Store package works as a Store copy',
+            cmd: ['node', '-e', 'console.error("store-e2e installs an MSIX: run the release on Windows with Developer Mode"); process.exit(1)'],
+          },
       // v0.43.0: npm and the Release went out, the images never built —
       // nothing local had ever built one.
       dockerBuild('docker/Dockerfile', 'full'),
@@ -234,7 +260,13 @@ export default function plan({ repo, version, tag }) {
         name: 'export: the workflow guards ran against the workflows that will run',
         vitest: {
           cwd: 'web',
-          files: ['tests/deploy/releaseGatesImages.test.ts', 'tests/deploy/goreleaserTemplates.test.ts', 'tests/deploy/dockerFrontendInputs.test.ts'],
+          files: [
+            'tests/deploy/releaseGatesImages.test.ts',
+            'tests/deploy/goreleaserTemplates.test.ts',
+            'tests/deploy/dockerFrontendInputs.test.ts',
+            'tests/deploy/wingetCla.test.ts',
+            'tests/deploy/msstoreSubmit.test.ts',
+          ],
           env: (c) => ({ FILEX_WORKFLOWS_DIR: workflowsOf(c.exportTarget) }),
           mustPass: WORKFLOW_GUARDS,
         },

@@ -26,6 +26,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
@@ -152,7 +153,7 @@ func (d *Driver) StartFlow(w http.ResponseWriter, r *http.Request) error {
 	http.SetCookie(w, &http.Cookie{
 		Name:     stateCookieName,
 		Value:    state,
-		Path:     "/",
+		Path:     basepath.CookiePath(r.Context()),
 		HttpOnly: true,
 		// Behind a TLS-terminating proxy r.TLS is nil; trust X-Forwarded-Proto
 		// so the state cookie is still marked Secure on an HTTPS site (matches

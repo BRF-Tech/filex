@@ -90,6 +90,7 @@ export interface EndpointMap {
   restore: string | null;
   trashList: string | null;
   trashRestore: string | null;
+  trashPurge: string | null;
   /* wiring:e2 */
   e2eEscrowChallenge: string | null;
   e2eEscrowUsed: string | null;
@@ -236,6 +237,10 @@ export interface ExplorerConfig {
   trashList?: string;
   /** filex trash restore endpoint — `POST { node_id }`. */
   trashRestore?: string;
+  /** Delete one trash entry for good — `DELETE`, `{id}` in the template
+   *  (default `/api/admin/trash/{id}`); `?queued=1` makes it a job of the
+   *  operations queue. Only an operator is let through. */
+  trashPurge?: string;
 
   /* wiring:e2 */
   /** E2E escrow proof-of-possession — `POST { path } → { id, challenge }`. */
@@ -258,6 +263,19 @@ export interface ExplorerConfig {
 
   /** Show the virtual `.trash/` entry in the root listing. */
   trashVisible?: boolean;
+
+  /**
+   * Say a refused change as a toast inside the explorer. Default `true`.
+   *
+   * A change the server refuses — a rename, a move or a copy (drag, paste,
+   * "Move to…"), a duplicate, a delete, a new folder, a permanent delete — is
+   * said in a toast AND emitted as `error` (`{ message, context: { op } }`).
+   * A host that already answers `error` with its own message sets `false`, and
+   * the explorer leaves the saying to it: no toast (the lock sentence of a 423
+   * included), the event still fires. A refusal whose dialog is still open is
+   * shown in that dialog either way. Honoured the same in every surface.
+   */
+  refusalToasts?: boolean;
 
   /**
    * paylas:m1 — show the navigation panel's **My shares** row: the public
@@ -772,8 +790,13 @@ export interface ExplorerConfig {
         dropped?: string;
         finished?: boolean;
         error?: string;
+        /** Files written into the drop so far, inside folders too. */
+        files?: number;
       }) => void,
     ) => void;
+    /** Stops filling in a drop that has landed (the explorer offers "Stop"
+     *  while it runs); the shell reports it as `error: 'cancelled'`. */
+    stop?: () => void | Promise<void>;
   };
 
   /**

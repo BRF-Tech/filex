@@ -15,6 +15,8 @@
 //   4. AppData really is redirected to the package's LocalCache — the reason
 //      the Explorer-visible folders moved to ~/.filex/desktop;
 //   5. Windows registered the startup task, switched off.
+//   6. a notification from inside the package is shown, and Windows files
+//      it under the package (step 3b below).
 //
 // ⚠ It installs an E2E VARIANT, never the real identity: its own package name,
 // its own `filex-e2e://` scheme and its own userData name. On a developer
@@ -115,10 +117,26 @@ async function cdpEval(port, expression) {
   }
 }
 
+/** How many toasts Action Center holds for `aumid` — the list Windows shows
+ *  under the app's name (ToastNotificationManager.History, which Windows
+ *  PowerShell reaches through WinRT; it answers for another app's AUMID too).
+ *  ⚠ Counted, not matched by text: a condensed toast keeps no Content. The
+ *  variant is installed fresh on every run, so whatever it holds is ours. */
+function toastsInActionCenter(aumid) {
+  try {
+    const n = ps(`[void][Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]
+$h = [Windows.UI.Notifications.ToastNotificationManager]::History.GetHistory(${q(aumid)})
+@($h | Where-Object { $_ }).Count`);
+    return /^\d+$/.test(n) ? Number(n) : n;
+  } catch (e) {
+    return String(e?.message ?? e).split('\n')[0];
+  }
+}
+
 let installLocation = '';
 let pfn = '';
 
-// The three checks that need Windows to activate the package (see
+// The checks that need Windows to activate the package (see
 // lib/store-activation.mjs for when a failure is only a warning).
 const SOFT = softActivation(process.env);
 const WAIT = activationWaitFactor(process.env);
@@ -230,6 +248,30 @@ try {
     check('updates belong to the Microsoft Store', state.updateChannel === 'msstore' && state.update?.status === 'store', JSON.stringify(state.update));
     check('the login item is left to Windows Settings', state.launchAtLoginInOsSettings === true);
     check('the app still reports ITS version, not the Store number', state.appVersion === pkg.version, state.appVersion);
+
+    // ── 3b. a notification reaches Windows under the package ──────────
+    // Inside a package Windows files a toast by PackageFamilyName!AppId, and
+    // Electron has to create its notifier WITHOUT an explicit AUMID there; the
+    // NSIS copy's toasts land under "electron.app.filex" instead (measured
+    // 2026-09-26). A web Notification goes through the same presenter as the
+    // main process's (Electron's Windows toast code), so one from the page
+    // stands for the sync, drag-out and "Open with" toasts too.
+    const shown = await cdpEval(port, `new Promise((r) => {
+      try {
+        const n = new Notification('filex Store e2e', { body: 'a toast from inside the package', silent: true });
+        n.onshow = () => r('shown');
+        n.onerror = () => r('error event');
+        setTimeout(() => r('no show event in 15 s'), 15000);
+      } catch (e) { r('threw: ' + e); }
+    })`);
+    activationCheck('a notification from inside the package is shown', shown === 'shown', shown);
+    let held = 0;
+    for (let i = 0; i < 20 * WAIT && !(held > 0); i++) {
+      await sleep(500);
+      held = toastsInActionCenter(`${pfn}!filex`);
+    }
+    activationCheck('Action Center holds it under the package, not under electron.app.filex',
+      held > 0, `${pfn}!filex: ${held}`);
   }
 
   // ── 4. AppData is redirected ────────────────────────────────────────
@@ -239,8 +281,20 @@ try {
     !fs.existsSync(path.join(process.env.APPDATA, VARIANT.name)));
 
   // ── 5. the startup task ─────────────────────────────────────────────
-  const taskState = ps(`$k = 'HKCU:\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\SystemAppData\\' + ${q(pfn)} + '\\filexStartup'; if (Test-Path $k) { (Get-ItemProperty $k).State } else { 'missing' }`);
-  activationCheck('Windows registered the startup task, switched off', taskState === '0', `State=${taskState}`);
+  // ⚠ Registered = the task's key exists. Its State value is NOT written at
+  // registration: the key stays empty (= the manifest's Enabled="false") until
+  // something enumerates startup apps — Settings, Task Manager, Windows' own
+  // StartupAppTask — and then reads State=0. Windows 26200, 2026-09-26: two
+  // runs of the same package, one empty, one State=0; the app never writes it
+  // (the Store copy leaves the login item to Windows). Switched ON would be
+  // State=2, and 1 is "turned off by the user".
+  let taskState = 'missing';
+  for (let i = 0; i < 20 * WAIT && taskState === 'missing'; i++) {
+    if (i) await sleep(500);
+    taskState = ps(`$k = 'HKCU:\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\SystemAppData\\' + ${q(pfn)} + '\\filexStartup'; if (Test-Path $k) { $s = (Get-ItemProperty $k).State; if ($null -eq $s) { 'unset' } else { "$s" } } else { 'missing' }`);
+  }
+  activationCheck('Windows registered the startup task, switched off',
+    taskState === '0' || taskState === 'unset', `State=${taskState}`);
   if (activationFailed) diagnoseActivation();
 } catch (e) {
   check('store-e2e ran to the end', false, String(e?.message ?? e));

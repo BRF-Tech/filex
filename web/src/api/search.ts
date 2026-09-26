@@ -31,6 +31,11 @@ export interface SearchIndexStats {
   index_size_bytes: number;
   last_built_at: string | null;
   rebuilding: boolean;
+  /** When the latest rebuild of the running server ended; absent before any
+   *  has. `rebuilding` turns false on a failure too — read this pair. */
+  last_rebuild_finished_at?: string | null;
+  /** Why that rebuild did not go live; empty when it did. */
+  last_rebuild_error?: string;
 }
 
 export const SearchApi = {

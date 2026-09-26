@@ -254,6 +254,7 @@ function choose(): void {
     :open="open"
     :title="title"
     size="md"
+    :busy="busy"
     @close="emit('close')"
   >
     <div class="fe-destpick" data-testid="destpicker">

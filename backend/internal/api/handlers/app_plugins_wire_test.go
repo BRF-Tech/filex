@@ -85,16 +85,32 @@ func wireFixtureApp(t *testing.T) *wasmplugin.Installed {
 	m, err := wasmplugin.ParseManifest([]byte(wireManifest))
 	require.NoError(t, err)
 	at := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	checked := time.Date(2026, 9, 26, 3, 0, 0, 0, time.UTC)
+	// What the update check found for it (wasmplugin/updates.go): a newer
+	// release that asks for a permission this install was not granted.
+	found := wireJSON(t, wasmplugin.UpdateInfo{
+		CheckedAt: &checked, Status: wasmplugin.UpdateNeedsApproval,
+		Version: "1.3.0", Ref: "v1.3.0", Added: []string{"mail:send"},
+		Announced: "needs_approval@1.3.0",
+	})
 	return &wasmplugin.Installed{
 		Row: &model.AppPlugin{
 			ID: 7, Name: m.Name, Version: m.Version, Source: "github",
-			SourceURL: "https://github.com/BRF-Tech/filex-sign", Signed: true, Enabled: true,
-			SHA256:    "a9950e0d84a62a1b30c952736b097e5f3cde019564724dc3c0432a36f7c0d091",
+			SourceURL: "https://github.com/BRF-Tech/filex-sign@v1.2.0", Signed: true, Enabled: true,
+			SHA256:     "a9950e0d84a62a1b30c952736b097e5f3cde019564724dc3c0432a36f7c0d091",
+			AutoUpdate: true, UpdateJSON: found,
 			CreatedAt: at, UpdatedAt: at,
 		},
 		Manifest: m,
 		Perms:    m.Perms,
 	}
+}
+
+func wireJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	return string(b)
 }
 
 // wireBytes is what writeJSON puts on the wire for body — the same encoder,
@@ -124,6 +140,11 @@ func fixtureLock(plugin string) *model.AppPluginLock {
 }
 
 func TestAppPluginWireFixtures(t *testing.T) {
+	// The filex every `filex` range below is judged against — a release, so
+	// ranges are enforced and an out-of-range app says so.
+	was := wasmplugin.HostVersion
+	wasmplugin.HostVersion = "0.47.0"
+	t.Cleanup(func() { wasmplugin.HostVersion = was })
 	app := wireFixtureApp(t)
 	/* The label resolver the handlers hold at runtime (NewAppPlugins wires
 	   the registry's). Only the fixture app answers, so `ghost` writes the
@@ -152,6 +173,35 @@ func TestAppPluginWireFixtures(t *testing.T) {
 			// which engines the app asks for are not on this server.
 			Installed:      &wasmplugin.DryRunInstalled{ID: 7, Version: "0.2.0"},
 			EnginesMissing: []wasmplugin.DryRunEngine{{ID: "libreoffice", Name: "LibreOffice"}},
+			Compat:         &wasmplugin.Compat{Requires: ">=0.47.0", OK: true, Filex: "0.47.0"},
+		},
+		// POST /api/admin/app-plugins/{id}/upgrade?dry_run=1 — an upgrade's
+		// review: the version it leaves and how the grant changes, and a
+		// range this filex is not in (the install itself then refuses).
+		"app-plugin-upgrade-review.json": &wasmplugin.DryRunAnswer{
+			Manifest:    &app.Manifest.Manifest,
+			Permissions: wasmplugin.PermissionRows(app.Manifest, "en"),
+			WasmSHA256:  app.Row.SHA256,
+			WasmBytes:   5242880,
+			Kind:        wasmplugin.KindApp,
+			Compat:      &wasmplugin.Compat{Requires: ">=0.48.0", OK: false, Filex: "0.47.0"},
+			Upgrade:     &wasmplugin.DryRunUpgrade{From: "1.1.0", Added: []string{"public_pages"}, Removed: []string{"mail:send"}},
+		},
+		// An install or upgrade refused because the app's range leaves this
+		// filex out.
+		"app-plugin-incompatible.json": installErrorBody(&wasmplugin.InstallError{
+			Code: wasmplugin.ErrCodeIncompatible, Requires: ">=0.48.0", Filex: "0.47.0",
+			Message: "sign 1.2.0 works with filex >=0.48.0; this is filex 0.47.0",
+		}),
+		// POST /api/admin/app-plugins/updates/check — what "Check now"
+		// answers: the report, and the list redrawn.
+		"app-plugin-update-check.json": map[string]any{
+			"report": &wasmplugin.UpdateReport{
+				CheckedAt: time.Date(2026, 9, 26, 9, 30, 0, 0, time.UTC), Checked: 2,
+				Updated: []string{"lang-es"}, Available: []string{}, NeedsApproval: []string{"sign"}, Failed: []string{},
+			},
+			"runtime": wireRuntime(),
+			"plugins": []*wasmplugin.Status{reg.StatusOf(app), packStatus(t, reg)},
 		},
 		// A repository install that found no manifest: the refusal the
 		// wizard turns into a sentence that says what to check.
@@ -170,7 +220,7 @@ func TestAppPluginWireFixtures(t *testing.T) {
 		),
 		// GET /api/admin/app-plugins — one row of the list.
 		"app-plugin-list.json": map[string]any{
-			"runtime": map[string]any{"enabled": true, "arch_ok": true, "disabled_reason": "", "requires_signature": false, "engines": map[string]bool{"ffmpeg": true}},
+			"runtime": wireRuntime(),
 			"plugins": []*wasmplugin.Status{reg.StatusOf(app)},
 		},
 		// A language pack: its list row and its install review. ⚠ The rows
@@ -226,12 +276,25 @@ func TestAppPluginWireFixtures(t *testing.T) {
 	}
 }
 
+// wireRuntime is the list answer's header as runtimeFacts writes it for a
+// running registry (the fixture has none to ask).
+func wireRuntime() map[string]any {
+	return map[string]any{
+		"enabled": true, "arch_ok": true, "disabled_reason": "", "requires_signature": false,
+		"engines": map[string]bool{"ffmpeg": true}, "engine_names": map[string]string{"ffmpeg": "FFmpeg"},
+		"filex_version": "0.47.0", "compat_enforced": true, "update_check": true,
+		"updates_checked_at": time.Date(2026, 9, 26, 3, 0, 0, 0, time.UTC),
+	}
+}
+
 // packManifestJSON is a language pack as a translator ships it: languages and
-// nothing else — no module, no permission, no screen.
+// nothing else — no module, no permission, no screen. Its range was written
+// for the filex before this one, so its row says it is out of range.
 const packManifestJSON = `{
   "manifest_version": 1,
   "name": "lang-es",
   "version": "1.0.0",
+  "filex": ">=0.45.0 <0.47.0",
   "label": {"en": "Spanish language pack", "tr": "İspanyolca dil paketi"},
   "description": {"en": "The whole interface in Spanish.", "tr": "Tüm arayüz İspanyolca."},
   "languages": ["en", "tr"],
@@ -255,11 +318,18 @@ func packStatus(t *testing.T, reg *wasmplugin.Registry) *wasmplugin.Status {
 	require.NoError(t, err)
 	require.True(t, m.IsLanguagePack())
 	at := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
+	updated := time.Date(2026, 9, 26, 9, 30, 0, 0, time.UTC)
 	st := reg.StatusOf(&wasmplugin.Installed{
 		Row: &model.AppPlugin{
 			ID: 9, Name: m.Name, Version: m.Version, Source: "github",
 			SourceURL: "https://github.com/BRF-Tech/filex-lang-es@main", Enabled: true,
-			SHA256:    "5d41402abc4b2a76b9719d911017c592ae2e8e9e5d41402abc4b2a76b9719d91",
+			SHA256:     "5d41402abc4b2a76b9719d911017c592ae2e8e9e5d41402abc4b2a76b9719d91",
+			AutoUpdate: true,
+			// It moved to 1.0.0 by itself in the last check.
+			UpdateJSON: wireJSON(t, wasmplugin.UpdateInfo{
+				CheckedAt: &updated, Status: wasmplugin.UpdateCurrent,
+				Auto: &wasmplugin.AutoUpdated{From: "0.9.0", To: "1.0.0", At: updated},
+			}),
 			CreatedAt: at, UpdatedAt: at,
 		},
 		Manifest: m,

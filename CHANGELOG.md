@@ -7,6 +7,331 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-09-26
+
+filex runs under a sub-path behind a reverse proxy, apps keep themselves up
+to date, and long folder jobs leave the request and say what they are doing.
+The last of these is twelve pull requests by Berk Başarır
+([#58](https://github.com/BRF-Tech/filex/pull/58)–[#69](https://github.com/BRF-Tech/filex/pull/69)),
+from an audit of a production install where a person reported "no positive
+or negative message, nothing at all". A review of them found and closed a
+few older holes in the operations queue on the way in.
+
+> ⚠ **Security fixes in the operations queue** ([Security](#security)): the
+> generic queue endpoint took any job kind a client named and ignored a
+> folder-confined token's root, a trash restore did not check the entry's
+> tenant, and every member of a storage could read every other member's
+> queued operations. Upgrade.
+>
+> ⚠ **For integrators** ([Changed](#changed)): `POST /api/files/ops` now
+> takes only `copy`, `move` and `delete` (`400 BAD_KIND` for anything else),
+> and a refused change is also said inside the explorer; hosts that show
+> their own message can turn that off with `refusalToasts: false`.
+>
+> ⚠ **Behind a proxy that strips a path** ([Added](#added)): if
+> `FILEX_PUBLIC_URL` has a path (`https://example.com/filex`) and the proxy
+> takes it off before filex sees the request, switch the proxy to pass the
+> full path — that path is now filex's base, and filex takes it off itself.
+>
+> ⚠ **For app authors** ([Added](#added)): a `filex-app.json` that declares
+> the new `filex` version range installs on filex 0.47 and later only; 0.46
+> and earlier refuse a manifest field they do not know.
+
+### Added
+
+- **The desktop app is in the Microsoft Store**, as
+  [filex File Manager](https://apps.microsoft.com/detail/9PKXDJLVZWXW): the
+  one Windows build Microsoft signs, so there is no SmartScreen prompt, and
+  the Store installs and updates it. The "Install the desktop app" prompt
+  and filex.sh put it first on Windows; the installer and the portable
+  `.exe` stay for machines without the Store. Every release is submitted to
+  the Store by the release itself from now on
+  ([docs/DESKTOP.md](docs/DESKTOP.md)).
+- **filex runs under a sub-path — `https://example.com/filex/` behind a
+  reverse proxy — as well as at the root of its own host**
+  ([#70](https://github.com/BRF-Tech/filex/issues/70)).
+  - One setting: `FILEX_BASE_PATH=/filex` (`base_path`), or nothing at all
+    with `FILEX_PUBLIC_URL=https://example.com/filex`, whose path is then the
+    base. It is checked at startup (leading slash, no trailing slash, no
+    `.`/`..`, unreserved characters); a bad one, or one that disagrees with
+    the public URL's path, stops the server with a message that says what to
+    write instead, and the startup log names the base in effect and where it
+    came from.
+  - The proxy passes the **full** path (Caddy `handle`, not `handle_path`;
+    nginx `proxy_pass` without a URI part). filex takes the prefix off itself
+    and answers 404 to everything outside it before any sign-in check runs,
+    except `/healthz`, which also answers at the root for container health
+    checks.
+  - Every address filex hands a browser carries the base — redirects, the
+    OIDC bounce and callback, share and file-request links and the no-JS
+    pages behind them, links in e-mails, the realtime socket, a tenant's
+    origin in multi-tenant mode — and every cookie it sets is scoped to it
+    (`Path=/filex`).
+  - The web app is built once and served for any base: the server rewrites
+    `index.html` and the PWA manifest as it serves them (and serves both byte
+    for byte at the root, so an installed app keeps its identity), and the
+    service worker is registered under the base.
+  - WebDAV lives at `/filex/dav/`, with every `PROPFIND` href and
+    `MOVE`/`COPY` destination under it; path-style S3 at `/filex/s3`, the
+    signature checked against the path the client signed. A dedicated S3
+    host (`FILEX_S3_DOMAIN`) is served at its own root as before.
+  - The desktop app keeps a server address's path (the sign-in field used to
+    drop it); the CLI already did. The Helm chart has a `basePath` value.
+  - Caddy and nginx examples, measured against a real filex:
+    [DEPLOYMENT.md → Serving filex under a sub-path](docs/DEPLOYMENT.md#serving-filex-under-a-sub-path);
+    the setting: [CONFIGURATION.md → Base path](docs/CONFIGURATION.md#base-path).
+- **Apps follow their source and update themselves, and say which filex
+  versions they work with.** Once a day, and on **Check for updates** in
+  Admin → Apps, filex asks where each app came from for a newer version this
+  filex can run: a GitHub app installed at a tag follows the repository's
+  releases, a language pack follows its branch, an app installed from an
+  address follows that manifest address.
+  - A newer version that asks for no new permission installs by itself,
+    through the same verified fetch and atomic upgrade as a manual install.
+    One that asks for a new permission, or a pack that now brings a module,
+    waits as *Needs approval*; **Review update** shows the version jump, the
+    new permissions marked **New**, and the ones it dropped.
+  - Automatic updates are switched per app from its Actions menu: on by
+    default, off for a URL install pinned by SHA-256, never applied on a
+    signed-only instance. Every one is logged, audited (`app_plugin.update`)
+    and announced to administrators (`app_updated`, and once per version
+    `app_update_available`, `app_update_needs_approval`,
+    `app_update_failed`). `FILEX_APP_PLUGIN_UPDATE_CHECK=0` turns the daily
+    check off; demo instances never check.
+  - `filex-app.json` gains `filex`, a version range (`">=0.47.0 <0.60.0"`).
+    Installs and upgrades outside it are refused (`incompatible`) and the
+    review says so first; updates take the newest version that fits; an
+    installed app filex has outgrown keeps running with a warning. Release
+    candidates count as their release, development builds check no range,
+    and `min_filex` is honoured now. Migration 00063.
+  - [docs/APP-PLUGINS.md](docs/APP-PLUGINS.md).
+- **The Trash says who deleted each item.** A delete now records the person
+  on the item, and on every file inside a deleted folder, whether it ran in
+  the request or later through the operations queue ([#64](https://github.com/BRF-Tech/filex/pull/64)).
+  - The explorer's Trash shows it in a "Deleted by" column ("You" for your
+    own deletes); the admin's Trash page shows the name.
+  - An item nobody in filex deleted shows a dash, with a hover text saying
+    why: the scanner found it gone from the storage, or it was deleted
+    before this release, when nothing was recorded.
+  - A restore clears the record. The trash listing carries
+    `deleted_by_id`, `deleted_by_name` and `deleted_by_self`. Migration 00061
+    adds `nodes.deleted_by`; nothing is backfilled.
+- **Renaming a folder, restoring from the trash and deleting permanently run
+  as jobs of the operations queue.** On an object store a folder is one
+  request per object, so these waited with nothing on screen until a proxy
+  gave up, then said the change had failed while the server carried on
+  ([#61](https://github.com/BRF-Tech/filex/pull/61), [#63](https://github.com/BRF-Tech/filex/pull/63)).
+  - `POST /api/files/manager?action=rename`, `POST /api/files/manager/restore`
+    (which then takes a `node_ids` batch, at most 1,000) and
+    `DELETE /api/admin/trash/{id}` take `queued=1`. The same checks answer at
+    once; what they allow becomes a job (`202 {op}` / `{ops}`, kinds `rename`,
+    `restore`, `purge`), listed under `capabilities.queued`.
+  - The explorer and the admin's Trash page use them on a server that lists
+    them. The dialog closes at once, the row says "Restoring…" or "Deleting
+    permanently…", and the listing follows when the job ends — with the undo
+    a rename always offered.
+  - These jobs run in a lane of their own, so a long folder rename never
+    holds up the copies, moves, deletes and upload commits queued behind it.
+    Once running they are not cancelled half-way (`cancellable: false`;
+    cancelling answers `409 NOT_CANCELLABLE`).
+  - A server restart does not lose them: a restore stopped between entries
+    carries on at the next start, and a rename interrupted half-way finishes
+    the move instead of failing on the half that had arrived.
+  - A purge takes what is in the trash when it runs. An entry restored while
+    the purge waited in the queue is left alone.
+- **"Delete permanently" in the explorer's Trash deletes.** Everyone was
+  offered it; its dialog said the items "will be moved to trash", about items
+  already there, and then nothing was deleted. Someone the server lets purge
+  now purges, after a dialog that says it is for good; anyone else no longer
+  sees it, and the Delete key says how the trash empties itself
+  ([#69](https://github.com/BRF-Tech/filex/pull/69)). A press of many items is
+  one job batch: one "Deleting N items permanently…", one summary with the
+  reason for anything that could not be deleted, one reload.
+- **A copy, move or delete of one folder says how far it has got.** Moving a
+  folder of 4,000 files on an object store read "0/1" with a 0% badge for the
+  minutes it took. The storage driver now counts the objects it works
+  through, a running operation carries `objects_total` / `objects_done`, and
+  the operations centre says "25 of 100 items"
+  ([#67](https://github.com/BRF-Tech/filex/pull/67)). Queued renames,
+  restores and purges count their objects too.
+- **The explorer says what became of what you asked it to do**
+  ([#59](https://github.com/BRF-Tech/filex/pull/59), [#65](https://github.com/BRF-Tech/filex/pull/65), [#69](https://github.com/BRF-Tech/filex/pull/69)):
+  - A paste, drag-move, duplicate or copy the server refused is said on
+    screen, in the reader's words; it went out as the explorer's `error`
+    event only, which looked exactly like a change that worked. A refusal
+    that arrives after its dialog has closed is said as a notice.
+  - A dialog whose request is on its way — Rename, New folder, Delete,
+    Delete permanently, the archive dialogs, the destination picker, an
+    app's screen, the converter — keeps its buttons shut with a label that
+    says so, and Escape, a click outside and × wait for the answer. A long
+    one that can be stopped (the converter) asks inside the dialog before it
+    closes. Paste, Restore and a multi-item Download take one press at a
+    time too.
+  - Undo says "Undoing…" and then what it did: queued, undone in part
+    ("2 of 5"), or undone.
+  - A listing being read again draws a thin moving bar over the rows it
+    will replace, and fades them, after 300 ms.
+  - "Catalog everything" follows the scan it started and says how it ended.
+  - "Move to…" says a move is queued only when it was, keeps the Undo of a
+    move made at once, and says so when the items are already there.
+  - Restore from the trash says what did not come back, and why.
+  - An upload whose bytes are all in filex says "Saving to the storage…"
+    while the server writes it, instead of 100%.
+  - The converter names its step (reading, converting, saving) and waits up
+    to 30 minutes; ⌘K's "Everywhere" says when it could not search; the
+    archive preview says why a listing takes long; restoring a version and
+    taking a snapshot say so while they run; an app's screen opens under the
+    action's name while its answer is on the way.
+- **The admin panel says what its long jobs are doing**
+  ([#66](https://github.com/BRF-Tech/filex/pull/66)): "Sync now" says
+  "started" or "already running" and when the scan is done, failed or
+  stopped (`GET /api/admin/storages` carries `running`); "Rebuild index"
+  follows the rebuild to its end and says it failed, and why, when it did
+  (search stats carry `last_rebuild_error` / `last_rebuild_finished_at`);
+  deleting a large storage says it is still deleting until it is gone;
+  replica "Fix all" queues each retry once (`{queued, already_queued}`); a
+  storage plugin's install waits up to 180 s.
+- **Desktop: the app says what sync, downloads and drag-out are doing**
+  ([#68](https://github.com/BRF-Tech/filex/pull/68)):
+  - A folder no pass has finished yet reads "waiting for its first check",
+    and every phase keeps its figures ("listing the server — 48,211 items so
+    far", "97 changes to make").
+  - An engine that stopped on its own is started again after 5 s, 15 s, a
+    minute, then every five minutes, and the line shows the engine's own
+    reason. A restart that brought no engine up is tried again.
+  - A download to disk moves the dock / taskbar bar, and a notification says
+    "Downloaded" (click to show it in its folder) or "Download failed".
+  - A folder dragged out counts its files, at most four reports a second,
+    and **Stop** ends the file in flight too; two drops at once each have
+    their own Stop.
+  - The tray tooltip carries the pause, sync's state and the unread count.
+- **Embedding: `ExplorerConfig.dragOut.stop` and a `files` count on the
+  drag-out progress** let a host stop a drag-out and say how far it got
+  ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
+- **An embedded explorer whose `apiBase` has a path keeps it for every
+  address it builds.** A multi-selection ZIP and the drag-out link
+  (`/z/<ticket>`) kept only the origin, so behind a host proxy such as
+  `/files-proxy` they went to the host's root and failed; the "open in a new
+  tab" editor route and the connection guides (the WebDAV address, the
+  Cyberduck path) dropped it too. The server's relative addresses
+  (`thumb_url`, a download's `/z/<ticket>`) are joined onto `apiBase`
+  ([INTEGRATION.md](docs/INTEGRATION.md#serving-filex-under-a-sub-path)).
+
+### Changed
+
+- **`POST /api/files/ops` takes only `copy`, `move` and `delete`.** Every
+  other kind answers `400 BAD_KIND`; renames, restores and purges are asked
+  for through their own endpoints with `queued=1`, which run their checks
+  first.
+- **A refused change is said inside the explorer as well as emitted as
+  `error`.** Hosts that already show their own message set
+  `refusalToasts: false` ([docs/API.md](docs/API.md)).
+- **The trash listing pages over everything the caller may see.** It is
+  ordered by deletion time (`deleted_at DESC, id DESC`), and a `limit` above
+  500 reads as 50.
+- **Mount as a drive uses `~/filex-drives/filex-<storage>` on macOS and
+  Linux.** macOS mounted onto `/Volumes/filex-<storage>`, a folder a user
+  cannot make, and ignored the failure; it now says so, in the app's
+  language, when the folder cannot be made. Not yet verified end to end on a
+  Mac.
+
+### Fixed
+
+- **Switching to Starred, Recent, Shared or a tag could be undone by a
+  refresh.** The view's address moved only when its rows arrived, so a
+  refresh landing in between (a live change, the Refresh button, the end of
+  an action) loaded the view being left again, and when that answer came
+  last it was put back on screen under a panel that no longer marked the
+  view you had clicked. The address now moves with the click.
+- **A folder renamed, moved, trashed, restored or purged on an object store
+  could be left half done when the client stopped waiting.** These ran
+  under the request's context, which a closed tab or a proxy that stops
+  waiting (nginx after 60 s, Cloudflare after 100 s) cancels. The folder was
+  left in two places and a retry was refused by the half that had arrived.
+  Once its checks have passed, the change now runs to the end whether or not
+  anybody is still waiting — in the explorer, the trash, the agent surface
+  (`/api/ai/move`, `/api/ai/delete`) and WebDAV (`DELETE`, `MOVE`)
+  ([#60](https://github.com/BRF-Tech/filex/pull/60)).
+- **A purge queued before its entry was restored no longer deletes the
+  restored folder.** The job hard-deleted whatever it found under the id,
+  live or not, with its shares, tags, comments and versions. A purge of an
+  entry already gone counts as done instead of failing on "no rows".
+- **A storage made from the admin panel is switched on.** The form never
+  sends `enabled`, and the server saved it disabled: no scan, and "Sync now"
+  answered 404.
+- **Saving a storage no longer restarts its scan for nothing** — including
+  on PostgreSQL and MySQL, which spell a stored configuration differently —
+  and a new setting stops every scan of the old one.
+- **Deleting a large storage finishes, and a failed delete leaves the
+  storage as it was.**
+- **The trash listing reached only its first page** when some entries were
+  hidden from the caller (it reported the page's length as the total).
+- **"Deleted by" is not given to a person for files the scanner had found
+  gone** under a folder that was deleted in place.
+- **The archive dialogs and "Send by email" send once per press**, Enter
+  included; "Extract here" says it is reading the archive and a second
+  choice starts nothing.
+- **A file request says the server is saving, and a drop that arrived is not
+  called failed.** The server finishes writing a drop that has fully arrived
+  when a proxy gives up, and a gateway timeout after every byte was sent
+  reads "Sent, but the server did not confirm it in time". A `502` still
+  reads as a failure: a down server answers it after the last byte too.
+- **The archive preview** no longer lets a listing land on the next file's
+  screen, and closing it stops the server's download.
+- **An error message that mentions "already exists"** is no longer read as
+  "something with that name is already there" unless it is the queue's own.
+- **The operations centre** no longer announces a colleague's job to an
+  administrator's explorer, names a restore or purge by its item count, and
+  shows a count only where it can move.
+- **Desktop:**
+  - moving the filex folder runs once, and sync stays off until it ends;
+  - "Open with filex" opens a document once, and finds the synced copy under
+    a path with a Turkish "İ" in it (it could open the wrong file);
+  - "Stop syncing" and "Keep online only" stop the pass under way;
+  - a pair list that could not be read no longer stops every sync watcher;
+  - Settings stops losing clicks while sync prints;
+  - the update card says "Up to date" only after a check, and the tray's
+    Settings opens Settings on a hidden start.
+- **Uploading from a page opened over plain http at an address other than
+  localhost did nothing.** The explorer named every upload with
+  `crypto.randomUUID()`, which browsers only define on https or localhost;
+  picking a file stopped at "crypto.randomUUID is not a function" before a
+  byte was sent.
+- **Apps:** an upgrade that failed and was rolled back no longer breaks the
+  app at the next restart; an app that is switched off stays off after an
+  upgrade; an upgrade interrupted by a crash is undone at the next start;
+  and a language pack installs from its manifest address alone (the install
+  looked for a module address, which a pack does not have).
+- **Two source files were stored as binary by git** (a raw NUL byte), so
+  their changes could not be reviewed; every source file is now checked.
+
+### Security
+
+- **Every member of a storage could read every other member's queued
+  operations, file paths included** ([#58](https://github.com/BRF-Tech/filex/pull/58)).
+  `GET /api/files/ops` was scoped to the tenant and nothing finer, and
+  `GET /api/files/ops/{id}` answered any sequential id. Anybody but an
+  administrator now sees, reads and cancels only the operations they queued,
+  and gets `404` for someone else's. "Administrator" means the credential in
+  use: an administrator's folder-confined or read-only token, or a session
+  narrowed with `X-Filex-Root`, sees only its own. Migration 00062 indexes
+  `pending_ops (actor_id, id)`.
+- **The generic queue endpoint took any job kind a client named.** A caller
+  could post `restore` or `purge` with any entry id and have it restored or
+  destroyed without the checks the trash endpoints make, or `rename` without
+  the read-only check. It now takes only `copy`, `move` and `delete`, and a
+  trash job refuses an entry of another storage.
+- **A folder-confined token could queue copies, moves and deletes outside
+  its folder** through `POST /api/files/ops`, whose `sources` and `dest` were
+  not held to the token's root. They are now (`403`).
+- **A trash restore did not check the entry's tenant.** A tenant
+  administrator, or a member on a storage without access control, could
+  restore another tenant's entry by id. Every entry is now checked, in the
+  request and in the queued batch.
+- **The queue could change a read-only storage**, as the source of a move or
+  delete, or as the destination of a copy through the generic endpoint. It
+  answers `403 READ_ONLY` now.
+
 ## [0.46.1] - 2026-09-26
 
 ### Fixed

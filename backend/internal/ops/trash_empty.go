@@ -361,11 +361,20 @@ func (s *Service) resumeTrashEmpties(ctx context.Context) {
 }
 
 // Viewer is who is looking at the queue: every row (All), or the rows of
-// these storages plus the trash empties of this tenant.
+// these storages plus the trash empties of this tenant — narrowed, when Own
+// is set, to the rows Actor queued.
 type Viewer struct {
 	All        bool
 	StorageIDs []int64
 	Tenant     string
+	// Own narrows the viewer to the rows Actor queued. A row carries its
+	// sources and its destination: paths inside folders the viewer may hold
+	// no grant for, which the tenant scope above does not look at. Set for
+	// everybody but an administrator (the handlers' opsViewer); a row that
+	// names nobody (queued before actor_id existed, or by something that is
+	// not a person) is then nobody's, and Actor 0 reaches no row at all.
+	Own   bool
+	Actor int64
 }
 
 // ViewerOf is the viewer a request is: unscoped callers and the supertenant
@@ -380,8 +389,12 @@ func ViewerOf(ctx context.Context) Viewer {
 
 // Sees reports whether v may see (and so follow or cancel) op. An op is a
 // tenant's when either of its storages is; a trash empty, which may name no
-// storage at all, is the tenant's that asked for it.
+// storage at all, is the tenant's that asked for it. An Own viewer sees only
+// what it queued (the same predicate ListFor puts in the SQL).
 func (v Viewer) Sees(op *Op) bool {
+	if v.Own && (op == nil || op.ActorID == nil || v.Actor <= 0 || *op.ActorID != v.Actor) {
+		return false
+	}
 	if v.All {
 		return true
 	}

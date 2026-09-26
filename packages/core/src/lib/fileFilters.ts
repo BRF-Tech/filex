@@ -382,6 +382,30 @@ export function ownerNameOf(n: FileNode): string {
   return typeof raw === 'string' ? raw : '';
 }
 
+/* ── Who put it in the Trash ──────────────────────────────────────────────
+ *
+ * A trash row's `deleted_by_*`, in the owner's shape: the id, the name the
+ * server resolved, and `deleted_by_self` for the asker's own deletes. Every
+ * key is absent when nobody in filex is named on the row. */
+
+/** The deleter's account id, or null when nobody is named. */
+export function deleterIdOf(n: FileNode): number | null {
+  const raw = (n as Record<string, unknown>).deleted_by_id;
+  return typeof raw === 'number' && raw > 0 ? raw : null;
+}
+
+/** True when the signed-in account put this row in the Trash (answered by the
+ *  server, like `owner_self`). */
+export function deletedByViewer(n: FileNode): boolean {
+  return (n as Record<string, unknown>).deleted_by_self === true;
+}
+
+/** The deleter's display name, or '' when there is none to show. */
+export function deleterNameOf(n: FileNode): string {
+  const raw = (n as Record<string, unknown>).deleted_by_name;
+  return typeof raw === 'string' ? raw : '';
+}
+
 /** True when the row arrived through an anonymous drop link. The OWNER is
  *  still the person who created the link — this only says they did not put it
  *  there themselves. */

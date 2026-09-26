@@ -13,6 +13,10 @@ const props = defineProps<{
    *  (a taken name, a refusal, an outage). Shown under the field until the
    *  name is edited. */
   error?: string | null;
+  /** The rename is on its way. Renaming a folder on an object store copies
+   *  every object in it, so this can last; a second Save meanwhile met the
+   *  half-copied folder and was refused as "already here". */
+  busy?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -51,6 +55,7 @@ function onInput() {
 }
 
 function submit() {
+  if (props.busy) return;
   const clean = name.value.trim();
   if (!clean) return;
   if (/[\\/]/.test(clean) || clean === '.' || clean === '..') {
@@ -70,7 +75,7 @@ function submit() {
 </script>
 
 <template>
-  <Modal :open="open" :title="t('modal.rename.title')" size="sm" @close="emit('close')">
+  <Modal :open="open" :title="t('modal.rename.title')" size="sm" :busy="busy" @close="emit('close')">
     <form @submit.prevent="submit">
       <input
         v-model="name"
@@ -83,11 +88,17 @@ function submit() {
       <p v-if="shownError" class="fe-form__error" role="alert" data-testid="rename-error">{{ shownError }}</p>
     </form>
     <template #actions>
-      <button type="button" class="fe-btn" @click="emit('close')">
+      <button type="button" class="fe-btn" :disabled="busy" @click="emit('close')">
         {{ t('modal.rename.cancel') }}
       </button>
-      <button type="button" class="fe-btn fe-btn--primary" @click="submit">
-        {{ t('modal.rename.save') }}
+      <button
+        type="button"
+        class="fe-btn fe-btn--primary"
+        :disabled="busy"
+        :aria-busy="busy ? 'true' : undefined"
+        @click="submit"
+      >
+        {{ busy ? t('modal.rename.saving') : t('modal.rename.save') }}
       </button>
     </template>
   </Modal>

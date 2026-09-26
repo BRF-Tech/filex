@@ -341,9 +341,15 @@ export function notificationRoute(
   return null; // a share link is outside the SPA; `none` goes nowhere at all
 }
 
-/** The public URL of a share token. Outside the SPA — a real navigation. */
-export function shareHref(token: string): string {
-  return `/s/${encodeURIComponent(token)}`;
+/**
+ * The public URL of a share token. Outside the SPA — a real navigation.
+ *
+ * `root` is the base path the app is served under (FILEX_BASE_PATH; the web
+ * passes the core's `appBase()`), `''` at the root. A parameter rather than an
+ * import, because this module depends on nothing (see notificationHref).
+ */
+export function shareHref(token: string, root = ''): string {
+  return `${root.replace(/\/+$/, '')}/s/${encodeURIComponent(token)}`;
 }
 
 /**
@@ -351,17 +357,18 @@ export function shareHref(token: string): string {
  * route: a service worker's `notificationclick` (which has no router, and may
  * run with no page open at all) and anything that wants a copyable link.
  *
- * `base` is the prefix the SPA is served from (`/admin/`, `/drive/`) — the
- * same reason `pluginPageBase` exists on the explorer's config: only those
- * prefixes fall back to index.html on the server.
+ * `base` is the prefix the SPA is served from (`/admin/`, `/drive/`, under
+ * the base path when there is one) — the same reason `pluginPageBase` exists
+ * on the explorer's config: only those prefixes fall back to index.html on the
+ * server. `root` is the base path alone, for a share link (shareHref).
  *
  * ⚠ Hand-rolled escaping rather than `URLSearchParams`: this module is
  * imported by the DESKTOP MAIN PROCESS and by a service worker, and its whole
  * discipline is to depend on nothing. `''` when there is nowhere to go — the
  * caller must not turn that into "/".
  */
-export function notificationHref(dest: NotificationDestination, base = '/'): string {
-  if (dest.kind === 'share') return shareHref(dest.token);
+export function notificationHref(dest: NotificationDestination, base = '/', root = ''): string {
+  if (dest.kind === 'share') return shareHref(dest.token, root);
   const prefix = `${String(base || '/').replace(/\/+$/, '')}/`;
   if (dest.kind === 'app') {
     const at = `${prefix}app/${encodeURIComponent(dest.plugin)}/${encodeURIComponent(dest.view)}`;

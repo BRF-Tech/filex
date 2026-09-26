@@ -15,6 +15,9 @@
  * Pure on purpose: no electron import, so node:test can drive it.
  */
 
+import fs from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+
 /** The request header value every download sends. */
 export const WHOLE_FILE_RANGE = 'bytes=0-';
 
@@ -38,4 +41,95 @@ export function wholeFileVerdict(status: number, contentRange?: string | string[
     return { ok: false, reason: 'the server is still preparing this file; try again in a moment' };
   }
   return { ok: false, reason: `server said ${status}` };
+}
+
+// ── a download to disk, said while it runs and when it ends ────────────────
+//
+// ⚠ The explorer's Download and ⌘K save through the window's own download,
+// and nothing listened to it: no progress, no end, and a failure said nothing
+// at all. main.ts listens (will-download); the rules are here.
+
+/**
+ * Every download of the window added up, for the dock / taskbar bar: the
+ * received bytes of all of them over their total. -1 when none runs (no
+ * bar); 2 when one does not know its size (Electron draws a value above 1 as
+ * an indeterminate bar, which is honest where 0% would read as stuck).
+ */
+export class DownloadTally {
+  private readonly items = new Map<string, { received: number; total: number }>();
+
+  update(id: string, received: number, total: number): void {
+    this.items.set(id, { received: Math.max(0, received), total: Math.max(0, total) });
+  }
+
+  finish(id: string): void {
+    this.items.delete(id);
+  }
+
+  fraction(): number {
+    if (this.items.size === 0) return -1;
+    let received = 0;
+    let total = 0;
+    for (const it of this.items.values()) {
+      if (it.total <= 0) return 2;
+      received += it.received;
+      total += it.total;
+    }
+    return Math.min(1, received / total);
+  }
+}
+
+/** What a download's end is worth saying: done, failed, or nothing (the person
+ *  cancelled it themselves). */
+export function downloadEnding(state: 'completed' | 'cancelled' | 'interrupted'): 'done' | 'failed' | null {
+  if (state === 'completed') return 'done';
+  if (state === 'interrupted') return 'failed';
+  return null;
+}
+
+// ── a download landing on disk ──────────────────────────────────────────────
+
+/** What a download stopped by the person rejects with — the word the drop's
+ *  progress carries to the explorer (`error: 'cancelled'`). */
+export const CANCELLED = 'cancelled';
+
+/**
+ * Writes a download into `dest` through `<dest><suffix>`, renamed to the real
+ * name only once complete, and returns its size.
+ *
+ * ⚠ Nothing may wear the real name half-written: whoever opens the folder
+ * while it arrives — or the next drag, handed the cache entry — would take
+ * the half for the whole. A failure removes the part file.
+ *
+ * ⚠ `signal` stops it IN THE MIDDLE of the file. The drop's Stop used to be
+ * looked at only between two files, so on a drop of one big file it did
+ * nothing, and inside a folder nothing changed until the file in flight had
+ * come down. On abort the source is destroyed (the caller also aborts its
+ * request), the part file goes, and it rejects with CANCELLED.
+ */
+export async function landViaPart(
+  source: NodeJS.ReadableStream,
+  dest: string,
+  opts: { suffix: string; signal?: AbortSignal },
+): Promise<number> {
+  const { suffix, signal } = opts;
+  const tmp = `${dest}${suffix}`;
+  if (signal?.aborted) {
+    (source as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.();
+    throw new Error(CANCELLED);
+  }
+  const out = fs.createWriteStream(tmp);
+  try {
+    await pipeline(source, out, signal ? { signal } : {});
+    if (signal?.aborted) throw new Error(CANCELLED);
+    await fs.promises.rename(tmp, dest);
+  } catch (e) {
+    // ⚠ Closed before it is removed: on Windows a file still open is not gone
+    // from its folder until its last handle is.
+    if (!out.closed) await new Promise<void>((r) => out.once('close', () => r()));
+    await fs.promises.rm(tmp, { force: true }).catch(() => undefined);
+    if (signal?.aborted) throw new Error(CANCELLED);
+    throw e;
+  }
+  return (await fs.promises.stat(dest)).size;
 }

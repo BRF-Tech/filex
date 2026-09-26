@@ -1,4 +1,9 @@
 {
+  "compat": {
+    "filex": "0.47.0",
+    "ok": true,
+    "requires": ">=0.47.0"
+  },
   "engines_missing": [
     {
       "id": "libreoffice",

@@ -1,0 +1,6 @@
+{
+  "error": "incompatible",
+  "filex": "0.47.0",
+  "message": "sign 1.2.0 works with filex >=0.48.0; this is filex 0.47.0",
+  "requires": ">=0.48.0"
+}

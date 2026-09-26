@@ -21,6 +21,7 @@ import { useRoute } from 'vue-router';
 import { PluginPageView, useFileApi } from '@brftech/filex-core';
 import type { ExplorerConfig } from '@brftech/filex-core';
 import { explorerAuth } from '@/lib/explorerConfig';
+import { getServerRoot } from '@/api/runtimeConfig';
 import { getStoredLocale } from '@/i18n';
 import { liveTheme } from '@/lib/theme';
 import { currentMountBase } from '@/router';
@@ -49,7 +50,7 @@ const theme = liveTheme;
 // makes carries it as `Accept-Language`, and the server renders a
 // plugin's screens in that language. Leaving it out asked a Turkish
 // window's wizard for English labels.
-const api = useFileApi({ apiBase: '', auth: explorerAuth(), locale: locale.value } as ExplorerConfig);
+const api = useFileApi({ apiBase: getServerRoot(), auth: explorerAuth(), locale: locale.value } as ExplorerConfig);
 
 /**
  * Back to the files, and to the tray. Both are the explorer, so both are the

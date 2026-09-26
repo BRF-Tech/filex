@@ -49,6 +49,8 @@ describe('e2e/run.mjs option checking', () => {
       'chrome',
       '--url',
       'https://fm.example.com',
+      '--base-path',
+      '/filex',
     ];
     expect(unknownOptions(argv)).toEqual([]);
   });

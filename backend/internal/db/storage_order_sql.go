@@ -17,12 +17,7 @@ type StorageOrderSQL struct {
 	Placeholders func(q string) string
 }
 
-func (o *StorageOrderSQL) q(query string) string {
-	if o.Placeholders != nil {
-		return o.Placeholders(query)
-	}
-	return query
-}
+func (o *StorageOrderSQL) q(query string) string { return rebind(o.Placeholders, query) }
 
 // SetStorageOrder gives ordered[i] position i+1 and clears every id in
 // cleared, in one transaction (or in the caller's, when ctx carries one on

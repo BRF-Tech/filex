@@ -236,4 +236,51 @@ test.describe('Virtual views — the context menu is the same everywhere', () =>
     expectWriteVerbs(names, 'home/first screen');
     expectNoFolderVerbs(names, 'home/first screen');
   });
+
+  /*
+   * ⚠⚠ A refresh while a view is loading must not undo the switch. Measured
+   * 2026-09-26 on the v0.47.0 release gate — the test above, twice in two
+   * full runs, "Recent never became aria-current": Starred → click Recent.
+   * `navView` said Recent at once, but the view's address (`currentPath`)
+   * still said `.starred` until Recent's rows arrived, and a refresh that
+   * landed in between (the realtime layer's reload, the Refresh button, the
+   * end of an action) re-read `.starred` and loaded Starred again. The click
+   * was undone — when the refresh's Starred answer came back AFTER Recent's.
+   * Here both answers are held and let go in that order, so the race happens
+   * every time: Recent is held until Refresh has been pressed, then answers;
+   * whatever Starred list the refresh asks for is held until Recent has
+   * answered, then let go.
+   */
+  test('a refresh while Recent is loading keeps Recent', async ({ page }) => {
+    await openExplorer(page);
+    await openView(page, 'starred', /\/api\/files\/manager\/star\/list/);
+    const isRecent = (u: URL) => u.pathname.endsWith('/api/files/manager/recent');
+    const isStarList = (u: URL) => u.pathname.endsWith('/api/files/manager/star/list');
+    let letRecentGo!: () => void;
+    let letStarredGo!: () => void;
+    const recentHeld = new Promise<void>((r) => (letRecentGo = r));
+    const starredHeld = new Promise<void>((r) => (letStarredGo = r));
+    await page.route(isRecent, async (route) => {
+      await recentHeld;
+      await route.continue();
+    });
+    await page.route(isStarList, async (route) => {
+      await starredHeld;
+      await route.continue();
+    });
+    const recent = page.getByTestId('sidenav-view-recent');
+    await recent.click();
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    const recentAnswered = page.waitForResponse((r) => isRecent(new URL(r.url())));
+    letRecentGo();
+    await recentAnswered;
+    letStarredGo();
+    // Long enough for a held Starred answer to land and redraw, if one was asked for.
+    await page.waitForTimeout(1500);
+    await expect(recent).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('.fe__body [aria-busy="true"]')).toHaveCount(0);
+    await expect(page.getByTestId('sidenav-view-starred')).not.toHaveAttribute('aria-current', 'page');
+    await page.unroute(isRecent);
+    await page.unroute(isStarList);
+  });
 });

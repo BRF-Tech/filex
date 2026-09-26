@@ -27,7 +27,7 @@ hero:
 features:
   - icon: ✍️
     title: Apps — things to do with a file
-    details: A second kind of plugin — a sandboxed WebAssembly app that adds actions to the file menu, screens filex draws for it, and public pages for people with no account — installed from a GitHub address through a review of every permission it asks for, and able to do exactly that and nothing else. Two ship alongside filex as public repositories — e-Signature, which sends a document round for signature and seals the finished file with the installation's own seal, and Convert. Write your own in stock Go, against a test kit.
+    details: A second kind of plugin — a sandboxed WebAssembly app that adds actions to the file menu, screens filex draws for it, and public pages for people with no account — installed from a GitHub address through a review of every permission it asks for, and able to do exactly that and nothing else. Apps keep themselves up to date from where they came from, and a new version that asks for more waits for your review. Two ship alongside filex as public repositories — e-Signature, which sends a document round for signature and seals the finished file with the installation's own seal, and Convert. Write your own in stock Go, against a test kit.
     link: /APP-PLUGINS
     linkText: Apps docs
   - icon: 🌍

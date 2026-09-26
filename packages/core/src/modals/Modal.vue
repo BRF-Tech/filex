@@ -16,7 +16,7 @@
  *   • `closeOnBackdrop` was read as `!== false`, but Vue casts an absent
  *     boolean prop to `false`, so NO dialog closed on an outside click.
  */
-import { watch, onBeforeUnmount, ref, getCurrentInstance, inject } from 'vue';
+import { watch, onBeforeUnmount, ref, getCurrentInstance, inject, nextTick } from 'vue';
 import { isTopModal, popModal, pushModal } from '../lib/modalStack';
 import { EXPLORER_LOCALE, useLocale } from '../composables/useLocale';
 
@@ -62,8 +62,28 @@ const props = withDefaults(defineProps<{
    *  rather than a child of the parent component, so plain DOM
    *  inheritance isn't always enough). */
   theme?: 'light' | 'dark' | 'auto';
+  /**
+   * The work this dialog started is on its way (a rename, a delete, an app's
+   * answer, a conversion). Escape and a click outside do nothing, × is shut,
+   * and the dialog says `aria-busy`; the caller shuts its own buttons.
+   *
+   * ⚠⚠ ONE rule for every dialog. #59's dialogs closed anyway and lost the
+   * server's refusal, an app's screen refused to close while its × looked
+   * live, and the converter asked with the browser's own `confirm()` —
+   * unthemed, not right-to-left, and simply blocked in an iframe sandboxed
+   * without `allow-modals`.
+   */
+  busy?: boolean;
+  /**
+   * A busy dialog that closing can still END — the converter, whose work runs
+   * in the dialog's own frame, for up to half an hour. × stays live and asks
+   * INSIDE the dialog: `question`, then "Keep going" or `confirm` (default
+   * "Stop and close"). Escape and an outside click still do nothing.
+   */
+  busyClose?: { question: string; confirm?: string } | null;
 }>(), {
   closeOnBackdrop: true,
+  busyClose: null,
 });
 // ⚠ The explorer's language when the caller names none (EXPLORER_LOCALE):
 // the × used to be "Close" under every Turkish dialog.
@@ -151,10 +171,47 @@ watch(
 // come off and the focus goes home, as if it had closed.
 onBeforeUnmount(unwire);
 
+/** × pressed on a busy dialog that closing can end: the question is up. */
+const asking = ref(false);
+const keepEl = ref<HTMLButtonElement | null>(null);
+// The work ended (or the dialog went) while the question was up: there is
+// nothing left to stop, and the question would be about nothing.
+watch(
+  () => [props.busy, props.open] as const,
+  ([busy, open]) => {
+    if (!busy || !open) asking.value = false;
+  },
+);
+
+/** × — the one way out of a dialog that is not busy; asks on one whose work
+ *  closing would end; does nothing (it is shut) on any other busy dialog. */
+function requestClose() {
+  if (!props.busy) {
+    emit('close');
+    return;
+  }
+  if (!props.busyClose) return;
+  asking.value = true;
+  // The safe answer has the focus: Enter or Space keeps the work going.
+  void nextTick(() => keepEl.value?.focus());
+}
+
+function stopAndClose() {
+  asking.value = false;
+  emit('close');
+}
+
 function onKey(e: KeyboardEvent) {
   if (!isTopModal(me)) return;
   if (e.key === 'Escape') {
     if (props.chromeless) return;
+    // Escape answers the question with the safe answer, and otherwise does
+    // nothing while the work is on its way.
+    if (asking.value) {
+      asking.value = false;
+      return;
+    }
+    if (props.busy) return;
     emit('close');
     return;
   }
@@ -191,7 +248,7 @@ function onBackdropDown(e: PointerEvent) {
 function onBackdrop(e: MouseEvent) {
   const started = downOnBackdrop;
   downOnBackdrop = false;
-  if (!props.closeOnBackdrop || props.chromeless) return;
+  if (!props.closeOnBackdrop || props.chromeless || props.busy) return;
   if (e.target !== e.currentTarget || !started) return;
   emit('close');
 }
@@ -224,6 +281,7 @@ function onBackdrop(e: MouseEvent) {
         aria-modal="true"
         :aria-labelledby="title && !chromeless && !fullbleed ? titleId : undefined"
         :aria-label="!title || chromeless || fullbleed ? title || undefined : undefined"
+        :aria-busy="busy ? 'true' : undefined"
         @click.stop
       >
         <header v-if="title && !chromeless && !fullbleed" class="fe-modal__head">
@@ -232,11 +290,33 @@ function onBackdrop(e: MouseEvent) {
             type="button"
             class="fe-modal__close"
             :aria-label="t('modal.close')"
-            @click="emit('close')"
+            :disabled="busy && !busyClose"
+            @click="requestClose"
           >×</button>
         </header>
         <div class="fe-modal__body">
           <slot />
+        </div>
+        <!-- The question a busy dialog asks before closing ends its work — in
+             the dialog, themed and in the reader's direction, never the
+             browser's confirm(). -->
+        <div v-if="asking && busyClose" class="fe-modal__ask" role="alert" data-testid="modal-busy-close">
+          <p class="fe-modal__ask-text">{{ busyClose.question }}</p>
+          <div class="fe-modal__ask-actions">
+            <button
+              ref="keepEl"
+              type="button"
+              class="fe-btn"
+              data-testid="modal-busy-close-keep"
+              @click="asking = false"
+            >{{ t('modal.busy_close.keep') }}</button>
+            <button
+              type="button"
+              class="fe-btn fe-btn--danger"
+              data-testid="modal-busy-close-confirm"
+              @click="stopAndClose"
+            >{{ busyClose.confirm || t('modal.busy_close.confirm') }}</button>
+          </div>
         </div>
         <footer v-if="$slots.actions && !chromeless && !fullbleed" class="fe-modal__actions">
           <slot name="actions" />

@@ -25,6 +25,7 @@ import { ConnectionsPanel, type ExplorerConfig } from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
 
 import { explorerAuth } from '@/lib/explorerConfig';
+import { getServerRoot } from '@/api/runtimeConfig';
 import { effectiveTheme } from '@/lib/theme';
 
 const { t, locale } = useI18n();
@@ -43,9 +44,10 @@ onMounted(() => {
 onBeforeUnmount(() => htmlObserver?.disconnect());
 
 const config = computed<ExplorerConfig>(() => ({
-  // Same-origin: the Go binary serves this SPA and the API.
-  apiBase: '',
-  endpoint: '/api/files/manager',
+  // Same-origin: the Go binary serves this SPA and the API — under the base
+  // path when there is one (runtimeConfig.getServerRoot).
+  apiBase: getServerRoot(),
+  endpoint: `${getServerRoot()}/api/files/manager`,
   auth: explorerAuth(),
   theme: currentTheme.value,
   locale: locale.value, // the active language — a language pack's too

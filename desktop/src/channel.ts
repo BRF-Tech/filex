@@ -104,7 +104,8 @@ export const LINUX_APP_NAME = 'filex-app';
 export const LEGACY_LINUX_DESKTOP_ENTRY = 'filex.desktop';
 
 export const STORE_IDS = {
-  msstore: '',
+  // Partner Center, 2026-09-26 (the product "filex app", BRFTech.filexapp).
+  msstore: '9PKXDJLVZWXW',
   flatpak: 'sh.filex.Filex',
   // Also the snap's app name: electron-builder names both after
   // `linux.executableName`, and the desktop entry snapd installs is

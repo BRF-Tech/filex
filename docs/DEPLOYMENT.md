@@ -12,7 +12,7 @@ filex is a single Go process that serves **everything from one origin** on port
 second port. Production deployment is therefore mostly "put a good reverse proxy
 in front of port 5212."
 
-- [Reverse proxy](#reverse-proxy) — [Caddy](#caddy) · [nginx](#nginx)
+- [Reverse proxy](#reverse-proxy) — [Caddy](#caddy) · [nginx](#nginx) · [Serving filex under a sub-path](#serving-filex-under-a-sub-path)
 - [HTTPS](#https)
 - [PUBLIC_URL](#public_url)
 - [Scaling / high availability](#scaling--high-availability)
@@ -27,7 +27,8 @@ in front of port 5212."
 ## Reverse proxy
 
 Terminate TLS at a reverse proxy and forward **`/`** to `filex:5212` (Docker) or
-`127.0.0.1:5212` (binary). filex speaks plain HTTP internally — don't try to make
+`127.0.0.1:5212` (binary) — or a path of a domain you share with other things,
+see [Serving filex under a sub-path](#serving-filex-under-a-sub-path). filex speaks plain HTTP internally — don't try to make
 it terminate TLS itself. Whatever proxy you pick must:
 
 - **Set `FILEX_PUBLIC_URL`** to the external `https://…` URL (see
@@ -85,7 +86,10 @@ internal Docker network instead of `127.0.0.1:5212`.
 ### nginx
 
 A complete server block. The `map` at the top turns the `Upgrade` header into the
-right `Connection` value so WebSocket/SSE upgrades work:
+right `Connection` value so WebSocket/SSE upgrades work. ⚠ On a public port
+other than 443/80, pass `$http_host` instead of `$host` (which drops the port):
+S3 signatures, WebDAV `MOVE`/`COPY` and the realtime socket's origin check
+compare against the `Host` the client sent.
 
 ```nginx
 # /etc/nginx/conf.d/filex.conf
@@ -169,6 +173,136 @@ server {
 }
 ```
 
+### Serving filex under a sub-path
+
+filex can live under a path of a domain it shares with other things —
+`https://example.com/filex/` — instead of on a host of its own. Tell filex the
+path, and have the proxy **pass the full path through**:
+
+```sh
+FILEX_PUBLIC_URL=https://example.com/filex    # its path is the base; or set
+# FILEX_BASE_PATH=/filex                      # explicitly (they must agree)
+```
+
+The startup log says which base is in effect
+(`http: serving under a base path base_path=/filex …`). Every route, the web
+app, share links, e-mails, the OIDC callback, WebDAV (`/filex/dav/`), path-style
+S3 (`/filex/s3/`) and the realtime socket (`/filex/api/ws`) then live under it,
+and **nothing outside it** reaches filex: `/api/…` on the host's root is a
+plain 404. `/healthz` is the one exception — it answers at the root too, for
+container health checks. The rules for the value and what it changes are in
+[CONFIGURATION.md → Base path](CONFIGURATION.md#base-path).
+
+⚠⚠ **The proxy must NOT strip the prefix.** filex receives
+`/filex/api/files/manager` and takes `/filex` off itself; a proxy that strips
+it sends `/api/files/manager`, which filex (correctly) refuses as outside its
+base. In Caddy that is `handle`, **not** `handle_path`; in nginx a `proxy_pass`
+**without** a URI part (`http://127.0.0.1:5212`, not `…:5212/`).
+
+**Caddy** — inside the site block of `example.com`, next to whatever else it
+serves:
+
+```caddy
+example.com {
+	encode zstd gzip
+	request_body {
+		max_size 5GB
+	}
+
+	# filex under /filex. `handle`, NOT `handle_path`: filex needs the prefix.
+	# The matcher names /filex itself too — filex answers it with a redirect
+	# to /filex/ — and not /filexsomething.
+	@filex path /filex /filex/*
+	handle @filex {
+		reverse_proxy 127.0.0.1:5212 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# …the rest of example.com
+	handle {
+		respond "the rest of the site" 200
+	}
+}
+```
+
+**nginx** — in the `server` block of `example.com` (the `map` from the
+[nginx](#nginx) example above is needed too):
+
+```nginx
+    # filex under /filex. ⚠ `proxy_pass` has NO URI part: nginx then passes
+    # the request's path unchanged. `proxy_pass http://127.0.0.1:5212/;`
+    # (trailing slash) would strip /filex, and filex would answer 404.
+    # ⚠ `$http_host`, not `$host`: `$host` drops the port, and on a port other
+    # than 80/443 that breaks three things that compare against the Host the
+    # client sent — S3 signatures (SignatureDoesNotMatch), a WebDAV MOVE/COPY
+    # Destination (502) and the realtime socket's origin check (403).
+    location = /filex {
+        return 301 /filex/;
+    }
+
+    location /filex/ {
+        proxy_pass         http://127.0.0.1:5212;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $http_host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Upgrade           $http_upgrade;
+        proxy_set_header   Connection        $connection_upgrade;
+        client_max_body_size    5g;
+        proxy_read_timeout      600s;
+        proxy_send_timeout      600s;
+        proxy_request_buffering off;
+    }
+
+    # The realtime socket and the MCP stream, unbuffered and long-lived —
+    # the same two blocks as above, under the base.
+    location /filex/api/ws {
+        proxy_pass         http://127.0.0.1:5212;
+        proxy_http_version 1.1;
+        proxy_set_header   Host       $http_host;
+        proxy_set_header   Upgrade    $http_upgrade;
+        proxy_set_header   Connection $connection_upgrade;
+        proxy_buffering    off;
+        proxy_read_timeout 3600s;
+    }
+    location /filex/api/ai/mcp {
+        proxy_pass         http://127.0.0.1:5212;
+        proxy_http_version 1.1;
+        proxy_set_header   Host       $http_host;
+        proxy_buffering    off;
+        proxy_read_timeout 3600s;
+    }
+```
+
+**Traefik / a Kubernetes Ingress** — route ``PathPrefix(`/filex`)`` to filex and
+add **no** `StripPrefix` middleware; the Helm chart does this when you set
+`basePath` (see [INSTALLATION.md → Kubernetes](INSTALLATION.md#kubernetes-helm)).
+
+What else to know:
+
+- **Clients** take the base as part of the server address:
+  `https://example.com/filex` in the desktop app's sign-in field and in
+  `filex client login --url`, `https://example.com/filex/dav/` for WebDAV,
+  `https://example.com/filex/s3` as a path-style S3 endpoint (the connection
+  pages print all of these filled in). A dedicated S3 host
+  (`FILEX_S3_DOMAIN`) is served at its own root and is not affected.
+- **Cookies** are scoped to the base (`Path=/filex`), so the other
+  applications on the host do not receive filex's session.
+- **An explorer embedded in another app** keeps pointing its `apiBase` at the
+  server root — `https://example.com/filex` — see
+  [INTEGRATION.md](INTEGRATION.md#serving-filex-under-a-sub-path).
+- **Moving an existing install** under a base (or out of one) changes the
+  address of everything, including the installed web app's identity: people
+  who installed it install it again, and links already sent point at the old
+  address. A proxy can keep the old addresses alive with a redirect.
+- **Upgrading from a setup whose proxy stripped the prefix.** Before 0.47.0
+  filex had no base path, and a `FILEX_PUBLIC_URL` with a path only changed the
+  links it built; a proxy that stripped the prefix got share links working
+  and the web app broken. From 0.47.0 on that path **is** the base: switch the
+  proxy to pass the full path (`handle` instead of `handle_path`).
+
 ---
 
 ## HTTPS
@@ -193,7 +327,9 @@ Whichever you use, the external scheme must be `https` and must match
 ## PUBLIC_URL
 
 `FILEX_PUBLIC_URL` (default `http://localhost:5212`) is **the externally
-resolvable URL users open in a browser** — e.g. `https://files.example.com`.
+resolvable URL users open in a browser** — e.g. `https://files.example.com`,
+or `https://example.com/filex` for filex under a
+[sub-path](#serving-filex-under-a-sub-path) (its path is then the base).
 Behind a proxy this is the proxy's public hostname, **not** the internal
 `filex:5212`.
 

@@ -25,6 +25,8 @@
  * having to un-write.
  */
 
+import { apiRootOr } from './appBase';
+
 /** The preferences an account carries for one surface. */
 export interface UiPrefs {
   /** `light` | `dark` | `auto`. */
@@ -276,7 +278,8 @@ export function forgetPersonalPrefs(): void {
 export interface PrefsConfig {
   /** `web`, `desktop`, or whatever a new surface calls itself. */
   surface: string;
-  /** API origin; empty = same origin. */
+  /** API origin; empty = same origin. Unset: the base path this document was
+   *  served under (lib/appBase) — `''` at the root. */
   base?: string;
   /** Per-call auth, for a host that does not ride on cookies (the desktop app). */
   headers?: () => Promise<Record<string, string>> | Record<string, string>;
@@ -425,7 +428,7 @@ export function localPrefs(): UiPrefs {
 /* ── the account's copy ───────────────────────────────────────────────── */
 
 function url(): string {
-  const base = (cfg.base ?? '').replace(/\/+$/, '');
+  const base = apiRootOr(cfg.base);
   return `${base}/api/me/prefs?surface=${encodeURIComponent(cfg.surface)}`;
 }
 

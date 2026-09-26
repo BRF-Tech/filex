@@ -34,6 +34,7 @@ import { publicLayoutFor } from '../../lib/publicLayout';
 import PublicShell from './PublicShell.vue';
 import PublicShareBody from './PublicShareBody.vue';
 import PublicRequestBody from './PublicRequestBody.vue';
+import { appBase } from '../../lib/appBase';
 import type { DropRefusal } from '../../lib/dropLimits';
 
 const props = defineProps<{
@@ -47,7 +48,11 @@ const props = defineProps<{
   kind: 'share' | 'request';
   /** From the route. Empty (a URL that is not a token) draws "not available". */
   token?: string;
-  /** API origin; empty = same origin. */
+  /**
+   * API origin; empty = same origin. Unset: the base path this document was
+   * served under (lib/appBase) — `/filex` for the admin app under a sub-path,
+   * `''` everywhere else.
+   */
   base?: string;
   /** Forced by the host; otherwise the device's choice, then the browser's. */
   locale?: LocaleCode | string;
@@ -80,7 +85,10 @@ const { t, formatSize } = useLocale(() => locale.value);
 
 /* ── the instance's identity ──────────────────────────────────────────── */
 
-const brand = usePublicBranding({ base: props.base });
+/** Where this page's API lives — see the `base` prop. */
+const apiRoot = props.base ?? appBase();
+
+const brand = usePublicBranding({ base: apiRoot });
 
 /* ⚠ The system's answer as a LIVE ref (#57): read inside the computed below
    it was read once, and an open page kept the mode it was opened in. */
@@ -103,7 +111,7 @@ const resolvedTheme = computed<'light' | 'dark'>(() => {
 /* ── the link itself ──────────────────────────────────────────────────── */
 
 const opts = {
-  base: props.base,
+  base: apiRoot,
   locale: () => locale.value,
   errorText: () => t('plugin.view.error'),
 };
@@ -113,7 +121,11 @@ const share = props.kind === 'share' ? usePublicShare(props.token ?? '', opts) :
    never the app runtime's "The app returned an error" (QA, 2026-09-21). */
 const request =
   props.kind === 'request'
-    ? usePublicRequest(props.token ?? '', { ...opts, errorText: () => t('public.upload_failed') })
+    ? usePublicRequest(props.token ?? '', {
+        ...opts,
+        errorText: () => t('public.upload_failed'),
+        unansweredText: () => t('public.upload_unanswered'),
+      })
     : null;
 
 /** The words for a file the drop page will not send (lib/dropLimits). */

@@ -427,6 +427,19 @@ function snippetTitle(snippet: string): string {
 </script>
 
 <template>
+  <!-- `display: contents`: the grid lays out in its pane exactly as it did
+       before there was a wrapper; the wrapper exists so the bar below can be
+       the grid's SIBLING. -->
+  <div class="fe-gridbox">
+  <!-- The cards on screen are the old ones while the listing is read again
+       (see DataTable's fe-list__refreshing). ⚠ Beside the listbox, not in it
+       — a listbox owns options — and sticky to the top of the pane that
+       scrolls the cards, so it stays in view however far they are scrolled
+       (inside the grid it was absolutely placed at the grid's top and
+       scrolled away with the first row). -->
+  <div v-if="loading && ordered.length > 0" class="fe-grid__refreshing" role="status">
+    <span class="fe-sr-only">{{ t('loading') }}</span>
+  </div>
   <!-- wiring:c4 — listbox semantics (multi-selectable cards as options);
        localized label + busy state. Structure/layout untouched. -->
   <div
@@ -662,5 +675,6 @@ function snippetTitle(snippet: string): string {
     <div v-if="!loading && files.length === 0" class="fe-grid__empty">
       {{ t('empty.folder') }}
     </div>
+  </div>
   </div>
 </template>

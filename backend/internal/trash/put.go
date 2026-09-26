@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
 // ErrUnsupported is returned when the driver can neither Move nor Copy, so
@@ -92,7 +93,7 @@ func Put(ctx context.Context, drv storage.Driver, rel string) (Outcome, error) {
 	// Single-call rename first — the cheap path, and the only one that is
 	// atomic for a whole folder on a real filesystem.
 	if hasMover {
-		err := mover.Move(ctx, rel, key)
+		err := countAttempt(ctx, func(ctx context.Context) error { return mover.Move(ctx, rel, key) })
 		if err == nil {
 			return Outcome{Key: key, Trashed: true, Files: 1}, nil
 		}
@@ -125,7 +126,9 @@ func Put(ctx context.Context, drv storage.Driver, rel string) (Outcome, error) {
 	}
 
 	// No Mover. Copy+Delete keeps the bytes instead of destroying them.
-	if err := copyThenDelete(ctx, copier, deleter, rel, key); err == nil {
+	if err := countAttempt(ctx, func(ctx context.Context) error {
+		return copyThenDelete(ctx, copier, deleter, rel, key)
+	}); err == nil {
 		return Outcome{Key: key, Trashed: true, Files: 1}, nil
 	} else if !errors.Is(err, storage.ErrNotFound) {
 		out, werr := putChildren(ctx, drv, rel, key, nil, copier, deleter)
@@ -150,8 +153,32 @@ func Put(ctx context.Context, drv storage.Driver, rel string) (Outcome, error) {
 	return Outcome{Missing: true}, nil
 }
 
+// countAttempt runs the single-call attempt so that the context's tally
+// (storage.Tally) counts each object once whichever way it goes. The attempt
+// counts as it works — an object-store folder is minutes of it — and may fail
+// part-way (a folder moved object by object stops at the first error) and fall
+// through to putChildren, which finds and counts what is LEFT: what the
+// attempt found and did not finish is taken back.
+func countAttempt(ctx context.Context, attempt func(context.Context) error) error {
+	parent := storage.TallyOf(ctx)
+	if parent == nil {
+		return attempt(ctx)
+	}
+	own := storage.TallyUnder(parent)
+	err := attempt(storage.WithTally(ctx, own))
+	if err != nil {
+		done, found := own.Load()
+		own.Forget(int(found - done))
+	}
+	return err
+}
+
 // putChildren moves every object under `rel` into `key`, preserving the
 // relative sub-path so a folder restores with its tree intact.
+//
+// It counts on the context's tally itself, one per object, and runs each
+// object's move on a context without one: a driver that counts its own moves
+// would otherwise count every object twice.
 func putChildren(ctx context.Context, drv storage.Driver, rel, key string,
 	mover storage.Mover, copier storage.Copier, deleter storage.Deleter) (Outcome, error) {
 	files, err := walkFiles(ctx, drv, rel, true)
@@ -161,6 +188,9 @@ func putChildren(ctx context.Context, drv storage.Driver, rel, key string,
 	if len(files) == 0 {
 		return Outcome{}, nil
 	}
+	tally := storage.TallyOf(ctx)
+	tally.Found(len(files))
+	ctx = storage.WithTally(ctx, nil)
 	// walkFiles reports storage-relative paths with no leading slash, while
 	// `rel` carries whatever spelling the caller used (`nodes.path` has a
 	// leading slash, the protocol surfaces do not). Trimming only the right
@@ -173,6 +203,7 @@ func putChildren(ctx context.Context, drv storage.Driver, rel, key string,
 		if mover != nil {
 			if err := mover.Move(ctx, fp, dst); err != nil {
 				if errors.Is(err, storage.ErrNotFound) {
+					tally.Done(1) // gone already: nothing left to do for it
 					continue
 				}
 				return Outcome{}, fmt.Errorf("trash %q: %w", fp, err)
@@ -180,11 +211,13 @@ func putChildren(ctx context.Context, drv storage.Driver, rel, key string,
 		} else {
 			if err := copyThenDelete(ctx, copier, deleter, fp, dst); err != nil {
 				if errors.Is(err, storage.ErrNotFound) {
+					tally.Done(1)
 					continue
 				}
 				return Outcome{}, fmt.Errorf("trash %q: %w", fp, err)
 			}
 		}
+		tally.Done(1)
 		moved++
 	}
 	if moved == 0 {
@@ -200,13 +233,17 @@ func putChildren(ctx context.Context, drv storage.Driver, rel, key string,
 //
 // Like Put it handles both a single rename and the per-object walk an object
 // store needs, and it never deletes anything it has not first copied.
+//
+// It counts on the context's tally (storage.Tally) the way Put does: the
+// single-call attempt counts as it works and takes back what it only found
+// (countAttempt), and the per-object walk counts each object once itself.
 func TakeBack(ctx context.Context, drv storage.Driver, trashKey, origPath string) error {
 	trashKey = strings.TrimRight(trashKey, "/")
 	origPath = strings.TrimRight(origPath, "/")
 	if trashKey == "" || origPath == "" {
 		return errors.New("trash: empty path")
 	}
-	err := relocate(ctx, drv, trashKey, origPath)
+	err := countAttempt(ctx, func(ctx context.Context) error { return relocate(ctx, drv, trashKey, origPath) })
 	if err == nil {
 		return nil
 	}
@@ -215,6 +252,9 @@ func TakeBack(ctx context.Context, drv storage.Driver, trashKey, origPath string
 	if werr != nil || len(files) == 0 {
 		return err
 	}
+	tally := storage.TallyOf(ctx)
+	tally.Found(len(files))
+	walk := storage.WithTally(ctx, nil)
 	// Same spelling contract as putChildren. Restore passes `nodes.path`, which
 	// carries a leading slash the walk's paths do not; untrimmed, the strip
 	// was a no-op and a folder restored on an object store landed under
@@ -223,13 +263,15 @@ func TakeBack(ctx context.Context, drv storage.Driver, trashKey, origPath string
 	moved := 0
 	for _, fp := range files {
 		dst := origPath + "/" + strings.TrimPrefix(fp, prefix)
-		if rerr := relocate(ctx, drv, fp, dst); rerr != nil {
+		if rerr := relocate(walk, drv, fp, dst); rerr != nil {
 			if !errors.Is(rerr, storage.ErrNotFound) {
 				return fmt.Errorf("restore %q: %w", fp, rerr)
 			}
 			// One object gone out of band is survivable; the rest is real.
+			tally.Done(1)
 			continue
 		}
+		tally.Done(1)
 		moved++
 	}
 	if moved == 0 {
@@ -239,10 +281,8 @@ func TakeBack(ctx context.Context, drv storage.Driver, trashKey, origPath string
 		// already reports for an empty key, so both shapes read the same.
 		return fmt.Errorf("restore %q: %w", trashKey, storage.ErrNotFound)
 	}
-	if deleter, ok := drv.(storage.Deleter); ok {
-		_ = deleter.Delete(ctx, trashKey)
-		_ = deleter.Delete(ctx, trashKey+"/")
-	}
+	deleter, ok := drv.(storage.Deleter)
+	cleanupMarkers(ctx, deleter, ok, trashKey)
 	return nil
 }
 
@@ -274,10 +314,16 @@ func copyThenDelete(ctx context.Context, copier storage.Copier, deleter storage.
 
 // cleanupMarkers drops the empty folder-marker objects an object store keeps
 // at a prefix. Best-effort: the contents are already safe by this point.
+//
+// ⚠ Off the context's tally (storage.Tally). The markers are not objects the
+// person moved, and an object store's Delete counts every call as one object
+// — found and done, whether or not anything was there — so a folder trashed
+// by the per-object walk ended at "N+2 of N+2".
 func cleanupMarkers(ctx context.Context, deleter storage.Deleter, ok bool, rel string) {
 	if !ok || deleter == nil {
 		return
 	}
+	ctx = storage.WithTally(ctx, nil)
 	_ = deleter.Delete(ctx, rel)
 	_ = deleter.Delete(ctx, strings.TrimRight(rel, "/")+"/")
 }
@@ -332,8 +378,6 @@ func walkFiles(ctx context.Context, drv storage.Driver, root string, skipTrash b
 	return out, nil
 }
 
-// IsTrashPath reports whether rel is the trash bucket or lives inside it.
-func IsTrashPath(rel string) bool {
-	clean := strings.Trim(rel, "/")
-	return clean == Prefix || strings.HasPrefix(clean, Prefix+"/")
-}
+// IsTrashPath reports whether rel is the trash bucket or lives inside it
+// (syspath.InTrash, which the store asks too).
+func IsTrashPath(rel string) bool { return syspath.InTrash(rel) }

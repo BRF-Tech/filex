@@ -67,7 +67,9 @@ side.
 | **From a URL** | the module's URL, the manifest's URL and the module's SHA-256 | The GitHub path with the two addresses spelled out |
 
 There is no marketplace. An app is a public repository whose root holds
-`filex-app.json`; that address is how it is found, shared and updated.
+`filex-app.json`; that address is how it is found, shared and updated —
+installed from a repository or an address, an app **follows it** and moves to
+newer versions by itself ([Updates](#updates)).
 
 ### From GitHub, step by step
 
@@ -85,7 +87,7 @@ There is no marketplace. An app is a public repository whose root holds
 5. The wizard ends on *"The app is installed and running."* The app's rows are
    in the file menu from the next time it is opened.
 
-![The install wizard stopped at the permission review](screenshots/v0.46.0/apps/apps-install-review-1440.png)
+![The install wizard stopped at the permission review](screenshots/v0.47.0/apps/apps-install-review-1440.png)
 
 ### The permission review
 
@@ -98,7 +100,15 @@ granting *exactly* that list — no more (an app cannot use a permission it did
 not declare) and no less (the install is refused with the missing ones named).
 An **upgrade** whose new manifest asks for a permission the installed one did
 not have stops at the same review; until you approve, the old version keeps
-running.
+running. An upgrade's review also says the **version jump** (*Version 1.1.0 →
+1.2.0*) and how the grant changes: the permissions it adds — marked **New** in
+the list, and what you are approving — and those it no longer asks for.
+
+An app whose manifest says it works with **other filex versions** (its
+[`filex` range](PLUGIN-KIT.md#which-filex-it-works-with)) is said so at the
+review, in red — *"sign 1.2.0 works with filex >=0.48.0; this is filex 0.47.0.
+It cannot be installed here."* — and **Install** stays off; the install itself
+answers `incompatible`.
 
 For e-Signature the list is long, and each line is worth reading:
 
@@ -134,14 +144,18 @@ signature beside the module.
 ## What the administrator controls after install
 
 The **Apps** tab lists every installed app: its name (with the source, and
-*Signed* when it is), label, version, state (*Running*, *Off*, *Refused* or
+*Signed* when it is), label, version — and under it what the last update
+check found ([Updates](#updates)) — state (*Running*, *Off*, *Refused* or
 *Failed*, with the reason), a **Wakes hourly** badge for an app granted
 `schedule`, how many permissions it holds, an **Enabled** switch, and the
-row's one **Actions** menu: **Details**, **Upgrade**, **Remove**. A banner above
-the table says whether apps are on here, which engines this host has, and
-whether signatures are required.
+row's one **Actions** menu: **Details**, **Review update** (when there is
+one), **Turn off / Turn on automatic updates** (an app with a source),
+**Upgrade**, **Remove**. A banner above the table says whether apps are on
+here, which engines this host has, whether signatures are required, and when
+the apps' sources were last checked for updates; **Check for updates** beside
+**Refresh** asks them now.
 
-![The Apps tab, a language pack among the apps](screenshots/v0.46.0/langpack/apps-list-1440.png)
+![The Apps tab, a language pack among the apps](screenshots/v0.47.0/langpack/apps-list-1440.png)
 
 A **language pack** (below) sits in the same list and is read the same way —
 its row says what it is, and, per language, how much of THIS filex it
@@ -154,7 +168,13 @@ translates.
   yourself, from the app's details, if the flow is never coming back. Its
   public links answer *not available* while it is off.
 - **Upgrade** takes the same three sources as an install, and stops at the
-  review when the new version asks for more.
+  review when the new version asks for more. **Review update** is the upgrade
+  to the newer version the app's own source has — no source to type in, the
+  wizard opens on its review ([Updates](#updates)).
+- **Turn off / Turn on automatic updates** — whether a newer version that
+  asks for nothing new is installed by itself; the Version cell says *Automatic
+  updates are off* while it is. Not offered for an app installed from a file:
+  there is nothing to ask.
 - **Remove** deletes the module, its settings, its action overrides, **its
   per-file state (every request it had open), its locks (so every lock it held
   is lifted), its queued work and its schedule**. The links it opened stay in
@@ -164,7 +184,7 @@ translates.
 **Details** opens the app's own page — `/admin/plugins/apps/<name>`, one
 section per card, **Back** returns to the Apps tab:
 
-![An installed app's details](screenshots/v0.46.0/apps/apps-detail-1440.png)
+![An installed app's details](screenshots/v0.47.0/apps/apps-detail-1440.png)
 
 - **The facts** — name, version, source (for a GitHub install,
   `https://github.com/<repo>@<tag>`), signed or unsigned, SHA-256, when it was
@@ -211,6 +231,108 @@ section per card, **Back** returns to the Apps tab:
   about it (a refused host call, a load failure, each wake-up's decision),
   refreshed every two seconds while the page is open. The ring is in memory:
   a restart empties it.
+
+## Updates
+
+An app installed from a GitHub repository or an address **follows it**. Once
+a day — and whenever you press **Check for updates** on the Apps tab — filex
+asks each app's source whether there is a newer version this filex can run,
+and installs it by itself when it asks for nothing you have not already
+approved.
+
+| Installed from | Where filex looks for a newer version |
+|---|---|
+| a GitHub repository at a **release tag** (`v0.1.1` — how apps with a module are released) | the repository's **releases**: the newest one that is neither a draft nor a pre-release, whose `filex-app.json` at that tag names the same app and whose [`filex` range](PLUGIN-KIT.md#which-filex-it-works-with) lets this filex in. A release that needs a newer filex is stepped over to the newest one that does not (up to five are read per check) |
+| a GitHub repository at a **branch** (`main` — how language packs are published) | that branch's `filex-app.json`, when its `version` is higher |
+| an **address** | the manifest's address again; the module from the new manifest's `wasm.url` when that is a full address, else from the address it was installed from |
+| **uploaded files** | nowhere — the row says *Installed from a file: there is no source to check for updates* |
+
+"Newer" is a higher [semantic version](https://semver.org) in the manifest's
+`version`; a pre-release (`1.2.0-rc.1`) is never taken. Every newer version is
+fetched and checked exactly as an install is — HTTPS only, the size caps, the
+SHA-256 its manifest pins, the signature on an instance that requires one,
+the module's own description of itself — and installed through the same
+upgrade: the old files are kept until the new module has proven itself, and
+put back when it does not.
+
+### What is installed without asking
+
+Each app's automatic updates are **on** by default; **Actions → Turn off
+automatic updates** switches them off for that app.
+
+- **A newer version that asks for the same permissions — or fewer — is
+  installed by itself.** The permissions are what you approved about an app:
+  every host function is held to them, so a version inside the same grant can
+  do nothing you did not already allow. That is every version of a language
+  pack (no module, no permissions) and most versions of an app.
+- **A version that asks for a new permission is never installed by itself.**
+  Its row says **Needs approval** and what it adds; **Actions → Review update**
+  opens the review of that version — the version jump, the new permission
+  marked **New** — and **Upgrade** installs it once you have ticked the box.
+- **A language pack that becomes an app with a module** — code that runs
+  where nothing did — waits for approval the same way, whatever permissions it
+  asks for.
+- With automatic updates off, a newer version is only announced (**Update
+  available**) and waits for **Review update**. An app installed from an
+  address whose SHA-256 you typed yourself starts with it off: you pinned
+  those exact bytes.
+- On an instance that only accepts signed apps (`FILEX_PLUGIN_TRUSTED_KEYS`),
+  nothing is installed by itself — a repository carries no detached
+  signature. Newer versions are announced; upload the signed module to
+  upgrade.
+
+An app that is switched off is updated too, and stays off.
+
+### What you are told
+
+- **The Version cell**, under the version: *Update available* (and the
+  jump, `1.0.0 → 1.0.1`),
+  *Needs approval* (and what it adds), *Updated automatically* (for a week,
+  with the version it came from), *Update failed* (the version that was tried
+  and undone — the old one keeps running; the reason on hover), *Could not
+  check* (and why), a newer version that needs a newer filex, *Up to date*, or
+  *Not checked yet*.
+- **The bell**, administrators only: an app that moved (*"Spanish language
+  pack updated to 0.1.4"*), and — once per version, not every day — one that
+  waits for you or could not be installed. A source that could not be read is
+  not rung: an air-gapped server would hear it every day. The list says it.
+- **The app's Log**: every check and every update. **The Audit log**:
+  `app_plugin.update` for every automatic update (by nobody, with `from`,
+  `to`, `automatic` and the source).
+
+### Which filex an app works with
+
+An app's manifest may say which filex versions it works with — `filex`, a
+range such as `>=0.47.0 <0.60.0` ([PLUGIN-KIT.md](PLUGIN-KIT.md#which-filex-it-works-with)).
+filex does not install, upgrade to or update to a version whose range leaves
+it out; the review says so first, and the update check takes the newest
+version that fits.
+
+An **installed** app that filex has been upgraded past **keeps running**,
+marked **Not compatible with this filex** on its row with the range it
+declares, and a line in its log. The range is its author's promise, not a
+proof — and switching it off at the moment filex is upgraded would take a
+language, or a signing flow, away from everybody with nobody having decided
+it. Switch it off yourself if it misbehaves; the update check looks for a
+version that fits.
+
+A **development build** (an unstamped `0.1.0-dev`, a `git describe` version)
+checks no range at all — the banner says so — so an author can install the
+app they are writing. A release candidate (`0.47.0-rc.1`) counts as its
+release: it is tested with the apps written for it.
+
+### Switching the check off, restarts and shutdowns
+
+`FILEX_APP_PLUGIN_UPDATE_CHECK=0` stops the daily check: no request leaves the
+server for it — what an air-gapped install wants. **Check for updates** still
+asks when you press it. A demo instance never checks and never updates.
+
+The time of the last check is stored, so a restart neither skips a day nor
+checks at every boot (a check that is due runs two minutes after start). One
+check runs at a time: **Check for updates** pressed while the daily one runs
+waits for it. A shutdown waits for an update in flight to finish its swap,
+and a server that stopped in the middle of one — a crash, a power cut — puts
+the previous version back at the next start.
 
 ## Apps that wake up on their own
 
@@ -404,7 +526,7 @@ an optional reason. On an office document the first screen offers to
    purpose: what is being asked of whom is one decision, where it goes is
    the next. Every signer needs at least one signature box.
 
-   ![Defining the boxes](screenshots/v0.46.0/signing/sign-define-1440.png)
+   ![Defining the boxes](screenshots/v0.47.0/signing/sign-define-1440.png)
 
 4. **Place them** — the document, and the boxes that still need a place.
    Choose one, then tap the page where it goes, or drag to size it as you
@@ -412,7 +534,7 @@ an optional reason. On an office document the first screen offers to
    again, copied to another page or deleted. The step cannot be left while a
    box has nowhere to go.
 
-   ![Placing the boxes on the document](screenshots/v0.46.0/signing/sign-place-1440.png)
+   ![Placing the boxes on the document](screenshots/v0.47.0/signing/sign-place-1440.png)
 
 5. **Time** — *How long do they have?* How many days the links are valid
    (14 by default, at most 90 — both pulled down to the instance's maximum
@@ -483,7 +605,7 @@ during which even the right PIN is refused.
 
 | The partner's link, behind its PIN | …and what it opens: only their own boxes |
 |---|---|
-| ![The outside signer's PIN gate](screenshots/v0.46.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](screenshots/v0.46.0/signing/sign-outside-fill-1440.png) |
+| ![The outside signer's PIN gate](screenshots/v0.47.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](screenshots/v0.47.0/signing/sign-outside-fill-1440.png) |
 
 Both kinds of signer then walk the same three steps:
 
@@ -513,7 +635,7 @@ fingerprint, and the certificate files to keep.
   file), and the audit trail saved. These controls are offered to anybody who
   may edit the document, not only to the requester.
 
-  ![The document frozen, its Signatures panel open](screenshots/v0.46.0/signing/sign-status-1440.png)
+  ![The document frozen, its Signatures panel open](screenshots/v0.47.0/signing/sign-status-1440.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* — and,
@@ -524,7 +646,7 @@ fingerprint, and the certificate files to keep.
   asked for, only the requester's own links listed, and every read written to
   filex's audit trail.
 
-  ![The Signatures screen's PINs section](screenshots/v0.46.0/signing/sign-pins-1440.png)
+  ![The Signatures screen's PINs section](screenshots/v0.47.0/signing/sign-pins-1440.png)
 - **The bell** tells the requester when an outside signer opened the
   document, when somebody signed or refused, and when everything is done.
 
@@ -688,7 +810,7 @@ short wizard in a dialog, with only the steps that have something to ask:
 4. **Review** — what will happen, including the route the conversion takes,
    then **Convert**.
 
-![The converter's wizard](screenshots/v0.46.0/apps/convert-wizard-1440.png)
+![The converter's wizard](screenshots/v0.47.0/apps/convert-wizard-1440.png)
 
 The result lands **beside the input**, as `<name>.<new extension>` (pages and
 frames as `<name>-1.png`, `<name>-2.png`, …); a taken name gets a suffix, and
@@ -836,6 +958,7 @@ admin surface refuses installs regardless.
 | `FILEX_APP_PLUGIN_MAX_INPUT_MB` | `256` | Per-file input ceiling for a job |
 | `FILEX_APP_PLUGIN_MAX_OUTPUT_MB` | `512` | Per-file output ceiling for a job |
 | `FILEX_APP_PLUGIN_MAX_WASM_MB` | `64` | Largest module an install accepts |
+| `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every app's source for a newer version and installs the ones that ask for nothing new ([Updates](#updates)). `0` = no request leaves the server for it; **Check for updates** still works. Off on a demo regardless |
 | `FILEX_PLUGIN_TRUSTED_KEYS` | — | Shared with storage plugins: set it and every module must carry a detached ed25519 signature over its sha256 |
 | `FILEX_SECRET_KEY` | — | Seals secret settings, the signing authority's key and share PINs; without it secret settings and signing answer *unavailable*, and a PIN cannot be read back later. The public-link unlock cookie falls back to a per-process key: it works, but a restart signs visitors out and two instances behind one address do not share it |
 
@@ -855,6 +978,8 @@ changes.
   public/<share id>/       the copies an app's public link exposes
   assets/<app>/            files an app pinned and fetched once (`asset_fetch`),
                            kept across upgrades, removed with the app
+  <name>.prev/             the previous version while an upgrade swaps it in;
+                           put back at start if the process stopped mid-swap
 ```
 
 Tables: `app_plugins`, `app_plugin_settings`, `app_plugin_overrides`,
@@ -863,8 +988,11 @@ its hash so an app can find its own documents again), `app_plugin_jobs`,
 `app_plugin_schedule` (what a woken app asked for), `app_plugin_signing_keys`
 (every authority, retired ones included). An app's public links are rows in
 **`shares`**, carrying `plugin_id`, `page_id`, `subject` and the app's own
-record — there is no separate page table any more. Audit entries:
+record — there is no separate page table any more. `app_plugins` also keeps
+each app's automatic-update switch (`auto_update`), the manifest address of a URL install and
+what the last update check found. Audit entries:
 `app_plugin.action_run`, `app_plugin.page_job`, `app_plugin.unlock`,
+`app_plugin.update` (an automatic update),
 `app_plugin.signing_ca_import`, `share.pin_revealed` for every PIN read back,
 and `share.pin_locked` for a PIN gate that shut (the row carries the token's
 hash, never the token).
@@ -877,11 +1005,12 @@ panel can explain):
 
 | Route | Purpose |
 |---|---|
-| `GET /` | `{runtime: {enabled, arch_ok, disabled_reason, requires_signature, engines}, plugins: [...]}` |
+| `GET /` | `{runtime: {enabled, arch_ok, disabled_reason, requires_signature, engines, filex_version, compat_enforced, update_check, updates_checked_at}, plugins: [...]}` — a row carries `compat`, `auto_update`, `update_source` and `update` (what the last check found) |
 | `POST /` | install — multipart `wasm` + `manifest` (+ `signature`, `grant` JSON), or JSON `{github_repo, ref, permissions}`, or JSON `{url, manifest_url, sha256, permissions}`; `?dry_run=1` answers the permission review without installing |
 | `GET /{id}` | row + manifest + granted permissions + settings (secrets masked) + overrides + the schedule |
-| `PATCH /{id}` | `{enabled}` |
-| `POST /{id}/upgrade` | same bodies as install; `409 permissions_changed` with the missing list until granted |
+| `PATCH /{id}` | `{enabled}` and/or `{auto_update}` |
+| `POST /{id}/upgrade` | same bodies as install, or `{from_source: true, permissions}` — the newer version the app's own source has, found and fetched as the update check does; `409 permissions_changed` with the missing list until granted, `409 up_to_date` when the source has nothing newer. The dry run's `upgrade` says the jump and how the grant changes |
+| `POST /updates/check` | ask every app's source now and install what may be installed; answers `{report: {checked_at, checked, updated, available, needs_approval, failed}, runtime, plugins}`. A check already running is waited for |
 | `DELETE /{id}` | remove everything |
 | `GET/PUT /{id}/settings` | `{values}`; `***` on PUT keeps a secret |
 | `GET/PUT /{id}/overrides` | `{actions: [{id, enabled, admin_only, applies}]}` — menu actions only (hidden ones are neither listed nor stored); `applies: null` = manifest; `applies` is the whole rule both ways (engine-gated extensions included), stored as the change against the manifest |
@@ -896,7 +1025,9 @@ panel can explain):
 Errors carry a code the wizard switches on: `manifest_invalid`,
 `sha256_mismatch`, `sha256_required`, `signature_required`, `signature_invalid`,
 `permissions_incomplete` (with `missing`), `name_taken`, `describe_mismatch`,
-`permissions_changed`, `too_large`, `fetch_failed`, `demo_refused` — see
+`permissions_changed`, `too_large`, `fetch_failed`, `demo_refused`,
+`incompatible` (the app's `filex` range leaves this filex out, with
+`requires` and `filex`), `up_to_date` — see
 [APP-PLUGINS-API.md → Errors](APP-PLUGINS-API.md#errors).
 
 The user-side routes (`/api/files/plugins/*`, `/api/files/ops/{id}/cancel`)

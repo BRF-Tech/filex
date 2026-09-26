@@ -12,8 +12,8 @@
 // scope guard.
 import { computed, onBeforeUnmount, onMounted, readonly, ref, type ComputedRef } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRegisterSW } from 'virtual:pwa-register/vue';
 import { viewPrefsSlot } from '@brftech/filex-core';
+import { registerAppServiceWorker } from '@/lib/serviceWorker';
 
 // The Chromium-only event fired when the app meets installability criteria.
 interface BeforeInstallPromptEvent extends Event {
@@ -140,6 +140,10 @@ export const DESKTOP_RELEASES_URL = 'https://github.com/BRF-Tech/filex/releases/
 // visitor to a 404 the moment a new release went out.
 const DL = `${DESKTOP_RELEASES_URL}/download`;
 
+/** The desktop app's Microsoft Store page. The same product id as
+ *  desktop/src/channel.ts `STORE_IDS.msstore` (a test holds the two equal). */
+export const MSSTORE_URL = 'https://apps.microsoft.com/detail/9PKXDJLVZWXW';
+
 export interface DesktopDownload {
   /** What the file is, named the way it is named on the release page. */
   label: string;
@@ -170,6 +174,13 @@ export function desktopDownloadsFor(
 ): DesktopDownload[] {
   if (platform === 'windows') {
     return [
+      // First since 2026-09-26, when the listing went live: the one Windows
+      // build Microsoft signs (no SmartScreen prompt) and the Store updates.
+      {
+        label: t('install.dl.win_store'),
+        hint: t('install.dl.win_store_hint'),
+        href: MSSTORE_URL,
+      },
       {
         label: t('install.dl.win_setup'),
         hint: t('install.dl.win_setup_hint'),
@@ -272,7 +283,8 @@ export function useInstallPrompt() {
   }
 
   // Service-worker update state (registerType: 'prompt' in vite.config.ts).
-  const { needRefresh, updateServiceWorker } = useRegisterSW({
+  // Registered at the address the base path gives it (lib/serviceWorker).
+  const { needRefresh, updateServiceWorker } = registerAppServiceWorker({
     onRegisteredSW(url) {
       console.debug('[pwa] service worker registered:', url);
     },

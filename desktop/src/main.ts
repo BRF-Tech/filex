@@ -72,10 +72,12 @@ import {
   type DrivePlatform,
   type MountResult,
 } from './drive.js';
-import { DragOutCache, createPlaceholders, fulfilDrop, type DragItem } from './dragout.js';
+import { DragOutCache, createPlaceholders, fulfilDrop, type DragItem, type DragProgress } from './dragout.js';
+import { DragFills, throttleReports } from './dragfill.js';
 import { localDriveRoots, watchForDrop } from './dropwatch.js';
 import { remoteDownloadUrl, remoteSearchUrl, searchResults } from './remote-search.js';
 import { log, logPath } from './log.js';
+import { bilingual, type Bilingual } from './strings.js';
 import {
   LEGACY_LINUX_AUTOSTART_NAME,
   LINUX_AUTOSTART_NAME,
@@ -94,6 +96,7 @@ import { DesktopNotifier, opensInWindow, type NotificationRow } from './notifica
 import { unreadBadgeCount, unreadBadgeLabel } from '../../web/src/lib/unreadBadge.ts';
 import {
   OFFICE_EXTENSIONS,
+  OpeningDocs,
   OFFICE_MIME_TYPES,
   SessionStore,
   WriteBackError,
@@ -106,6 +109,7 @@ import {
   orphanScratchEntries,
   recoveryPathFor,
   resolveSyncTwin,
+  sameLocalPath,
   scratchBasename,
   scratchRemoteDir,
   scratchRemotePath,
@@ -129,7 +133,7 @@ import {
   cliPath,
   confirmHeld,
   discardHeld,
-  listPairs,
+  readPairs,
   listTrash,
   movePair,
   removePair,
@@ -143,11 +147,16 @@ import {
   normLimit,
   normWindow,
   folderView,
+  removeFolder,
+  trayTooltip,
   watchPrefsKey,
   watcherAccounts,
   type WatchPrefs,
 } from './sync-policy.js';
 import { SleepGuard, quietMomentForUpdate, syncBusy } from './power.js';
+import { CANCELLED, DownloadTally, downloadEnding } from './download-guard.js';
+import { anyError } from './syncstatus.js';
+import { isServerApiUrl, serverUrl } from './server-url.js';
 import { PORTABLE_DATA_DIRNAME, portableMode } from './portable.js';
 
 // ─────────────────────────── portable build ───────────────────────────
@@ -251,11 +260,16 @@ let dragCache: DragOutCache | null = null;
  *  so `drag:start` never has to re-derive (or re-check) them mid-gesture. */
 let dragReady: { key: string; paths: string[] } | null = null;
 let dragPrepare: AbortController | null = null;
-/** The placeholder drag in flight: its watcher, and the transfer it becomes. */
+/** The placeholder drag waiting to learn where it landed: its watcher. */
 let dragDrop: { cancel: () => void; dir: string } | null = null;
+/** The drops being filled in, each with its own Stop, and what they tell the
+ *  window. `mainWindow` is read when a report is sent, not now. */
+const dragFills = new DragFills((p) => mainWindow?.webContents.send('drag:progress', p));
 /** What the updater is doing, as far as the UI is concerned. */
 // 'store': a store copy (src/channel.ts) — the store updates it, `url` is its page.
-let updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error' | 'manual' | 'store'; version?: string; percent?: number; error?: string; url?: string } = { status: 'idle' };
+// ⚠ 'idle' is "not checked yet" and 'current' is "checked, nothing newer": the
+// card said "Up to date" before any check had been made.
+let updateState: { status: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'error' | 'manual' | 'store'; version?: string; percent?: number; error?: string; url?: string } = { status: 'idle' };
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -344,15 +358,66 @@ function wireAuthHeaderInjection(): void {
   });
 }
 
-/** True for the account's API surface — bytes, not pages. */
-function isApiUrl(url: string, serverUrl: string): boolean {
-  const origin = originOf(serverUrl);
-  try {
-    const u = new URL(url);
-    return u.origin === origin && u.pathname.startsWith('/api/');
-  } catch {
-    return false;
-  }
+/** True for the account's API surface — bytes, not pages. ⚠ Under the server's
+ *  own path (a sub-path install): see server-url.ts. */
+function isApiUrl(url: string, server: string): boolean {
+  return isServerApiUrl(url, server);
+}
+
+/** What a finished download's notification says (watchDownloads). */
+const DOWNLOAD_STRINGS: Bilingual = {
+  done: ['Downloaded', 'İndirildi'],
+  failed: ['Download failed', 'İndirilemedi'],
+};
+
+function downloadText(key: string): string {
+  return bilingual(DOWNLOAD_STRINGS, key, effectiveLocale());
+}
+
+/** Every download of the app's windows, for the dock / taskbar bar. */
+const downloads = new DownloadTally();
+let downloadSeq = 0;
+
+/**
+ * A download to disk says how far it has got and how it ended.
+ *
+ * ⚠ The explorer's Download and ⌘K save through the window's own download
+ * (openOutward, remote:download), and nothing listened to it: no progress, no
+ * end, and a failure said nothing at all. The window's bar moves with the
+ * bytes of every download at once; the end is a notification, and clicking a
+ * finished one shows the file in its folder.
+ */
+function watchDownloads(): void {
+  session.defaultSession.on('will-download', (_e, item) => {
+    const id = String(++downloadSeq);
+    const paint = () => {
+      const f = downloads.fraction();
+      for (const w of BrowserWindow.getAllWindows()) w.setProgressBar(f);
+    };
+    downloads.update(id, item.getReceivedBytes(), item.getTotalBytes());
+    paint();
+    item.on('updated', () => {
+      downloads.update(id, item.getReceivedBytes(), item.getTotalBytes());
+      paint();
+    });
+    item.once('done', (_ev, state_) => {
+      downloads.finish(id);
+      paint();
+      const ending = downloadEnding(state_);
+      if (!ending) return;
+      const name = item.getFilename();
+      log('download', ending, { name });
+      try {
+        if (!Notification.isSupported()) return;
+        const n = new Notification({ title: downloadText(ending), body: name });
+        const saved = item.getSavePath();
+        if (ending === 'done' && saved) n.on('click', () => shell.showItemInFolder(saved));
+        n.show();
+      } catch {
+        /* a courtesy, never a failure path */
+      }
+    });
+  });
 }
 
 /**
@@ -569,8 +634,34 @@ function paintUnread(): void {
   } catch {
     /* a platform that will not take a badge still gets the tooltip */
   }
-  const label = unreadBadgeLabel(count);
-  tray?.setToolTip(label ? `filex — ${label}` : 'filex');
+  paintTrayTip();
+}
+
+let lastTrayTip = '';
+
+/**
+ * The tray's tooltip: the pause, sync's state and the unread count, in ONE
+ * sentence (sync-policy.ts trayTooltip). The pause used to be written by
+ * refreshTray and overwritten the same moment by the unread count's own
+ * tooltip, and sync was not in it at all.
+ */
+function paintTrayTip(): void {
+  if (!tray) return;
+  const acc = activeAccount(state);
+  const count = acc ? (unreadByAccount[acc.id] ?? 0) : 0;
+  const statuses = supervisor?.statuses() ?? [];
+  const tip = trayTooltip(
+    {
+      paused: state.syncPaused === true,
+      unreadLabel: unreadBadgeLabel(count),
+      syncing: syncBusy(statuses),
+      failing: statuses.some((st) => st.signedOut !== true && anyError(st)),
+    },
+    { paused: trayText('pausedState'), syncing: trayText('syncingState'), failing: trayText('failingState') },
+  );
+  if (tip === lastTrayTip) return;
+  lastTrayTip = tip;
+  tray.setToolTip(tip);
 }
 
 function startNotifier(): void {
@@ -584,7 +675,7 @@ function startNotifier(): void {
     },
     enabled: () => state.notifications !== false,
     fetchRows: async (acc, limit) => {
-      const url = new URL('/api/notifications', acc.serverUrl);
+      const url = serverUrl(acc.serverUrl, '/api/notifications');
       url.searchParams.set('unread', 'true');
       url.searchParams.set('limit', String(limit));
       const res = await net.fetch(url.toString(), { headers: { Authorization: `Bearer ${acc.token}` } });
@@ -626,7 +717,7 @@ function startNotifier(): void {
       // the app with a page it has no way back from.
       if (dest.kind === 'share') {
         const acc = state.accounts.find((a) => a.id === accountId);
-        if (acc) void shell.openExternal(new URL(`/s/${encodeURIComponent(dest.token)}`, acc.serverUrl).toString());
+        if (acc) void shell.openExternal(serverUrl(acc.serverUrl, `/s/${encodeURIComponent(dest.token)}`).toString());
         return;
       }
       // The window may be closed (running in the tray) — a notification the
@@ -681,22 +772,22 @@ function effectiveLocale(): 'en' | 'tr' {
 /** The tray's own strings. Tiny on purpose: the window has the real catalogue,
  *  and duplicating it into the main process would be two tables to keep in
  *  step. Anything not listed here has no business being in a tray menu. */
-const TRAY_STRINGS: Record<string, [en: string, tr: string]> = {
+const TRAY_STRINGS: Bilingual = {
   signedOut: ['Not signed in', 'Giriş yapılmadı'],
   open: ['Open filex', "filex'i aç"],
   signedOutSuffix: ['signed out', 'oturum kapalı'],
   pause: ['Pause sync', 'Eşitlemeyi duraklat'],
   resume: ['Resume sync', 'Eşitlemeyi sürdür'],
-  pausedTip: ['filex — sync paused', 'filex — eşitleme duraklatıldı'],
+  pausedState: ['sync paused', 'eşitleme duraklatıldı'],
+  syncingState: ['syncing…', 'eşitleniyor…'],
+  failingState: ['a folder could not be synced — see Settings', 'bir klasör eşitlenemedi — Ayarlar’a bak'],
   updateReady: ['Update {v} ready — installs itself (or now)', '{v} güncellemesi hazır — kendiliğinden kurulur (ya da şimdi)'],
   settings: ['Settings…', 'Ayarlar…'],
   quit: ['Quit filex', "filex'ten çık"],
 };
 
 function trayText(key: string, vars: Record<string, string> = {}): string {
-  const pair = TRAY_STRINGS[key];
-  const raw: string = effectiveLocale() === 'tr' ? pair[1] : pair[0];
-  return Object.entries(vars).reduce<string>((acc, [k, v]) => acc.replaceAll(`{${k}}`, v), raw);
+  return bilingual(TRAY_STRINGS, key, effectiveLocale(), vars);
 }
 
 function refreshTray(): void {
@@ -704,8 +795,8 @@ function refreshTray(): void {
   const acc = activeAccount(state);
   const paused = state.syncPaused === true;
   // The tray icon is often all there is on screen: a paused client has to be
-  // recognisable from it without opening anything.
-  tray.setToolTip(paused ? trayText('pausedTip') : 'filex');
+  // recognisable from it without opening anything (paintTrayTip, below via
+  // paintUnread).
   // ⚠ The badge follows the ACTIVE account, and every caller of this function
   // is a moment the active one may just have changed (boot, a rail switch, a
   // sign-out). Repainting here keeps the number on the icon the number for the
@@ -738,7 +829,13 @@ function refreshTray(): void {
         label: trayText('settings'),
         click: () => {
           route();
-          mainWindow?.webContents.send('app:open-settings');
+          // ⚠ A window the app started hidden (the login item) is only now
+          // loading, and a message sent before its page listens is lost: the
+          // explorer opened instead of Settings. Sent once it has loaded.
+          const wc = mainWindow?.webContents;
+          if (!wc) return;
+          if (wc.isLoading()) wc.once('did-finish-load', () => wc.send('app:open-settings'));
+          else wc.send('app:open-settings');
         },
       },
       { type: 'separator' },
@@ -1010,7 +1107,7 @@ async function checkFeedForManualUpdate(): Promise<void> {
     const version = /^version:\s*(\S+)/m.exec(yml)?.[1];
     if (!version) throw new Error('feed carries no version');
     if (!isNewerVersion(version, app.getVersion())) {
-      pushUpdateState({ status: 'idle' });
+      pushUpdateState({ status: 'current' });
       return;
     }
     // Hand the browser the artifact itself when the feed names one; the plain
@@ -1060,7 +1157,7 @@ function wireAutoUpdate(): void {
 
   autoUpdater.on('checking-for-update', () => pushUpdateState({ status: 'checking' }));
   autoUpdater.on('update-available', (i) => pushUpdateState({ status: 'available', version: i?.version }));
-  autoUpdater.on('update-not-available', () => pushUpdateState({ status: 'idle' }));
+  autoUpdater.on('update-not-available', () => pushUpdateState({ status: 'current' }));
   autoUpdater.on('download-progress', (p) =>
     pushUpdateState({ status: 'downloading', percent: Math.round(p?.percent ?? 0), version: updateState.version }));
   autoUpdater.on('update-downloaded', (i) => {
@@ -1335,9 +1432,17 @@ function migrateLegacyLinuxNames(): void {
   }
 }
 
+/**
+ * Accounts whose local filex folder is being moved (sync:setRoot). Their
+ * watcher is stopped for the move and none is started until it ends — see
+ * WatchGate.moving — and their folders say "moving".
+ */
+const rootMoves = new Set<string>();
+
 function publicState() {
   const keychainNow = keychain();
   return {
+    rootMoving: [...rootMoves],
     accounts: state.accounts.map(({ token, ...rest }) => rest), // never hand the token to a renderer
     activeId: state.activeId,
     // Pairings come from the CLI's own state file, not from a copy kept here.
@@ -1357,6 +1462,7 @@ function publicState() {
         pairId: p.id,
         paused: state.syncPaused === true,
         signedOut: !!state.accounts.find((a) => a.id === p.account)?.signedOut,
+        moving: rootMoves.has(p.account ?? ''),
         status: supervisor?.statuses().find((st) => st.accountId === p.account) ?? null,
         minuteOfDay: new Date().getHours() * 60 + new Date().getMinutes(),
       }),
@@ -1435,11 +1541,14 @@ function publicState() {
 let knownPairs: Pair[] = [];
 
 async function refreshPairs(): Promise<void> {
-  knownPairs = await listPairs();
+  // A list that could not be read is not an empty one: the folders stay on
+  // screen as they were (sync-policy.ts watchersWanted says the same to the
+  // supervisor).
+  knownPairs = await readPairs().catch(() => knownPairs);
   // Paused hands the supervisor no accounts: every watcher stops and none
   // starts — at launch too. See watcherAccounts().
   await supervisor?.reconcile(
-    watcherAccounts(state.accounts, { paused: state.syncPaused === true }),
+    watcherAccounts(state.accounts, { paused: state.syncPaused === true, moving: rootMoves }),
     (id) => state.accounts.find((a) => a.id === id)?.token ?? null,
   );
 }
@@ -1484,7 +1593,7 @@ async function setSyncPaused(paused: boolean): Promise<void> {
 
 /** Native-dialog strings for the keep flow. The window carries the real
  *  catalogue; these render in OS dialogs, which the renderer cannot draw. */
-const SYNC_STRINGS: Record<string, [en: string, tr: string]> = {
+const SYNC_STRINGS: Bilingual = {
   rootTitle: ['Choose where filex keeps folders on this computer', 'filex klasörlerinin bu bilgisayarda tutulacağı yeri seç'],
   rootButton: ['Use this folder', 'Bu klasörü kullan'],
   unkeepTitle: ['Keep online only', 'Yalnızca çevrimiçi tut'],
@@ -1532,9 +1641,7 @@ const SYNC_STRINGS: Record<string, [en: string, tr: string]> = {
 };
 
 function syncText(key: string, vars: Record<string, string> = {}): string {
-  const pair = SYNC_STRINGS[key];
-  const raw: string = effectiveLocale() === 'tr' ? pair[1] : pair[0];
-  return Object.entries(vars).reduce<string>((acc, [k, v]) => acc.replaceAll(`{${k}}`, v), raw);
+  return bilingual(SYNC_STRINGS, key, effectiveLocale(), vars);
 }
 
 /** `docs://reports/` → `docs://reports`; the bare storage form `docs://`
@@ -1685,6 +1792,30 @@ function dragIcon(): Electron.NativeImage {
 
 function accountPairs(accountId: string): Pair[] {
   return knownPairs.filter((p) => p.account === accountId);
+}
+
+/**
+ * Takes a folder out of sync — Settings' "Stop syncing" (sync:remove) and the
+ * explorer's "Keep online only" (sync:unkeep) both, through ONE rule
+ * (sync-policy.ts removeFolder): a pass of it under way is stopped first, and
+ * the pair list is read again even if the remove threw.
+ *
+ * ⚠ The re-read is not optional: the watcher only re-reads its pair list
+ * when the supervisor restarts it, and skipping it on error left a process
+ * syncing a pair that was already gone from pairs.json — visibly listing the
+ * server every 30 s until someone killed it by hand. Measured, not theorised.
+ */
+async function removeSyncedFolder(pairId: string): Promise<void> {
+  const account = knownPairs.find((p) => p.id === pairId)?.account;
+  await removeFolder({
+    pairId,
+    status: account ? supervisor?.statuses().find((s) => s.accountId === account) : undefined,
+    stop: () => {
+      if (account) supervisor?.stop(account);
+    },
+    remove: () => removePair(pairId),
+    refresh: () => refreshPairs(),
+  });
 }
 
 /** Names the OS drops into folders it merely LOOKED at. A folder holding
@@ -1904,7 +2035,7 @@ function openWithQuietMs(): number {
   return Math.max(0, Number(process.env.FILEX_OPENWITH_QUIET_MS ?? 20_000));
 }
 
-const OPEN_WITH_STRINGS: Record<string, [en: string, tr: string]> = {
+const OPEN_WITH_STRINGS: Bilingual = {
   ok: ['OK', 'Tamam'],
   notOfficeTitle: ['filex does not open this kind of file', 'filex bu tür dosyaları açmaz'],
   notOfficeBody: ['{names}', '{names}'],
@@ -1922,6 +2053,11 @@ const OPEN_WITH_STRINGS: Record<string, [en: string, tr: string]> = {
     'Az önce açılan pencereden sunucunu ekle, sonra belgeyi yeniden aç.',
   ],
   openFailedTitle: ['filex could not open {name}', 'filex {name} dosyasını açamadı'],
+  openingTitle: ['Opening {name}…', '{name} açılıyor…'],
+  openingBody: [
+    'filex is putting a working copy on your server; the editor opens when it is there.',
+    'filex sunucuna bir çalışma kopyası koyuyor; kopya oraya varınca düzenleyici açılır.',
+  ],
   openFailedDetail: [
     'The document on this computer has not been touched.',
     'Bu bilgisayardaki belgeye dokunulmadı.',
@@ -1959,9 +2095,7 @@ const OPEN_WITH_STRINGS: Record<string, [en: string, tr: string]> = {
 };
 
 function openText(key: string, vars: Record<string, string> = {}): string {
-  const pair = OPEN_WITH_STRINGS[key];
-  const raw: string = effectiveLocale() === 'tr' ? pair[1] : pair[0];
-  return Object.entries(vars).reduce<string>((acc, [k, v]) => acc.replaceAll(`{${k}}`, v), raw);
+  return bilingual(OPEN_WITH_STRINGS, key, effectiveLocale(), vars);
 }
 
 /**
@@ -1995,16 +2129,6 @@ function openWithNotify(title: string, body: string): void {
 
 function remoteCtx(acc: Account): RemoteContext {
   return { serverUrl: acc.serverUrl, token: acc.token };
-}
-
-/** Two paths naming the same document. Case-insensitive on Windows, where
- *  `C:\Docs\a.docx` and `c:\docs\A.DOCX` are one file. */
-function pathsEqual(a: string, b: string): boolean {
-  const norm = (p: string) => {
-    const n = path.resolve(p);
-    return process.platform === 'win32' ? n.toLowerCase() : n;
-  };
-  return norm(a) === norm(b);
 }
 
 /** Where an edit goes when it cannot go home. Under userData, not the OS temp
@@ -2088,6 +2212,9 @@ async function openDocuments(paths: string[]): Promise<void> {
   }
 }
 
+/** Documents between the double-click and their editor (OpeningDocs). */
+const openingDocs = new OpeningDocs(process.platform);
+
 async function openOneDocument(acc: Account, localPath: string): Promise<void> {
   // ⚠ One document, one editor. Double-clicking a file that is already open —
   // easy to do, since the app does not put itself in front of you — would
@@ -2095,7 +2222,7 @@ async function openOneDocument(acc: Account, localPath: string): Promise<void> {
   // sessions writing back to one path: whichever saved last would win, and the
   // other person's edit would vanish without a word.
   const already = [...liveOpenWith.values()].find(
-    (l) => !l.closing && pathsEqual(l.record.localPath, localPath),
+    (l) => !l.closing && sameLocalPath(l.record.localPath, localPath),
   );
   if (already && !already.window.isDestroyed()) {
     already.window.show();
@@ -2104,13 +2231,34 @@ async function openOneDocument(acc: Account, localPath: string): Promise<void> {
     return;
   }
 
-  const twin = resolveSyncTwin(localPath, accountPairs(acc.id));
-  if (twin) {
-    log('openwith', 'synced twin', { localPath, remote: twin.remote, pair: twin.pairId });
-    openEditorWindow(acc, twin.remote, localPath, 'twin');
+  // ⚠ …and one that is still being opened. The check above only knows
+  // documents whose editor is up, which is after the working copy has gone
+  // up: a second double-click in that time opened a second session.
+  if (!openingDocs.begin(localPath)) {
+    log('openwith', 'already being opened', { localPath });
     return;
   }
-  await openViaScratch(acc, localPath);
+  try {
+    const twin = resolveSyncTwin(localPath, accountPairs(acc.id));
+    if (twin) {
+      log('openwith', 'synced twin', { localPath, remote: twin.remote, pair: twin.pairId });
+      openEditorWindow(acc, twin.remote, localPath, 'twin');
+      return;
+    }
+    // The upload is the slow part (up to 256 MB), and nothing was on screen
+    // until the editor came up: said once it takes a moment.
+    const slow = setTimeout(
+      () => openWithNotify(openText('openingTitle', { name: path.basename(localPath) }), openText('openingBody')),
+      1500,
+    );
+    try {
+      await openViaScratch(acc, localPath);
+    } finally {
+      clearTimeout(slow);
+    }
+  } finally {
+    openingDocs.end(localPath);
+  }
 }
 
 /**
@@ -2268,7 +2416,7 @@ function docChromeScript(): string {
 
 /** The `/files/edit` URL for a remote path, in edit mode. */
 function editRouteUrl(acc: Account, remote: string): string {
-  const url = new URL('/files/edit', acc.serverUrl);
+  const url = serverUrl(acc.serverUrl, '/files/edit');
   url.searchParams.set('path', remote);
   url.searchParams.set('type', extensionOf(remote));
   url.searchParams.set('mode', 'edit');
@@ -2847,7 +2995,7 @@ function wireIpc(): void {
   ipcMain.handle('account:openAdmin', (_e, id: string) => {
     const acc = state.accounts.find((a) => a.id === id);
     if (!acc) throw new Error('unknown account');
-    void shell.openExternal(new URL('/admin/', acc.serverUrl).toString());
+    void shell.openExternal(serverUrl(acc.serverUrl, '/admin/').toString());
   });
 
   ipcMain.handle('auth:add', () => {
@@ -2900,7 +3048,7 @@ function wireIpc(): void {
   ipcMain.handle('remote:storages', async (_e, accountId: string) => {
     const acc = state.accounts.find((a) => a.id === accountId);
     if (!acc) throw new Error('unknown account');
-    const url = new URL('/api/files/manager', acc.serverUrl);
+    const url = serverUrl(acc.serverUrl, '/api/files/manager');
     url.searchParams.set('action', 'index');
     const res = await net.fetch(url.toString(), {
       headers: { Authorization: `Bearer ${acc.token}` },
@@ -2966,7 +3114,7 @@ function wireIpc(): void {
   ipcMain.handle('remote:branding', async (_e, accountId: string) => {
     const acc = state.accounts.find((a) => a.id === accountId);
     if (!acc) throw new Error('unknown account');
-    const res = await net.fetch(new URL('/api/branding', acc.serverUrl).toString());
+    const res = await net.fetch(serverUrl(acc.serverUrl, '/api/branding').toString());
     if (!res.ok) throw new Error(`server said ${res.status}`);
     const body = (await res.json()) as { name?: string; logo_url?: string; accent?: string };
     let logo = String(body.logo_url ?? '').trim();
@@ -2985,7 +3133,7 @@ function wireIpc(): void {
   ipcMain.handle('remote:browse', async (_e, accountId: string, remotePath: string) => {
     const acc = state.accounts.find((a) => a.id === accountId);
     if (!acc) throw new Error('unknown account');
-    const url = new URL('/api/files/manager', acc.serverUrl);
+    const url = serverUrl(acc.serverUrl, '/api/files/manager');
     url.searchParams.set('action', 'index');
     if (remotePath) url.searchParams.set('path', remotePath);
     const res = await net.fetch(url.toString(), {
@@ -3265,16 +3413,7 @@ function wireIpc(): void {
   });
 
   ipcMain.handle('sync:remove', async (_e, id: string) => {
-    try {
-      await removePair(id);
-    } finally {
-      // Reconcile EVEN IF the remove threw. The watcher process only re-reads
-      // the pair list when the supervisor restarts it; skipping this on error
-      // left a process syncing a pair that was in fact already gone from
-      // pairs.json — visibly listing the server every 30s until someone killed
-      // it by hand. Measured, not theorised.
-      await refreshPairs();
-    }
+    await removeSyncedFolder(String(id));
     return publicState();
   });
 
@@ -3354,6 +3493,10 @@ function wireIpc(): void {
     dragPrepare?.abort();
     const ctrl = new AbortController();
     dragPrepare = ctrl;
+    // At most four reports a second reach the window (dragfill.ts).
+    const reports = throttleReports<DragProgress>((pr) => {
+      if (!ctrl.signal.aborted) mainWindow?.webContents.send('drag:progress', pr);
+    });
     const res = await dragCache.prepare(
       items,
       {
@@ -3361,9 +3504,7 @@ function wireIpc(): void {
         serverUrl: acc.serverUrl,
         token: acc.token,
         mirrorFor: (remote) => mirrorPathFor(acc.id, remote),
-        onProgress: (pr) => {
-          if (!ctrl.signal.aborted) mainWindow?.webContents.send('drag:progress', pr);
-        },
+        onProgress: (pr) => reports.push(pr, pr.finished === true),
       },
       ctrl.signal,
     );
@@ -3431,26 +3572,44 @@ function wireIpc(): void {
     void watch.promise
       .then(async (loc) => {
         dragLog('watch result', loc ?? 'not found');
+        // The watch is over, so this drag is no longer the one dragDropCancel
+        // would end. ⚠ Only if it still IS this drag: a newer drag started
+        // meanwhile owns `dragDrop` now, and clearing it (as the end of a fill
+        // did) left that one's in-app drop unable to cancel its watcher.
+        const cancelled = dragDrop?.dir !== session.dir;
+        if (!cancelled) dragDrop = null;
         await fs.promises.rm(session.dir, { recursive: true, force: true }).catch(() => undefined);
         if (!loc) {
           // Nothing landed anywhere we can see: either the drag was let go over
           // this window (an internal move — normal, and dragDropCancel already
           // ran) or it went into an application, which never writes a file.
           // Saying so is the honest end; pretending it worked is not.
-          if (dragDrop) mainWindow?.webContents.send('drag:progress', { done: 0, total: items.length, finished: true, error: 'drop_not_found' });
-          dragDrop = null;
+          if (!cancelled) mainWindow?.webContents.send('drag:progress', { done: 0, total: items.length, finished: true, error: 'drop_not_found' });
           return;
         }
-        mainWindow?.webContents.send('drag:progress', { done: 0, total: items.length, name: loc.name, dropped: loc.dir });
-        dragLog('filling in', { dir: loc.dir, items: items.length });
-        const res = await fulfilDrop(dragCache!, loc.dir, items, {
-          accountId: acc.id,
-          serverUrl: acc.serverUrl,
-          token: acc.token,
-          mirrorFor: (remote) => mirrorPathFor(acc.id, remote),
-          onProgress: (pr) => mainWindow?.webContents.send('drag:progress', { ...pr, dropped: loc.dir }),
-        });
-        dragDrop = null;
+        // Its own Stop, whatever other drop is being filled in (dragfill.ts
+        // DragFills), and its reports to the window at most four a second.
+        const fill = dragFills.begin();
+        fill.report({ done: 0, total: items.length, name: loc.name, dropped: loc.dir });
+        dragLog('filling in', { dir: loc.dir, items: items.length, fill: fill.id });
+        const res = await fulfilDrop(
+          dragCache!,
+          loc.dir,
+          items,
+          {
+            accountId: acc.id,
+            serverUrl: acc.serverUrl,
+            token: acc.token,
+            mirrorFor: (remote) => mirrorPathFor(acc.id, remote),
+            onProgress: (pr) => fill.report({ ...pr, dropped: loc.dir }),
+          },
+          fill.signal,
+        ).finally(() => fill.end());
+        // Stopped by the person: the explorer has already said so (DragFills.stop).
+        if (!res.ok && res.error === CANCELLED) {
+          dragLog('fill stopped', { dir: loc.dir, fill: fill.id, written: res.written });
+          return;
+        }
         dragLog('fill result', res.ok ? { ok: true, written: res.written } : { ok: false, error: res.error });
         if (!res.ok) {
           // ⚠⚠ NOT dialog.showErrorBox. This runs long after the gesture, on
@@ -3475,7 +3634,7 @@ function wireIpc(): void {
       })
       .catch((e) => {
         dragLog('fill threw', String((e as Error)?.stack ?? e));
-        dragDrop = null;
+        if (dragDrop?.dir === session.dir) dragDrop = null;
       });
 
     return 'placeholder';
@@ -3487,6 +3646,16 @@ function wireIpc(): void {
   ipcMain.handle('drag:cancel', () => {
     dragDropCancel();
     return true;
+  });
+
+  // The explorer's Stop on a drop being filled in: the file in flight is
+  // dropped, what had arrived stays, the rest is not fetched. It names no
+  // drop, and takes no argument from the page: it stops the one the explorer's
+  // line is about (dragfill.ts DragFills.stop).
+  ipcMain.handle('drag:stop', () => {
+    const stopped = dragFills.stop();
+    dragLog('stop pressed', stopped ?? 'no drop is being filled in');
+    return stopped !== null;
   });
 
   // ── selective sync — the explorer's "keep on this computer" menu ──
@@ -3553,11 +3722,10 @@ function wireIpc(): void {
       noLink: true,
     });
     if (response === 2) return publicState();
-    try {
-      await removePair(pair.id);
-    } finally {
-      await refreshPairs();
-    }
+    // ⚠ The same way out as "Stop syncing": a pass of this folder under way
+    // is stopped BEFORE the pair goes — and before its folder may go to the
+    // Trash below, which that pass would otherwise be walking.
+    await removeSyncedFolder(pair.id);
     if (response === 0) {
       // To the OS trash, not deletion — same restore story every user knows.
       try {
@@ -3628,6 +3796,10 @@ function wireIpc(): void {
   ipcMain.handle('sync:setRoot', async (_e, accountId: string) => {
     const acc = state.accounts.find((a) => a.id === accountId);
     if (!acc) throw new Error('unknown account');
+    // ⚠ One move at a time. A move to another drive copies for hours, and a
+    // second press of "Change…" meanwhile started a second move of the same
+    // mirrors.
+    if (rootMoves.has(acc.id)) return publicState();
     const def = acc.syncRoot ?? defaultSyncRoot(acc);
     await fs.promises.mkdir(def, { recursive: true });
     const newRoot = await pickDirectory({
@@ -3657,96 +3829,106 @@ function wireIpc(): void {
       // round it is in, and a mirror renamed under it mid-run reads as a
       // mass local delete — which, now that baselines survive migration,
       // would become a mass REMOTE delete. refreshPairs() restarts it.
+      //
+      // ⚠ And it stays stopped until the move ends: rootMoves keeps every
+      // other refreshPairs() — a hold, a folder added, a crashed engine's
+      // restart — from starting it in the middle (WatchGate.moving).
+      rootMoves.add(acc.id);
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
       supervisor?.stop(acc.id);
-      // Only mirrors under the old root move; a hand-picked pair living
-      // elsewhere was placed there on purpose and stays put.
-      const mine = accountPairs(acc.id).filter((p) => isInsideDir(oldRoot, p.local) && p.local !== oldRoot);
-      // Remember which top-level dirs (the storage names) we emptied, so the
-      // sweep below touches only those — the root may be a folder the user
-      // already had things in, and their empty folders are not ours to bin.
-      const touched = new Set<string>();
-      for (const p of mine) {
-        const rel = path.relative(oldRoot, p.local);
-        touched.add(rel.split(path.sep)[0]!);
-        const dest = path.join(newRoot, rel);
-        // `arrived` says the content is COMPLETE at dest: the rename went
-        // through, or the cross-device copy finished (whatever the rm of the
-        // source did afterwards). A rollback flips it back. It decides which
-        // side the pair follows if something fails halfway — see the catch.
-        let arrived = false;
-        try {
-          await fs.promises.mkdir(path.dirname(dest), { recursive: true });
-          // ⚠ A move to another DRIVE is the usual reason to change the
-          // root at all, and rename cannot cross devices (EXDEV). Copy and
-          // remove instead — slower, but it is what the user asked for.
-          const relocate = async (from: string, to: string) => {
-            try {
-              await fs.promises.rename(from, to);
-              arrived = to === dest;
-              return;
-            } catch (e) {
-              if ((e as NodeJS.ErrnoException)?.code !== 'EXDEV') throw e;
-            }
-            // ⚠ preserveTimestamps is not optional: the engine detects
-            // change by (size, mtime), so a copy stamped "now" reads as every
-            // file edited here and re-uploads the whole tree — the history
-            // `sync move` keeps below would be worth nothing across drives.
-            await fs.promises.cp(from, to, {
-              recursive: true,
-              force: true,
-              errorOnExist: false,
-              preserveTimestamps: true,
-            });
-            arrived = to === dest;
-            await fs.promises.rm(from, { recursive: true, force: true });
-          };
-          await relocate(p.local, dest);
+      try {
+        // Only mirrors under the old root move; a hand-picked pair living
+        // elsewhere was placed there on purpose and stays put.
+        const mine = accountPairs(acc.id).filter((p) => isInsideDir(oldRoot, p.local) && p.local !== oldRoot);
+        // Remember which top-level dirs (the storage names) we emptied, so the
+        // sweep below touches only those — the root may be a folder the user
+        // already had things in, and their empty folders are not ours to bin.
+        const touched = new Set<string>();
+        for (const p of mine) {
+          const rel = path.relative(oldRoot, p.local);
+          touched.add(rel.split(path.sep)[0]!);
+          const dest = path.join(newRoot, rel);
+          // `arrived` says the content is COMPLETE at dest: the rename went
+          // through, or the cross-device copy finished (whatever the rm of the
+          // source did afterwards). A rollback flips it back. It decides which
+          // side the pair follows if something fails halfway — see the catch.
+          let arrived = false;
           try {
-            // `sync move` keeps the pair's BASELINE, so the next run is an
-            // ordinary incremental pass. The old remove + re-add threw it
-            // away, and the first-run merge that followed conflicted every
-            // file this machine had ever uploaded.
-            await movePair(p.id, dest);
-          } catch (e) {
-            await relocate(dest, p.local); // pointer unmoved — put the folder back
-            throw e;
-          }
-          await pruneEmptyDirsUpTo(path.dirname(p.local), oldRoot);
-        } catch (e) {
-          // Whatever failed, make the POINTER agree with where the content
-          // is COMPLETE: with `sync move` the pair was never removed, but a
-          // pair aimed at a partial tree plus a SURVIVING baseline reads as
-          // a mass local delete on the next round — and becomes a mass
-          // remote one. Two half-states exist: the copy finished and only
-          // the rm of the old tree failed partway (dest complete, old path
-          // a partial leftover → follow dest, even though the old path still
-          // exists), or the copy itself failed (old path intact, dest is our
-          // partial litter → leave the pair alone and discard the litter).
-          if (arrived && fs.existsSync(dest)) {
+            await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+            // ⚠ A move to another DRIVE is the usual reason to change the
+            // root at all, and rename cannot cross devices (EXDEV). Copy and
+            // remove instead — slower, but it is what the user asked for.
+            const relocate = async (from: string, to: string) => {
+              try {
+                await fs.promises.rename(from, to);
+                arrived = to === dest;
+                return;
+              } catch (e) {
+                if ((e as NodeJS.ErrnoException)?.code !== 'EXDEV') throw e;
+              }
+              // ⚠ preserveTimestamps is not optional: the engine detects
+              // change by (size, mtime), so a copy stamped "now" reads as every
+              // file edited here and re-uploads the whole tree — the history
+              // `sync move` keeps below would be worth nothing across drives.
+              await fs.promises.cp(from, to, {
+                recursive: true,
+                force: true,
+                errorOnExist: false,
+                preserveTimestamps: true,
+              });
+              arrived = to === dest;
+              await fs.promises.rm(from, { recursive: true, force: true });
+            };
+            await relocate(p.local, dest);
             try {
+              // `sync move` keeps the pair's BASELINE, so the next run is an
+              // ordinary incremental pass. The old remove + re-add threw it
+              // away, and the first-run merge that followed conflicted every
+              // file this machine had ever uploaded.
               await movePair(p.id, dest);
-            } catch {
-              // The pointer cannot be made to agree with the content. An
-              // unpaired folder syncs nothing — and deletes nothing; a pair
-              // left on the partial side would. The dialog says the move
-              // failed; the user re-keeps the folder from the explorer.
-              await removePair(p.id).catch(() => {});
+            } catch (e) {
+              await relocate(dest, p.local); // pointer unmoved — put the folder back
+              throw e;
             }
-          } else if (!arrived && fs.existsSync(dest) && fs.existsSync(p.local)) {
-            await fs.promises.rm(dest, { recursive: true, force: true }).catch(() => {});
+            await pruneEmptyDirsUpTo(path.dirname(p.local), oldRoot);
+          } catch (e) {
+            // Whatever failed, make the POINTER agree with where the content
+            // is COMPLETE: with `sync move` the pair was never removed, but a
+            // pair aimed at a partial tree plus a SURVIVING baseline reads as
+            // a mass local delete on the next round — and becomes a mass
+            // remote one. Two half-states exist: the copy finished and only
+            // the rm of the old tree failed partway (dest complete, old path
+            // a partial leftover → follow dest, even though the old path still
+            // exists), or the copy itself failed (old path intact, dest is our
+            // partial litter → leave the pair alone and discard the litter).
+            if (arrived && fs.existsSync(dest)) {
+              try {
+                await movePair(p.id, dest);
+              } catch {
+                // The pointer cannot be made to agree with the content. An
+                // unpaired folder syncs nothing — and deletes nothing; a pair
+                // left on the partial side would. The dialog says the move
+                // failed; the user re-keeps the folder from the explorer.
+                await removePair(p.id).catch(() => {});
+              }
+            } else if (!arrived && fs.existsSync(dest) && fs.existsSync(p.local)) {
+              await fs.promises.rm(dest, { recursive: true, force: true }).catch(() => {});
+            }
+            await tellUser(
+              'error',
+              syncText('rootTitle'),
+              syncText('moveFailed', { name: p.remote, err: String((e as Error)?.message ?? e) }),
+            );
           }
-          await tellUser(
-            'error',
-            syncText('rootTitle'),
-            syncText('moveFailed', { name: p.remote, err: String((e as Error)?.message ?? e) }),
-          );
         }
-      }
-      // Sweep what the mirrors left behind — litter-aware rmdir only, and
-      // ONLY the storage dirs we just emptied. The old root itself stays: the
-      // user chose that folder, and it may be one they already had.
-      for (const entry of touched) {
-        await removeIfEffectivelyEmpty(path.join(oldRoot, entry)).catch(() => false);
+        // Sweep what the mirrors left behind — litter-aware rmdir only, and
+        // ONLY the storage dirs we just emptied. The old root itself stays: the
+        // user chose that folder, and it may be one they already had.
+        for (const entry of touched) {
+          await removeIfEffectivelyEmpty(path.join(oldRoot, entry)).catch(() => false);
+        }
+      } finally {
+        rootMoves.delete(acc.id);
       }
     }
     acc.syncRoot = newRoot;
@@ -3860,6 +4042,7 @@ if (!app.requestSingleInstanceLock()) {
     // No application menu. It is a file manager window, not an editor: the
     // default Edit/View/Window scaffolding only offers devtools and reload.
     Menu.setApplicationMenu(null);
+    watchDownloads();
 
     if (process.env.FILEX_NO_BROWSER === '1') {
       // ⚠⚠ A test run registers NOTHING with the operating system. The scheme
@@ -3912,6 +4095,7 @@ if (!app.requestSingleInstanceLock()) {
         // While any pair is being worked on the machine does not idle-sleep;
         // the moment none is, it may again. See src/power.ts.
         sleepGuard?.update(syncBusy(supervisor?.statuses() ?? []));
+        paintTrayTip();
         for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
       },
       onSignedOut: (accountId) => markSignedOut(accountId, 'the sync engine was refused (HTTP 401)'),
@@ -3923,6 +4107,9 @@ if (!app.requestSingleInstanceLock()) {
         void refreshPairs();
       },
       watchPrefs: () => currentWatchPrefs(),
+      // An engine that stopped on its own is started again from here, after
+      // the supervisor's backoff (sync-policy.ts restartDelay).
+      restart: () => refreshPairs().catch((e) => log('sync', 'restart failed', String(e))),
     });
     // Local copies for dragging files out. Under userData rather than the OS
     // temp dir: the point of keeping them is that the SECOND drag of the same

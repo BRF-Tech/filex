@@ -39,6 +39,9 @@ function trashList(files: FileNode[]) {
 
 describe('the Trash’s own columns', () => {
   it('says when it was deleted, where from and how long it has left — and draws no owner or star', () => {
+    // ⚠ The owner's track carries WHO DELETED IT in the Trash (see
+    // trashDeletedBy.test.ts); what must never come back is an Owner column
+    // reading "System" for every row.
     const w = trashList([trashed('Projeler/eski-rapor.txt', '2026-09-22T11:11:26Z', 29)]);
     const head = w.findAll('.fe-list__head .fe-list__col').map((c) => c.text());
     expect(head.join(' | ')).toContain(en['col.deleted']);
@@ -52,7 +55,7 @@ describe('the Trash’s own columns', () => {
     expect(row.get('.fe-list__col--mod').text()).toContain('2026');
     expect(row.get('.fe-list__col--location').text()).toBe('depo/Projeler');
     expect(row.get('.fe-list__col--remaining').text()).toBe('29 days');
-    expect(row.find('.fe-list__col--owner').exists()).toBe(false);
+    expect(row.get('.fe-list__col--owner').text()).not.toBe(en['owner.system']);
     expect(row.find('.fe-list__col--star').exists()).toBe(false);
   });
 

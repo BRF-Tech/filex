@@ -73,6 +73,9 @@ files.
 
 ### Interactive login
 
+A filex [served under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path)
+is logged in to with its path: `--url https://example.com/filex`.
+
 ```bash
 filex client login --url https://fm.example.com
 Email: you@example.com

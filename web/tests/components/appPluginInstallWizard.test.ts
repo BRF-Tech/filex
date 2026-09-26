@@ -298,3 +298,82 @@ describe('AppPluginInstallWizard', () => {
     w.unmount();
   });
 });
+
+// ── Upgrades that follow the app's source, and the `filex` range ─────────
+//
+// Both reviews are the SERVER's bytes: app-plugin-upgrade-review.json (an
+// upgrade's dry run: the version it leaves, what it adds to and drops from
+// the grant, a range this filex is outside of) and
+// app-plugin-incompatible.json (the refusal).
+describe('AppPluginInstallWizard — upgrade review and range', () => {
+  const upgradeReview = () => JSON.parse(readFileSync(path.join(WIRE, 'app-plugin-upgrade-review.json'), 'utf8'));
+  const sign = { id: 7, name: 'sign', version: '1.1.0', label: { en: 'e-Signature' }, permissions: [], source: 'github', source_url: 'https://github.com/BRF-Tech/filex-sign@v1.1.0' };
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    posts.length = 0;
+    refuse = null;
+    dryRunAnswer = wireDryRun();
+    document.body.innerHTML = '';
+  });
+
+  function mountUpdate(locale = 'en') {
+    const i18n = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages: { en, tr } });
+    return mount(AppPluginInstallWizard, {
+      props: { modelValue: false, requiresSignature: false, update: sign as never, installed: [sign] as never },
+      global: { plugins: [i18n] },
+      attachTo: document.body,
+    });
+  }
+
+  it('"Review update" opens on the review of what the source has — the jump and how the grant changes', async () => {
+    const review = upgradeReview();
+    review.compat.ok = true; // this half is about the jump; the range is below
+    dryRunAnswer = review;
+    const w = mountUpdate();
+    await w.setProps({ modelValue: true });
+    await flushPromises();
+    expect(posts[0]).toMatchObject({ url: '/admin/app-plugins/7/upgrade', body: { from_source: true, permissions: [] }, cfg: { params: { dry_run: 1 } } });
+    expect(w.find('[data-testid="app-plugin-upgrade-jump"]').text()).toBe('Version 1.1.0 → 1.2.0');
+    expect(w.find('[data-testid="app-plugin-upgrade-added"]').text()).toBe('New permissions this version asks for: public_pages');
+    expect(w.find('[data-testid="app-plugin-upgrade-removed"]').text()).toBe('Permissions it no longer asks for: mail:send');
+    // The new one is marked where it is reviewed, in the permission list.
+    expect(w.find('[data-testid="perm-new-public_pages"]').exists()).toBe(true);
+    expect(w.find('[data-testid="perm-new-files:read"]').exists()).toBe(false);
+    // Nothing to go back to: the source is the app's own.
+    expect(w.text()).not.toContain(en.appPlugins.wizard.back);
+
+    await w.find('input[type="checkbox"]').setValue(true);
+    await w.find('[data-testid="app-plugin-install"]').trigger('click');
+    await flushPromises();
+    const real = posts.find((p) => !p.cfg?.params?.dry_run);
+    expect(real).toMatchObject({ url: '/admin/app-plugins/7/upgrade', body: { from_source: true } });
+    expect(w.emitted('upgraded')).toHaveLength(1);
+    w.unmount();
+  });
+
+  it('a range that leaves this filex out is said at the review, and nothing can be installed from it', async () => {
+    dryRunAnswer = upgradeReview();
+    const w = mountUpdate('tr');
+    await w.setProps({ modelValue: true });
+    await flushPromises();
+    const box = w.find('[data-testid="app-plugin-incompatible"]');
+    expect(box.text()).toBe('sign 1.2.0, filex >=0.48.0 ile çalışıyor; bu sunucu filex 0.47.0. Burada kurulamaz.');
+    await w.find('input[type="checkbox"]').setValue(true);
+    expect(w.find('[data-testid="app-plugin-install"]').attributes('disabled'), 'Install stays off').toBeDefined();
+    w.unmount();
+  });
+
+  it('the server’s own refusal of an out-of-range install is a sentence, with the range and this filex', async () => {
+    refuse = { status: 409, data: JSON.parse(readFileSync(path.join(WIRE, 'app-plugin-incompatible.json'), 'utf8')) };
+    const w = mountWizard('tr');
+    await reachReview(w);
+    await w.find('input[type="checkbox"]').setValue(true);
+    await w.find('[data-testid="app-plugin-install"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-testid="app-plugin-wizard-error"]').text()).toBe(
+      'Bu sürüm filex >=0.48.0 ile çalışıyor; bu sunucu filex 0.47.0, bu yüzden burada kurulamaz.',
+    );
+    w.unmount();
+  });
+});

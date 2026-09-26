@@ -25,6 +25,7 @@
 
 import { shallowReactive, toRaw } from 'vue';
 import type { FileNode } from '../types/FileNode';
+import { underApiBase } from '../lib/appBase';
 
 interface ThumbApiSlice {
   authHeaders: (extra?: Record<string, string>) => Promise<Record<string, string>>;
@@ -53,11 +54,8 @@ export function useThumbs(apiBase: string | undefined, api: ThumbApiSlice) {
   /** Keys being fetched — one request per picture however many URLs name it. */
   const pending = new Set<string>();
 
-  function resolveUrl(raw: string): string {
-    if (/^https?:\/\//i.test(raw)) return raw;
-    const base = (apiBase || '').replace(/\/+$/, '');
-    return base && raw.startsWith('/') ? base + raw : raw;
-  }
+  // `thumb_url` is relative to the SERVER ROOT, which is the API base (lib/appBase).
+  const resolveUrl = (raw: string): string => underApiBase(apiBase, raw);
 
   /** Reactive, per node: returns the loaded object URL for the node's thumb,
    *  kicking off the fetch on first sight. null = not (yet) available → show

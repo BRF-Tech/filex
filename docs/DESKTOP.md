@@ -26,6 +26,7 @@ one of them; plain `filex` is the [CLI](CLI.md).
 |---|---|---|
 | Ubuntu and other Linux with snapd | `sudo snap install filex-app` | Also in Ubuntu's App Center — search for *filex*. The sign-in is stored in your keyring once the snap may reach it: `sudo snap connect filex-app:password-manager-service` (the app says so when it is needed). |
 | macOS 13+ (Apple Silicon) | `brew install brf-tech/filex/filex-app` | Homebrew tap [`BRF-Tech/homebrew-filex`](https://github.com/BRF-Tech/homebrew-filex). The first launch is blocked once, as below: the app is not signed with a Developer ID. |
+| Windows 10/11 | [Microsoft Store](https://apps.microsoft.com/detail/9PKXDJLVZWXW) — *filex File Manager* | **The one Windows build that is code-signed**: Microsoft signs it, so there is no SmartScreen prompt, and the Store installs and updates it. On a machine that also has the installer below, both read the same accounts and folders; Settings says so. |
 | Windows 10/11 | `winget install BRFTech.filex-app` | The same per-user installer as the download below. A new package waits for winget's review before it can be installed, so this works a few days after the first release that submits it. |
 
 ### Download
@@ -63,7 +64,8 @@ choices made under the old name.
 .\filex-desktop-portable-x64.exe
 ```
 
-> ⚠ **The packages are not code-signed yet.** Windows SmartScreen will show
+> ⚠ **The downloads are not code-signed yet** (the Microsoft Store build is:
+> Microsoft signs it). Windows SmartScreen will show
 > "Windows protected your PC" — *More info* → *Run anyway*. This is a real gap,
 > not something to wave away: a signing certificate is a paid, separate step.
 > Verify what you downloaded against `checksums.txt` on the release if you want
@@ -92,7 +94,12 @@ username + password, which would lock out every installation behind an identity
 provider — Keycloak, OIDC, passkeys, MFA, corporate SSO. Your browser already
 has that session.
 
-1. Type your server address (e.g. `https://files.example.com`).
+1. Type your server address (e.g. `https://files.example.com`, or
+   `https://example.com/filex` for a filex [served under a
+   sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path) — the path is part
+   of the address and every request the app makes keeps it). An address
+   pasted from the browser's address bar works too: the page part
+   (`/admin/login`, `/drive/explore`) is dropped, the server's own path is not.
 2. Your browser opens; sign in however that server expects.
 3. The browser hands the app a one-time code and you are in.
 
@@ -420,6 +427,20 @@ While the engine is working, a strip along the bottom of the window names the
 folder it is on and shows what it is doing — listing, or `12/345` with a
 progress bar. It disappears when the run settles.
 
+Under each folder in *Settings* the same line says what is true of it now:
+
+- the phase, with its figures ("listing the server — 48,211 items so far",
+  "97 changes to make", "finishing up — 40/97");
+- "waiting for its first check" for a folder no pass has finished for since
+  the app started (a folder just added waits behind the others);
+- "watching for changes" only once a pass has left it in step;
+- "moving to the new filex folder…" while the filex folder is moved.
+
+An engine that stops on its own is started again after 5 s, 15 s, a minute,
+then every five minutes, and the line says so. The tray icon's tooltip carries
+the pause, whether a pass is running or a folder is failing, and the unread
+count.
+
 ### The filex folder on this computer
 
 *Settings ⚙ → filex folder on this computer* names the root, opens it, and can
@@ -434,6 +455,10 @@ times preserved, since those are what the engine reads change from — rather
 than failing. If a move fails halfway, the pair follows whichever side holds the
 complete folder; if even that cannot be arranged, the folder is unpaired rather
 than left pointing at a partial tree, and the dialog says so.
+
+A move runs once at a time ("Change…" reads "Moving…" until it ends), and
+nothing starts the account's watcher again before it ends: a watcher reading
+half-moved mirrors would see a mass delete.
 
 
 ### When filex holds items back
@@ -540,9 +565,15 @@ file that is genuinely there.
 **2. Stand-ins, for everything else.** The drag starts with empty placeholders
 carrying the right names, which the shell copies in microseconds. filex then
 finds the folder they landed in, removes them, and downloads the real content
-there, showing progress in the window. Nothing is fetched before the drag, so
-size stops mattering. Downloads land on `name.filexpart` and are renamed only
-once complete, so nothing ever wears the real name half-written.
+there, showing progress in the window ("42 files so far…", counted inside
+folders too) with **Stop**. Stop takes effect at once, in the middle of a file
+too: the file on its way down is dropped (its `name.filexpart` removed), every
+file that had fully arrived stays, and nothing more is fetched. Two drops
+filling in at the same time are stopped one at a time: Stop ends the one the
+line is showing. Nothing is
+fetched before the drag, so size stops mattering. Downloads land on
+`name.filexpart` and are renamed only once complete, so nothing ever wears the
+real name half-written.
 
 ⚠ Route 2 cannot fill in a drop onto an **application**: nothing is written to
 disk, so there is no landing place to find, and the program is left holding the
@@ -625,6 +656,26 @@ plainly rather than implying more than is there:
 The Windows share sheet needs WinRT, which Electron does not expose. Rather than
 draw an imitation of it, the app offers the two things people actually do with a
 link.
+
+## Mounting the server as a drive
+
+*Settings → Mount as a drive* attaches the server — every storage you can see —
+as a drive of the operating system over WebDAV, and **Detach** takes it off
+again. The credential is the account's own token, handed to the system's
+mounter on its input: it never appears on a command line or in the log. The
+drive lasts for the session, and after a restart the app shows none rather than
+claim one a reboot may have dropped.
+
+| Platform | Mounts with | Where it appears | Verified |
+|---|---|---|---|
+| Windows | Windows' WebDAV client (its WebClient service, started for you) | A free drive letter, from Z: down | Yes, end to end |
+| macOS | `mount_webdav`, Finder's client | `~/filex-drives/filex` — a folder of your own. (Not `/Volumes`: a user cannot create a folder there.) | Not yet on a Mac |
+| Linux | `gio mount` (GVfs) | Where GVfs mounts it, listed by your file manager | Not yet |
+
+⚠ It needs HTTPS. Windows refuses to send the credential to a WebDAV drive over
+plain `http://`, and elsewhere it would travel in the clear. Very large files
+are better synced than opened through the Windows drive. For mounting by hand,
+[WebDAV](WEBDAV.md) has the same addresses.
 
 ## Running in the background
 

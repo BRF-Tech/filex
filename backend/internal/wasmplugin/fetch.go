@@ -54,23 +54,9 @@ func (r *Registry) FetchGitHub(ctx context.Context, in GitHubInput) (*InstallInp
 	if ref == "" {
 		refs = []string{"main", "master"}
 	}
-	var manifest []byte
-	var usedRef string
-	var lastErr error
-	for _, rf := range refs {
-		u := "https://raw.githubusercontent.com/" + repo + "/" + url.PathEscape(rf) + "/filex-app.json"
-		b, err := r.fetch(ctx, u, wire.MaxManifestBytes)
-		if err == nil {
-			manifest, usedRef = b, rf
-			break
-		}
-		lastErr = err
-	}
-	if manifest == nil {
-		ie := fetchFailure(lastErr, FetchReasonManifestNotFound, repo)
-		ie.Refs = refs
-		ie.Message = "filex-app.json not found in " + repo + ": " + lastErr.Error()
-		return nil, ie
+	manifest, usedRef, err := r.githubManifest(ctx, repo, refs)
+	if err != nil {
+		return nil, err
 	}
 	m, err := ParseManifest(manifest)
 	if err != nil {
@@ -104,6 +90,25 @@ func (r *Registry) FetchGitHub(ctx context.Context, in GitHubInput) (*InstallInp
 	}, nil
 }
 
+// githubManifest reads filex-app.json from a repository at the first of refs
+// that has one — the one address a repository's manifest is read from, for an
+// install, an upgrade and the update check (updates.go) alike.
+func (r *Registry) githubManifest(ctx context.Context, repo string, refs []string) ([]byte, string, error) {
+	var lastErr error
+	for _, rf := range refs {
+		u := "https://raw.githubusercontent.com/" + repo + "/" + url.PathEscape(rf) + "/filex-app.json"
+		b, err := r.fetch(ctx, u, wire.MaxManifestBytes)
+		if err == nil {
+			return b, rf, nil
+		}
+		lastErr = err
+	}
+	ie := fetchFailure(lastErr, FetchReasonManifestNotFound, repo)
+	ie.Refs = refs
+	ie.Message = "filex-app.json not found in " + repo + ": " + lastErr.Error()
+	return nil, "", ie
+}
+
 // FetchURL resolves explicit module + manifest addresses.
 func (r *Registry) FetchURL(ctx context.Context, in URLInput) (*InstallInput, error) {
 	if strings.TrimSpace(in.ManifestURL) == "" {
@@ -127,7 +132,8 @@ func (r *Registry) FetchURL(ctx context.Context, in URLInput) (*InstallInput, er
 		if strings.TrimSpace(in.URL) != "" {
 			return nil, installErr(ErrCodeManifestInvalid, "this manifest is a language pack — it has no module, so leave the module address empty")
 		}
-		return &InstallInput{Manifest: manifest, SHA256: strings.TrimSpace(in.SHA256), Signature: in.Signature, Source: "url", SourceURL: in.ManifestURL}, nil
+		return &InstallInput{Manifest: manifest, SHA256: strings.TrimSpace(in.SHA256), Signature: in.Signature,
+			Source: "url", SourceURL: in.ManifestURL, ManifestURL: in.ManifestURL, Pinned: strings.TrimSpace(in.SHA256) != ""}, nil
 	}
 	if strings.TrimSpace(in.URL) == "" {
 		return nil, &InstallError{Code: ErrCodeFetch, Reason: FetchReasonMissingURL,
@@ -148,7 +154,7 @@ func (r *Registry) FetchURL(ctx context.Context, in URLInput) (*InstallInput, er
 	}
 	return &InstallInput{
 		Manifest: manifest, Wasm: bytes.NewReader(wasm), SHA256: sum, Signature: in.Signature,
-		Source: "url", SourceURL: in.URL,
+		Source: "url", SourceURL: in.URL, ManifestURL: in.ManifestURL, Pinned: strings.TrimSpace(in.SHA256) != "",
 	}, nil
 }
 

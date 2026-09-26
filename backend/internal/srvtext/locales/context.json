@@ -111,6 +111,12 @@
     "policy": "the update policy's name, one of the server.update.policy.* words"
   },
   "key_vars": {
+    "server.notify.app_updated.title": { "version": "the app's new version, e.g. 1.2.0 (not a filex version)" },
+    "server.notify.app_updated.body": { "from": "the app's previous version, e.g. 1.1.0 (not a path)" },
+    "server.notify.app_update_available.title": { "version": "the app's new version, e.g. 1.2.0 (not a filex version)" },
+    "server.notify.app_update_needs_approval.title": { "version": "the app's new version, e.g. 1.2.0 (not a filex version)" },
+    "server.notify.app_update_failed.title": { "version": "the app's version that could not be installed, e.g. 1.2.0 (not a filex version)" },
+    "server.notify.app_update_failed.body": { "from": "the app's version that keeps running, e.g. 1.1.0 (not a path)" },
     "server.public.drop_remove_aria": { "name": "the name of a file the visitor picked" },
     "server.public.drop_err_too_large": { "name": "the name of a file the visitor picked" },
     "server.public.drop_err_ext": { "name": "the name of a file the visitor picked" },

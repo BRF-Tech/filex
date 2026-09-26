@@ -95,6 +95,44 @@ test('the manifest gets the Store version, the namespaces and the Windows range'
   assert.match(out, /^<\?xml version="1\.0"/);
 });
 
+/* Partner Center (2026-09-26) reserved "filex app" (the identity) and "filex
+   File Manager" (the listing) — "filex" was taken. The Store compares the package's Properties/DisplayName with the
+   reserved names; the Start menu tile is the app's own name. The template
+   writes one displayName into both, so the tile is set back to "filex". */
+const NAMED = GENERATED.replace(
+  '</Package>',
+  `  <Properties>
+    <DisplayName>filex File Manager</DisplayName>
+    <PublisherDisplayName>BRF Tech</PublisherDisplayName>
+  </Properties>
+  <Applications>
+    <Application Id="filex" Executable="app/filex.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+       BackgroundColor="transparent"
+       DisplayName="filex File Manager"
+       Square150x150Logo="assets/Square150x150Logo.png"
+       Description="filex" />
+    </Application>
+  </Applications>
+</Package>`,
+);
+
+test('the Store name is the reserved one, the Start menu tile says filex', () => {
+  const out = patchManifest(NAMED, '0.46.1');
+  assert.match(out, /<Properties>\s*<DisplayName>filex File Manager<\/DisplayName>/);
+  assert.match(out, /<uap:VisualElements\b[^>]*\bDisplayName="filex"/s);
+  assert.equal(patchManifest(out, '0.46.1'), out);
+});
+
+test('electron-builder.yml carries the identity Partner Center assigned', () => {
+  const yml = fs.readFileSync(path.join(ROOT, 'electron-builder.yml'), 'utf8');
+  const appx = yml.slice(yml.indexOf('\nappx:'));
+  assert.match(appx, /\n {2}identityName: BRFTech\.filexapp\r?\n/);
+  assert.match(appx, /\n {2}publisher: CN=69159FAC-B790-4E30-94CC-F229F3A585B2\r?\n/);
+  assert.match(appx, /\n {2}publisherDisplayName: BRF Tech\r?\n/);
+  assert.match(appx, /\n {2}displayName: filex File Manager\r?\n/);
+});
+
 test('patching twice changes nothing the second time', () => {
   const once = patchManifest(GENERATED, '0.43.1');
   assert.equal(patchManifest(once, '0.43.1'), once);

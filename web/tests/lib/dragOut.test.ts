@@ -144,4 +144,11 @@ describe('dragKey', () => {
   it('changes when the selection changes', () => {
     expect(dragKey([{ path: 'a' }])).not.toBe(dragKey([{ path: 'a' }, { path: 'b' }]));
   });
+  it('joins with a character no wire path carries, so one name with a space is not two names', () => {
+    expect(dragKey([{ path: 'docs://a b' }])).not.toBe(dragKey([{ path: 'docs://a' }, { path: 'b' }]));
+    expect(dragKey([{ path: 'b' }, { path: 'a' }])).toBe(`a${String.fromCharCode(0)}b`);
+  });
+  // ⚠ The separator used to be a raw NUL byte in the source, which made git
+  // take the file for binary; web/tests/quality/rawControlBytes.test.ts now
+  // keeps every source file free of such bytes.
 });

@@ -168,6 +168,7 @@ and what makes losing the private key unrecoverable.
 |---|---|---|
 | `FILEX_LISTEN` | `0.0.0.0:5212` | Bind address. |
 | `FILEX_PUBLIC_URL` | `http://localhost:5212` | **The external URL users open.** Baked into share links, the OIDC redirect and OnlyOffice fetch/callback — set it to your real `https://…` domain behind a proxy. ⚠ It is one value serving both audiences: it must be openable by a browser **and** reachable from inside the OnlyOffice container ([three addresses](ONLYOFFICE.md#three-machines-three-addresses)). |
+| `FILEX_BASE_PATH` | — (the path of `FILEX_PUBLIC_URL`, usually none) | **Serve filex under a sub-path** behind a reverse proxy, e.g. `/filex` for `https://example.com/filex/`. Unset: the path of `FILEX_PUBLIC_URL` is used, so `FILEX_PUBLIC_URL=https://example.com/filex` alone is enough. Empty/unset with a root public URL = served at the root, exactly as before. Validated at startup; the proxy must pass the **full** path. See [Base path](#base-path) and [DEPLOYMENT.md → Serving filex under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path). |
 | `FILEX_DATA_DIR` | `~/.filex` (`/data` in Docker) | Holds the SQLite DB, search index, thumbnail cache, first‑run secret. |
 | `FILEX_DEFAULT_LOCALE` | — | Pin the initial UI language (`en` / `tr`) for users who haven't chosen one, overriding browser detection. A user's explicit language switch still wins. |
 | `FILEX_MULTI_TENANT` | `false` | Turn on native multi-tenancy — one install serves N tenants, each a host-bound auth realm (provider) confined to its own storage(s). **Off = a normal single-tenant install, behaviour unchanged.** See [MULTI-TENANCY.md](./MULTI-TENANCY.md). |
@@ -196,6 +197,75 @@ some time later. The panel banner is there for precisely that case.
 
 In [multi-tenant](./MULTI-TENANCY.md) mode a tenant's links are built on the
 tenant's own host; `FILEX_PUBLIC_URL` is the operator's fallback.
+
+### Base path
+
+filex can live under a path of a domain it shares with other things —
+`https://example.com/filex/` — instead of on a host of its own. **One setting**
+decides it:
+
+- `FILEX_BASE_PATH=/filex` (`base_path: /filex` in `config.yaml`), or
+- nothing at all, with `FILEX_PUBLIC_URL=https://example.com/filex`: the path
+  of the public URL **is** the base.
+
+| You set | filex serves | Links are built on |
+|---|---|---|
+| `FILEX_PUBLIC_URL=https://files.example.com` | the root (the default) | `https://files.example.com` |
+| `FILEX_PUBLIC_URL=https://example.com/filex` | `/filex/…` | `https://example.com/filex` |
+| `FILEX_BASE_PATH=/filex` + `FILEX_PUBLIC_URL=https://example.com` | `/filex/…` | `https://example.com/filex` (the base is added to the public URL) |
+| `FILEX_BASE_PATH=/filex` + `FILEX_PUBLIC_URL=https://example.com/filex` | `/filex/…` | `https://example.com/filex` |
+| `FILEX_BASE_PATH=/filex` + `FILEX_PUBLIC_URL=https://example.com/files` | **refuses to start** — the two disagree | — |
+| `FILEX_BASE_PATH=/` | the root, said out loud (and refused if the public URL has a path) | — |
+
+The value is checked when filex starts, and a bad one stops it with a message
+that says what to write instead:
+
+- it starts with `/` and does **not** end with one — `/filex`, not `/filex/`
+  or `filex`;
+- no empty, `.` or `..` segment;
+- letters, digits and `- . _ ~` only (anything else would need
+  percent-encoding, and a prefix that can be spelled two ways is a prefix a
+  request can be talked past).
+
+The startup log names the base in effect and where it came from:
+
+```text
+INFO http: serving under a base path base_path=/filex from=FILEX_PUBLIC_URL public_url=https://example.com/filex
+```
+
+(`http: serving at the root of the host (no base path)` otherwise.)
+
+What it changes, all of it at once:
+
+- **Every route answers under the base and nowhere else.** `/filex/api/…`,
+  `/filex/admin/`, `/filex/dav/…`, `/filex/s/<token>` — and `/api/…` on the
+  host's root is a plain 404, before any sign-in check runs. The one exception
+  is `/healthz`, which answers at the root **and** at `/filex/healthz`, because
+  the container images' `HEALTHCHECK` and a Kubernetes probe ask for it there.
+- **The proxy passes the full path.** filex takes the prefix off itself; a
+  proxy that strips it (Caddy `handle_path`, an nginx `proxy_pass` with a URI)
+  sends requests filex no longer answers. Examples in
+  [DEPLOYMENT.md](DEPLOYMENT.md#serving-filex-under-a-sub-path).
+- **Every address filex hands out carries it**: redirects, share and
+  file-request links, links in e-mails, the OIDC callback
+  (`<public>/api/auth/oidc/callback`), the realtime socket, the WebDAV and S3
+  endpoints on the connection pages, the PWA manifest's `id`, `start_url` and
+  `scope`.
+- **Cookies are scoped to it** (`Path=/filex`), so the other applications on
+  the same host do not receive filex's session.
+- **The web app is the same build.** The server tells it its base as it serves
+  it; nothing is rebuilt per prefix.
+
+⚠ Pick a base that is not one of filex's own route names (`admin`, `drive`,
+`api`, `dav`, `s3`, `s`, `d`, `u`, `z`, `p`, `files`, `embed`). The server
+works with any of them, but the desktop app, given an address someone pasted
+from the browser, cannot tell `https://example.com/drive/` (filex under
+`/drive`) from the `/drive/` page of a filex at the root.
+
+⚠ Moving an existing install under a base path, or out of one, changes the
+installed web app's identity (the manifest `id` follows the base): browsers
+treat it as a new app, and people who installed it install it again. Links
+already sent keep pointing at the old address.
 
 ---
 
@@ -457,6 +527,7 @@ Drivers that live outside the binary — see [PLUGINS.md](PLUGINS.md).
 | `FILEX_APP_PLUGIN_MAX_INPUT_MB` | `256` | Per-file ceiling on what one app job may read. |
 | `FILEX_APP_PLUGIN_MAX_OUTPUT_MB` | `512` | Per-file ceiling on what one app job may produce. |
 | `FILEX_APP_PLUGIN_MAX_WASM_MB` | `64` | Largest module an app install accepts. `FILEX_PLUGIN_TRUSTED_KEYS` applies to app modules too. |
+| `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every installed app's source (its GitHub repository or address) for a newer version the running filex can run, and installs the ones that ask for no new permission ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). `0` = no request leaves the server for it — what an air-gapped install wants; **Check for updates** on the Apps tab still asks when pressed. A demo never checks. The time of the last check is stored, so a restart neither skips a day nor checks at every boot. YAML: `app_plugin_update_check`. |
 | `FILEX_SECRET_KEY` | — | Also seals a **remote** plugin's bearer token. Without it, registering a remote plugin is refused rather than stored in plaintext (binary plugins get a token minted per start, which is never stored). |
 
 Installed binaries live in `<data-dir>/plugins/<name>/` (with the detached
@@ -1003,6 +1074,7 @@ Every field is optional; pass with `--config /path/to/config.yaml`.
 ```yaml
 listen: "0.0.0.0:5212"
 public_url: "https://files.example.com"
+# base_path: "/filex"   # served under a sub-path — see "Base path"; unset = the public URL's path
 data_dir: "/data"
 
 log:   { level: info, format: text }

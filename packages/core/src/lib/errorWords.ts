@@ -141,6 +141,57 @@ const CODE_WORDS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^quota_exceeded$|quota exceeded|quota: exceeded/i, 'err.quota'],
 ];
 
+/**
+ * A queue JOB's own error strings a person can act on — read from a failed
+ * ops row (`jobFailure`) and nowhere else.
+ *
+ * ⚠⚠ Anchored to the two sentences the server writes, not to "already
+ * exists" anywhere. The loose pattern sat in CODE_WORDS, which every HTTP
+ * refusal goes through, and New document's 503 EXISTS_CHECK_FAILED ("could
+ * not check whether that file already exists…" — an outage) told the person a
+ * file of that name was there and to rename it.
+ *   - ops.ErrNameTaken — a queued rename (internal/ops/rename_restore.go);
+ *   - handlers.Trash RestoreNode — a queued restore (internal/api/handlers/trash.go).
+ * A row that also skipped items appends "; …" (ops service), hence `^` only.
+ */
+const JOB_WORDS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^something with that name already exists here\b|^something already exists at this path: /, 'err.name_taken'],
+  // A queued purge of an entry restored (or taken) meanwhile: the server
+  // leaves a live row alone (trash.ErrNotInTrash, handlers.Trash PurgeNode).
+  [/^trash: the item is not in the trash\b|^trash entry not found\b/, 'err.not_in_trash'],
+];
+
+/**
+ * Refusals the queue's doors name in a `code` field beside their English
+ * `error` (handlers/ops.go, handlers/trash.go). The code decides the words:
+ * printed as it came, a Turkish reader got "this operation cannot be stopped
+ * once it has started; it finishes on its own" — and by status alone a 409
+ * NOT_CANCELLABLE read "Already exists / conflict".
+ */
+const CODE_FIELD_WORDS: Readonly<Record<string, string>> = {
+  BAD_KIND: 'err.bad_kind',
+  READ_ONLY: 'err.read_only',
+  NOT_CANCELLABLE: 'err.not_cancellable',
+  FINISHED: 'err.finished',
+  TOO_MANY: 'err.too_many',
+};
+
+function codeFieldWordsWith(fields: Record<string, unknown>, t: T): string {
+  const key = typeof fields.code === 'string' ? CODE_FIELD_WORDS[fields.code] : undefined;
+  if (!key) return '';
+  return t(key, typeof fields.max === 'number' ? { max: fields.max } : {});
+}
+
+/**
+ * The words for a refusal's `code` field, or '' when it names none this file
+ * knows — for a client that holds the answer's data rather than its text (the
+ * admin panel's axios errors, web api/client `extractError`).
+ */
+export function codeWords(data: unknown, locale: string | undefined): string {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return '';
+  return codeFieldWordsWith(data as Record<string, unknown>, wordsIn(locale));
+}
+
 function fieldsOf(body: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(body) as unknown;
@@ -163,6 +214,8 @@ export function refusalWords(status: number, body: string, locale: string | unde
 }
 
 function refusalWordsWith(status: number, body: string, t: T): string {
+  const byCode = codeFieldWordsWith(fieldsOf(body), t);
+  if (byCode) return byCode;
   const code = refusalCode(body);
   for (const [re, key] of CODE_WORDS) if (code && re.test(code)) return t(key);
   return statusWordsWith(status, t);
@@ -389,6 +442,6 @@ export function jobFailure(
     default:
       break;
   }
-  for (const [re, key] of CODE_WORDS) if (raw && re.test(raw)) return withDetail(t(key));
+  for (const [re, key] of [...JOB_WORDS, ...CODE_WORDS]) if (raw && re.test(raw)) return withDetail(t(key));
   return withDetail(fallback);
 }

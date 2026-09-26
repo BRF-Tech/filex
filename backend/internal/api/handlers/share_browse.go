@@ -140,7 +140,7 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 	if pin != "" {
 		pinAmp = "&pin=" + url.QueryEscape(pin)
 	}
-	base := shareURLPath(sh.Token)
+	base := shareURLPath(r, sh.Token)
 
 	gallery := share.GalleryEligible(entries)
 	lang, t, footer := h.pub(r)

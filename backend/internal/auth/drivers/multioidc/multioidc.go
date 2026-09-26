@@ -25,6 +25,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authoidc "github.com/brf-tech/filex/backend/internal/auth/drivers/oidc"
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
@@ -101,8 +102,9 @@ func (m *Dispatcher) driverFor(ctx context.Context, p *model.Provider, host stri
 	if redirect == "" {
 		// Each tenant lives on its own host; default the redirect there. TLS is
 		// assumed — multi-tenant hosts sit behind the reverse proxy that
-		// terminates HTTPS (see docs/MULTI-TENANCY.md §13).
-		redirect = "https://" + host + "/api/auth/oidc/callback"
+		// terminates HTTPS (see docs/MULTI-TENANCY.md §13). Under a base path
+		// (FILEX_BASE_PATH) every tenant host serves filex under it too.
+		redirect = "https://" + host + basepath.From(ctx) + "/api/auth/oidc/callback"
 	}
 	hash := strings.Join([]string{p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret, redirect, p.RoleClaim, p.AdminGroup}, "\x00")
 

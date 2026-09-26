@@ -15,6 +15,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -231,7 +232,10 @@ func (h *WS) wsURL(r *http.Request) string {
 			if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 				scheme = "https"
 			}
-			base = scheme + "://" + host
+			// …under the base the request arrived on: without it a filex at
+			// https://example.com/filex/ sent the socket to /api/ws on the
+			// host's root, which is somebody else's server.
+			base = scheme + "://" + host + basepath.From(r.Context())
 		}
 	}
 	switch {

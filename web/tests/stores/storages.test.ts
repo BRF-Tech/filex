@@ -107,6 +107,34 @@ describe('stores/storages', () => {
     expect(s.count).toBe(1);
   });
 
+  // A delete whose answer never came is not a failed delete: the server
+  // finishes it whoever stops waiting (a large storage takes minutes, and a
+  // proxy gives up at 60–100 s). The list says which it is.
+  it('remove() reads the list again when the answer never came, and says whether the storage is gone', async () => {
+    const gateway = Object.assign(new Error('Request failed with status code 504'), { response: { status: 504 } });
+    (StoragesApi.remove as ReturnType<typeof vi.fn>).mockRejectedValue(gateway);
+    (StoragesApi.list as ReturnType<typeof vi.fn>).mockResolvedValue([fixture[0]]);
+    const s = useStoragesStore();
+    s.items = [...fixture];
+    await expect(s.remove(2)).resolves.toBe('deleted');
+    expect(s.find(2)).toBeUndefined();
+
+    (StoragesApi.list as ReturnType<typeof vi.fn>).mockResolvedValue([...fixture]);
+    await expect(s.remove(2)).resolves.toBe('pending');
+
+    const timeout = Object.assign(new Error('timeout of 600000ms exceeded'), { code: 'ECONNABORTED', request: {} });
+    (StoragesApi.remove as ReturnType<typeof vi.fn>).mockRejectedValue(timeout);
+    await expect(s.remove(2)).resolves.toBe('pending');
+  });
+
+  it('remove() still fails on a refusal the server answered', async () => {
+    const refused = Object.assign(new Error('Request failed with status code 500'), { response: { status: 500 } });
+    (StoragesApi.remove as ReturnType<typeof vi.fn>).mockRejectedValue(refused);
+    const s = useStoragesStore();
+    s.items = [...fixture];
+    await expect(s.remove(2)).rejects.toBe(refused);
+  });
+
   // Issue #16: "after I pressed Sync on storage and it finished, it says —
   // Never ran". The endpoint runs the sync synchronously, so by the time
   // syncNow resolves the row on screen is STALE, not pending. The old version
@@ -114,14 +142,16 @@ describe('stores/storages', () => {
   // last thing the store ever wrote and the storage read "Never ran" until a
   // full page reload.
   it('syncNow() refreshes the list, so the finished run is what the UI shows', async () => {
-    (StoragesApi.syncNow as ReturnType<typeof vi.fn>).mockResolvedValue({ run_id: 1 });
+    (StoragesApi.syncNow as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, status: 'started' });
     (StoragesApi.list as ReturnType<typeof vi.fn>).mockResolvedValue([
       fixture[0],
       { ...fixture[1], last_sync_at: '2026-09-05T20:02:16Z', last_sync_state: 'ok' as const },
     ]);
     const s = useStoragesStore();
     s.items = [...fixture];
-    await s.syncNow(2);
+    // The server's answer goes back to the page: "started", or "running"
+    // when a scan was already walking the storage (useSyncNow says which).
+    await expect(s.syncNow(2)).resolves.toEqual({ ok: true, status: 'started' });
     expect(StoragesApi.list).toHaveBeenCalled();
     expect(s.find(2)?.last_sync_state).toBe('ok');
     expect(s.find(2)?.last_sync_at).toBe('2026-09-05T20:02:16Z');

@@ -32,6 +32,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loginAs, apiLogin } from '../helpers/auth';
+import { underBase } from '../helpers/base';
 import { seedLocalStorage, dropStorageByName, waitForOp } from '../helpers/seed';
 import { APP_INSTALL_ALLOWANCE_MS } from '../helpers/appPlugin';
 
@@ -431,9 +432,9 @@ test.describe('App plugins — install, run, output, public page', () => {
        than a 404: a link already sitting in somebody's inbox has to land
        somewhere that can explain itself. Followed automatically by the client,
        so the assertion is on where it ENDED UP. */
-    const moved = await anon.get(`/api/p/${token}`, { maxRedirects: 0 });
+    const moved = await anon.get(underBase(`/api/p/${token}`), { maxRedirects: 0 });
     expect(moved.status(), 'the retired JSON prefix redirects to the share').toBe(301);
-    expect(moved.headers()['location']).toBe(`/api/public/s/${token}`);
+    expect(moved.headers()['location']).toBe(underBase(`/api/public/s/${token}`));
     await anon.dispose();
 
     // The same page in a browser with no session: PIN form → surface → Sign

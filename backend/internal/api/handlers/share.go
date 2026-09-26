@@ -21,6 +21,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
@@ -973,7 +974,7 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		// download, a file off an app page — carries no PIN at all.
 		http.SetCookie(w, &http.Cookie{
 			Name: share.CookieName(sh.Token), Value: h.Service.MintUnlock(sh.Token),
-			Path: "/", HttpOnly: true, Secure: requestIsHTTPS(r), SameSite: http.SameSiteLaxMode,
+			Path: basepath.CookiePath(r.Context()), HttpOnly: true, Secure: requestIsHTTPS(r), SameSite: http.SameSiteLaxMode,
 			MaxAge: int(share.UnlockTTL().Seconds()),
 		})
 	}
@@ -1429,9 +1430,12 @@ func (h *Share) dropURL(r *http.Request, token string) string {
 	return h.Tenants.FromRequest(r) + "/d/" + token
 }
 
-// shareURLPath returns the URL path for a share token.
-func shareURLPath(token string) string {
-	return "/s/" + path.Clean(token)
+// shareURLPath returns the path of a share's no-JS page as the browser has to
+// ask for it — under the base path the request arrived on (FILEX_BASE_PATH).
+// It is written into those pages (form actions, folder links), which the
+// browser resolves against the host, not against filex's root.
+func shareURLPath(r *http.Request, token string) string {
+	return basepath.Path(r.Context(), "/s/"+path.Clean(token))
 }
 
 // publicPageStyle is the shared inline stylesheet for every public
@@ -1565,7 +1569,7 @@ func (h *Share) renderPINForm(w http.ResponseWriter, r *http.Request, token, err
 		"Lang":      lang,
 		"Dir":       pageDir(lang),
 		"T":         t,
-		"Action":    shareURLPath(token),
+		"Action":    shareURLPath(r, token),
 		"Error":     errMsg,
 		"BrandCSS":  chrome.BrandCSS,
 		"BrandHead": chrome.BrandHead,
@@ -1587,7 +1591,7 @@ func (h *Share) renderUnlockedPage(w http.ResponseWriter, r *http.Request, token
 		"Lang":      lang,
 		"Dir":       pageDir(lang),
 		"T":         t,
-		"Action":    shareURLPath(token) + "?confirmed=1",
+		"Action":    shareURLPath(r, token) + "?confirmed=1",
 		"PIN":       pin,
 		"BrandCSS":  chrome.BrandCSS,
 		"BrandHead": chrome.BrandHead,

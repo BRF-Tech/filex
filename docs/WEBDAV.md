@@ -96,6 +96,14 @@ Notes:
 > A correction here belongs in `packages/core/src/lib/connectionGuides.ts`
 > too, and the other way round.
 
+**Under a base path** ([filex served under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path),
+`FILEX_BASE_PATH=/filex`) the endpoint is `https://example.com/filex/dav/` —
+every example below takes the base in front of `/dav/`, and the in-app page
+prints it that way. Answers are consistent with it: every `href` in a
+`PROPFIND` is under `/filex/dav/`, and a `MOVE`/`COPY` names its
+`Destination` there too (one outside the base is refused like one outside
+`/dav`). The reverse proxy passes the full path.
+
 ### Windows (map network drive)
 
 1. Open **File Explorer** → right-click **This PC** → **Map network drive…**
@@ -224,6 +232,12 @@ WebDAV enforces exactly the same authorization model as the web UI:
   documentation described WebDAV `DELETE` as permanent. Treat a sync client's
   delete as recoverable, but note the flip side: a large
   `rclone sync --delete` run fills the trash rather than freeing space.
+- **A folder's `DELETE` or `MOVE` runs to its end** once it has passed its
+  checks, whether or not the client is still waiting. On an object store a
+  folder is changed one object at a time; up to v0.46.0 a client that gave up
+  (its own timeout, a proxy's) stopped it between two objects and left the
+  folder half in the trash, or half at its new name. List the folder again to
+  see the result.
 - **Cross-storage MOVE is not supported** (drivers can't rename across
   backends) — the server answers `502`; do COPY + DELETE instead. COPY
   across storages works (it streams through the server).

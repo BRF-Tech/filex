@@ -119,6 +119,38 @@ the same rule; none of them adjust quota at delete time.
 > accounting is real now — see [Quotas](QUOTAS.md) for the full set of
 > rules (overwrite, move, restore, copy, purge) and where they live.
 
+### Who deleted it
+
+Every item in the trash records **who put it there** (`nodes.deleted_by`,
+migration 00061), and both Trash views show it: the explorer in a "Deleted by"
+column ("You" for your own deletes), the admin's Trash page by name.
+
+- **Who is recorded.** It is the person the delete was done for, whichever way
+  it arrived: the explorer, the API, WebDAV/SFTP/FTPS/S3 under their
+  account, or a delete the operations queue ran later (the queue keeps who
+  asked).
+- **Folders.** Deleting a folder records the person on the folder and on
+  every item inside it, because the trash lists a folder's contents as rows of
+  their own. A folder on a storage that cannot keep deleted bytes (it is
+  deleted outright, and only its row stays behind) records the person on the
+  folder alone: whatever is already in the trash under its path was put there
+  by the scanner, not by this delete.
+- **Nobody recorded.** An item shows a dash in two cases, and the hover text
+  says so:
+  - nobody in filex deleted it: the scanner found it gone from the storage,
+    or the virus scan quarantined it;
+  - it was deleted before this was kept.
+
+  The two cannot be told apart, so neither is called "System".
+- **Restore.** A restore clears the record. If the item goes back into the
+  trash, it records whoever deleted it that time.
+- **Deleted accounts.** Deleting an account clears the record wherever it
+  names that account.
+
+The listing resolves the names in one lookup per page, as the file listing
+does for owners. Nothing is backfilled: there is no honest way to know who
+deleted an item before the column existed.
+
 ### Retention & purge
 
 Trashed items are kept for a fixed window, then hard‑deleted automatically.
@@ -164,8 +196,9 @@ logged; the next run tries again).
 
 | Method & path | Body / query | Notes |
 |---|---|---|
-| `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, and **`ttl_days`** (days remaining before purge, floored at 0). |
+| `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, **`ttl_days`** (days remaining before purge, floored at 0), and who deleted it: **`deleted_by_id`**, **`deleted_by_name`**, and **`deleted_by_self`** (`true` when it was the caller). The three are absent when nobody is recorded (see *Who deleted it* below). `total` counts the entries **the caller may see**, and `offset`/`limit` page through those — up to v0.46.0 a member whose trash was interleaved with entries they may not see was told `total` = the length of the filtered first page, and could not reach the rest. `limit` above 500 is read as 50. |
 | `POST /api/files/manager/restore` | `{ "node_id": 123 }` | Moves the file back to its original path and re‑attaches the row. Returns **409** `{ "code": "EXISTS", "name", "path" }` when something already holds that path; nothing moves and the entry stays in the trash. |
+| `POST /api/files/manager/restore?queued=1` | `{ "node_ids": [123, 124] }` | The same checks for every entry, and one refusal refuses the batch. What they allow is queued, one job per storage: **202** `{ "ops": [{ "kind": "restore", … }] }`, followed with `GET /api/files/ops`. An entry whose place is taken fails on its own, and the job's `error` says so; the others come back. Offered when `capabilities.queued` lists `restore`; the explorer's Restore uses it then. At most **1000** entries per request: more answer **400** `{ "code": "TOO_MANY", "max": 1000 }`. |
 
 The explorer's **Trash** view draws these entries in its own table with the
 facts a deleted item has: **Deleted** (when — the date column, sortable and
@@ -177,7 +210,12 @@ drawn there, and **+ New** is gone — nothing is made inside the Trash.
 Both are **filtered by access**: a [confined](RBAC.md) (root‑locked) caller only
 sees / can restore items whose original path is inside its root, and
 [RBAC](RBAC.md) requires **≥viewer** to see an item in the list and **≥editor**
-on its original path to restore it (restore writes the file back).
+on its original path to restore it (restore writes the file back). With
+multi-tenancy on, an entry of another tenant's storage answers **404** `trash
+entry not found`, as an id that does not exist does — one at a time and in a
+queued batch. Up to v0.46.0 the restore never asked whose storage the entry
+was in, and a storage without access control let any member restore another
+tenant's deleted file by its id.
 
 An entry is judged on the path it was deleted **from**, never on its trash key.
 A row old enough to record no original path — its path is still inside
@@ -191,7 +229,8 @@ answer to whoever holds a grant on `.filex-trash/`.
 |---|---|---|
 | `POST /api/admin/trash/empty` | `?older_than_days=N&storage_id=…` **or** JSON `{ "older_than_days": N, "storage_id": … }` | Queues a purge of everything deleted more than `N` days before **the moment it is asked for**, in one storage or every storage the caller can reach. **`0` or missing days is everything in the trash at that moment** — a file deleted while the purge runs stays in the trash. Waits up to two seconds: **200** with the final counts when the purge is done by then, otherwise **202** with its progress so far while it carries on as an ops job — see the run fields below. **409** `{ "code": "BUSY", "job": … }` while the caller's tenant already has one queued or running (`job` is that run); another tenant's purge, or the nightly retention, does not refuse it — it waits its turn (`queued: true`). **400** for anything it cannot read — a non‑integer or negative day count, a storage id that is not a number, an unknown field — and nothing is purged. |
 | `GET /api/admin/trash/empty` | — | The latest purge the caller's tenant asked for: queued, running or finished. `{ "running": false }` alone when it has asked for none. |
-| `DELETE /api/admin/trash/{id}` | — | Immediately hard‑delete one trashed node (storage object + quota + row). |
+| `DELETE /api/admin/trash/{id}` | — | Immediately hard‑delete one trashed node (storage object + quota + row). The id of a node that is not in the trash answers **404** `trash entry not found` and nothing is touched (up to v0.46.0 it was hard‑deleted like a trash entry). |
+| `DELETE /api/admin/trash/{id}?queued=1` | — | The same ownership check, then the purge is a job of the operations queue: **202** `{ "op": { "kind": "purge", … } }`, followed with `GET /api/files/ops`. A folder is purged one object and one row at a time; inside the request the admin page's client gave up after 30 s. Offered when `capabilities.queued` lists `purge`; the admin Trash page and an operator's **Delete permanently** in the explorer's Trash use it then (the admin page restores with `POST /api/files/manager/restore?queued=1`). The explorer follows the jobs of one press as one: the rows say "Deleting permanently…", no second purge is sent for them, and one notice says what was deleted and what was not, and why, when the last job ends. Once running it is not cancelled half-way. The job purges what is in the trash **when it runs**: an entry restored while the purge waited in the queue is left alone, and the job ends `failed` with `the item is not in the trash`. |
 
 A run reports `{ ok, op_id, running, queued, cancelled, storage_id,
 older_than_days, total, total_bytes, scanned, purged, failed, bytes, started_at,
@@ -205,8 +244,9 @@ for — the cutoff the run purges below.
 
 **The run is an ops job** (kind `trash-empty`, `op_id`): it is in the
 explorer's operations centre and the admin tray, `GET /api/files/ops/{op_id}`
-reads it and `POST /api/files/ops/{op_id}/cancel` stops it (an administrator,
-or the admin who asked). A stopped run finishes the row in hand and stops;
+reads it and `POST /api/files/ops/{op_id}/cancel` stops it (an administrator
+of the tenant that asked; below an administrator nobody sees another person's
+ops). A stopped run finishes the row in hand and stops;
 what it had not reached stays in the trash. It never takes the queue's worker —
 copies, moves, deletes and upload commits keep running beside it — and a
 restart does not forget it: the row is requeued at boot and the run carries on
@@ -242,6 +282,14 @@ folder exists again.
 A file or folder now holds the original path. filex refuses rather than
 overwrite it or pour one folder into another. Rename or move what is there,
 then restore again.
+
+**A folder restore answered 504, or the page gave up waiting.**
+The restore carries on to the end: it no longer depends on anybody waiting for
+the answer. List the folder again to see it back. Up to v0.46.0 the proxy's
+timeout stopped it between two objects, leaving the folder half in the trash
+and half back in place; a second restore then answered 409 `EXISTS`, because
+the half that had come back held the name. The rest of such a folder is still
+under its `.filex-trash/` key on the backend, to be moved back by hand.
 
 **Restore reports success but the file isn't back on disk.**
 The DB flag is cleared **best‑effort**: if the driver's move step fails, filex

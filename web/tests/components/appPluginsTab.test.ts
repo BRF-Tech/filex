@@ -1,7 +1,9 @@
-import { closeRowMenus, menuEntries, openRowMenu } from '../helpers/rowMenu';
+import { closeRowMenus, menuEntries, openRowMenu, pickMenuItem } from '../helpers/rowMenu';
 // The Apps tab: the runtime banner says whether apps can run here, the table
 // draws each state with its own tone, and the shell learns whether Apps
 // should be the default tab.
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
@@ -181,5 +183,127 @@ describe('AppPluginsTab', () => {
     expect(cell!.textContent).toContain('100');
     const coverage = [...wrapper.children].find((el) => !el.contains(badge!) && /100/.test(el.textContent ?? ''));
     expect(coverage, 'the coverage line is not a sibling of the name+badge line inside the wrapper').toBeTruthy();
+  });
+});
+
+// ── Updates ─────────────────────────────────────────────────────────────
+//
+// The rows here are the SERVER's own bytes for "Check now"'s answer
+// (testdata/wire/app-plugin-update-check.json): an app whose newer release
+// asks for a new permission, and a language pack that moved by itself and is
+// outside its own range for this filex.
+describe('AppPluginsTab — updates', () => {
+  const WIRE = path.resolve(__dirname, '../../../backend/internal/api/handlers/testdata/wire');
+  const checkAnswer = () => JSON.parse(readFileSync(path.join(WIRE, 'app-plugin-update-check.json'), 'utf8'));
+
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    listStatus = 200;
+    const { report: _r, ...list } = checkAnswer();
+    listAnswer = list;
+    const { api } = await import('@/api/client');
+    (api.post as unknown as ReturnType<typeof vi.fn>).mockReset();
+    (api.patch as unknown as ReturnType<typeof vi.fn>).mockReset();
+    closeRowMenus();
+  });
+
+  it('says in the Version cell what the last check found, in ONE wrapper, and the range warning', async () => {
+    const w = mountTab();
+    await flushPromises();
+    const cell = w.element.querySelector('[data-testid="app-plugin-updates-sign"]')!.closest('.fe-list__cell')!;
+    expect(cell.children.length, 'the Version cell is a flex row: one wrapper, or its pieces overlap').toBe(1);
+    expect(w.find('[data-testid="app-plugin-version-sign"]').text()).toBe('1.2.0');
+    expect(w.find('[data-testid="app-plugin-update-approval-sign"]').text()).toBe(en.appPlugins.update.needsApproval);
+    expect(w.find('[data-testid="app-plugin-updates-sign"]').text()).toContain('1.2.0 → 1.3.0 · new: mail:send');
+    // The badge carries its tone as a prop, not a `variant` Vue would drop.
+    expect(w.find('[data-testid="app-plugin-update-approval-sign"]').classes().join(' ')).toMatch(/amber/);
+
+    expect(w.find('[data-testid="app-plugin-compat-lang-es"]').text()).toBe(en.appPlugins.compat.bad);
+    expect(w.find('[data-testid="app-plugin-compat-lang-es"]').classes().join(' ')).toMatch(/rose/);
+    expect(w.find('[data-testid="app-plugins-update-check"]').text()).toMatch(/^The apps’ sources were last checked for updates /);
+    w.unmount();
+  });
+
+  it('offers "Review update" only where there is one, and it opens the review of the source’s version', async () => {
+    const { api } = await import('@/api/client');
+    const dry = JSON.parse(readFileSync(path.join(WIRE, 'app-plugin-upgrade-review.json'), 'utf8'));
+    (api.post as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => ({ data: dry }));
+    const w = mountTab();
+    await flushPromises();
+
+    await openRowMenu(w, 'app-plugin-actions-lang-es');
+    expect(menuEntries().map((e) => e.label)).not.toContain(en.appPlugins.actions.reviewUpdate);
+    closeRowMenus();
+
+    await openRowMenu(w, 'app-plugin-actions-sign');
+    expect(menuEntries().map((e) => e.label)).toEqual([
+      en.appPlugins.actions.details,
+      en.appPlugins.actions.reviewUpdate,
+      en.appPlugins.actions.autoUpdateOff,
+      en.appPlugins.actions.upgrade,
+      en.appPlugins.actions.remove,
+    ]);
+    await pickMenuItem('app-plugin-actions-sign-update');
+    await flushPromises();
+    const call = (api.post as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe('/admin/app-plugins/7/upgrade');
+    expect(call[1]).toEqual({ from_source: true, permissions: [] });
+    expect(call[2]).toMatchObject({ params: { dry_run: 1 } });
+    // Straight on the review: the jump, what it adds, and — this review's
+    // range leaves 0.47.0 out — why it cannot be installed.
+    expect(w.find('[data-testid="app-plugin-upgrade-jump"]').text()).toContain('1.1.0 → 1.2.0');
+    expect(w.find('[data-testid="app-plugin-incompatible"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('"Check for updates" asks the server, redraws the list and says what moved', async () => {
+    const { api } = await import('@/api/client');
+    (api.post as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === '/admin/app-plugins/updates/check') return { data: checkAnswer() };
+      return { data: {} };
+    });
+    listAnswer = { ...listAnswer, plugins: [] };
+    const w = mountTab('tr');
+    await flushPromises();
+    expect(w.find('[data-testid="app-plugin-updates-sign"]').exists()).toBe(false);
+    await w.find('[data-testid="app-plugins-check-updates"]').trigger('click');
+    await flushPromises();
+    const call = (api.post as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe('/admin/app-plugins/updates/check');
+    expect(call[2]?.timeout, 'a check installs what may be installed: it waits for the compiles').toBeGreaterThanOrEqual(600_000);
+    expect(w.find('[data-testid="app-plugin-updates-sign"]').exists(), 'the list is the answer’s').toBe(true);
+    const { useToastStore } = await import('@/stores/toast');
+    expect(useToastStore().toasts.map((x) => x.message)).toEqual(['Güncelleme denetimi bitti: 1 güncellendi, 1 sizi bekliyor.']);
+    w.unmount();
+  });
+
+  it('the row menu switches automatic updates for that app, and an app with no source has no switch', async () => {
+    const { api } = await import('@/api/client');
+    (api.patch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (_u: string, body: { auto_update: boolean }) => ({
+      data: { ...listAnswer.plugins[0], auto_update: body.auto_update },
+    }));
+    listAnswer = {
+      ...listAnswer,
+      plugins: [...listAnswer.plugins, { ...listAnswer.plugins[0], id: 11, name: 'uploaded', source: 'upload', update_source: undefined, update: undefined }],
+    };
+    const w = mountTab();
+    await flushPromises();
+    await openRowMenu(w, 'app-plugin-actions-uploaded');
+    const uploaded = menuEntries().map((e) => e.label);
+    expect(uploaded, 'no source, nothing to switch').not.toContain(en.appPlugins.actions.autoUpdateOff);
+    expect(uploaded).not.toContain(en.appPlugins.actions.autoUpdateOn);
+    closeRowMenus();
+    expect(w.find('[data-testid="app-plugin-updates-uploaded"]').text()).toContain(en.appPlugins.update.noSource);
+
+    await openRowMenu(w, 'app-plugin-actions-sign');
+    await pickMenuItem('app-plugin-actions-sign-auto-update');
+    await flushPromises();
+    expect((api.patch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(['/admin/app-plugins/7', { auto_update: false }]);
+    // The row takes the server's answer: the switch is off, and the cell says so.
+    expect(w.find('[data-testid="app-plugin-updates-sign"]').text()).toContain(en.appPlugins.update.autoOff);
+    await openRowMenu(w, 'app-plugin-actions-sign');
+    expect(menuEntries().map((e) => e.label)).toContain(en.appPlugins.actions.autoUpdateOn);
+    closeRowMenus();
+    w.unmount();
   });
 });

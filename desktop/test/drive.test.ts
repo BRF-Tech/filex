@@ -22,6 +22,7 @@ import {
   type DriveDeps,
   type MountRequest,
 } from '../src/drive.ts';
+import { appStrings } from './ui-strings.ts';
 
 const TOKEN = 'sekritTOKEN-do-not-leak-0123456789';
 
@@ -174,10 +175,15 @@ test('Linux mount reports a missing gio as no-tool', async () => {
   assert.equal(res.problem, 'no-tool');
 });
 
-test('macOS plan targets /Volumes and the token stays off argv', async () => {
+// ⚠ It targeted /Volumes/filex-<storage>. A user cannot make a folder under
+// /Volumes (measured on macOS 26: "Permission denied"), the mkdir's failure
+// was ignored, and mount_webdav then failed on a folder that did not exist:
+// the feature could not have worked for anyone. The folder is the user's own,
+// beside — never inside or instead of — the ~/filex sync folder.
+test('macOS plan targets a folder in the home, not /Volumes, and the token stays off argv', async () => {
   const mac: MountRequest = { ...base, platform: 'darwin' };
-  const plan = planMount(mac, () => false);
-  assert.equal(plan.mountDir, '/Volumes/filex-docs');
+  const plan = planMount(mac, () => false, '/Users/ada');
+  assert.equal(plan.mountDir, '/Users/ada/filex-drives/filex-docs');
   const { deps, calls, logs } = recorder({ '/bin/mkdir': { code: 0 }, '/sbin/mount_webdav': { code: 0 } });
   const res = await mount(mac, deps);
   assert.equal(res.ok, true);
@@ -185,4 +191,36 @@ test('macOS plan targets /Volumes and the token stays off argv', async () => {
   assert.ok(!mw.args.some((a) => a.includes(TOKEN)));
   assert.ok(mw.input.includes(TOKEN), 'mount_webdav takes the password on stdin');
   assertNoLeak(TOKEN, calls, logs);
+});
+
+// ⚠ …and it says so in the window's language. It was problem 'failed' with an
+// English detail ("could not make the folder …") dropped into the Turkish
+// sentence "Sürücü bağlanamadı. {detail}".
+test('macOS says so when the mount folder cannot be made, and does not mount', async () => {
+  const mac: MountRequest = { ...base, platform: 'darwin' };
+  const { deps, calls } = recorder({ '/bin/mkdir': { code: 1, stderr: 'mkdir: /x: Permission denied' } });
+  const res = await mount(mac, deps);
+  assert.equal(res.ok, false);
+  assert.equal(res.problem, 'mount-folder', 'a code the window words, not an English sentence');
+  assert.equal(res.mountDir, '/home/ada/filex-drives/filex-docs', 'the folder it could not make');
+  assert.match(res.detail ?? '', /Permission denied/, 'the OS words stay for the log');
+  assert.ok(!calls.some((c) => c.file === '/sbin/mount_webdav'), 'it mounted onto a folder it could not make');
+});
+
+test('the window has words for the folder that could not be made, in both languages', () => {
+  const s = appStrings()['drive.err.mount-folder'];
+  assert.ok(s, 'no drive.err.mount-folder in ui/app.html');
+  for (const text of s) assert.match(text, /\{dir\}/);
+});
+
+// Linux's default sat at ~/filex-<storage> — and at ~/filex itself for the
+// whole server, which is the sync folder's own parent: "Mounted at ~/filex"
+// and Open showed the synced folders as if they were the drive. It sits under
+// filex-drives/ like macOS'. Safe to move: mounts are remembered for the
+// session only (main.ts driveMounts), and gio mounts under GVfs's own
+// directory, never onto this one — nothing already mounted refers to it.
+test('Linux names a folder under filex-drives/ too, never the sync folder', () => {
+  const linux: MountRequest = { ...base, platform: 'linux' };
+  assert.equal(planMount(linux, () => false, '/home/ada').mountDir, '/home/ada/filex-drives/filex-docs');
+  assert.equal(planMount({ ...linux, storage: undefined }, () => false, '/home/ada').mountDir, '/home/ada/filex-drives/filex');
 });

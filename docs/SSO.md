@@ -57,6 +57,11 @@ Create a **confidential** OIDC client with:
   `https://files.example.com/*`. Where the IdP sends the browser back after
   [signing out](#signing-out); without them sign-out ends on the IdP's "invalid
   redirect URI" page.
+- **Under a sub-path** ([`FILEX_BASE_PATH`](CONFIGURATION.md#base-path)) every
+  one of these carries the base:
+  `https://example.com/filex/api/auth/oidc/callback`,
+  `https://example.com/filex/admin/login?signed_out=1`, … — the public URL
+  already ends with it, so "`FILEX_PUBLIC_URL` + …" still holds.
 - **Grant type:** Authorization Code (standard flow).
 - **Client authentication:** on (you'll get a client secret).
 

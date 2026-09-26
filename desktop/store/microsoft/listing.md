@@ -54,8 +54,10 @@ Kubernetes — see filex.sh.
 - English and Turkish interface
 - Open source (MIT); no telemetry, no ads
 
-**What's new** — from `CHANGELOG.md` for the version being submitted, rewritten
-for a person rather than a changelog reader. Store version ≠ app version: see
+**What's new** — written by the release itself since 0.47.0: "What's new in
+filex X.Y.Z: <the GitHub Release>" in every listed language (the public
+workflow's `scripts/msstore-submit.ps1`). The first submission's text was
+written by hand. Store version ≠ app version: see
 `desktop/scripts/appx-manifest.cjs`.
 
 **Search terms:** file manager · file sync · self-hosted · WebDAV · SFTP · S3 · cloud storage
@@ -114,7 +116,7 @@ tek bir programdır — ayrıntılar filex.sh'ta.
 | Support contact | https://github.com/BRF-Tech/filex/issues |
 | Category | Productivity (subcategory: none) |
 | Copyright | © BRF Tech |
-| Developed by | BRF Teknoloji |
+| Developed by | BRF Tech |
 | Store logo (1:1, 300×300) | `desktop/build/appx/LargeTile.png` is 310×310; export 300×300 from `build/icon.png` |
 | Screenshots | EN listing: the English interface; TR listing: the Turkish interface. Taken from a signed-in desktop app against a demo server — file list, Settings → Sync folders, a share dialog, "Open with" in the editor window. The release screenshot rules apply (`docs/CONTRIBUTING.md` → Release process, step 2): current, and in the listing's language |
 

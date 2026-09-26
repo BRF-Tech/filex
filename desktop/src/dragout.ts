@@ -40,10 +40,10 @@ import { net } from 'electron';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
 
 import { log } from './log.js';
-import { WHOLE_FILE_RANGE, wholeFileVerdict } from './download-guard.js';
+import { serverUrl } from './server-url.js';
+import { CANCELLED, WHOLE_FILE_RANGE, landViaPart, wholeFileVerdict } from './download-guard.js';
 
 export interface DragItem {
   path: string; // wire path: `<depo>://rel`
@@ -57,6 +57,9 @@ export interface DragProgress {
   name?: string;
   finished?: boolean;
   error?: string;
+  /** Files written so far, inside folders too: a dragged folder is ONE item,
+   *  and its item count said nothing until the whole of it had arrived. */
+  files?: number;
 }
 
 export interface PrepareContext {
@@ -94,26 +97,86 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  * servers it did not ship.
  *
  * `net.request` hands back headers as a plain object and never validates them.
+ *
+ * `signal` aborts the request — before the answer or in the middle of its
+ * body — so the drop's Stop ends the file in flight, not only the ones after
+ * it. The listener goes with the response: one signal serves a whole folder
+ * of requests.
  */
-function get(ctx: PrepareContext, url: string, range?: string): Promise<Electron.IncomingMessage> {
+function get(ctx: PrepareContext, url: string, range?: string, signal?: AbortSignal): Promise<Electron.IncomingMessage> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error(CANCELLED));
+      return;
+    }
     const req = net.request({ method: 'GET', url });
     req.setHeader('Authorization', `Bearer ${ctx.token}`);
     if (range) req.setHeader('Range', range);
-    req.on('response', (res) => resolve(res));
-    req.on('error', (e) => reject(e));
+    const onAbort = () => {
+      req.abort();
+      reject(new Error(CANCELLED));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const settled = () => signal?.removeEventListener('abort', onAbort);
+    req.on('response', (res) => {
+      res.once('end', settled);
+      res.once('error', settled);
+      res.once('aborted', settled);
+      resolve(res);
+    });
+    req.on('error', (e) => {
+      settled();
+      reject(e);
+    });
     req.end();
   });
 }
 
-/** Reads a whole response into a string — used for the JSON listings. */
+/** Reads a whole response into a string — used for the JSON listings.
+ *  ⚠ An aborted request ends its response with 'aborted', not with 'end' or
+ *  'error' (Electron's IncomingMessage): without it a stopped listing never
+ *  settles. */
 function readAll(res: Electron.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     res.on('data', (c: Buffer) => chunks.push(c));
     res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     res.on('error', (e: Error) => reject(e));
+    res.on('aborted', () => reject(new Error(CANCELLED)));
   });
+}
+
+/**
+ * One file into `dest`, through `dest + suffix` (download-guard.ts
+ * landViaPart): copied off the sync engine's mirror when it keeps one — of
+ * `size`, when that is known — and downloaded from the server otherwise. Both
+ * ways stop mid-file on `signal`.
+ */
+async function landFile(
+  ctx: PrepareContext,
+  remote: string,
+  dest: string,
+  opts: { suffix: string; signal?: AbortSignal; size?: number },
+): Promise<number> {
+  const mirror = ctx.mirrorFor?.(remote) ?? null;
+  if (mirror) {
+    const mst = await fs.promises.stat(mirror).catch(() => null);
+    if (mst?.isFile() && (opts.size === undefined || opts.size < 0 || mst.size === opts.size)) {
+      const size = await landViaPart(fs.createReadStream(mirror), dest, opts);
+      await fs.promises.utimes(dest, mst.atime, mst.mtime).catch(() => undefined);
+      return size;
+    }
+  }
+  const url = serverUrl(ctx.serverUrl, '/api/files/manager');
+  url.searchParams.set('action', 'download');
+  url.searchParams.set('path', remote);
+  const res = await get(ctx, url.toString(), WHOLE_FILE_RANGE, opts.signal);
+  const verdict = wholeFileVerdict(res.statusCode, res.headers['content-range']);
+  if (!verdict.ok) {
+    throw new Error(`downloading ${remote} failed: ${verdict.reason}`);
+  }
+  xferLog('streaming', { remote, status: res.statusCode });
+  return landViaPart(res as unknown as NodeJS.ReadableStream, dest, opts);
 }
 
 export class DragOutCache {
@@ -204,10 +267,10 @@ export class DragOutCache {
     let bytes = 0;
     let done = 0;
     for (const f of plan) {
-      if (signal?.aborted) return { ready: false, paths: [], error: 'cancelled' };
+      if (signal?.aborted) return { ready: false, paths: [], error: CANCELLED };
       ctx.onProgress?.({ done, total: plan.length, name: path.basename(f.local) });
       try {
-        bytes += await this.materialise(ctx, f.remote, f.local, f.size);
+        bytes += await this.materialise(ctx, f.remote, f.local, f.size, signal);
       } catch (e) {
         ctx.onProgress?.({ done, total: plan.length, finished: true, error: String((e as Error)?.message ?? e) });
         return { ready: false, paths: [], error: String((e as Error)?.message ?? e) };
@@ -242,31 +305,13 @@ export class DragOutCache {
    * Downloads one remote file to an exact destination path, completing through
    * a `.filexpart` rename so nothing ever wears the final name half-written.
    * Used by the placeholder route, which writes into the user's own folder.
+   * `signal` stops it mid-file: the part file goes, nothing is left behind.
    */
-  async downloadFileTo(ctx: PrepareContext, remote: string, dest: string): Promise<number> {
+  async downloadFileTo(ctx: PrepareContext, remote: string, dest: string, signal?: AbortSignal): Promise<number> {
+    if (signal?.aborted) throw new Error(CANCELLED);
     xferLog('file ->', remote);
     await fs.promises.mkdir(path.dirname(dest), { recursive: true });
-    const mirror = ctx.mirrorFor?.(remote) ?? null;
-    if (mirror) {
-      const mst = await fs.promises.stat(mirror).catch(() => null);
-      if (mst?.isFile()) {
-        await fs.promises.copyFile(mirror, dest);
-        return mst.size;
-      }
-    }
-    const url = new URL('/api/files/manager', ctx.serverUrl);
-    url.searchParams.set('action', 'download');
-    url.searchParams.set('path', remote);
-    const res = await get(ctx, url.toString(), WHOLE_FILE_RANGE);
-    const verdict = wholeFileVerdict(res.statusCode, res.headers['content-range']);
-    if (!verdict.ok) {
-      throw new Error(`downloading ${remote} failed: ${verdict.reason}`);
-    }
-    const tmp = `${dest}.filexpart`;
-    xferLog('streaming', { remote, status: res.statusCode });
-    await pipeline(res as unknown as NodeJS.ReadableStream, fs.createWriteStream(tmp));
-    await fs.promises.rename(tmp, dest);
-    const size = (await fs.promises.stat(dest)).size;
+    const size = await landFile(ctx, remote, dest, { suffix: '.filexpart', signal });
     xferLog('file ok', { dest, size });
     return size;
   }
@@ -277,14 +322,15 @@ export class DragOutCache {
     remoteDir: string,
     dest: string,
     signal?: AbortSignal,
+    onFile?: () => void,
   ): Promise<void> {
-    if (signal?.aborted) throw new Error('cancelled');
+    if (signal?.aborted) throw new Error(CANCELLED);
     xferLog('dir ->', remoteDir);
     await fs.promises.mkdir(dest, { recursive: true });
-    const url = new URL('/api/files/manager', ctx.serverUrl);
+    const url = serverUrl(ctx.serverUrl, '/api/files/manager');
     url.searchParams.set('action', 'index');
     url.searchParams.set('path', remoteDir);
-    const res = await get(ctx, url.toString());
+    const res = await get(ctx, url.toString(), undefined, signal);
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw new Error(`listing ${remoteDir} failed: server said ${res.statusCode}`);
     }
@@ -295,8 +341,12 @@ export class DragOutCache {
       if (!f.basename || f.basename === '.trash') continue;
       const childRemote = `${base}${f.basename}`;
       const childDest = path.join(dest, safeName(f.basename));
-      if (f.type === 'dir') await this.downloadTreeTo(ctx, childRemote, childDest, signal);
-      else await this.downloadFileTo(ctx, childRemote, childDest);
+      if (signal?.aborted) throw new Error(CANCELLED);
+      if (f.type === 'dir') await this.downloadTreeTo(ctx, childRemote, childDest, signal, onFile);
+      else {
+        await this.downloadFileTo(ctx, childRemote, childDest, signal);
+        onFile?.();
+      }
     }
   }
 
@@ -309,11 +359,11 @@ export class DragOutCache {
     dirs: string[],
     signal?: AbortSignal,
   ): Promise<void> {
-    if (signal?.aborted) throw new Error('cancelled');
-    const url = new URL('/api/files/manager', ctx.serverUrl);
+    if (signal?.aborted) throw new Error(CANCELLED);
+    const url = serverUrl(ctx.serverUrl, '/api/files/manager');
     url.searchParams.set('action', 'index');
     url.searchParams.set('path', remoteDir);
-    const res = await get(ctx, url.toString());
+    const res = await get(ctx, url.toString(), undefined, signal);
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw new Error(`listing ${remoteDir} failed: server said ${res.statusCode}`);
     }
@@ -340,8 +390,18 @@ export class DragOutCache {
    * makes the second drag of anything instant. Otherwise the local mirror is
    * copied when the sync engine has one (no network), and only failing that
    * does the file come down from the server.
+   *
+   * ⚠ Through `.part`, renamed when complete: a half-written file left at the
+   * real path would be handed to the OS by the next drag and copied as if
+   * whole.
    */
-  private async materialise(ctx: PrepareContext, remote: string, local: string, size: number): Promise<number> {
+  private async materialise(
+    ctx: PrepareContext,
+    remote: string,
+    local: string,
+    size: number,
+    signal?: AbortSignal,
+  ): Promise<number> {
     const have = await fs.promises.stat(local).catch(() => null);
     if (have?.isFile() && (size < 0 || have.size === size)) {
       // Touch it so the sweeper counts it as recently used.
@@ -350,32 +410,7 @@ export class DragOutCache {
       return have.size;
     }
     await fs.promises.mkdir(path.dirname(local), { recursive: true });
-
-    const mirror = ctx.mirrorFor?.(remote) ?? null;
-    if (mirror) {
-      const mst = await fs.promises.stat(mirror).catch(() => null);
-      if (mst?.isFile() && (size < 0 || mst.size === size)) {
-        await fs.promises.copyFile(mirror, local);
-        await fs.promises.utimes(local, mst.atime, mst.mtime).catch(() => undefined);
-        return mst.size;
-      }
-    }
-
-    const url = new URL('/api/files/manager', ctx.serverUrl);
-    url.searchParams.set('action', 'download');
-    url.searchParams.set('path', remote);
-    const res = await get(ctx, url.toString(), WHOLE_FILE_RANGE);
-    const verdict = wholeFileVerdict(res.statusCode, res.headers['content-range']);
-    if (!verdict.ok) {
-      throw new Error(`downloading ${remote} failed: ${verdict.reason}`);
-    }
-    // ⚠ Written to `.part` and renamed: a half-written file left at the real
-    // path would be handed to the OS by the next drag and copied as if whole.
-    const tmp = `${local}.part`;
-    await pipeline(res as unknown as NodeJS.ReadableStream, fs.createWriteStream(tmp));
-    await fs.promises.rename(tmp, local);
-    const st = await fs.promises.stat(local);
-    return st.size;
+    return landFile(ctx, remote, local, { suffix: '.part', signal, size });
   }
 }
 
@@ -433,26 +468,39 @@ export async function fulfilDrop(
 ): Promise<{ ok: boolean; written: string[]; error?: string }> {
   const written: string[] = [];
   let done = 0;
+  let files = 0;
   for (const item of items) {
-    if (signal?.aborted) return { ok: false, written, error: 'cancelled' };
+    if (signal?.aborted) {
+      ctx.onProgress?.({ done, total: items.length, finished: true, error: CANCELLED, files });
+      return { ok: false, written, error: CANCELLED };
+    }
     const name = safeName(item.basename);
     const dest = path.join(dropDir, name);
-    ctx.onProgress?.({ done, total: items.length, name });
+    ctx.onProgress?.({ done, total: items.length, name, files });
+    // Each file that lands is said: a folder is ONE item, and its count
+    // alone said nothing until the whole folder had arrived.
+    const onFile = () => {
+      files++;
+      ctx.onProgress?.({ done, total: items.length, name, files });
+    };
     try {
       // The empty stand-in goes first: the real content takes its place, and a
       // failure must not leave a zero-byte file wearing the right name.
       await fs.promises.rm(dest, { recursive: true, force: true });
-      if (item.type === 'dir') await cache.downloadTreeTo(ctx, item.path, dest, signal);
-      else await cache.downloadFileTo(ctx, item.path, dest);
+      if (item.type === 'dir') await cache.downloadTreeTo(ctx, item.path, dest, signal, onFile);
+      else {
+        await cache.downloadFileTo(ctx, item.path, dest, signal);
+        onFile();
+      }
       written.push(dest);
     } catch (e) {
-      const msg = String((e as Error)?.message ?? e);
-      ctx.onProgress?.({ done, total: items.length, name, finished: true, error: msg });
+      const msg = signal?.aborted ? CANCELLED : String((e as Error)?.message ?? e);
+      ctx.onProgress?.({ done, total: items.length, name, finished: true, error: msg, files });
       return { ok: false, written, error: msg };
     }
     done++;
   }
-  ctx.onProgress?.({ done, total: items.length, finished: true });
+  ctx.onProgress?.({ done, total: items.length, finished: true, files });
   return { ok: true, written };
 }
 

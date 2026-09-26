@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/testutil/dbtest"
 )
@@ -236,5 +237,45 @@ func TestAccessLog_AnonymousRequestHasNoCaller(t *testing.T) {
 		if v, ok := lines[0][key]; ok {
 			t.Errorf("anonymous request logged %s=%q", key, v)
 		}
+	}
+}
+
+// Under a base path (FILEX_BASE_PATH) the access log shows the path exactly as
+// it arrived — the base included — still names the manager's verb, and logs a
+// request refused for arriving OUTSIDE the base: that 404 is how a proxy that
+// strips the prefix shows up, so it must not be silent.
+func TestAccessLog_UnderABasePath(t *testing.T) {
+	logs := captureAccessLog(t)
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	r := chi.NewRouter()
+	r.Use(LoggerAt("/filex"))
+	r.Use(basepath.Middleware("/filex"))
+	r.Get("/api/files/manager", ok)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	for _, p := range []string{"/filex/api/files/manager?action=index&path=main://", "/api/files/manager?action=index"} {
+		resp, err := http.Get(srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	lines := logs.lines()
+	if len(lines) != 2 {
+		t.Fatalf("want two http lines, got %d: %v", len(lines), lines)
+	}
+	for key, want := range map[string]string{"path": "/filex/api/files/manager", "action": "index", "status": "200"} {
+		if lines[0][key] != want {
+			t.Errorf("under the base: %s = %q, want %q (line %v)", key, lines[0][key], want, lines[0])
+		}
+	}
+	for key, want := range map[string]string{"path": "/api/files/manager", "status": "404"} {
+		if lines[1][key] != want {
+			t.Errorf("outside the base: %s = %q, want %q (line %v)", key, lines[1][key], want, lines[1])
+		}
+	}
+	if a := lines[1]["action"]; a != "" {
+		t.Errorf("a request outside the base names no verb, got %q", a)
 	}
 }

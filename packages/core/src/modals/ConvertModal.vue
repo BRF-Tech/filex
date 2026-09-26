@@ -18,6 +18,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
+import Modal from './Modal.vue';
 
 const props = defineProps<{
   /** Converter base, e.g. https://fm.example.com/convert */
@@ -85,16 +86,35 @@ const toList = computed<Fmt[]>(() => {
 const iframeSrc = computed(() => `${props.convertUrl.replace(/\/$/, '')}/?embed=1`);
 
 let msgId = 0;
-const pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>();
+/** Messages waiting for the converter's answer, each with its time limit. */
+const pending = new Map<
+  number,
+  { resolve: (v: any) => void; reject: (e: any) => void; timer: ReturnType<typeof setTimeout> }
+>();
 
-function send(cmd: string, extra: Record<string, unknown> = {}, transfer: Transferable[] = []): Promise<any> {
+/** How long the converter may take to answer an ordinary command. */
+const ANSWER_TIMEOUT_MS = 180000;
+/** ⚠ How long a CONVERSION may take. It shared the 180 s above, and a large
+ *  video or document simply takes longer: the window called it failed while
+ *  the converter was still at it, and dropped the result when it came. */
+const CONVERT_TIMEOUT_MS = 30 * 60 * 1000;
+
+function send(
+  cmd: string,
+  extra: Record<string, unknown> = {},
+  transfer: Transferable[] = [],
+  timeoutMs = ANSWER_TIMEOUT_MS,
+): Promise<any> {
   const id = ++msgId;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    iframeRef.value?.contentWindow?.postMessage({ target: 'convert-embed', id, cmd, ...extra }, '*', transfer);
-    setTimeout(() => {
+    // ⚠ The time limit is cleared with its answer, and every one that is
+    // left goes with the window (onBeforeUnmount): a conversion's is half an
+    // hour, and it used to outlive the window that asked.
+    const timer = setTimeout(() => {
       if (pending.has(id)) { pending.delete(id); reject(new Error('convert timeout')); }
-    }, 180000);
+    }, timeoutMs);
+    pending.set(id, { resolve, reject, timer });
+    iframeRef.value?.contentWindow?.postMessage({ target: 'convert-embed', id, cmd, ...extra }, '*', transfer);
   });
 }
 
@@ -129,6 +149,7 @@ function onMessage(ev: MessageEvent) {
   const p = pending.get(d.id);
   if (!p) return;
   pending.delete(d.id);
+  clearTimeout(p.timer);
   if (d.ok) p.resolve(d); else p.reject(new Error(d.error || 'convert error'));
 }
 
@@ -145,34 +166,57 @@ async function loadFormats() {
   }
 }
 
+/** The step a conversion is on — said on its button: reading the file can be
+ *  as long as converting it, and saving the result as well. */
+const stage = ref<'read' | 'convert' | 'save'>('read');
+const STAGE_WORDS = { read: 'convert.reading', convert: 'convert.converting', save: 'convert.saving' } as const;
+
 async function doConvert() {
-  if (!selectedTo.value || !fromFmt.value) return;
+  if (!selectedTo.value || !fromFmt.value || status.value === 'converting') return;
   status.value = 'converting';
   error.value = null;
-  let stage: 'read' | 'convert' | 'save' = 'read';
+  stage.value = 'read';
   try {
     const buf = await props.fetchBytes();
-    stage = 'convert';
+    stage.value = 'convert';
     const res = await send(
       'convert',
       { name: props.fileName, bytes: buf, fromIndex: fromFmt.value.index, toIndex: selectedTo.value.index },
       [buf],
+      CONVERT_TIMEOUT_MS,
     );
     const base = props.fileName.replace(/\.[^.]+$/, '');
     const ext = res.ext || selectedTo.value.ext || selectedTo.value.format;
     const outName = `${base}.${ext}`;
     const file = new File([res.bytes], outName, { type: selectedTo.value.mime || 'application/octet-stream' });
-    stage = 'save';
+    stage.value = 'save';
     await props.upload(file);
     status.value = 'done';
     emit('done', outName);
   } catch (e) {
     failWith(
-      stage === 'read' ? 'convert.read_failed' : stage === 'save' ? 'convert.save_failed' : 'convert.failed',
+      stage.value === 'read' ? 'convert.read_failed' : stage.value === 'save' ? 'convert.save_failed' : 'convert.failed',
       e,
     );
   }
 }
+
+/**
+ * ⚠ The conversion runs in this window's frame: closing it mid-way throws the
+ * work away. While it runs the window is Modal's `busy` — Escape and a click
+ * outside do nothing — and × asks, in the window, whether to stop it (never
+ * the browser's confirm(): unthemed, not right-to-left, and blocked in an
+ * iframe sandboxed without allow-modals).
+ *
+ * ⚠ Saving the result is not stopped by closing: the upload is the
+ * explorer's and goes on, and the explorer says when the file has arrived
+ * (FileExplorer `saveConverted`). The question says that, not "stop it".
+ */
+const busyClose = computed(() =>
+  stage.value === 'save'
+    ? { question: t('convert.close_while_saving'), confirm: t('convert.close') }
+    : { question: t('convert.close_while_converting') },
+);
 
 onMounted(() => {
   window.addEventListener('message', onMessage);
@@ -183,45 +227,40 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('message', onMessage);
   if (readyTimer) clearTimeout(readyTimer);
+  for (const p of pending.values()) clearTimeout(p.timer);
+  pending.clear();
 });
 </script>
 
 <template>
-  <div class="filex-cv__bg" @click.self="emit('close')">
-    <div class="filex-cv">
-      <header class="filex-cv__head">
-        <h3>{{ t('convert.title') }} — {{ fileName }}</h3>
-        <button
-          class="filex-cv__x"
-          type="button"
-          :title="t('convert.close')"
-          :aria-label="t('convert.close')"
-          @click="emit('close')"
-        >
-          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
-          <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
-        </button>
-      </header>
-
+  <Modal
+    :open="true"
+    :title="`${t('convert.title')} — ${fileName}`"
+    size="md"
+    :locale="locale"
+    :busy="status === 'converting'"
+    :busy-close="busyClose"
+    @close="emit('close')"
+  >
+    <div class="filex-cv" data-testid="convert-modal">
       <p v-if="adminNote" class="filex-cv__note" data-testid="convert-legacy-note">{{ adminNote }}</p>
 
-      <div v-if="status === 'loading'" class="filex-cv__msg">
+      <div v-if="status === 'loading'" class="filex-cv__msg" role="status">
         {{ t('convert.loading') }}
       </div>
 
       <!-- The converter never answered: there is nothing to pick from, so the
            sentence stands alone rather than above an empty format list. -->
-      <div v-else-if="status === 'error' && formats.length === 0" class="filex-cv__msg filex-cv__err">
+      <div v-else-if="status === 'error' && formats.length === 0" class="filex-cv__msg filex-cv__err" role="alert">
         {{ error }}
       </div>
 
-      <div v-else-if="status === 'done'" class="filex-cv__msg filex-cv__ok">
+      <div v-else-if="status === 'done'" class="filex-cv__msg filex-cv__ok" role="status">
         <p>
           <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
           <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('check')"></span>
           {{ t('convert.done') }}
         </p>
-        <button class="filex-cv__convert" @click="emit('close')">{{ t('convert.close') }}</button>
       </div>
 
       <template v-else>
@@ -232,12 +271,15 @@ onBeforeUnmount(() => {
           v-model="search"
           class="filex-cv__search"
           :placeholder="t('convert.search_format')"
+          :disabled="status === 'converting'"
         />
         <div class="filex-cv__list">
           <button
             v-for="f in toList"
             :key="f.index"
+            type="button"
             :class="['filex-cv__fmt', { 'is-sel': selectedTo?.index === f.index }]"
+            :disabled="status === 'converting'"
             @click="selectedTo = f"
           >
             <b>{{ (f.ext || f.format).toUpperCase() }}</b>
@@ -247,89 +289,27 @@ onBeforeUnmount(() => {
             {{ t('convert.no_format') }}
           </div>
         </div>
-        <div v-if="error" class="filex-cv__err">{{ error }}</div>
-        <footer class="filex-cv__foot">
-          <button
-            class="filex-cv__convert"
-            :disabled="!selectedTo || !fromFmt || status === 'converting'"
-            @click="doConvert"
-          >
-            {{ status === 'converting' ? t('convert.converting') : t('convert.convert') }}
-          </button>
-        </footer>
+        <div v-if="error" class="filex-cv__err" role="alert">{{ error }}</div>
       </template>
 
       <!-- hidden headless converter engine -->
       <iframe ref="iframeRef" :src="iframeSrc" class="filex-cv__frame" title="converter" />
     </div>
-  </div>
+    <template v-if="status === 'done'" #actions>
+      <button type="button" class="fe-btn fe-btn--primary filex-cv__convert" @click="emit('close')">
+        {{ t('convert.close') }}
+      </button>
+    </template>
+    <template v-else-if="status !== 'loading' && !(status === 'error' && formats.length === 0)" #actions>
+      <button
+        type="button"
+        class="fe-btn fe-btn--primary filex-cv__convert"
+        :disabled="!selectedTo || !fromFmt || status === 'converting'"
+        :aria-busy="status === 'converting' ? 'true' : undefined"
+        @click="doConvert"
+      >
+        {{ status === 'converting' ? t(STAGE_WORDS[stage]) : t('convert.convert') }}
+      </button>
+    </template>
+  </Modal>
 </template>
-
-<style>
-/* ⚠ NOT `scoped`, deliberately. Vue's scoped styles compile to
-   `.cls[data-v-HASH]`, and in the web-component build the hash baked into
-   this CSS does not match the one Vue stamps onto the DOM — so every rule
-   here silently stopped applying. Measured in the desktop app: the share
-   dialog had `position: static`, no background and no radius, i.e. raw
-   unstyled HTML, in EVERY embedded surface.
-   Safe to drop: every selector below is prefixed (fx-/fe-/filex-), so
-   there is nothing here that can leak into a host page. */
-.filex-cv__bg {
-  position: fixed; inset: 0; z-index: 1000;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex; align-items: center; justify-content: center;
-}
-.filex-cv {
-  width: min(560px, 92vw); max-height: 80vh; overflow: hidden;
-  display: flex; flex-direction: column;
-  background: var(--fe-bg, #fff); color: var(--fe-text, #1a1f29);
-  border: 1px solid var(--fe-border, #e2e6ed); border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
-}
-.filex-cv__head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; border-bottom: 1px solid var(--fe-border, #e2e6ed);
-}
-.filex-cv__head h3 { margin: 0; font-size: 14px; font-weight: 600; }
-.filex-cv__x {
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 0; background: none; cursor: pointer; font-size: 16px;
-  color: var(--fe-text-muted, #5a6475);
-}
-.filex-cv__x .fe-aicon { color: currentColor; }
-.filex-cv__ok .fe-icon { display: inline-flex; vertical-align: -0.2em; }
-.filex-cv__msg { padding: 28px; text-align: center; color: var(--fe-text-muted, #5a6475); }
-.filex-cv__note {
-  margin: 12px 16px 0; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; line-height: 1.45;
-  background: var(--fe-bg-elev, #f7f8fa); color: var(--fe-text-muted, #5a6475);
-  border: 1px solid var(--fe-border, #e2e6ed);
-}
-.filex-cv__ok { color: #059669; }
-.filex-cv__src { padding: 12px 16px 0; font-size: 13px; color: var(--fe-text-muted, #5a6475); }
-.filex-cv__search {
-  margin: 8px 16px; padding: 8px 10px;
-  border: 1px solid var(--fe-border, #e2e6ed); border-radius: 8px;
-  background: var(--fe-bg-elev, #f7f8fa); color: inherit; font-size: 13px;
-}
-.filex-cv__list {
-  flex: 1; overflow-y: auto; padding: 4px 12px 12px;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px;
-}
-.filex-cv__fmt {
-  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
-  padding: 8px 10px; cursor: pointer; text-align: start;
-  border: 1px solid var(--fe-border, #e2e6ed); border-radius: 8px;
-  background: var(--fe-bg-elev, #f7f8fa); color: inherit;
-}
-.filex-cv__fmt small { color: var(--fe-text-muted, #5a6475); font-size: 11px; }
-.filex-cv__fmt.is-sel { border-color: #44c878; background: rgba(68, 200, 120, 0.12); }
-.filex-cv__empty { grid-column: 1 / -1; text-align: center; color: var(--fe-text-muted, #5a6475); padding: 16px; }
-.filex-cv__err { padding: 0 16px; color: var(--fe-danger, #dc2626); font-size: 13px; }
-.filex-cv__foot { padding: 12px 16px; border-top: 1px solid var(--fe-border, #e2e6ed); text-align: end; }
-.filex-cv__convert {
-  padding: 8px 18px; border: 0; border-radius: 8px; cursor: pointer;
-  background: #44c878; color: #03200f; font-weight: 600; font-size: 13px;
-}
-.filex-cv__convert:disabled { opacity: 0.5; cursor: default; }
-.filex-cv__frame { position: absolute; width: 0; height: 0; border: 0; inset-inline-start: -9999px; }
-</style>

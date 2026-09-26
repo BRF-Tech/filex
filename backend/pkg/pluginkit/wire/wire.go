@@ -400,15 +400,27 @@ type WasmSource struct {
 
 // Manifest is filex-app.json — and what `describe` must echo.
 type Manifest struct {
-	ManifestVersion int      `json:"manifest_version"`
-	Name            string   `json:"name"`
-	Version         string   `json:"version"`
-	Label           Text     `json:"label"`
-	Description     Text     `json:"description,omitempty"`
-	Icon            string   `json:"icon,omitempty"`
-	Homepage        string   `json:"homepage,omitempty"`
-	MinFilex        string   `json:"min_filex,omitempty"`
-	Permissions     []string `json:"permissions"`
+	ManifestVersion int    `json:"manifest_version"`
+	Name            string `json:"name"`
+	Version         string `json:"version"`
+	Label           Text   `json:"label"`
+	Description     Text   `json:"description,omitempty"`
+	Icon            string `json:"icon,omitempty"`
+	Homepage        string `json:"homepage,omitempty"`
+	// Filex is the range of filex versions the app works with, e.g.
+	// ">=0.47.0" or ">=0.47.0 <0.60.0" (comparators joined by spaces must
+	// all hold; alternatives are joined by "||"). Empty = any filex. filex
+	// refuses to install or upgrade to a version whose range leaves the
+	// running filex out, and its update check picks the newest version whose
+	// range lets it in (docs/PLUGIN-KIT.md → Which filex it works with).
+	// ⚠ filex before 0.47.0 does not know this field and refuses a manifest
+	// that carries it; an app that must still install there says only
+	// `min_filex`.
+	Filex string `json:"filex,omitempty"`
+	// MinFilex is the older, lower-bound-only form: "0.43.0" means
+	// ">=0.43.0". Honoured together with Filex (both must hold).
+	MinFilex    string   `json:"min_filex,omitempty"`
+	Permissions []string `json:"permissions"`
 	// Languages the plugin promises to speak. Every Text it returns must
 	// carry all of them, or the host refuses it at install: a screen half in
 	// one language is a bug the author should see before a person does.

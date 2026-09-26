@@ -40,6 +40,7 @@ import type { PublicBranding, PublicLocaleOption } from '../types/Public';
 import { en } from '../locales/en';
 import { tr } from '../locales/tr';
 import type { LocaleCode } from '../types/ExplorerConfig';
+import { apiRootOr } from './appBase';
 
 /** Bumped whenever the list or a table changes; `useLocale` and the pickers watch it. */
 export const localesVersion = ref(0);
@@ -369,7 +370,7 @@ export function ensureLocaleStrings(code: string | undefined): Promise<boolean> 
   if (pending) return pending;
   const doFetch = source.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
   if (!doFetch) return Promise.resolve(false);
-  const base = (source.base ?? '').replace(/\/+$/, '');
+  const base = apiRootOr(source.base);
   const p = (async () => {
     let strings: Record<string, string> = {};
     try {
@@ -439,7 +440,7 @@ export async function loadLocales(opts: LoadLocalesOptions = {}): Promise<Public
   source = opts;
   const doFetch = opts.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
   if (!doFetch) return availableLocales();
-  const base = (opts.base ?? '').replace(/\/+$/, '');
+  const base = apiRootOr(opts.base);
   try {
     const extra = opts.headers ? await opts.headers() : {};
     const res = await doFetch(`${base}/api/public/branding`, {

@@ -148,7 +148,20 @@ helm install filex ./deploy/helm/filex -f deploy/helm/filex/values-full.yaml \
 
 Key `values.yaml` toggles: `postgresql.enabled`, `redis.enabled`,
 `onlyoffice.enabled`, `minio.enabled`, `persistence.size`, `ingress.*`,
-`resources`. See the chart's `values.yaml` for the full list.
+`basePath`, `resources`. See the chart's `values.yaml` for the full list.
+
+To serve filex under a path of the host instead of its root
+(`https://files.example.com/filex/`), set `basePath`: the chart sets
+`FILEX_BASE_PATH` and routes that path on the Ingress, passing it through
+unchanged — don't add a rewrite/strip annotation
+([Serving filex under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path)):
+
+```bash
+helm install filex ./deploy/helm/filex \
+  --set ingress.host=files.example.com \
+  --set basePath=/filex \
+  --set publicURL=https://files.example.com/filex
+```
 
 > **Zero‑touch config.** Auth (OIDC/LDAP/header), the first admin, SMTP, branding
 > and a default storage can all be supplied as `FILEX_*` env in the chart values,
@@ -296,6 +309,12 @@ Forward `/` to `filex:5212` and:
 
 The bundled Caddy config ([`deploy/compose/Caddyfile`](../deploy/compose/Caddyfile))
 already does all of this; an nginx example is in [DEPLOYMENT.md](DEPLOYMENT.md).
+
+**Under a path instead of a host of its own** — `https://example.com/filex/` —
+set `FILEX_PUBLIC_URL=https://example.com/filex` (its path becomes the base, or
+set `FILEX_BASE_PATH=/filex`) and have the proxy forward `/filex/…` **with the
+path unchanged**: Caddy `handle`, not `handle_path`. Caddy and nginx examples:
+[DEPLOYMENT.md → Serving filex under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path).
 
 ---
 

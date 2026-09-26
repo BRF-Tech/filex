@@ -32,7 +32,7 @@ spec:
     - host: {{ .Values.ingress.host | quote }}
       http:
         paths:
-          - path: /
+          - path: {{ $.Values.basePath | default "/" }}
             pathType: Prefix
             backend:
               service:
@@ -43,7 +43,7 @@ spec:
     - host: {{ .host | quote }}
       http:
         paths:
-          - path: /
+          - path: {{ $.Values.basePath | default "/" }}
             pathType: Prefix
             backend:
               service:

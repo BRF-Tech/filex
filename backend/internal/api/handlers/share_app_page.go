@@ -4,6 +4,7 @@ import (
 	"html/template"
 	"net/http"
 
+	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
@@ -97,7 +98,7 @@ func (h *Share) renderAppPage(w http.ResponseWriter, r *http.Request, token stri
 	for _, f := range files {
 		// ?download=1: a link a person follows to take the file is a
 		// download, and counted as one (PublicAPI.serveExposed).
-		rows = append(rows, appPageFile{Name: f.Name, URL: "/api/public/s/" + token + "/file/" + f.Ref + "?download=1"})
+		rows = append(rows, appPageFile{Name: f.Name, URL: basepath.Path(r.Context(), "/api/public/s/"+token+"/file/"+f.Ref+"?download=1")})
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

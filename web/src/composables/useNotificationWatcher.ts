@@ -20,6 +20,7 @@
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { appBase } from '@brftech/filex-core';
 
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationsStore } from '@/stores/notifications';
@@ -88,7 +89,7 @@ export function useNotificationWatcher() {
       // can open nothing but a URL. Same resolver for both, so the two cannot
       // land in two different places.
       const goes = isNotificationClickable(n.target);
-      const url = goes ? notificationHref(resolveNotificationTarget(n.target), currentMountBase()) : '';
+      const url = goes ? notificationHref(resolveNotificationTarget(n.target), currentMountBase(), appBase()) : '';
       void raiseBrowserNotification(
         {
           title: text.title,

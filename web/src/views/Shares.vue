@@ -34,6 +34,7 @@ import type { PaginatedResponse, Share } from '@/api/types';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import { copyText } from '@/lib/clipboard';
+import { fallbackShareUrl } from '@/lib/shareLink';
 import { formatDate, formatRelative } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
@@ -147,8 +148,7 @@ async function remove() {
 // The origin fallback remains only for a server too old to send `url`.
 function shareUrl(s: Share): string {
   if (s.url) return s.url;
-  if (typeof window === 'undefined') return `/s/${s.token}`;
-  return `${window.location.origin}/s/${s.token}`;
+  return fallbackShareUrl(s.token);
 }
 
 // koru:k3 — THE "copy link" row action (clipboard + toast). The token cell

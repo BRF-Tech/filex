@@ -88,6 +88,8 @@ watch(name, (next) => {
 });
 
 function submit() {
+  // Enter in a box submits too; the buttons' `disabled` does not reach it.
+  if (props.busy) return;
   if (!name.value.trim() || /[\\/]/.test(name.value)) {
     error.value = t('archive.invalid_name');
     return;
@@ -120,7 +122,7 @@ function submit() {
 </script>
 
 <template>
-  <Modal :open="open" :title="t('archive.create_title')" size="sm" @close="emit('close')">
+  <Modal :open="open" :title="t('archive.create_title')" size="sm" :busy="busy" @close="emit('close')">
     <form class="fe-form" @submit.prevent="submit">
       <p class="fe-field__hint">{{ t('archive.create_count', { count }) }}</p>
       <label class="fe-field">
@@ -184,7 +186,7 @@ function submit() {
     </form>
     <template #actions>
       <button type="button" class="fe-btn" :disabled="busy" @click="emit('close')">{{ t('archive.cancel') }}</button>
-      <button type="button" class="fe-btn fe-btn--primary" :disabled="busy" @click="submit">
+      <button type="button" class="fe-btn fe-btn--primary" :disabled="busy" :aria-busy="busy ? 'true' : undefined" @click="submit">
         {{ busy ? t('archive.creating') : t('archive.create') }}
       </button>
     </template>

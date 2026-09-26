@@ -1,4 +1,5 @@
 import { api } from './client';
+import { getApiBaseUrl } from './runtimeConfig';
 import type { LoginRequest, LoginResponse, MeResponse, User } from './types';
 
 export const AuthApi = {
@@ -26,9 +27,11 @@ export const AuthApi = {
     return data ?? {};
   },
 
+  /** A navigation, not a request — under the API base (and so under the base
+   *  path a sub-path deployment serves filex at). */
   oidcStartUrl(provider: string = 'oidc', returnTo: string = '/admin/'): string {
     const qs = new URLSearchParams({ provider, return_to: returnTo });
-    return `/api/auth/oidc/start?${qs.toString()}`;
+    return `${getApiBaseUrl()}/auth/oidc/start?${qs.toString()}`;
   },
 
   async updateProfile(patch: Partial<User> & { password?: string }): Promise<User> {
