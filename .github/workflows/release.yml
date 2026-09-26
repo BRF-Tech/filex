@@ -520,15 +520,15 @@ jobs:
       # ⚠ Before anything leaves the runner: installed, launched through its
       # protocol, and asked over DevTools whether it knows it is a Store copy.
       # A package Partner Center accepts is not a package that works.
-      # STORE_E2E_STRICT: while no Store secret is set nothing is uploaded, and
-      # the three checks that need Windows to activate the package only warn
-      # on this runner (v0.44.2 lost its Store job to them; see
-      # desktop/scripts/lib/store-activation.mjs). With the secret set, a
-      # package that goes to Partner Center must pass all of them.
+      # The checks that need Windows to ACTIVATE the package (a protocol
+      # launch, the app answering from inside it, its toast in Action Center)
+      # only warn here: this runner has never activated one (v0.44.2 through
+      # v0.46.1, see desktop/scripts/lib/store-activation.mjs). They are hard
+      # gates in the local release run instead (scripts/release/plan.mjs,
+      # "desktop: the Store package works as a Store copy"), on a desktop, for
+      # the same commit, before the tag exists.
       - name: Install the Store package and check it as a Store copy
         if: matrix.label == 'store'
-        env:
-          STORE_E2E_STRICT: ${{ env.MSSTORE_CLIENT_ID != '' && '1' || '0' }}
         run: pnpm --filter ./desktop run e2e:store
       - name: Keep the Store package for Partner Center
         if: matrix.label == 'store'
@@ -545,16 +545,17 @@ jobs:
         if: matrix.label == 'store' && env.MSSTORE_CLIENT_SECRET != '' && env.MSSTORE_PRODUCT_ID != ''
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          msstore reconfigure --tenantId $env:MSSTORE_TENANT_ID --sellerId $env:MSSTORE_SELLER_ID --clientId $env:MSSTORE_CLIENT_ID --clientSecret $env:MSSTORE_CLIENT_SECRET
           # The CLI looks for .msix/.msixupload; an .appx is the same format.
           $appx = Get-ChildItem desktop/release/*.appx | Select-Object -First 1
           $msix = Join-Path $appx.DirectoryName ($appx.BaseName + '.msix')
           Copy-Item $appx.FullName $msix
-          # --noCommit: the submission waits in Partner Center as a draft.
-          # "What's new" is written there by a person (listing.md), then
-          # submitted by hand; drop --noCommit once that is automated.
-          msstore publish desktop -i $msix -id $env:MSSTORE_PRODUCT_ID --noCommit
+          # Uploads, points "What's new" at the GitHub Release in every
+          # listing language and sends the submission to certification; skips
+          # with a warning while an earlier one is still in certification
+          # (scripts/msstore-submit.ps1). Never fails the release.
+          $ver = "$env:GITHUB_REF_NAME".TrimStart('v')
+          ./.github/workflows/scripts/msstore-submit.ps1 -Msix $msix -Version $ver
+          exit 0
       # Not a silent skip: a release that did not reach the Store says so.
       - name: Store submission skipped
         if: matrix.label == 'store' && (env.MSSTORE_CLIENT_SECRET == '' || env.MSSTORE_PRODUCT_ID == '')
