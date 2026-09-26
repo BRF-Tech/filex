@@ -360,7 +360,7 @@ a tag cannot be used to learn that a file exists.
 opening one lists every file carrying it — from every folder and every storage
 the person can reach:
 
-![Personal and team tags, with a team tag opened](screenshots/v0.43.0/tags/tags-kinds-1440.png)
+![Personal and team tags, with a team tag opened](screenshots/v0.46.0/tags/tags-kinds-1440.png)
 
 Rules that follow from it:
 
