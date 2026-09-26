@@ -72,6 +72,9 @@ export interface NewFileResponse {
   path: string;
   /** Final basename, which may have gained the extension server-side. */
   name: string;
+  /** The TYPE the bytes were made from (a `newdoc_types` key) — not the
+   *  extension of `name`, which since #56 may have none (`LICENSE`). The
+   *  explorer opens the new file as this type. */
   ext: string;
   size: number;
   mime: string;
@@ -609,12 +612,23 @@ export function useFileApi(config: ExplorerConfig) {
    * `name` may or may not already carry the extension; the server appends it
    * when it is missing. Throws on a name collision (409 NAME_TAKEN) — the
    * dialog warns first, but this is the check.
+   *
+   * `exactName` (#56): `name` is the WHOLE file name. A text type is then
+   * created under exactly it — `LICENSE`, `Makefile`, `test.conf` — and only
+   * a type whose editor needs its extension (`ext_required`: office,
+   * diagrams) still gains it. A text type may not borrow such a type's
+   * extension (`x.docx` as Plain text): 400 `EXT_NEEDS_TYPE`.
    */
-  async function newFile(path: string, name: string, type: string): Promise<NewFileResponse> {
+  async function newFile(
+    path: string,
+    name: string,
+    type: string,
+    opts: { exactName?: boolean } = {},
+  ): Promise<NewFileResponse> {
     return jsonFetch<NewFileResponse>(managerUrl('newfile'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, name, type }),
+      body: JSON.stringify(opts.exactName ? { path, name, type, exact_name: true } : { path, name, type }),
     });
   }
 
@@ -879,6 +893,24 @@ export function useFileApi(config: ExplorerConfig) {
     );
   }
 
+  /**
+   * An app call's URL with the language on SCREEN named (`lang=`).
+   *
+   * ⚠⚠ Accept-Language already carries it (jsonFetch), but the server ranks
+   * that header below the ACCOUNT's language on purpose — for any other
+   * client it is only the language the browser was installed in. An embed
+   * draws the language its host chose (`config.locale`), whatever the
+   * account says, and an app picks its plain strings (a field's label and
+   * help, a select's options) by the language it is told: a Turkish popup
+   * over an English account asked "Identity" with an English help line
+   * (the signing app, 2026-09-26). Named here, it is an explicit choice the
+   * server puts first (backend pluginLang). A host's own endpoint template
+   * may already carry a query, so the separator is chosen, not assumed.
+   */
+  function withScreenLang(url: string): string {
+    return `${url}${url.includes('?') ? '&' : '?'}lang=${encodeURIComponent(lang())}`;
+  }
+
   /** `GET /api/files/plugins/actions` — what applies to the caller. */
   async function pluginActions(): Promise<PluginActionsResponse> {
     if (!endpoints.pluginActions) return { actions: [], views: [] };
@@ -897,7 +929,7 @@ export function useFileApi(config: ExplorerConfig) {
     body: { paths: string[]; params?: Record<string, unknown> },
   ): Promise<PluginRunResult> {
     if (!endpoints.pluginActionRun) throw new Error('pluginActionRun endpoint not configured');
-    return jsonFetch<PluginRunResult>(fillTemplate(endpoints.pluginActionRun, { plugin, action }), {
+    return jsonFetch<PluginRunResult>(withScreenLang(fillTemplate(endpoints.pluginActionRun, { plugin, action })), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -922,13 +954,13 @@ export function useFileApi(config: ExplorerConfig) {
       path ? `path=${encodeURIComponent(path)}` : '',
       section ? `section=${encodeURIComponent(section)}` : '',
     ].filter(Boolean);
-    return jsonFetch<{ surface: PluginSurface }>(url + (q.length ? `?${q.join('&')}` : ''));
+    return jsonFetch<{ surface: PluginSurface }>(withScreenLang(url + (q.length ? `?${q.join('&')}` : '')));
   }
 
   /** `POST …/views/{plugin}/{view}/event` — answers a surface, or `{op}` when it enqueued a job. */
   async function pluginViewEvent(plugin: string, view: string, body: PluginViewEventBody): Promise<PluginRunResult> {
     if (!endpoints.pluginViewEvent) throw new Error('pluginViewEvent endpoint not configured');
-    return jsonFetch<PluginRunResult>(fillTemplate(endpoints.pluginViewEvent, { plugin, view }), {
+    return jsonFetch<PluginRunResult>(withScreenLang(fillTemplate(endpoints.pluginViewEvent, { plugin, view })), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -1232,6 +1264,7 @@ export function useFileApi(config: ExplorerConfig) {
     authHeadersSync,
     credentialsMode,
     jsonFetch,
+    withScreenLang,
   };
 }
 

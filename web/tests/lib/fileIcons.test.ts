@@ -12,7 +12,7 @@
 // GridView, GalleryView and ListView.
 
 import { describe, it, expect } from 'vitest';
-import { iconFamilyFor, fileIconTile, iconSvg } from '@brftech/filex-core/src/lib/fileIcons';
+import { iconFamilyFor, fileIconTile, iconSvg, typeLabelFor } from '@brftech/filex-core/src/lib/fileIcons';
 
 describe('iconFamilyFor: places, not types', () => {
   it('a storage row is a storage, not a folder — even though it is a dir', () => {
@@ -65,5 +65,27 @@ describe('the glyphs they get', () => {
     expect(tile).toContain('fe-ftile--storage');
     // One definition: whatever the three views pass, they get this back.
     expect(fileIconTile({ ...node })).toBe(tile);
+  });
+});
+
+// #56 lets a person name a new text file `LICENSE` or `Makefile`. With no
+// extension the family map has nothing to go on, and the row drew the "?"
+// glyph beside a Type cell reading "—" — for a file the viewer and the editor
+// both already treat as text (lib/textMime.ts). The server's mime is the fact
+// that is left, and it is used ONLY when there is no extension: an unmapped
+// `.zig` still reads "ZIG" (the tier-3 rule in fileIcons.ts).
+describe('a file with no extension', () => {
+  const t = (k: string) => k;
+  it('is text when its mime says text', () => {
+    expect(iconFamilyFor({ type: 'file', extension: '', mime_type: 'text/plain', basename: 'LICENSE' })).toBe('text');
+    expect(typeLabelFor({ type: 'file', extension: '', mime_type: 'text/plain; charset=utf-8' }, t)).toBe('ftype.plaintext');
+  });
+  it('stays unknown when its mime says nothing textual', () => {
+    expect(iconFamilyFor({ type: 'file', extension: '', mime_type: 'application/octet-stream', basename: 'blob' })).toBe('unknown');
+    expect(typeLabelFor({ type: 'file', extension: '', mime_type: 'application/octet-stream' }, t)).toBe('—');
+  });
+  it('does not override an extension the map does not know', () => {
+    expect(iconFamilyFor({ type: 'file', extension: 'zig', mime_type: 'text/plain', basename: 'main.zig' })).toBe('unknown');
+    expect(typeLabelFor({ type: 'file', extension: 'zig', mime_type: 'text/plain' }, t)).toBe('ZIG');
   });
 });

@@ -656,6 +656,25 @@ async function run(tokens) {
       (await page.locator('[data-testid="sidenav-connect"]').count()) === 1 &&
         (await page.locator('[data-testid="sidenav-apikeys"]').count()) === 1,
     );
+
+    // ── #57 — a storage row's order menu ─────────────────────────────────
+    // Right click on a storage in the panel: Move up / Move down / Sort by
+    // name / Use default order. The e2e spec 158 measures what each does; this
+    // is the picture of it.
+    await page.locator('[data-testid="sidenav-storage-Marketing"]').click({ button: 'right' });
+    await page.waitForSelector('[data-testid="sidenav-storage-move-up"]', { timeout: 10_000 });
+    await sleep(400);
+    const orderMenu = await page.evaluate(() =>
+      [...document.querySelectorAll('.fe-ctx .fe-ctx__label')].map((l) => (l.textContent ?? '').trim()),
+    );
+    check(
+      'a storage row opens its order menu, in English',
+      JSON.stringify(orderMenu) === JSON.stringify(['Move up', 'Move down', 'Sort by name', 'Use default order']),
+      orderMenu.join(' · '),
+    );
+    await shot(page, 'storage-order-menu-1440.png');
+    await page.keyboard.press('Escape');
+    await sleep(300);
     await ctx.close();
 
     // ── 390px — a phone ──────────────────────────────────────────────────
@@ -876,6 +895,37 @@ async function run(tokens) {
       admRail > admExpanded + 100 && admRail > 1300,
       `${Math.round(admExpanded)}px expanded → ${Math.round(admRail)}px on the rail`,
     );
+
+    // ── #57 — the administrator's order, on the Storages page ────────────
+    // Taken MID-DRAG: the row in hand is faded and the drop line shows where
+    // it lands — the one moment the picture explains the feature.
+    await apage.goto(`${URL}/admin/storages`);
+    await apage.waitForSelector('[data-testid^="storage-order-handle-"]', { timeout: 20_000 });
+    await sleep(800);
+    const handles = apage.locator('[data-testid^="storage-order-handle-"]');
+    const rowsBox = await apage.locator('[data-storage-row]').first().boundingBox();
+    const lastHandle = await handles.last().boundingBox();
+    if (rowsBox && lastHandle) {
+      const x = lastHandle.x + lastHandle.width / 2;
+      const y0 = lastHandle.y + lastHandle.height / 2;
+      const y1 = rowsBox.y + 6;
+      await apage.mouse.move(x, y0);
+      await apage.mouse.down();
+      for (let i = 1; i <= 10; i++) await apage.mouse.move(x, y0 + ((y1 - y0) * i) / 10);
+      await sleep(300);
+      check(
+        'the admin Storages table shows the row in hand and one drop line',
+        (await apage.locator('.fe-list__row--dragging').count()) === 1 &&
+          (await apage.locator('.fe-list__row--drop-before').count()) === 1,
+      );
+      await apage.screenshot({ path: join(OUT, 'admin-storages-order-1440.png') });
+      log('wrote admin-storages-order-1440.png');
+      // Escape abandons the drag, so the picture writes no order.
+      await apage.keyboard.press('Escape');
+      await apage.mouse.up();
+    } else {
+      check('the admin Storages table has rows to drag', false);
+    }
     await adm.close();
   } finally {
     await browser.close();

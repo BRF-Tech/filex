@@ -25,7 +25,7 @@
  *     printing the viewer's chosen one.
  */
 
-import { computed, getCurrentInstance, inject, type Ref } from 'vue';
+import { computed, getCurrentInstance, inject, type InjectionKey, type Ref } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { localeOwnTable, localesVersion, type OwnLocaleTable } from '../lib/uiLocales';
 import { pluralCategory } from '../lib/plural';
@@ -349,6 +349,18 @@ export function formatWhenFull(
  * The variables that COUNT something, in the order they are asked. The first
  * one a call passes decides the form of the sentence.
  */
+/**
+ * The language of the explorer a component sits in, for a component that is
+ * not handed one — a dialog (modals/Modal.vue) most of all.
+ *
+ * ⚠ Modal took its language from its own `locale` prop and said "Close" when
+ * none came, and not one of the twenty core dialogs passed it: every × in a
+ * Turkish explorer — an embed's app popup included — was named in English
+ * (2026-09-26). FileExplorer provides its language here once, so every dialog
+ * under it inherits it; an explicit `locale` still wins.
+ */
+export const EXPLORER_LOCALE: InjectionKey<() => string> = Symbol('filex-explorer-locale');
+
 export const COUNT_VARS = ['count', 'n', 'days'] as const;
 
 /**

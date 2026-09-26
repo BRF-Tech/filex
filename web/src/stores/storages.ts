@@ -62,6 +62,30 @@ export const useStoragesStore = defineStore('storages', () => {
     }
   }
 
+  /**
+   * #57 — put the storages in this order (ids, first = top; `[]` = back to
+   * the default order).
+   *
+   * ⚠ The rows move at ONCE, before the server answers: a dragged row that
+   * snapped back for a round trip and then jumped to where it was dropped
+   * reads as a failed drop. The refetch afterwards replaces the optimistic
+   * list with the server's (positions and all) — on failure too, so a refused
+   * order shows the order that is really stored.
+   */
+  async function setOrder(ids: number[]): Promise<void> {
+    if (ids.length) {
+      const byId = new Map(items.value.map((s) => [s.id, s]));
+      const placed = ids.map((id) => byId.get(id)).filter((s): s is StorageRef => !!s);
+      const rest = items.value.filter((s) => !ids.includes(s.id));
+      items.value = [...placed, ...rest];
+    }
+    try {
+      await StoragesApi.setOrder(ids);
+    } finally {
+      await fetch();
+    }
+  }
+
   function find(id: number): StorageRef | undefined {
     return items.value.find((s) => s.id === id);
   }
@@ -77,6 +101,7 @@ export const useStoragesStore = defineStore('storages', () => {
     update,
     remove,
     syncNow,
+    setOrder,
     find,
   };
 });

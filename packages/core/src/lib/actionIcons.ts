@@ -190,6 +190,17 @@ const GLYPHS: Record<string, string> = {
     '<path d="M13.8 10.2a4.2 4.2 0 0 0-6.1 0l-2.3 2.3a4.3 4.3 0 0 0 6.1 6.1l1.35-1.35"/>',
   /* ── toolbar chrome that is not a ContextAction ──────────────────────── */
   'go-up': '<path d="M12 20V5"/><path d="M5.5 11.5L12 5l6.5 6.5"/>',
+  /* #57 — the storage row's order menu (SideNav). One step up or down is a
+     SHORT arrow, so it does not read as `go-up`'s "to the parent folder";
+     "Sort by name" is the A→Z mark every file manager uses; "Use default order" is
+     the refresh circle turning back. All vertical or rotational, so none of
+     them is mirrored in a right-to-left interface. */
+  'move-up': '<path d="M12 18V7"/><path d="M7.5 11.5L12 7l4.5 4.5"/>',
+  'move-down': '<path d="M12 6v11"/><path d="M7.5 12.5L12 17l4.5-4.5"/>',
+  'sort-name':
+    '<path d="M3.5 10.5L6.5 3.5l3 7"/><path d="M4.7 8h3.6"/>' +
+    '<path d="M4 13.5h5l-5 7h5"/><path d="M17 4v16"/><path d="M13.5 16.5L17 20l3.5-3.5"/>',
+  'reset-order': '<path d="M3.5 12a8.5 8.5 0 1 0 2.49-6.01"/><path d="M6 1.5V6h4.5"/>',
   /* === gorunum:v2-topbar — the breadcrumb row's own controls ============
      The crumb trail gained the reference shell's three affordances: a home
      crumb in place of the bare "/" root, a chevron on the last crumb that

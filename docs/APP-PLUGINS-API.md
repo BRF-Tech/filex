@@ -167,6 +167,26 @@ when the surface carries `job`, the handler enqueues it with the same checks
 as `run` and answers `202 {"op": …, "job_id"}`. Views may read the named
 files but never write; `state_set` is refused outside a job.
 
+⚠⚠ A primary button arrives as `submit`, every other one as `action` — the
+same in the full page, the dialog and an embedded explorer's popup. A plugin
+that listens for one event only has a dead button the day the button changes
+weight: the signing app's "Convert to PDF" was primary and listened for
+`action`, so a click redrew the same screen (fixed in filex-sign 0.1.1). Ask
+for the button id on both events.
+
+**`?lang=` — the language on the screen (0.45.2).** The explorer names the
+language it is drawn in on every app call (`…/run`, the view `GET`, every
+`…/event`, and the ops list it polls), and the app is told THAT language
+(`context.locale`, and the job's `locale`), before the account's and before
+Accept-Language. An embedded explorer draws the language its host page chose
+(`config.locale`) whatever the account says; an app that picks its plain
+strings by `context.locale` answered a Turkish popup in English
+("Identity"). Without `?lang=`, or with a language the server does not speak,
+nothing changes: the account's language, then Accept-Language. A field whose
+label, help or placeholder is a `{lang: …}` map (wire.Field `I18n`, an
+option's `LabelI18n`) is drawn in the screen's own language whatever the app
+was told.
+
 **`paths` on every event (#64).** A screen opened on a selection
 names the WHOLE selection on every event — `change`, `action` and `submit`,
 not only the opening `run` — and the event's `context.inputs` are built from
@@ -225,7 +245,7 @@ guest sees the effective `output` in `ActionRunInput.Output`.
 ### Ops rows
 `GET /api/files/ops` rows for plugin jobs carry `kind: "plugin-action"`
 (the queue's own field; there is no separate `op_type`), plus `plugin`,
-`action`, `label` (the action label in the caller's locale), `message` (the
+`action`, `label` (the action label), `message` (the
 last `job_progress` message, or the plugin's final message) and, once
 committed, `outputs: [{"path": "docs://reports/nda-signed.pdf"}]` —
 adapter-qualified so the tray can navigate. Progress rides on the existing
@@ -233,6 +253,14 @@ adapter-qualified so the tray can navigate. Progress rides on the existing
 `pending | running | ok | failed | cancelled`. New: `POST /api/files/ops/{id}/cancel`
 → `200 {"op"}`; `409 already finished`; `403` when the op is somebody else's
 and the caller is not an administrator.
+
+**The reader's language (0.45.2).** `label`, `message` and — for a job the app
+itself failed (`error_code: "app"`) — `error` are said when the row is READ,
+in the reader's language (`?lang=`, then the account's, then
+Accept-Language): the job row keeps every language the app wrote (the action
+label, the app's final message) instead of flattening them to the
+submitter's at creation. A progress line (`job_progress`) is one string and
+stays as it was sent. Rows written before 0.45.2 read as they were.
 
 ## The scheduled wake-up (`tick`) — v3
 

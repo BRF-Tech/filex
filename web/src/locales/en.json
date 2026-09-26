@@ -199,6 +199,21 @@
   "storages": {
     "title": "Storages",
     "subtitle": "Mount points used as top-level folders",
+    "columns": {
+      "size": "Size",
+      "sync": "Sync",
+      "lastSync": "Last sync"
+    },
+    "order": {
+      "hint": "Everybody sees the storages in this order in the navigation panel, unless they have arranged their own. Drag a row by its handle, or use Move up / Move down in its Actions menu.",
+      "handle": "Move {name} — drag, or press the up and down arrow keys",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "reset": "Reset to default order",
+      "resetNone": "The storages are already in the default order",
+      "saved": "Order saved",
+      "resetDone": "The storages are back in the default order"
+    },
     "fileCount": "{n} file | {n} files",
     "notYetSynced": "Sync has not run yet",
     "modeLabel": {

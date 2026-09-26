@@ -40,16 +40,32 @@ export interface Condition {
   equals: string[];
 }
 
+/**
+ * A field's words as the wire sends them: a plain string, or — when the app
+ * gave them in several languages (pluginkit `wire.Field.I18n`, filex-convert
+ * and filex-sign 0.1.1) — a `{ lang: text }` map the reader's filex picks
+ * from. ⚠ Read them with `textOf`, never as a string: `label.trim()` on a map
+ * is a TypeError, which is how the 0.46.0 release run first met it.
+ */
+export type FieldText = string | Text;
+
+/** The words of a field text in one language (English, else the first given). */
+export function textOf(t: FieldText | null | undefined, lang = 'en'): string {
+  if (typeof t === 'string') return t;
+  if (t && typeof t === 'object') return t[lang] ?? Object.values(t)[0] ?? '';
+  return '';
+}
+
 export interface Field {
   key: string;
   type: string;
-  label?: string;
-  help?: string;
+  label?: FieldText;
+  help?: FieldText;
   required?: boolean;
   secret?: boolean;
   default?: unknown;
-  placeholder?: string;
-  options?: { value: string; label: string }[];
+  placeholder?: FieldText;
+  options?: { value: string; label: FieldText }[];
   multi?: boolean;
   show_when?: Condition;
   required_when?: Condition;
@@ -124,7 +140,9 @@ export function fieldByKey(s: Surface, key: string): Field | undefined {
  */
 export function choices(s: Surface, key: string): { value: string; label: string }[] {
   const f = fieldByKey(s, key);
-  return f && f.type === 'select' ? (f.options ?? []) : [];
+  return f && f.type === 'select'
+    ? (f.options ?? []).map((o) => ({ value: o.value, label: textOf(o.label) }))
+    : [];
 }
 
 function conditionHolds(c: Condition | undefined, values: Record<string, unknown>): boolean {

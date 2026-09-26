@@ -27,7 +27,7 @@ boxes also speak SFTP/FTP/WebDAV natively. See
 > lives in [PROTOCOLS.md](PROTOCOLS.md).
 
 - [How storages work](#how-storages-work)
-- [Adding a storage](#adding-a-storage) — [several folders at once](#mounting-several-folders-at-once)
+- [Adding a storage](#adding-a-storage) — [several folders at once](#mounting-several-folders-at-once) · [ordering storages](#ordering-storages)
 - [The storage config](#the-storage-config)
 - [Adapters](#adapters) — [local](#local) · [NAS / SMB / NFS](#nas-nfs-smb-and-friends) · [S3](#s3--s3-compatible) · [SFTP](#sftp) · [WebDAV](#webdav) · [FTP](#ftp--ftps)
 - [Sync — staying in step with the backend](#sync)
@@ -138,6 +138,59 @@ It is on the storage's page in the admin UI, under **Stable address**, and in
 `GET /api/admin/storages` as `uid`. A mount written against it survives every
 rename. The name stays the address people type; the uid is the address a
 machine should be given.
+
+### Ordering storages
+
+The explorer's navigation panel (and Home's storage cards) list the storages in
+one order, decided in three layers — the most personal wins:
+
+1. **The person's own order.** Anybody can drag a storage row in the navigation
+   panel, or use the row's menu (right click, a long press on a phone, or
+   Shift+F10 on the focused row): **Move up**, **Move down**, **Sort by name**
+   (writes a name-sorted order they can keep adjusting) and **Use default
+   order** (drops their own order). It is kept on their account — the same
+   per-person preferences document as their palette and language
+   (`/api/me/prefs`, key `storageOrder`) — so it follows them to every
+   browser. An embedded explorer with no account document keeps it in that
+   browser.
+2. **The administrator's order.** On **Storages** in the admin panel, drag a
+   row by its handle, use **Move up** / **Move down** in its Actions menu, or
+   press ↑/↓ on the focused handle. **Reset to default order** undoes it.
+   Everybody who has not arranged their own sees this order.
+3. **Creation order**, when neither has been set — what every install showed
+   before this existed.
+
+![A storage row's order menu in the navigation panel](screenshots/v0.43.0/sidenav/storage-order-menu-1440.png)
+
+![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](screenshots/v0.43.0/sidenav/admin-storages-order-1440.png)
+
+A storage the person's own order does not name — one added after they
+arranged theirs, or one they could not see then — keeps the position the
+administrator's (or creation) order gives it, and the storages they did
+arrange fill the other positions in their order. So a drive the administrator
+puts at the top shows up at the top for everybody, without undoing anybody's
+arrangement.
+
+Over the API the administrator's order is one call with the whole list, first
+= top:
+
+```bash
+curl -X PUT https://files.example.com/api/admin/storages/order \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"ids": [3, 1, 2]}'
+```
+
+The listed storages get positions 1…n; every other storage you administer goes
+back to "not placed" (after the placed ones, in creation order). `{"ids": []}`
+is **Reset to default order**. An id you cannot administer — including another
+tenant's — is refused with `400` and changes nothing. Each storage carries its
+position as `sort_order` (`null` = not placed) in `GET /api/admin/storages`,
+and the explorer's root listing says it for every drive the caller can open
+(`storage_info[].sort_order`). Both lists come back in this order.
+
+⚠ In multi-tenant mode the position is kept on the storage row: a storage
+linked to two tenants has one position, set by whichever tenant admin
+reordered last.
 
 ### Admin API
 `POST /api/admin/storages` (admin session/token). Body is the storage config;

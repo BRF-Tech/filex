@@ -14,7 +14,7 @@
  * (PWA / OIDC) / CSRF (panel) / basic / none — `useFileApi` swallows
  * the difference.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, ref, watch, watchEffect } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, watch, watchEffect } from 'vue';
 import type { ExplorerConfig, SearchAccount, ThemeMode } from './types/ExplorerConfig';
 import type {
   FileNode,
@@ -33,7 +33,7 @@ import {
 } from './composables/useUploadChunked';
 import { useSelection } from './composables/useSelection';
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
-import { useLocale, localeTag } from './composables/useLocale';
+import { EXPLORER_LOCALE, useLocale, localeTag } from './composables/useLocale';
 import { useSystemDark } from './composables/useSystemDark';
 import { usePendingOps, type PendingOp } from './composables/usePendingOps';
 import { usePluginActions } from './composables/usePluginActions'; /* App plugins — docs/APP-PLUGINS-API.md */
@@ -125,6 +125,7 @@ import { useOperations } from './composables/useOperations';
 /* wiring:c4 */
 import OnboardingTour from './components/OnboardingTour.vue';
 import { markTourSeen, offerTourOnce } from './lib/tour'; /* the tour is offered to a person once */
+import { orderStorages, saveStorageOrder, useStorageOrder } from './lib/storageOrder'; /* #57 — the person's storage order */
 /* /wiring:c4 */
 /* wiring:d1 — tabs + per-tab split */
 import TabBar from './components/TabBar.vue';
@@ -177,6 +178,7 @@ import {
 } from './lib/listing';
 import { nodeRowToFileNode as nodeRowToFileNodePure } from './lib/nodeRow'; /* Recent / Starred / tag / Home rows — one shape, with `perm` + `read_only` */
 import { iconFamilyFor, isStorageRow } from './lib/fileIcons'; /* pane:p1 — the storage-row predicate's one home */
+import { openSurface } from './lib/openSurface';
 import { actionIconSvg } from './lib/actionIcons'; /* inceleme:r1 — the drop overlay's mark, off the emoji font */
 import { convertAppOffered, isPluginActionKey, pluginActionKey, pluginMenuRows } from './lib/pluginMenu'; /* App plugins — the menu block, pure */
 import { isPagePlacement, pluginPageUrl } from './lib/pluginPage'; /* App plugins — a `page` view opens in a new tab */
@@ -291,6 +293,8 @@ const api = useFileApi(props.config);
 // helpers) need `t()` at runtime, so the catalogue must be constructed before
 // they are wired. Depends only on props — safe this early.
 const locale = computed(() => resolveLocale(props.config.locale));
+// Every dialog under this explorer speaks its language (EXPLORER_LOCALE).
+provide(EXPLORER_LOCALE, () => locale.value);
 /* surucu:d1-sort — the alphabet the `type` key sorts in (lib/sortOrder sorts
  * by the word the Type column PRINTS, so "Image" and "Görsel" each fall in
  * their own order).
@@ -1708,6 +1712,20 @@ watch(showRename, (open) => {
 const mutationInPane = ref(false);
 const previewTarget = ref<FileNode | null>(null);
 const previewMode = ref<'edit' | 'view'>('edit');
+/* #56 — the type a document was just CREATED as, for the viewer's `openAs`:
+ * `LICENSE` made as Plain text opens in the text editor although its name
+ * picks no viewer. Tied to that one path (prev/next to another file drops it)
+ * and forgotten when the viewer closes — a later open goes by the file itself,
+ * like every other open. */
+const previewOpenAs = ref<{ path: string; ext: string } | null>(null);
+const previewOpenAsExt = computed(() =>
+  previewOpenAs.value && previewTarget.value?.path === previewOpenAs.value.path
+    ? previewOpenAs.value.ext
+    : null,
+);
+watch(showPreview, (open) => {
+  if (!open) previewOpenAs.value = null;
+});
 const showConvert = ref(false);
 const convertTarget = ref<FileNode | null>(null);
 const showPerm = ref(false);
@@ -2376,6 +2394,18 @@ const homeRecent = ref<FileNode[]>([]);
 const homeStarred = ref<FileNode[]>([]);
 const homeLoading = ref(false);
 
+/* === #57 — the order the person put their storages in ====================
+ * `config.storages` is the HOST's order; the panel and Home draw the person's
+ * (`lib/storageOrder`: none saved = the host's order, unchanged). The panel
+ * announces a new order and it is stored here — on the account beside the
+ * palette, with this browser's mirror for the first paint, or in the mirror
+ * alone for an embed that wires no account document. */
+const storageOrder = useStorageOrder();
+const navStorages = computed(() => orderStorages(props.config.storages ?? [], storageOrder.saved.value));
+function onReorderStorages(keys: string[]) {
+  saveStorageOrder(keys, navStorages.value);
+}
+
 /**
  * The storages Home draws.
  *
@@ -2384,12 +2414,16 @@ const homeLoading = ref(false);
  * `fetchVisibleStorages` in our own app) and the navigation panel two hundred
  * pixels to the left is rendering that same array — a Home that asked for its
  * own copy could show a drive the panel beside it hides.
+ *
+ * #57 — and in the SAME ORDER as that panel: the person's own
+ * (`navStorages`), so a drive they moved to the top of the panel is not the
+ * third card on Home.
  */
 /* A drive's figure is a lower bound while its catalog does not cover all of
    it: the host says so (`usedPartial`, from the usage endpoint's `coverage`),
    or else the last listing did (coverageMap). */
 const homeStorages = computed(() =>
-  (props.config.storages ?? []).map((s) =>
+  navStorages.value.map((s) =>
     s.usedPartial !== undefined || !(s.name in coverageMap.value)
       ? s
       : { ...s, usedPartial: coverageMap.value[s.name] !== null },
@@ -4065,7 +4099,7 @@ function openNode(n: FileNode) {
   // `file-opened` and spawns the window. Directories still navigate inline
   // (handled above); Space quick-look still peeks in-page. E2E files fell into
   // the decrypted in-page branch above, so a host window never gets ciphertext.
-  if (props.config.openInHost && n.type === 'file') {
+  if (openSurface(props.config, n) === 'host') {
     emit('file-opened', { path: n.path, basename: n.basename });
     void markRecent(n);
     return;
@@ -5148,9 +5182,26 @@ async function onDocumentCreated(file: { path: string; name: string; ext: string
   const dir = file.path.slice(0, file.path.lastIndexOf('/'));
   if (dir && dir !== qualify(currentPath.value)) await load(dir);
   else await load();
+  /* `file.ext` is the TYPE the bytes were made from, not the name's extension
+   * (#56: a Plain text document may be `LICENSE`), so the stand-in row takes
+   * its extension from the name, and the type goes to the viewer as openAs. */
+  const dot = file.name.lastIndexOf('.');
   const node =
     files.value.find((n) => n.path === file.path) ??
-    ({ type: 'file', path: file.path, basename: file.name, extension: file.ext } as unknown as FileNode);
+    ({
+      type: 'file',
+      path: file.path,
+      basename: file.name,
+      extension: dot > 0 ? file.name.slice(dot + 1).toLowerCase() : '',
+    } as unknown as FileNode);
+  // Host-owned open (desktop): the new document goes to its own window like
+  // any other open (lib/openSurface.ts) — not ALSO over the explorer.
+  if (openSurface(props.config, node) === 'host') {
+    emit('file-opened', { path: node.path, basename: node.basename });
+    void markRecent(node);
+    return;
+  }
+  previewOpenAs.value = file.ext ? { path: node.path, ext: file.ext } : null;
   previewTarget.value = node;
   // ⚠ NOT previewModeForExt: that sends office types to 'view', which is right
   // for a peek at somebody else's file and wrong for the one you just made.
@@ -7548,7 +7599,9 @@ function closeRecoveryKey() {
       :tags="navTags"
       :tags-loaded="navTagsLoaded"
       :active-storage="adapter"
-      :storages="config.storages ?? []"
+      :storages="navStorages /* #57 — in the person's order */"
+      :storage-order-custom="storageOrder.custom.value"
+      @reorder-storages="onReorderStorages"
       :shared-storages="sharedStorageNames"
       :trash-visible="config.trashVisible !== false"
       :show-connections="connectionsEnabled"
@@ -8551,6 +8604,7 @@ function closeRecoveryKey() {
       :save-text-endpoint="e2eActive ? null : api.endpoints.saveText || null /* wiring:e2 — a plaintext save would be a leak */"
       :archive-list-endpoint="api.endpoints.archiveList || null"
       :open-mode="previewMode"
+      :open-as="previewOpenAsExt /* #56 — a New document opens as its type */"
       :auth-headers="() => buildAuthHeaders({ 'Content-Type': 'application/json' })"
       :auth-credentials="api.credentialsMode()"
       :drawio-url="effectiveDrawioUrl"

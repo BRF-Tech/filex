@@ -1367,6 +1367,16 @@ export const tr: Record<string, string> = {
   'sidenav.open': 'Gezintiyi aç',
   'sidenav.storage.shared': 'Paylaşılan',
   'sidenav.storage.readOnly': 'Salt okunur',
+  // #57 — depo satırının sıralama menüsü (sağ tık, uzun basış, Shift+F10).
+  // "Ada göre sırala" bir mod değildir; kişinin elle düzeltmeye devam
+  // edebileceği bir sıra yazar. "Varsayılan sırayı kullan" kişinin kendi
+  // sırasını bırakır: panel yöneticinin sırasına (yoksa sunucununkine) döner.
+  'sidenav.storage.moveUp': 'Yukarı taşı',
+  'sidenav.storage.moveDown': 'Aşağı taşı',
+  'sidenav.storage.sortName': 'Ada göre sırala',
+  'sidenav.storage.sortName.done': 'Zaten ada göre sıralı',
+  'sidenav.storage.defaultOrder': 'Varsayılan sırayı kullan',
+  'sidenav.storage.defaultOrder.none': 'Zaten varsayılan sırada',
   // ⚠ `toolbar.nav` KALDIRILDI, yerine bir şey konmadı — bkz. en.ts'teki not.
   // Paneli daraltan tek denetimin etiketiydi; önce "Gezinti" (panelin adı,
   // düğmenin ne yaptığını söylemiyor), sonra "Gezintiyi göster/gizle" (sabit
@@ -1435,10 +1445,13 @@ export const tr: Record<string, string> = {
   'newdoc.empty.body': 'Bu sunucu, bu uygulamanın oluşturabileceği bir tür sunmadı.',
   'newdoc.empty.blocked': 'Bu sunucunun oluşturabildiği her tür, burada tanımlı olmayan bir düzenleyici servisine bağlı.',
   'newdoc.name': 'Ad',
-  'newdoc.name.placeholder': 'Belge adı',
+  'newdoc.name.placeholder': 'Dosya adı, ör. notlar.txt ya da LICENSE',
   'newdoc.untitled': 'Adsız',
   'newdoc.err.slash': 'Ad eğik çizgi içeremez.',
   'newdoc.err.exists': '{name} burada zaten var. Başka bir ad seçin.',
+  'newdoc.err.bare_ext': 'Dosyaya yalnız bir uzantı değil, bir ad verin.',
+  'newdoc.err.ext_needs_type': '.{ext} dosyası kendi türüyle oluşturulmalı — boş bir dosya açılmaz. O türü ya da başka bir uzantıyı seçin.',
+  'newdoc.hint.ext_added': 'Bu tür uzantısını korur; dosya {name} adıyla oluşturulacak.',
   'newdoc.location': 'Konum',
   'newdoc.location.none': 'Bir klasör seçin',
   'newdoc.location.change': 'Değiştir',

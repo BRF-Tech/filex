@@ -12,6 +12,9 @@
  *   office (docx/xlsx/pptx)       → OnlyOffice iframe (config.onlyOfficeBase)
  *   plain text (txt/log/conf)     → CodeMirror when saveText is set,
  *                                    `<pre>` otherwise
+ *   no telling extension          → as `openAs` says (a New document's
+ *     (LICENSE, notes.custom)       type), else as plain text when the
+ *                                    server's mime says text (#56)
  *   anything else                 → "Download" fallback
  *
  * Monaco is dynamic-imported at FileExplorer onMounted; by the time the
@@ -34,6 +37,7 @@ import { actionIconSvg } from '../lib/actionIcons';
 import { OFFICE_EXTS } from '../lib/serviceGate';
 import { requestFailure, sayFailure } from '../lib/errorWords';
 import { createArchivePreviewCache } from '../lib/archivePreviewCache';
+import { isTextualMime } from '../lib/textMime';
 
 const props = defineProps<{
   open: boolean;
@@ -100,6 +104,14 @@ const props = defineProps<{
   /** Draw the share action. Off by default on purpose: a share button with
    *  no host listening to `@share` is a control that lies. */
   shareEnabled?: boolean;
+  /**
+   * Open `file` AS this type — an extension, no dot — instead of by its name
+   * (#56). The New document dialog made `LICENSE` as Plain text, so it opens
+   * in the text editor although its name picks no viewer at all; `README`
+   * made as Markdown opens in the markdown editor. Unset: the name decides,
+   * as it always has. The host passes it for the one file it applies to.
+   */
+  openAs?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -117,8 +129,22 @@ const emit = defineEmits<{
 const { t, formatSize, formatDate, nodeDisplayName } = useLocale(() => props.locale);
 const archivePreviewCache = createArchivePreviewCache();
 
+/**
+ * The extension that picks the viewer.
+ *
+ * Normally the file's own. Two exceptions, both for a file whose name does not
+ * say what it is (#56): the host's `openAs` (the type a New document was made
+ * as), and — for a name that picks NO viewer, like `LICENSE` or
+ * `example.custom` — the server's mime: bytes it calls text open as the plain
+ * text they are, instead of the "Download" fallback. A name that does pick a
+ * viewer keeps it whatever the mime says.
+ */
 function ext(f: FileNode | null): string {
-  return (f?.extension || '').toLowerCase();
+  if (!f) return '';
+  if (props.openAs && f === props.file) return props.openAs.toLowerCase();
+  const own = (f.extension || '').toLowerCase();
+  if (!picksViewer(own) && isTextualMime(f.mime_type)) return 'txt';
+  return own;
 }
 
 const IMAGE = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'svg', 'heic'];
@@ -204,6 +230,17 @@ const VIEWER_MAP: Record<string, () => Promise<Component>> = {
 type PreviewKind =
   | 'image' | 'video' | 'audio' | 'pdf' | 'markdown' | 'code'
   | 'office' | 'text' | 'viewer' | 'other';
+
+/** Does this extension, on its own, pick a surface? The same lists `kind`
+ *  reads below — an extension that falls through all of them is 'other'. */
+function picksViewer(e: string): boolean {
+  if (!e) return false;
+  return (
+    IMAGE.includes(e) || VIDEO.includes(e) || AUDIO.includes(e) || e === 'pdf' ||
+    e === 'md' || e === 'markdown' || e in CODE_LANGS || e in VIEWER_MAP ||
+    OFFICE.includes(e) || TEXT_PLAIN.includes(e)
+  );
+}
 
 const kind = computed<PreviewKind>(() => {
   const e = ext(props.file);

@@ -16,9 +16,9 @@
  *   • `closeOnBackdrop` was read as `!== false`, but Vue casts an absent
  *     boolean prop to `false`, so NO dialog closed on an outside click.
  */
-import { watch, onBeforeUnmount, ref } from 'vue';
+import { watch, onBeforeUnmount, ref, getCurrentInstance, inject } from 'vue';
 import { isTopModal, popModal, pushModal } from '../lib/modalStack';
-import { useLocale } from '../composables/useLocale';
+import { EXPLORER_LOCALE, useLocale } from '../composables/useLocale';
 
 const props = withDefaults(defineProps<{
   /** The explorer's language, for the close button's name. Absent = English. */
@@ -65,7 +65,10 @@ const props = withDefaults(defineProps<{
 }>(), {
   closeOnBackdrop: true,
 });
-const { t } = useLocale(() => props.locale ?? 'en');
+// ⚠ The explorer's language when the caller names none (EXPLORER_LOCALE):
+// the × used to be "Close" under every Turkish dialog.
+const ambientLocale = getCurrentInstance() ? inject(EXPLORER_LOCALE, undefined) : undefined;
+const { t } = useLocale(() => props.locale ?? ambientLocale?.() ?? 'en');
 
 const emit = defineEmits<{
   (e: 'close'): void;

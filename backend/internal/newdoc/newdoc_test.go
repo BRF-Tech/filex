@@ -3,6 +3,7 @@ package newdoc
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"encoding/xml"
 	"io"
 	"os"
@@ -88,6 +89,29 @@ func TestLookupNormalisesTheExtension(t *testing.T) {
 		if !ok || ty.Ext != "docx" {
 			t.Errorf("Lookup(%q) = %v, %v; want docx, true", in, ty.Ext, ok)
 		}
+	}
+}
+
+// #56: which types may be created under any name. A text type's new file is
+// zero bytes, valid whatever it is called (LICENSE, Makefile, test.conf); an
+// office document or a diagram is a container its editor finds by extension,
+// so it keeps the extension. The client reads the flag rather than deriving
+// it from `group` or `requires`, and it must be on the wire for text types
+// too: its ABSENCE is how a client recognises a server from before #56.
+func TestExtRequiredMarksExactlyTheContainers(t *testing.T) {
+	for _, ty := range Types() {
+		want := ty.Group != GroupText
+		if ty.ExtRequired != want {
+			t.Errorf("%s (%s): ext_required = %v, want %v", ty.Ext, ty.Group, ty.ExtRequired, want)
+		}
+	}
+	txt, _ := Lookup("txt")
+	raw, err := json.Marshal(txt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"ext_required":false`) {
+		t.Errorf("txt marshals as %s; ext_required:false must be published, not omitted", raw)
 	}
 }
 

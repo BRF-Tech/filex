@@ -85,6 +85,8 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 		Upsert: s.upsert,
 		Time:   db.CatalogueTime,
 	}}
+	// The admin's storage order (00060): `?` on both engines this file serves.
+	s.StorageOrderSQL = &db.StorageOrderSQL{Pool: sqlDB}
 	return s
 }
 
@@ -97,6 +99,8 @@ type Store struct {
 	mysql bool
 	// The catalogue_folders methods (internal/db catalogue_folders_sql.go).
 	*db.CatalogueFolderSQL
+	// SetStorageOrder (internal/db storage_order_sql.go).
+	*db.StorageOrderSQL
 }
 
 // upsertClause matches SQLite's upsert tail so it can be swapped for MySQL's.
@@ -188,7 +192,13 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 // ⚠ COALESCE on uid: the column is nullable so its UNIQUE index tolerates a
 // row that somehow arrives unfilled, and an empty string is what the rest of
 // the code treats as "not addressable by uid yet".
-const storageCols = `id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled, COALESCE(uid,'')`
+const storageCols = `id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled, COALESCE(uid,''), sort_order`
+
+// storageOrder is the order every storage listing follows (issue #57): the
+// storages the admin placed, by position, then the rest by id. The CASE puts
+// NULL last on all three engines, which disagree on where NULL sorts. With
+// nothing placed it is exactly the ORDER BY id it replaced.
+const storageOrder = ` ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order, id`
 
 func (s *Store) GetStorage(ctx context.Context, id int64) (*model.Storage, error) {
 	row := s.conn(ctx).QueryRowContext(ctx, `SELECT `+storageCols+` FROM storages WHERE id=?`, id)
@@ -212,7 +222,7 @@ func (s *Store) GetStorageByUID(ctx context.Context, uid string) (*model.Storage
 }
 
 func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+storageCols+` FROM storages ORDER BY id`)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+storageCols+` FROM storages`+storageOrder)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +239,7 @@ func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
 }
 
 func (s *Store) ListEnabledStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+storageCols+` FROM storages WHERE enabled=1 ORDER BY id`)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+storageCols+` FROM storages WHERE enabled=1`+storageOrder)
 	if err != nil {
 		return nil, err
 	}
@@ -2817,13 +2827,13 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 	st := &model.Storage{}
 	var cfg string
 	var role, replicaMode sql.NullString
-	var replicaOf, replicaTarget sql.NullInt64
+	var replicaOf, replicaTarget, sortOrder sql.NullInt64
 	err := r.Scan(
 		&st.ID, &st.Name, &st.Driver, &st.MountPath, &cfg,
 		&st.SyncMode, &st.SyncIntervalS, &st.LastSyncAt, &st.LastSyncToken,
 		&st.Enabled, &st.ReadOnly, &st.CreatedAt,
 		&role, &replicaOf, &replicaMode, &replicaTarget,
-		&st.RBACEnabled, &st.UID,
+		&st.RBACEnabled, &st.UID, &sortOrder,
 	)
 	if err != nil {
 		return nil, err
@@ -2842,6 +2852,10 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 	if replicaTarget.Valid {
 		v := replicaTarget.Int64
 		st.ReplicaTargetID = &v
+	}
+	if sortOrder.Valid {
+		v := sortOrder.Int64
+		st.SortOrder = &v
 	}
 	return st, nil
 }

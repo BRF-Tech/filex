@@ -28,6 +28,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   *Follow symlinks that leave this folder* option
 - [Moving files between storages](STORAGE.md#moving-files-between-storages) — what
   copy, cut and drag mean when the two ends are different storages
+- [Ordering storages](STORAGE.md#ordering-storages) — the order the navigation
+  panel lists the drives in: each person's own (drag, or the row menu), else the
+  one the administrator set on the Storages page, else creation order
 - [NAS over NFS / SMB](STORAGE.md#nas-nfs-smb-and-friends) — mount it with the
   OS, serve it with `local`, and the three traps that come with it
 - [Slow storage](STORAGE.md#slow-storage) — what is already cached, and what is

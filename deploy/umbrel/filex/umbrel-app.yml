@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.45.1"
+version: "0.46.0"
 releaseNotes: |-
-  filex v0.45.1 — 2026-09-25
-  • A token confined to one folder could reach files outside it through the app doors and the selection archive.
-  • Drag a file out of the web admin onto the desktop (#71).
-  • Desktop: Mount as a drive.
-  • ⌘K search results you can act on.
-  • Desktop: ⌘K searches every account on the rail.
+  filex v0.46.0 — 2026-09-26
+  • Put the storages in the navigation panel in your own order (#57).
+  • Administrators set the order everybody starts from (#57).
+  • New document: name the file anything — LICENSE, Makefile, test.conf, example.custom (#56).
+  • A text file whose name has no known extension opens as text and can be saved (#56).
+  • A new document opens once in the desktop app.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

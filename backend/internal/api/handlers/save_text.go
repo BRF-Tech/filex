@@ -178,7 +178,7 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isTextSafePath(rel) {
+	if !isTextSafePath(rel) && !h.catalogueSaysText(r.Context(), storageID, rel) {
 		writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "extension not allowed for save-text"})
 		return
 	}
@@ -322,6 +322,48 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		"ok":   true,
 		"size": len(body),
 	})
+}
+
+// catalogueSaysText answers for a name isTextSafePath cannot judge (#56):
+// `LICENSE`, `NOTICE`, `example.custom` — a document created as Plain text
+// under a name of the person's choosing, or an upload with text in it. The
+// list above allows by extension, and these names carry none it knows, so
+// the text editor that had just opened the file refused its first save.
+//
+// The catalogue row's mime is the word on the BYTES: the New document path
+// writes the chosen type's, the upload path sniffs them. An existing file it
+// calls text is saved; a file it calls anything else, and a path with no row
+// at all, are refused exactly as before — nothing vouches for them.
+func (h *SaveText) catalogueSaysText(ctx context.Context, storageID int64, rel string) bool {
+	clean := strings.TrimRight(path.Clean("/"+rel), "/")
+	n, err := h.Store.GetNodeByPath(ctx, storageID, pathkey.Hash(storageID, clean))
+	if err != nil || n == nil || n.Type != model.NodeTypeFile {
+		return false
+	}
+	return isTextualMime(n.Mime)
+}
+
+// isTextualMime reports whether a media type is text a person edits as text:
+// any text/*, and the structured-text types filed under application/.
+//
+// ⚠ The same list is in packages/core/src/lib/textMime.ts, which decides that
+// the explorer opens such a file in its text editor. The two answer one
+// question — "is this file text?" — from the two ends, and a file the editor
+// opens but save-text refuses is the bug #56 found.
+func isTextualMime(m string) bool {
+	m = strings.ToLower(strings.TrimSpace(m))
+	if i := strings.IndexByte(m, ';'); i >= 0 {
+		m = strings.TrimSpace(m[:i])
+	}
+	if strings.HasPrefix(m, "text/") {
+		return true
+	}
+	switch m {
+	case "application/json", "application/xml", "application/yaml", "application/x-yaml",
+		"application/javascript", "application/x-sh", "application/toml":
+		return true
+	}
+	return false
 }
 
 // isTextSafePath returns true for extensions that round-trip cleanly as

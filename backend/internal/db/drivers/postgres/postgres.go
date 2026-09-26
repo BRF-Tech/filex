@@ -68,12 +68,15 @@ func (Driver) Open(_ context.Context, dsn string) (*sql.DB, error) {
 
 // NewStore returns a Store backed by the given *sql.DB.
 func (Driver) NewStore(sqlDB *sql.DB) db.Store {
-	return &Store{db: sqlDB, CatalogueFolderSQL: &db.CatalogueFolderSQL{DB: sqlDB, Dialect: db.CatalogueDialect{
+	s := &Store{db: sqlDB, CatalogueFolderSQL: &db.CatalogueFolderSQL{DB: sqlDB, Dialect: db.CatalogueDialect{
 		// The lazy catalogue's folder state (00059), written once in
 		// internal/db: $N placeholders and real timestamps are all that differ.
 		Placeholders: db.DollarPlaceholders,
 		Time:         db.PlainTime,
 	}}}
+	// The admin's storage order (00060), written once in internal/db.
+	s.StorageOrderSQL = &db.StorageOrderSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	return s
 }
 
 // Store implements db.Store atop Postgres.
@@ -86,6 +89,8 @@ type Store struct {
 	db *sql.DB
 	// The catalogue_folders methods (internal/db catalogue_folders_sql.go).
 	*db.CatalogueFolderSQL
+	// SetStorageOrder (internal/db storage_order_sql.go).
+	*db.StorageOrderSQL
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
@@ -127,7 +132,12 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 // storageCols is the one place the storage projection is spelled out; see the
 // same constant in the sqlite driver. COALESCE on uid because the column is
 // nullable so its UNIQUE index tolerates an unfilled row.
-const storageCols = `id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled, COALESCE(uid,'')`
+const storageCols = `id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled, COALESCE(uid,''), sort_order`
+
+// storageOrder: the admin's order, then the rest by id (issue #57). See the
+// same constant in the sqlite driver; PostgreSQL sorts NULL last on its own,
+// the CASE keeps the three engines' SQL identical.
+const storageOrder = ` ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order, id`
 
 func (s *Store) GetStorage(ctx context.Context, id int64) (*model.Storage, error) {
 	row := s.conn(ctx).QueryRowContext(ctx, `SELECT `+storageCols+` FROM storages WHERE id=$1`, id)
@@ -148,7 +158,7 @@ func (s *Store) GetStorageByUID(ctx context.Context, uid string) (*model.Storage
 }
 
 func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+storageCols+` FROM storages ORDER BY id`)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+storageCols+` FROM storages`+storageOrder)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +175,7 @@ func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
 }
 
 func (s *Store) ListEnabledStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+storageCols+` FROM storages WHERE enabled=true ORDER BY id`)
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+storageCols+` FROM storages WHERE enabled=true`+storageOrder)
 	if err != nil {
 		return nil, err
 	}
@@ -2253,13 +2263,13 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 	st := &model.Storage{}
 	var cfg string
 	var role, replicaMode sql.NullString
-	var replicaOf, replicaTarget sql.NullInt64
+	var replicaOf, replicaTarget, sortOrder sql.NullInt64
 	err := r.Scan(
 		&st.ID, &st.Name, &st.Driver, &st.MountPath, &cfg,
 		&st.SyncMode, &st.SyncIntervalS, &st.LastSyncAt, &st.LastSyncToken,
 		&st.Enabled, &st.ReadOnly, &st.CreatedAt,
 		&role, &replicaOf, &replicaMode, &replicaTarget,
-		&st.RBACEnabled, &st.UID,
+		&st.RBACEnabled, &st.UID, &sortOrder,
 	)
 	if err != nil {
 		return nil, err
@@ -2278,6 +2288,10 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 	}
 	if replicaMode.Valid {
 		st.ReplicaMode = replicaMode.String
+	}
+	if sortOrder.Valid {
+		v := sortOrder.Int64
+		st.SortOrder = &v
 	}
 	return st, nil
 }

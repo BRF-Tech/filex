@@ -49,6 +49,17 @@
  * Name collisions are the same shape: this dialog asks the destination listing
  * first and says "already here" BEFORE the write, and the create endpoint
  * answers 409 anyway.
+ *
+ * ## The name is the whole name (#56)
+ *
+ * The field holds the file name, extension and all. The TYPE decides the
+ * bytes the server writes and the editor the file opens in; it only prefills
+ * the name (`Untitled.txt`). It used to draw the extension as a read-only
+ * suffix beside the field, which made `LICENSE`, `Makefile`, `test.conf` and
+ * `example.custom` impossible to create. A type whose editor finds it BY
+ * extension (office documents, diagrams — `ext_required`) still keeps it: the
+ * dialog says "will be created as report.docx" instead of locking the field.
+ * The rules are lib/newDocName; this file wires them.
  */
 import { computed, nextTick, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
@@ -60,6 +71,14 @@ import { crumbsOfWire, permAllowsWrite, splitWire } from '../lib/destinationTree
 import Modal from './Modal.vue';
 import DestinationPickerModal from './DestinationPickerModal.vue';
 import { inlineKeyStep } from '../lib/direction';
+import {
+  docNameProblem,
+  extLocked,
+  finalDocName,
+  retypeDocName,
+  stemEnd,
+  suggestDocName,
+} from '../lib/newDocName';
 
 const props = defineProps<{
   open: boolean;
@@ -204,24 +223,48 @@ const collision = ref(false);
 const busy = ref(false);
 const failure = ref<string | null>(null);
 
-const finalName = computed(() => {
-  const base = name.value.trim();
-  const ext = selectedType.value?.ext ?? '';
-  if (!base || !ext) return base;
-  return base.toLowerCase().endsWith('.' + ext) ? base : base + '.' + ext;
+/** The name the server will write: what the collision check and the
+ *  "will be created as" line quote. */
+const finalName = computed(() =>
+  selectedType.value ? finalDocName(name.value, selectedType.value) : name.value.trim(),
+);
+
+/** Why the typed name cannot be created — the server's own refusals, said
+ *  before the click (lib/newDocName). */
+const nameProblem = computed(() =>
+  selectedType.value ? docNameProblem(name.value, selectedType.value, props.types ?? []) : null,
+);
+
+const nameError = computed(() => {
+  const p = nameProblem.value;
+  if (!p) return '';
+  switch (p.kind) {
+    case 'slash':
+      return t('newdoc.err.slash');
+    case 'dots':
+      return t('modal.newfolder.invalid');
+    case 'bare_ext':
+      return t('newdoc.err.bare_ext');
+    case 'reserved':
+      return t('names.reserved', { name: p.name });
+    case 'ext_needs_type':
+      return t('newdoc.err.ext_needs_type', { ext: p.ext });
+  }
+  return '';
 });
 
-const nameHasSeparator = computed(() => /[\\/]/.test(name.value));
-
-function freeName(taken: Set<string>, ext: string): string {
-  const base = t('newdoc.untitled');
-  if (!taken.has((base + '.' + ext).toLowerCase())) return base;
-  for (let i = 2; i < 100; i++) {
-    const cand = `${base} (${i})`;
-    if (!taken.has((cand + '.' + ext).toLowerCase())) return cand;
-  }
-  return base;
-}
+/**
+ * A type whose editor needs its extension, and a name without it: the server
+ * will add it, and the person reads that BEFORE Create rather than finding
+ * `report.docx` afterwards. Also what a server from before #56 gets for every
+ * type (lib/newDocName `extLocked`).
+ */
+const extHint = computed(() => {
+  const ty = selectedType.value;
+  const typed = name.value.trim();
+  if (!ty || !typed || nameProblem.value || !extLocked(ty)) return '';
+  return finalName.value === typed ? '' : t('newdoc.hint.ext_added', { name: finalName.value });
+});
 
 function takenNames(resp: ManagerResponse | undefined): Set<string> {
   const s = new Set<string>();
@@ -251,7 +294,7 @@ async function refreshDestination(opts: { suggest?: boolean } = {}) {
   const taken = takenNames(resp);
   const ext = selectedType.value?.ext ?? '';
   if (opts.suggest && !nameTouched.value && ext) {
-    name.value = freeName(taken, ext);
+    name.value = suggestDocName(t('newdoc.untitled'), ext, taken);
   }
   collision.value = !!finalName.value && taken.has(finalName.value.toLowerCase());
 }
@@ -296,10 +339,14 @@ watch(
   },
 );
 
-// A different type means a different extension, so the suggested name has to
-// be re-asked against the destination (Untitled.md may be free where
-// Untitled.docx is not).
-watch(selected, () => {
+// A different type means a different default extension. What the person typed
+// is kept — only the previous type's default is swapped (lib/newDocName
+// retypeDocName) — and an untouched suggestion is re-asked against the
+// destination (Untitled.md may be free where Untitled.docx is not).
+watch(selected, (next, prev) => {
+  const nextType = offered.value.find((ty) => ty.ext === next);
+  const prevType = offered.value.find((ty) => ty.ext === prev) ?? null;
+  if (nextType && name.value) name.value = retypeDocName(name.value, prevType, nextType);
   void refreshDestination({ suggest: true });
 });
 watch(name, () => {
@@ -365,17 +412,54 @@ const canCreate = computed(
     !!dest.value &&
     !pickingDest.value &&
     !!name.value.trim() &&
-    !nameHasSeparator.value &&
+    !nameProblem.value &&
     !collision.value &&
     (!destChecked.value || destWritable.value),
 );
+
+/* ================================================================ the field */
+
+/**
+ * Focusing the name selects the STEM, the way a rename does: typing replaces
+ * `Untitled` and keeps `.txt`. A name with no extension (`LICENSE`) selects
+ * whole.
+ *
+ * ⚠ A mouse click focuses on mousedown and then places the caret on mouseup,
+ * which would undo the selection; the first click's mouseup is therefore
+ * swallowed and the stem re-selected. A click into an already-focused field
+ * is the person placing the caret, and is left alone.
+ */
+let reselectOnMouseUp = false;
+function selectStem(el: HTMLInputElement) {
+  try {
+    el.setSelectionRange(0, stemEnd(el.value));
+  } catch {
+    /* an input type without a selection — nothing to select */
+  }
+}
+function onNameFocus(e: FocusEvent) {
+  selectStem(e.target as HTMLInputElement);
+}
+function onNameMouseDown(e: MouseEvent) {
+  reselectOnMouseUp = document.activeElement !== e.target;
+}
+function onNameMouseUp(e: MouseEvent) {
+  if (!reselectOnMouseUp) return;
+  reselectOnMouseUp = false;
+  e.preventDefault();
+  selectStem(e.target as HTMLInputElement);
+}
 
 async function create() {
   if (!canCreate.value || !selectedType.value) return;
   busy.value = true;
   failure.value = null;
   try {
-    const res = await props.api.newFile(dest.value, name.value.trim(), selectedType.value.ext);
+    // exactName: the field IS the file name (#56). The server still adds the
+    // extension a type's editor needs, which extHint has already said.
+    const res = await props.api.newFile(dest.value, name.value.trim(), selectedType.value.ext, {
+      exactName: true,
+    });
     emit('created', res);
   } catch (e) {
     const err = e as Error & { status?: number };
@@ -430,7 +514,7 @@ async function create() {
                 :aria-checked="selected === ty.ext"
                 :tabindex="selected === ty.ext ? 0 : -1"
                 :data-newdoc-ext="ty.ext"
-                :data-testid="'newdoc-type-' + ty.ext"
+                :data-testid="`newdoc-type-${ty.ext}`"
                 @click="pick(ty.ext)"
                 @keydown="onTileKey($event, ty.ext)"
               >
@@ -451,24 +535,43 @@ async function create() {
 
         <div class="fe-newdoc__field">
           <label class="fe-newdoc__label" for="fe-newdoc-name">{{ t('newdoc.name') }}</label>
-          <div class="fe-newdoc__nameline">
-            <input
-              id="fe-newdoc-name"
-              v-model="name"
-              type="text"
-              class="fe-input fe-newdoc__name"
-              autocomplete="off"
-              spellcheck="false"
-              data-testid="newdoc-name"
-              :placeholder="t('newdoc.name.placeholder')"
-              @input="nameTouched = true"
-              @keydown.enter.prevent="create"
-            />
-            <span v-if="selectedType" class="fe-newdoc__suffix">.{{ selectedType.ext }}</span>
-          </div>
-          <p v-if="nameHasSeparator" class="fe-form__error">{{ t('newdoc.err.slash') }}</p>
+          <!-- #56 — the whole file name, extension included. There used to be
+               a read-only ".txt" beside the field, which is why LICENSE could
+               not be made. -->
+          <input
+            id="fe-newdoc-name"
+            v-model="name"
+            type="text"
+            class="fe-input fe-newdoc__name"
+            autocomplete="off"
+            spellcheck="false"
+            data-testid="newdoc-name"
+            :placeholder="t('newdoc.name.placeholder')"
+            :aria-describedby="nameError || extHint ? 'fe-newdoc-name-note' : undefined"
+            @input="nameTouched = true"
+            @focus="onNameFocus"
+            @mousedown="onNameMouseDown"
+            @mouseup="onNameMouseUp"
+            @keydown.enter.prevent="create"
+          />
+          <p
+            v-if="nameError"
+            id="fe-newdoc-name-note"
+            class="fe-form__error"
+            data-testid="newdoc-name-error"
+          >
+            {{ nameError }}
+          </p>
           <p v-else-if="collision" class="fe-form__error" data-testid="newdoc-collision">
             {{ t('newdoc.err.exists', { name: finalName }) }}
+          </p>
+          <p
+            v-else-if="extHint"
+            id="fe-newdoc-name-note"
+            class="fe-newdoc__hint"
+            data-testid="newdoc-ext-hint"
+          >
+            {{ extHint }}
           </p>
         </div>
 

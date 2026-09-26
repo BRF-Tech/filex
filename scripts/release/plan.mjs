@@ -56,6 +56,8 @@ const WORKFLOW_GUARDS = [
   'every publishing job waits for the gate',
   'the release hands every token variable to the goreleaser step',
   'every repository token is a single {{ .Env.NAME }}, as GoReleaser demands',
+  // v0.45.1: a tolerated winget warning code still failed the desktop job.
+  'ends with exit 0, because GitHub exits the step with $LASTEXITCODE',
 ];
 
 export default function plan({ repo, version, tag }) {

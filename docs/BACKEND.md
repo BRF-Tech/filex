@@ -189,14 +189,18 @@ published by every install that configured one.
 `newdoc_types` is the other field worth naming, because it decides what a
 "New document" menu may offer: the document types **this build can create**,
 from a template registry compiled into the binary (`internal/newdoc`). Each row
-is `{ ext, group, mime, requires }`, where `requires` names the external service
-the *editor* needs (`"onlyoffice"`, `"drawio"`, or absent for the built-in code
-and markdown editors).
+is `{ ext, group, mime, requires, ext_required }`, where `requires` names the
+external service the *editor* needs (`"onlyoffice"`, `"drawio"`, or absent for
+the built-in code and markdown editors), and `ext_required` says whether the
+file must carry the extension — `true` for office documents and diagrams, whose
+editors find them by it, `false` for text types, which a person may name
+anything (`LICENSE`, `test.conf`; #56). It is published as `false`, never
+omitted: its absence is how a client recognises a server from before #56.
 
 ```json
 "newdoc_types": [
-  { "ext": "docx", "group": "document", "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "requires": "onlyoffice" },
-  { "ext": "md",   "group": "text",     "mime": "text/markdown; charset=utf-8" }
+  { "ext": "docx", "group": "document", "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "requires": "onlyoffice", "ext_required": true },
+  { "ext": "md",   "group": "text",     "mime": "text/markdown; charset=utf-8", "ext_required": false }
 ]
 ```
 
@@ -454,6 +458,13 @@ content-only. Full reference: [SEARCH.md](SEARCH.md).
 Writes the body of the built-in text / code / Markdown editor. Takes a version
 snapshot of what it is about to replace, writes the bytes, updates the row and
 re-indexes the file.
+
+Which files it saves: those whose extension is a known text or code format
+(`.txt`, `.md`, `.conf`, `.json`, `Dockerfile`, `Makefile` …), and — since #56
+— an existing file under any other name (`LICENSE`, `NOTICE`, `notes.custom`)
+whose catalogue row calls its bytes text (`text/*`, or JSON/XML/YAML). Anything
+else answers `415`: a binary file under an unknown name, and a path with no
+catalogue row that no known extension vouches for.
 
 ⚠ Creating and saving are **different events** and get **different scans**:
 
@@ -1321,15 +1332,26 @@ without an extra step.
 Storages created on it are left in place.
 
 ### `GET /api/admin/storages` ![admin](https://img.shields.io/badge/-admin-red)
-**Response 200**
+**Response 200** — an array, in the administrator's order (placed storages by
+`sort_order`, then the rest in creation order):
 ```json
-{
-  "storages": [
-    { "id": 1, "name": "Local", "driver": "local", "readonly": false,
-      "config_summary": "/var/lib/filex/local-storage", "last_sync": "..." }
-  ]
-}
+[
+  { "id": 1, "uid": "7f3a1b2c-…", "name": "Local", "driver": "local",
+    "read_only": false, "sort_order": 1, "config": { "path": "/var/lib/filex/local-storage" },
+    "stats": { "file_count": 12, "total_size_bytes": 4200000 }, "last_sync_state": "ok" }
+]
 ```
+
+### `PUT /api/admin/storages/order` ![admin](https://img.shields.io/badge/-admin-red)
+The administrator's order — the one everybody's navigation panel starts from
+([STORAGE.md → Ordering storages](STORAGE.md#ordering-storages)).
+**Request** `{ "ids": [3, 1, 2] }` — the whole order, first = top. The listed
+storages get `sort_order` 1…n and every other storage the caller administers
+goes back to `null` (not placed: after the placed ones, in creation order).
+`{ "ids": [] }` resets to creation order.
+**Response 200** `{ "ok": true, "ids": [3, 1, 2] }`. **400** for bad JSON, a
+duplicate id, or an id the caller cannot administer (another tenant's reads
+exactly like one that does not exist); nothing is written then.
 
 ### `POST /api/admin/storages` ![admin](https://img.shields.io/badge/-admin-red)
 **Request** (driver-specific fields)

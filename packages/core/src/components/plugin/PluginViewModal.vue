@@ -120,7 +120,7 @@ const size = computed<'sm' | 'md' | 'lg' | 'xl'>(() => {
 </script>
 
 <template>
-  <Modal :open="open" :title="title" :size="size" :theme="theme" @close="emit('close')">
+  <Modal :open="open" :title="title" :size="size" :theme="theme" :locale="locale" @close="emit('close')">
     <div class="fe-plugin-view" data-testid="plugin-view">
       <SurfaceSections
         v-if="sections.length"

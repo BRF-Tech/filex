@@ -29,6 +29,7 @@ import { useLocale } from '../composables/useLocale';
 import { inlineKeyStep } from '../lib/direction';
 import { eventMatchesShortcut, shortcutHint } from '../composables/useKeyboardShortcuts';
 import PreviewModal from '../modals/PreviewModal.vue';
+import { isTypingTarget } from '../lib/typingTarget';
 
 const props = defineProps<{
   open: boolean;
@@ -75,17 +76,6 @@ const emit = defineEmits<{
 // interface (the next file's chevron is on the left there).
 const { t, dir } = useLocale(() => props.locale);
 
-function inFormControl(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  return !!(
-    el &&
-    (el.tagName === 'INPUT' ||
-      el.tagName === 'TEXTAREA' ||
-      el.tagName === 'SELECT' ||
-      el.isContentEditable)
-  );
-}
-
 /**
  * The peek's own arrows. These are NOT registry actions — they only
  * mean anything while the overlay is up — so they are declared once
@@ -96,7 +86,8 @@ const NAV_KEYS = ['↑', '↓'] as const;
 
 function onKeydown(e: KeyboardEvent) {
   if (!props.open) return;
-  if (inFormControl(e.target)) return;
+  // The code editor is typing too, not only form controls (lib/typingTarget).
+  if (isTypingTarget(e.target)) return;
 
   // ⚠ The registry first, and BEFORE the modifier bail-out: the user may
   // have remapped quick-look onto a combo that carries Ctrl or Alt. The

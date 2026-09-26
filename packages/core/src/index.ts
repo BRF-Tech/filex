@@ -250,6 +250,23 @@ export type { LookKey, PrefKey, PrefsConfig, UiPrefs } from './lib/prefs';
 /* The first-use tour is offered to a PERSON once — the account's answer or
  * this browser's, never once per mount. */
 export { markTourSeen, offerTourOnce, resetTourState, tourSeen, TOUR_LS_KEY } from './lib/tour';
+/* #57 — the order a person put their storages in (the navigation panel and
+ * Home draw it). Kept on the account beside the palette (`storageOrder`). */
+export {
+  defaultStorageOrder,
+  dropStorageAt,
+  moveStorage,
+  orderStorages,
+  parseStorageOrder,
+  saveStorageOrder,
+  storageOrderKey,
+  useStorageOrder,
+} from './lib/storageOrder';
+export type { OrderableStorage, StorageOrderHandle } from './lib/storageOrder';
+/* #57 — the one "drag a row to a new place" gesture: the panel's storages and
+ * the admin Storages table. */
+export { useReorderDrag } from './composables/useReorderDrag';
+export type { ReorderDrag, ReorderDragOptions } from './composables/useReorderDrag';
 export { default as SurfaceRenderer } from './components/plugin/SurfaceRenderer.vue';
 /* v2 — the surface BODY and the footer row, shared by every frame that draws
  * one (the explorer's dialog, an inspector section, an app's full page, the

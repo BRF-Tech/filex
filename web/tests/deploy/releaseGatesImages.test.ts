@@ -94,3 +94,45 @@ describe('a release cannot publish before its images build', () => {
     expect(needs(job(release, 'desktop'))).toContain('binaries');
   });
 });
+
+/** Every `run: |` block of a workflow, as its script lines (indent removed). */
+function runBlocks(lines: string[]): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\s*)(?:-\s+)?run:\s*\|\s*$/.exec(lines[i]);
+    if (!m) continue;
+    const body: string[] = [];
+    let indent = -1;
+    for (let j = i + 1; j < lines.length; j++) {
+      const l = lines[j];
+      if (!l.trim()) continue;
+      const ind = l.length - l.trimStart().length;
+      if (indent < 0) indent = ind;
+      if (ind < indent || ind <= m[1].length) break;
+      body.push(l.slice(indent));
+    }
+    out.push(body);
+  }
+  return out;
+}
+
+// ⚠⚠ v0.45.1, run 36182595696: `winget validate` returned 0x8A150028
+// ("succeeded with warnings"), the step accepted that code on purpose — and
+// still failed. GitHub runs a pwsh step as `. '<script>'` followed by
+// `exit $LASTEXITCODE`, so the tolerated code of the last native command IS
+// the step's exit code. The desktop app's winget pull request was never
+// opened. A step that tolerates a native exit code has to end by saying so.
+describe('a pwsh step that tolerates a native exit code', () => {
+  it.runIf(!!DIR)('ends with exit 0, because GitHub exits the step with $LASTEXITCODE', () => {
+    const offenders: string[] = [];
+    for (const file of ['release.yml', 'ci.yml']) {
+      for (const body of runBlocks(code(file))) {
+        const text = body.join('\n');
+        if (!/\$LASTEXITCODE/.test(text) || !/-ne\s+0\s+-and\b/.test(text)) continue;
+        const last = body.filter((l) => !/^\s*#/.test(l)).pop() ?? '';
+        if (!/^\s*(exit 0|\$global:LASTEXITCODE\s*=\s*0)\s*$/.test(last)) offenders.push(`${file}: …${last.trim()}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});

@@ -174,3 +174,27 @@ describe('fetchVisibleStorages', () => {
     expect(out[0].usedBytes).toBe(85022);
   });
 });
+
+// #57 — the administrator's order reaches the explorer on both paths, so a
+// person with no order of their own sees the drives where the administrator
+// put them (lib/storageOrder in the core package applies it).
+describe('the administrator order', () => {
+  it('comes with the admin list', () => {
+    const out = fromAdminStorages([admin({ sort_order: 2 }), admin({ name: 'b', sort_order: null })]);
+    expect(out.map((s) => s.sortOrder)).toEqual([2, null]);
+  });
+
+  it('comes with the manager root for everybody else, and is absent when the drive has none', () => {
+    const out = fromManagerRoot({
+      storages: ['depo', 'arsiv'],
+      storage_info: [
+        { name: 'depo', read_only: false, sort_order: 1 },
+        { name: 'arsiv', read_only: false },
+      ],
+    });
+    expect(out).toEqual([
+      { name: 'depo', label: 'depo', readOnly: false, sortOrder: 1 },
+      { name: 'arsiv', label: 'arsiv', readOnly: false },
+    ]);
+  });
+});

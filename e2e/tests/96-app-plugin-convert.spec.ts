@@ -52,8 +52,10 @@ import {
   openView,
   removeApp,
   surfaceEvent,
+  textOf,
   walkNodes,
   type Field,
+  type FieldText,
   type Node,
   type Surface,
 } from '../helpers/surface';
@@ -93,7 +95,7 @@ function targetGroups(s: Surface): Field[] {
  */
 function targetChoices(s: Surface): { value: string; label: string; group: string }[] {
   return targetGroups(s).flatMap((f) =>
-    (f.options ?? []).map((o) => ({ value: o.value, label: o.label, group: f.key })),
+    (f.options ?? []).map((o) => ({ value: o.value, label: textOf(o.label), group: f.key })),
   );
 }
 
@@ -214,7 +216,7 @@ test.describe('App plugin: convert — install, choose a target, get the file', 
       ).toBe('select');
       // The category is the HEADING of its own group, which is what makes
       // thirty formats readable without opening anything.
-      expect((g.label ?? '').trim(), `${g.key}: a button group with no heading`).not.toBe('');
+      expect(textOf(g.label).trim(), `${g.key}: a button group with no heading`).not.toBe('');
     }
 
     const opts = targetChoices(s);
@@ -252,12 +254,12 @@ test.describe('App plugin: convert — install, choose a target, get the file', 
       test.info().annotations.push({ type: 'note', description: 'every engine is installed here; no grey list' });
       return;
     }
-    const rows = (lists[0].props?.rows as { id: string; cells: Record<string, string> }[]) ?? [];
+    const rows = (lists[0].props?.rows as { id: string; cells: Record<string, FieldText> }[]) ?? [];
     expect(rows.length, 'the grey list must name the formats it cannot reach').toBeGreaterThan(0);
     for (const row of rows) {
       expect(offered.has(row.id), `${row.id} is in the grey list, so it must not also be a button`).toBe(false);
       expect(
-        (row.cells?.needs ?? '').trim(),
+        textOf(row.cells?.needs).trim(),
         `the grey row for ${row.id} must say which engine it needs`,
       ).not.toBe('');
     }

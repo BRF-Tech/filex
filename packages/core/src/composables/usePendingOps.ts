@@ -184,7 +184,10 @@ export function usePendingOps(
   async function poll(): Promise<void> {
     if (!api.endpoints.opsList) return;
     try {
-      const res = await api.jsonFetch<{ ops: Record<string, unknown>[] }>(api.endpoints.opsList);
+      // ⚠ `lang=`: an app job's label and result are said in the reader's
+      // language when the list is READ (backend wasmplugin/jobtext.go) — the
+      // language on this screen, not the account's (an embed's config.locale).
+      const res = await api.jsonFetch<{ ops: Record<string, unknown>[] }>(api.withScreenLang(api.endpoints.opsList));
       const incoming = (res.ops || []).map(normalizeOp);
 
       for (const op of incoming) {

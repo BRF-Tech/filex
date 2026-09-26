@@ -199,6 +199,21 @@
   "storages": {
     "title": "Depolar",
     "subtitle": "Üst düzey klasör olarak görünen mount noktaları",
+    "columns": {
+      "size": "Boyut",
+      "sync": "Senkron",
+      "lastSync": "Son senkron"
+    },
+    "order": {
+      "hint": "Kendi sırasını oluşturmamış herkes depoları gezinti panelinde bu sırayla görür. Bir satırı tutamağından sürükleyin ya da İşlemler menüsündeki Yukarı taşı / Aşağı taşı ile taşıyın.",
+      "handle": "{name} deposunu taşı — sürükleyin ya da yukarı ve aşağı ok tuşlarına basın",
+      "moveUp": "Yukarı taşı",
+      "moveDown": "Aşağı taşı",
+      "reset": "Varsayılan sıraya döndür",
+      "resetNone": "Depolar zaten varsayılan sırada",
+      "saved": "Sıra kaydedildi",
+      "resetDone": "Depolar varsayılan sıraya döndü"
+    },
     "fileCount": "{n} dosya | {n} dosya",
     "notYetSynced": "Henüz senkron çalışmadı",
     "modeLabel": {

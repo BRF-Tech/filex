@@ -33,6 +33,7 @@ const { t } = useLocale(() => props.locale);
     :title="title || t('plugin.confirm.title')"
     size="sm"
     :theme="theme"
+    :locale="locale"
     @close="emit('close')"
   >
     <p data-testid="plugin-confirm-message">{{ message }}</p>

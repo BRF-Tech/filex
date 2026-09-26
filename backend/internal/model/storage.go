@@ -136,6 +136,13 @@ type Storage struct {
 	ReplicaOfID     *int64 `json:"replica_of_id,omitempty"`
 	ReplicaMode     string `json:"replica_mode,omitempty"`
 	ReplicaTargetID *int64 `json:"replica_target_id,omitempty"`
+
+	// SortOrder is the position the admin gave this storage (1 = first;
+	// migration 00060, issue #57). NULL = not placed: listed after every
+	// placed storage, in creation order. Written only by
+	// Store.SetStorageOrder — CreateStorage leaves it NULL and UpdateStorage
+	// never touches it. No omitempty: the admin list says null explicitly.
+	SortOrder *int64 `json:"sort_order"`
 }
 
 // ReplicationTarget is a backup-only sink that the replica engine

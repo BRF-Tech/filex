@@ -15,6 +15,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 // Ops handles async copy/move/delete tasks.
@@ -407,7 +408,7 @@ func (o *Ops) List(w http.ResponseWriter, r *http.Request) {
 	//
 	// A trash empty is its TENANT's (ops.Viewer): it may name no storage at
 	// all, and its counts describe that tenant's trash.
-	list, err := o.Service.ListFor(r.Context(), status, opsViewer(r))
+	list, err := o.Service.ListFor(readerCtx(r), status, opsViewer(r))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -417,6 +418,15 @@ func (o *Ops) List(w http.ResponseWriter, r *http.Request) {
 		rows = append(rows, newOpListRow(op))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ops": rows})
+}
+
+// readerCtx is the request's context carrying the language its rows are
+// read in (srvtext.Reader). An app job keeps its label and its result in
+// every language the app wrote (wasmplugin/jobtext.go); the row says them in
+// the language on the reader's screen — `?lang=`, which the explorer sends —
+// then the account's, then Accept-Language (pluginLang).
+func readerCtx(r *http.Request) context.Context {
+	return srvtext.WithReader(r.Context(), pluginLang(r))
 }
 
 // opsViewer is who the request is to the queue: every row for an unscoped
@@ -507,7 +517,7 @@ func (o *Ops) Cancel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	op, err := o.Service.Get(r.Context(), id)
+	op, err := o.Service.Get(readerCtx(r), id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
 		return
@@ -532,7 +542,7 @@ func (o *Ops) Cancel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "already finished"})
 		return
 	}
-	op, _ = o.Service.Get(r.Context(), id)
+	op, _ = o.Service.Get(readerCtx(r), id)
 	writeJSON(w, http.StatusOK, map[string]any{"op": op})
 }
 
@@ -547,7 +557,7 @@ func (o *Ops) Status(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	op, err := o.Service.Get(r.Context(), id)
+	op, err := o.Service.Get(readerCtx(r), id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
 		return

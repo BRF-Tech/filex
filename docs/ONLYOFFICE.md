@@ -333,8 +333,42 @@ client is the only place that knows the true answer. What it must not do is
 re-derive the dependency from an extension list of its own — that list rots the
 moment the registry grows a type.
 
+### Naming the file
+
+The name field holds the **whole file name**. Choosing a type fills it in with
+that type's extension — `Untitled.txt`, `Untitled.docx` — and clicking into the
+field selects the name part only, the way a rename does, so typing replaces
+`Untitled` and keeps the extension. After that the name is yours:
+
+- **Text and code types take any name.** `LICENSE`, `NOTICE`, `Makefile`,
+  `Dockerfile`, `.gitignore`, `test.conf` and `example.custom` can all be made
+  as Plain text; `README` can be made as Markdown. The type decides what the
+  file is — its contents and the editor it opens in straight after — not what
+  it is called, so `LICENSE` opens in the text editor. Opened again later, a
+  file whose name says nothing (no extension, or one filex does not know) opens
+  as plain text when the server says its bytes are text, and saves like any
+  other text file.
+- **Office documents and diagrams keep their extension.** Their editors find
+  them by it — OnlyOffice picks Word, Excel or PowerPoint from the extension,
+  and `report` with none is a ZIP nothing opens — so if you remove it the dialog
+  says *"This type keeps its extension, so the file will be created as
+  report.docx"* and the server adds it back.
+- **A text type cannot borrow a document's extension.** `x.docx` made as Plain
+  text would be an empty `.docx` that no editor opens, so the dialog refuses it
+  and asks for the Word document type (or another extension).
+- **Switching the type keeps what you typed.** Only the previous type's default
+  extension is swapped (`notes.txt` → `notes.md`); a name with no extension, or
+  one you chose (`test.conf`), stays as it is.
+
+![The New document dialog with a Plain text document named LICENSE](screenshots/v0.43.0/newdoc/newdoc-any-name-1280.png)
+
 The create itself is `POST /api/files/manager?action=newfile` with
-`{path, name, type}`, where `type` is one of the `newdoc_types` keys.
+`{path, name, type, exact_name}`, where `type` is one of the `newdoc_types`
+keys and `exact_name: true` says `name` is the whole file name. Without
+`exact_name` the server appends the type's extension when the name lacks it —
+the contract a client from before #56 relies on — and with it only a type whose
+row says `ext_required: true` still gains its extension. A text type asked for
+under another type's `ext_required` extension answers `400 EXT_NEEDS_TYPE`.
 
 ---
 

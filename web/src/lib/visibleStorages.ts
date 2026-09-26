@@ -46,6 +46,10 @@ export interface VisibleStorage {
    * sync, a lazily cataloged storage). Home draws it as a lower bound.
    */
   usedPartial?: boolean;
+  /** #57 — the administrator's position (1 = first); null = not placed. The
+   *  explorer's navigation panel and Home follow it unless the person has an
+   *  order of their own (`lib/storageOrder` in the core package). */
+  sortOrder?: number | null;
 }
 
 /** The server's `coverage` beside a size figure says the figure is partial. */
@@ -76,6 +80,7 @@ export function fromAdminStorages(items: readonly StorageRef[]): VisibleStorage[
     usedBytes: s.stats?.total_size_bytes ?? s.total_bytes,
     fileCount: s.stats?.file_count ?? s.file_count,
     usedPartial: partial(s.coverage),
+    sortOrder: typeof s.sort_order === 'number' ? s.sort_order : null,
   }));
 }
 
@@ -94,15 +99,24 @@ export function fromManagerRoot(body: unknown): VisibleStorage[] {
   const names = b?.storages;
   if (!Array.isArray(names)) return [];
   const ro = new Map<string, boolean>();
+  const pos = new Map<string, number>();
   if (Array.isArray(b.storage_info)) {
     for (const i of b.storage_info) {
-      const row = i as { name?: unknown; read_only?: unknown };
-      if (typeof row?.name === 'string') ro.set(row.name, row.read_only === true);
+      const row = i as { name?: unknown; read_only?: unknown; sort_order?: unknown };
+      if (typeof row?.name !== 'string') continue;
+      ro.set(row.name, row.read_only === true);
+      // #57 — the administrator's position, when the drive has one.
+      if (typeof row.sort_order === 'number') pos.set(row.name, row.sort_order);
     }
   }
   return names
     .filter((n): n is string => typeof n === 'string' && n !== '')
-    .map((n) => (ro.has(n) ? { name: n, label: n, readOnly: ro.get(n) } : { name: n, label: n }));
+    .map((n) => {
+      const out: VisibleStorage = { name: n, label: n };
+      if (ro.has(n)) out.readOnly = ro.get(n);
+      if (pos.has(n)) out.sortOrder = pos.get(n);
+      return out;
+    });
 }
 
 /**

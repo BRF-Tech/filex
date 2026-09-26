@@ -347,7 +347,7 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 	infos := make([]storageInfo, 0, len(storages))
 	for _, s := range storages {
 		storageNames = append(storageNames, s.Name)
-		infos = append(infos, storageInfo{Name: s.Name, ReadOnly: s.ReadOnly, Coverage: h.coverageOf(r.Context(), s)})
+		infos = append(infos, storageInfo{Name: s.Name, ReadOnly: s.ReadOnly, SortOrder: s.SortOrder, Coverage: h.coverageOf(r.Context(), s)})
 	}
 	r = r.WithContext(withStorageInfo(r.Context(), infos))
 
@@ -1702,6 +1702,10 @@ type storageInfo struct {
 	// one that only catalogues the folders people open. Search, folder sizes
 	// and drive usage say so from this (docs/LAZY-CATALOGUE.md).
 	Coverage *syncpkg.CatalogueCoverage `json:"coverage,omitempty"`
+	// SortOrder is the position the admin gave the storage (issue #57);
+	// absent when it has none. `storages` is already in this order
+	// (ListEnabledStorages), so a client need not sort by it.
+	SortOrder *int64 `json:"sort_order,omitempty"`
 }
 
 type storageInfoKey struct{}

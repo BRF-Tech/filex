@@ -493,7 +493,7 @@ func (h *AppPlugins) Run(w http.ResponseWriter, r *http.Request) {
 		// c.storage, not req.StorageID: with adapter-qualified paths the
 		// request carries no id, and a view opened on storage 0 would see
 		// no files and no qualified paths.
-		s, err := h.Registry.ViewEvent(r.Context(), pluginName, c.action.View, c.storage.ID, c.rels, auth.UserFrom(r.Context()), langOf(r),
+		s, err := h.Registry.ViewEvent(r.Context(), pluginName, c.action.View, c.storage.ID, c.rels, auth.UserFrom(r.Context()), pluginLang(r),
 			wire.ViewEventInput{Event: "open"})
 		if err != nil {
 			h.callFail(w, err)
@@ -527,12 +527,14 @@ func (h *AppPlugins) enqueue(w http.ResponseWriter, r *http.Request, c *checked,
 	}
 	u := auth.UserFrom(r.Context())
 	var actorID *int64
-	// ⚠ langOf, not the account field alone: somebody who never chose a
+	// ⚠ pluginLang, not the account field alone: somebody who never chose a
 	// language in their profile still has one in the browser, and the
 	// wizard they just walked through answered in it. Reading u.Locale
 	// only made the queued job answer in English underneath a Turkish
 	// screen — one flow, two languages, which is exactly the complaint.
-	locale := langOf(r)
+	// The screen that queued the job may name its own language (`?lang=`,
+	// an embed drawing Turkish over an English account): that one wins.
+	locale := pluginLang(r)
 	if u != nil {
 		id := u.ID
 		actorID = &id
@@ -546,7 +548,7 @@ func (h *AppPlugins) enqueue(w http.ResponseWriter, r *http.Request, c *checked,
 	job := &model.AppPluginJob{
 		ID: wasmplugin.NewJobID(), PluginID: c.plugin.Row.ID, PluginName: c.plugin.Row.Name, ActionID: c.action.ID,
 		StorageID: c.storage.ID, PathsJSON: jsonString(c.rels), ParamsJSON: string(pb), ActorID: actorID, Locale: locale,
-		Label: c.action.Label.Get(locale), Status: model.AppPluginJobPending,
+		Label: wasmplugin.EncodeJobText(c.action.Label), Status: model.AppPluginJobPending,
 	}
 	if err := h.Store.CreateAppPluginJob(r.Context(), job); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "job: " + err.Error()})
@@ -567,7 +569,7 @@ func (h *AppPlugins) enqueue(w http.ResponseWriter, r *http.Request, c *checked,
 		Metadata: map[string]any{"action": c.action.ID, "storage_id": c.storage.ID, "paths": c.rels, "job": job.ID, "op": opID},
 		IP:       clientIP(r),
 	})
-	op.Plugin, op.Action, op.Label = c.plugin.Row.Name, c.action.ID, job.Label
+	op.Plugin, op.Action, op.Label = c.plugin.Row.Name, c.action.ID, wasmplugin.JobText(job.Label, locale)
 	writeJSON(w, http.StatusAccepted, map[string]any{"op": op, "job_id": job.ID})
 }
 
@@ -693,7 +695,7 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 	// is a convenience for the person at the screen — THIS is the boundary,
 	// and a crafted request meets it here.
 	if missing, gerr := gateSurfaceValues(req.Event, req.State, req.Data, func(in wire.ViewEventInput) (*wire.Surface, error) {
-		return h.Registry.ViewEvent(r.Context(), pluginName, viewID, req.StorageID, rels, auth.UserFrom(r.Context()), langOf(r), in)
+		return h.Registry.ViewEvent(r.Context(), pluginName, viewID, req.StorageID, rels, auth.UserFrom(r.Context()), pluginLang(r), in)
 	}); gerr != nil {
 		h.callFail(w, gerr)
 		return
@@ -701,7 +703,7 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 		writeSurfaceRequired(w, missing)
 		return
 	}
-	s, err := h.Registry.ViewEvent(r.Context(), pluginName, viewID, req.StorageID, rels, auth.UserFrom(r.Context()), langOf(r),
+	s, err := h.Registry.ViewEvent(r.Context(), pluginName, viewID, req.StorageID, rels, auth.UserFrom(r.Context()), pluginLang(r),
 		wire.ViewEventInput{Event: req.Event, ActionID: req.ActionID, State: req.State, Data: req.Data})
 	if err != nil {
 		h.callFail(w, err)

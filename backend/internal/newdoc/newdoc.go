@@ -108,6 +108,17 @@ type Type struct {
 	Group    Group       `json:"group"`
 	MIME     string      `json:"mime"`
 	Requires Requirement `json:"requires,omitempty"`
+	// ExtRequired says the file must carry this extension (#56). True for the
+	// containers — an office document or a diagram is a ZIP or an XML file
+	// that its editor finds BY extension, so "report" with no extension is a
+	// document nothing opens. False for text: the new file is zero bytes and
+	// is just as valid called LICENSE, Makefile or test.conf, so the person
+	// names it whatever they like.
+	//
+	// ⚠ Never `omitempty`. A client tells a server from before #56 by this
+	// key being ABSENT (that server appends the extension to every type), so
+	// `false` has to be on the wire.
+	ExtRequired bool `json:"ext_required"`
 }
 
 // part is one entry in the produced ZIP.
@@ -180,6 +191,12 @@ func textType(ext, mime string) tmpl {
 	return tmpl{typ: Type{Ext: ext, Group: GroupText, MIME: mime}}
 }
 
+// container is a type whose bytes are a format of their own (an office ZIP,
+// a diagram's XML), so the file keeps its extension — see Type.ExtRequired.
+func container(ext string, group Group, mime string, requires Requirement) Type {
+	return Type{Ext: ext, Group: group, MIME: mime, Requires: requires, ExtRequired: true}
+}
+
 // registry is the ordered list of everything this build can create. The order
 // is the order the picker draws, so it is a design decision and not an
 // accident of map iteration.
@@ -189,15 +206,15 @@ func textType(ext, mime string) tmpl {
 // extension when it has no localised label yet.
 var registry = []tmpl{
 	{
-		typ:   Type{Ext: "docx", Group: GroupDocument, MIME: mimeDocx, Requires: RequiresOnlyOffice},
+		typ:   container("docx", GroupDocument, mimeDocx, RequiresOnlyOffice),
 		parts: ooxmlParts("docx", "[Content_Types].xml", "_rels/.rels", "docProps/app.xml", "docProps/core.xml", "word/document.xml", "word/_rels/document.xml.rels", "word/styles.xml"),
 	},
 	{
-		typ:   Type{Ext: "xlsx", Group: GroupDocument, MIME: mimeXlsx, Requires: RequiresOnlyOffice},
+		typ:   container("xlsx", GroupDocument, mimeXlsx, RequiresOnlyOffice),
 		parts: ooxmlParts("xlsx", "[Content_Types].xml", "_rels/.rels", "docProps/app.xml", "docProps/core.xml", "xl/workbook.xml", "xl/_rels/workbook.xml.rels", "xl/styles.xml", "xl/worksheets/sheet1.xml"),
 	},
 	{
-		typ: Type{Ext: "pptx", Group: GroupDocument, MIME: mimePptx, Requires: RequiresOnlyOffice},
+		typ: container("pptx", GroupDocument, mimePptx, RequiresOnlyOffice),
 		parts: ooxmlParts("pptx", "[Content_Types].xml", "_rels/.rels", "docProps/app.xml", "docProps/core.xml",
 			"ppt/presentation.xml", "ppt/_rels/presentation.xml.rels",
 			"ppt/slideMasters/slideMaster1.xml", "ppt/slideMasters/_rels/slideMaster1.xml.rels",
@@ -206,15 +223,15 @@ var registry = []tmpl{
 			"ppt/theme/theme1.xml"),
 	},
 	{
-		typ:   Type{Ext: "odt", Group: GroupDocument, MIME: mimeOdt, Requires: RequiresOnlyOffice},
+		typ:   container("odt", GroupDocument, mimeOdt, RequiresOnlyOffice),
 		parts: odfParts(mimeOdt, "odt"),
 	},
 	{
-		typ:   Type{Ext: "ods", Group: GroupDocument, MIME: mimeOds, Requires: RequiresOnlyOffice},
+		typ:   container("ods", GroupDocument, mimeOds, RequiresOnlyOffice),
 		parts: odfParts(mimeOds, "ods"),
 	},
 	{
-		typ:   Type{Ext: "odp", Group: GroupDocument, MIME: mimeOdp, Requires: RequiresOnlyOffice},
+		typ:   container("odp", GroupDocument, mimeOdp, RequiresOnlyOffice),
 		parts: odfParts(mimeOdp, "odp"),
 	},
 
@@ -232,7 +249,7 @@ var registry = []tmpl{
 	textType("sh", "text/x-shellscript; charset=utf-8"),
 
 	{
-		typ:    Type{Ext: "drawio", Group: GroupDiagram, MIME: "application/vnd.jgraph.mxfile", Requires: RequiresDrawio},
+		typ:    container("drawio", GroupDiagram, "application/vnd.jgraph.mxfile", RequiresDrawio),
 		single: "drawio/diagram.xml",
 	},
 }

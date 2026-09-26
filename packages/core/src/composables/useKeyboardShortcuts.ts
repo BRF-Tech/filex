@@ -21,6 +21,7 @@
  */
 
 import { computed, onMounted, onBeforeUnmount, ref, type ComputedRef, type Ref } from 'vue';
+import { isTypingTarget } from '../lib/typingTarget';
 
 export interface ShortcutHandlers {
   onDelete?: () => void;
@@ -535,14 +536,10 @@ export function useKeyboardShortcuts(rootEl: Ref<HTMLElement | null>, handlers: 
     // Skip when the event originates inside a form control — don't
     // want `Delete` while editing a filename, `/` while typing in the
     // search box, etc. Escape always goes through so modals can close.
+    // ⚠ Not only form controls: the code editor's focused element is a
+    // `role="textbox"` div in Chromium (lib/typingTarget).
     const target = e.target as HTMLElement | null;
-    const inForm = !!(
-      target &&
-      (target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.tagName === 'SELECT' ||
-        target.isContentEditable)
-    );
+    const inForm = isTypingTarget(target);
 
     const combo = comboFromEvent(e);
     if (!combo) return;

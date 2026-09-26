@@ -4838,6 +4838,94 @@ filex-explorer {
   text-overflow: ellipsis;
 }
 
+/* === #57 — reordering the storages ===================================
+   A storage row can be dragged (SideNav: pointer events, a long press for a
+   finger). Nothing here changes a row that is not being dragged. */
+.fe-sidenav__item--storage {
+  /* A finger's long press lifts the row; without these it would select the
+     label (Android) or open the system's link callout (iOS) instead. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* The row in hand: still in its place (the drop marker says where it goes),
+   faded so the marker is what the eye follows. The same on a table row the
+   admin Storages page drags by its handle (`useReorderDrag`, one gesture). */
+.fe-sidenav__item--storage.is-dragging,
+.fe-list__row--dragging {
+  opacity: 0.45;
+}
+.fe-sidenav--reordering,
+.fe-sidenav--reordering .fe-sidenav__item {
+  cursor: grabbing;
+}
+/* The drop marker: a 2px primary line in the gap the row would land in —
+   above the row carrying `is-drop-before`, below the last row for
+   `is-drop-after`. Positioned on the <li> (a table: on the row) so it takes no
+   layout space and the rows do not jump while the pointer moves; logical
+   properties, so it is the same line in a right-to-left panel. On a table row
+   it sits above the frozen Name / Actions cells, which paint an opaque ground
+   at z-index 2. */
+.fe-sidenav__group > li.is-drop-before,
+.fe-sidenav__group > li.is-drop-after,
+.fe-list__row--drop-before,
+.fe-list__row--drop-after {
+  position: relative;
+}
+.fe-sidenav__group > li.is-drop-before::before,
+.fe-sidenav__group > li.is-drop-after::after,
+.fe-list__row--drop-before::before,
+.fe-list__row--drop-after::after {
+  content: '';
+  position: absolute;
+  inset-inline: 6px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--fe-primary);
+  pointer-events: none;
+  z-index: 3;
+}
+.fe-list__row--drop-before::before,
+.fe-list__row--drop-after::after {
+  inset-inline: 0;
+}
+.fe-sidenav__group > li.is-drop-before::before,
+.fe-list__row--drop-before::before {
+  inset-block-start: -1px;
+}
+.fe-sidenav__group > li.is-drop-after::after,
+.fe-list__row--drop-after::after {
+  inset-block-end: -1px;
+}
+/* A table row's handle (the admin Storages page). ⚠ `touch-action: none`:
+   a finger on the handle drags at once and never scrolls the page instead —
+   which is why the handle, and not the whole row, is what a finger holds. */
+.fe-reorder-handle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.fe-reorder-handle:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-reorder-handle:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+
 /* === etiket:t1 — the Tags section ==================================== */
 /* A tag row is an ordinary panel item; only its label wraps differently,
    because a tag is user text and can be long. */
@@ -9524,23 +9612,22 @@ filex-explorer {
   text-transform: uppercase;
   color: var(--fe-text-muted);
 }
-.fe-newdoc__nameline {
-  display: flex;
-  align-items: center;
-  gap: var(--fe-gap-sm);
-}
+/* #56 — the field holds the WHOLE file name. The extension used to sit beside
+   it as a read-only label, which kept a name from losing it by accident and
+   also made LICENSE, Makefile and test.conf impossible; the type now only
+   prefills it, and focusing the field selects the stem as a rename does. */
 .fe-newdoc__name {
-  flex: 1 1 auto;
   min-width: 0;
+  width: 100%;
 }
-/* The extension sits beside the field rather than inside it: typed into the
-   field it would be text the person can delete, and a name that quietly loses
-   its extension is exactly the accident this label prevents. */
-.fe-newdoc__suffix {
-  flex: 0 0 auto;
-  font-size: var(--fe-text-md);
+/* "Will be created as report.docx" — a type whose editor needs its extension,
+   said before Create. Quiet, not an error: nothing is wrong with the name. */
+.fe-newdoc__hint {
+  margin: 0;
+  font-size: var(--fe-text-xs);
+  line-height: 1.45;
   color: var(--fe-text-muted);
-  font-family: var(--fe-font-mono);
+  overflow-wrap: anywhere;
 }
 
 .fe-newdoc__dest {

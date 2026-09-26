@@ -77,7 +77,10 @@ const config = {
   // Home · Shared with me · Recent · Starred · Trash (plus "My files" when the
   // caller reaches at most one storage — with several there is a drives root
   // to go back to instead), the tags in use, the storages this caller can
-  // reach, an "Apps" section when an installed app has a home screen
+  // reach (in the person's own order — they drag a row or use its menu, and
+  // it is kept on their account — else in `storages[].sortOrder`, the
+  // administrator's order, else in the order of `storages`; STORAGE.md →
+  // Ordering storages), an "Apps" section when an installed app has a home screen
   // (docs/APP-PLUGINS.md), then "How to connect" + "API keys".
   // ON by default on every surface. The viewer collapses it to a 56px
   // icon rail from the control at the FAR LEFT OF THE TOP BAR — above the

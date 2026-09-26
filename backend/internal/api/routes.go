@@ -1330,6 +1330,9 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Post("/", stg.Create)
 				r.Post("/test", storagesAdmH.Test)
 				r.Post("/discover", storagesAdmH.Discover)
+				// The order storages are listed in (issue #57). Static, so
+				// chi matches it before /{id}.
+				r.Put("/order", stg.SetOrder)
 				r.Get("/{id}", stg.Get)
 				r.Patch("/{id}", stg.Update)
 				r.Delete("/{id}", stg.Delete)

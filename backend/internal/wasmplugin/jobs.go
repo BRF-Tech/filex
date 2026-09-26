@@ -17,6 +17,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
@@ -446,15 +447,19 @@ func (r *Registry) runJob(ctx context.Context, job *model.AppPluginJob, live fun
 	if err := json.Unmarshal(outb, &out); err != nil {
 		return nil, "", &CallError{Code: CodePluginError, Message: "action_run returned malformed JSON"}
 	}
+	// The job's own language for the error text an administrator reads (and
+	// classifyJobError parses); every language the app wrote for the row
+	// (EncodeJobText), which the ops list reads in its reader's.
 	msg := out.Message.Get(job.Locale)
+	words := EncodeJobText(out.Message)
 	if !out.OK {
 		if msg == "" {
 			msg = "the plugin reported a failure"
 		}
-		return nil, "", &CallError{Code: CodePluginError, Message: msg}
+		return nil, words, &CallError{Code: CodePluginError, Message: msg}
 	}
 	if action.Output.Mode == "none" || len(out.Outputs) == 0 {
-		return []JobOutput{}, msg, nil
+		return []JobOutput{}, words, nil
 	}
 	if r.sink == nil {
 		return nil, "", errors.New("no output sink wired")
@@ -541,7 +546,7 @@ func (r *Registry) runJob(ctx context.Context, job *model.AppPluginJob, live fun
 		r.keepPromisedShares(context.WithoutCancel(ctx), scope, p, job.StorageID, o.Ref, rel)
 		r.keepPromisedLock(context.WithoutCancel(ctx), scope, p, job.StorageID, o.Ref, rel)
 	}
-	return committed, msg, nil
+	return committed, words, nil
 }
 
 // closeAllFor shuts any handle still open on f so its bytes are complete.
@@ -664,6 +669,9 @@ func (r *Registry) DecorateOps(ctx context.Context, rows []*ops.Op) {
 		return
 	}
 	names := map[int64]string{}
+	// The reader's language: the words were kept in every language the app
+	// wrote (jobtext.go), and are said here in the one on the reader's screen.
+	lang := srvtext.Reader(ctx)
 	for _, op := range rows {
 		j := jobs[op.ID]
 		if j == nil {
@@ -671,10 +679,15 @@ func (r *Registry) DecorateOps(ctx context.Context, rows []*ops.Op) {
 		}
 		op.Plugin = j.PluginName
 		op.Action = j.ActionID
-		op.Label = j.Label
-		op.Message = j.Message
+		op.Label = JobText(j.Label, lang)
+		op.Message = JobText(j.Message, lang)
 		if j.Status == model.AppPluginJobFailed || j.Status == model.AppPluginJobCancelled {
 			op.ErrorCode, op.ErrorEngine = classifyJobError(j.Status, j.Error)
+			// An app that said WHY it failed said it in every language it
+			// speaks; the queue row only kept the job's own.
+			if j.Status == model.AppPluginJobFailed && op.ErrorCode == "app" && j.Message != "" {
+				op.Error = JobText(j.Message, lang)
+			}
 		}
 		var outs []ops.OpOutput
 		_ = json.Unmarshal([]byte(j.OutputsJSON), &outs)

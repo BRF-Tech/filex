@@ -49,11 +49,19 @@ type Store interface {
 	// The file protocols accept it in place of the name so a mount survives a
 	// rename; see model.Storage.UID.
 	GetStorageByUID(ctx context.Context, uid string) (*model.Storage, error)
+	// ListStorages and ListEnabledStorages list in the admin's order: placed
+	// storages by sort_order, then unplaced ones by id (model.Storage.SortOrder).
 	ListStorages(ctx context.Context) ([]*model.Storage, error)
 	ListEnabledStorages(ctx context.Context) ([]*model.Storage, error)
+	// UpdateStorage writes every column the edit form owns — not sort_order.
 	UpdateStorage(ctx context.Context, s *model.Storage) error
 	UpdateStorageSyncCursor(ctx context.Context, id int64, at time.Time, token string) error
 	DeleteStorage(ctx context.Context, id int64) error
+	// SetStorageOrder places ordered[i] at position i+1 and clears (NULL) the
+	// position of every id in cleared, in one transaction (issue #57;
+	// StorageOrderSQL). It does not check the ids: the caller decides which
+	// storages it may order.
+	SetStorageOrder(ctx context.Context, ordered []int64, cleared []int64) error
 
 	// Nodes
 	CreateNode(ctx context.Context, n *model.Node) (*model.Node, error)

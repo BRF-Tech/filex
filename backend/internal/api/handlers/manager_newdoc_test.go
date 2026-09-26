@@ -138,6 +138,104 @@ func TestNewFile_RejectsNamesThatAreNotLeaves(t *testing.T) {
 	}
 }
 
+// ---------- #56: the name the person typed is the name ----------
+//
+// A client that sends `exact_name` gives the WHOLE file name: the type decides
+// the bytes, not the extension. Without the flag the old contract holds (the
+// tests above), because an older dialog sends "Q3 report" and means
+// "Q3 report.docx".
+
+func exactFileBody(dir, name, typ string) map[string]any {
+	return map[string]any{"path": dir, "name": name, "type": typ, "exact_name": true}
+}
+
+func TestNewFile_ExactNameKeepsWhatWasTyped(t *testing.T) {
+	mh, store, _, st, dir := newMutateFixture(t)
+
+	for _, tc := range []struct{ typed, typ string }{
+		{"LICENSE", "txt"},
+		{"Makefile", "txt"},
+		{"test.conf", "txt"},
+		{"example.custom", "txt"},
+		{".gitignore", "txt"},
+		{"notes.md", "txt"},
+		{"README", "md"},
+		{"settings", "json"},
+	} {
+		rec := callMutate(t, mh, "newfile", exactFileBody("main://", tc.typed, tc.typ))
+		require.Equal(t, http.StatusOK, rec.Code, "%s as %s: %s", tc.typed, tc.typ, rec.Body.String())
+		got := decodeNewFile(t, rec.Body.Bytes())
+		assert.Equal(t, tc.typed, got["name"], "%s as %s", tc.typed, tc.typ)
+		assert.Equal(t, "main://"+tc.typed, got["path"])
+		// `ext` names the TYPE the bytes came from, which is what the client
+		// opens the file as — not the extension of a name that may have none.
+		assert.Equal(t, tc.typ, got["ext"])
+
+		fi, err := os.Stat(filepath.Join(dir, tc.typed))
+		require.NoError(t, err, tc.typed)
+		assert.Equal(t, int64(0), fi.Size(), "%s: a text type is an empty file whatever it is called", tc.typed)
+	}
+
+	// The catalogue records what the bytes ARE (the chosen type), which is
+	// what lets the editor and save-text treat an extensionless file as text.
+	node, err := store.GetNodeByPath(context.Background(), st.ID, mutTestPathHash(st.ID, "LICENSE"))
+	require.NoError(t, err)
+	require.NotNil(t, node)
+	assert.Equal(t, "text/plain; charset=utf-8", node.Mime)
+}
+
+func TestNewFile_ExactNameStillAddsTheExtensionAnEditorNeeds(t *testing.T) {
+	// An office document or a diagram is found by its extension: OnlyOffice
+	// picks its editor from it, and "report" with no extension is a ZIP that
+	// nothing opens. Those types keep appending, flag or not.
+	mh, _, _, _, dir := newMutateFixture(t)
+	for _, tc := range []struct{ typed, typ, want string }{
+		{"report", "docx", "report.docx"},
+		{"Budget.XLSX", "xlsx", "Budget.XLSX"},
+		{"flow", "drawio", "flow.drawio"},
+	} {
+		rec := callMutate(t, mh, "newfile", exactFileBody("main://", tc.typed, tc.typ))
+		require.Equal(t, http.StatusOK, rec.Code, "%s: %s", tc.typed, rec.Body.String())
+		assert.Equal(t, tc.want, decodeNewFile(t, rec.Body.Bytes())["name"])
+		_, err := os.Stat(filepath.Join(dir, tc.want))
+		assert.NoError(t, err, tc.want)
+	}
+}
+
+func TestNewFile_ExactNameRefusesAnExtensionThatNeedsItsOwnType(t *testing.T) {
+	// "x.docx" made as Plain text would be a zero-byte .docx — the file the
+	// newdoc package exists to never produce. Refused, and nothing written.
+	mh, _, _, _, dir := newMutateFixture(t)
+	for _, typed := range []string{"x.docx", "Deck.PPTX", "flow.drawio", ".odt"} {
+		rec := callMutate(t, mh, "newfile", exactFileBody("main://", typed, "txt"))
+		assert.Equal(t, http.StatusBadRequest, rec.Code, typed)
+		assert.Equal(t, "EXT_NEEDS_TYPE", decodeNewFile(t, rec.Body.Bytes())["code"], typed)
+	}
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
+func TestNewFile_ExactNameIsAsStrictAboutNames(t *testing.T) {
+	// Only the extension step changed. Every name the old path refused is
+	// still refused, and so is the bare extension and a name filex keeps for
+	// itself (which the old path could never produce: it became ".keepdir.txt").
+	mh, _, _, _, dir := newMutateFixture(t)
+	for _, bad := range []string{"", "   ", "../escape", "a/b", `a\b`, ".", "..", "...", ".txt", ".keepdir"} {
+		rec := callMutate(t, mh, "newfile", exactFileBody("main://", bad, "txt"))
+		assert.NotEqual(t, http.StatusOK, rec.Code, "name %q must be refused", bad)
+		assert.GreaterOrEqual(t, rec.Code, 400, "name %q", bad)
+	}
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "a refused name leaves nothing behind")
+	parent, err := os.ReadDir(filepath.Dir(dir))
+	require.NoError(t, err)
+	for _, e := range parent {
+		assert.NotEqual(t, "escape", e.Name())
+	}
+}
+
 // ---------- the refusals ----------
 
 func TestNewFile_SecondCreateWithTheSameNameIs409(t *testing.T) {

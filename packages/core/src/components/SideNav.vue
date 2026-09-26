@@ -28,9 +28,11 @@
  * hash does not match in the web-component build, so the rules silently stop
  * applying in every embed (measured on the share dialog: raw unstyled HTML).
  */
-import { computed, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import { useLocale } from '../composables/useLocale';
+import { useReorderDrag } from '../composables/useReorderDrag';
 import { inlineStartX } from '../lib/direction';
+import { dropStorageAt, moveStorage, sortStoragesByName, storageOrderKey } from '../lib/storageOrder';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { actionIconSvg } from '../lib/actionIcons';
 import type { TagItem, TagKind } from '../lib/tags';
@@ -61,6 +63,8 @@ export type NavDest = Exclude<NavView, '' | 'tag'> | 'myfiles';
 
 export interface NavStorage {
   name: string;
+  /** The storage's immutable id, when the host knows it — what a saved order keys on (#57). */
+  uid?: string;
   label?: string;
   driver?: string;
   readOnly?: boolean;
@@ -87,8 +91,17 @@ const props = defineProps<{
   activeView: NavView;
   /** Storage currently open ('' at the multi-storage root). */
   activeStorage?: string;
-  /** Storages the caller can see (ExplorerConfig.storages). */
+  /**
+   * Storages the caller can see (ExplorerConfig.storages), ALREADY in the
+   * person's order (#57, `lib/storageOrder`). The panel draws them as handed
+   * and announces a new order with `reorder-storages`; it stores nothing.
+   */
   storages: NavStorage[];
+  /**
+   * The person has an order of their own (#57) — "Use default order" is live only
+   * then. Absent = the host's order, and the row is greyed out.
+   */
+  storageOrderCustom?: boolean;
   /**
    * Names of storages the caller reaches through a GRANT rather than their own
    * role — Drive's "shared drives". Marked, not sorted out: the reporter's ask
@@ -218,6 +231,12 @@ const emit = defineEmits<{
   (e: 'open-app', key: string): void;
   /* surucu:d1 — "Request files": the access modal on THIS folder, drop tab. */
   (e: 'request-files'): void;
+  /**
+   * #57 — the storages were reordered: a drag, "Move up/down" or "Sort by
+   * name". Carries the WHOLE new order as storage keys (`uid`, else the name);
+   * `[]` is "Use default order". The host stores it (`lib/storageOrder`).
+   */
+  (e: 'reorder-storages', keys: string[]): void;
   /** Drawer scrim / Esc — narrow mode only. */
   (e: 'close'): void;
 }>();
@@ -466,14 +485,226 @@ const quotaText = computed(() => {
 
 /** Only the drawer draws this control now (see the template). */
 const toggleLabel = computed(() => t('sidenav.close'));
+
+/* === #57 — reordering the storages ======================================
+ * "Is it possible to implement sorting or even better — manual reordering for
+ * sidebar Storages?" Three doors to one verb, each announcing the WHOLE new
+ * order through `reorder-storages` (the explorer stores it, `lib/storageOrder`):
+ *
+ *   · drag a row (mouse or pen: once it has travelled DRAG_SLOP; a finger:
+ *     after a long press, so a finger that only wanted to scroll the panel
+ *     scrolls it);
+ *   · the row's menu — right click, a finger's long press lifted without
+ *     moving, or Shift+F10 / the Menu key on a focused row: Move up, Move
+ *     down, Sort by name, Use default order. This is the keyboard's way in, and
+ *     the way for anybody who cannot drag;
+ *   · "Sort by name" is part of that menu and WRITES an order — there is no
+ *     sort mode that could disagree with the hand-made one.
+ *
+ * ⚠ With fewer than two storages there is nothing to order: no menu, no drag,
+ * and the browser's own context menu is left alone. */
+const canReorder = computed(() => props.storages.length > 1);
+
+/** The row buttons, by storage key — for focus after a move and for the drop geometry. */
+const rowEls = new Map<string, HTMLElement>();
+function setRowEl(key: string, el: unknown) {
+  if (el instanceof HTMLElement) rowEls.set(key, el);
+  else rowEls.delete(key);
+}
+const navEl = ref<HTMLElement | null>(null);
+
+const storageMenuRef = ref<InstanceType<typeof ContextMenu> | null>(null);
+/** The storage whose menu is open. */
+const menuKey = ref('');
+/** Opened by a finger: the menu comes up as the bottom sheet the file rows use. */
+const menuSheet = ref(false);
+
+function indexOfKey(key: string): number {
+  return props.storages.findIndex((s) => storageOrderKey(s) === key);
+}
+
+const storageActions = computed<ContextAction[]>(() => {
+  const i = indexOfKey(menuKey.value);
+  const n = props.storages.length;
+  const current = props.storages.map(storageOrderKey);
+  const sorted = sortStoragesByName(props.storages);
+  const alreadySorted = sorted.every((k, j) => k === current[j]);
+  return [
+    {
+      key: 'storage-move-up',
+      icon: 'move-up',
+      label: t('sidenav.storage.moveUp'),
+      disabled: i <= 0,
+      testid: 'sidenav-storage-move-up',
+    },
+    {
+      key: 'storage-move-down',
+      icon: 'move-down',
+      label: t('sidenav.storage.moveDown'),
+      disabled: i < 0 || i >= n - 1,
+      testid: 'sidenav-storage-move-down',
+    },
+    { divider: true, key: 'storage-order-sep', label: '' },
+    {
+      key: 'storage-sort-name',
+      icon: 'sort-name',
+      label: t('sidenav.storage.sortName'),
+      disabled: alreadySorted,
+      // ⚠ A greyed row says why, or it reads as broken (ContextAction.title).
+      title: alreadySorted ? t('sidenav.storage.sortName.done') : undefined,
+      testid: 'sidenav-storage-sort-name',
+    },
+    {
+      // "Use default order": drop the person's own order and fall back to the
+      // administrator's (or, with none, the host's). Not "Reset": nothing of
+      // the default is being reset, the person's order is being let go.
+      key: 'storage-default-order',
+      icon: 'reset-order',
+      label: t('sidenav.storage.defaultOrder'),
+      disabled: !props.storageOrderCustom,
+      title: props.storageOrderCustom ? undefined : t('sidenav.storage.defaultOrder.none'),
+      testid: 'sidenav-storage-default-order',
+    },
+  ];
+});
+
+/**
+ * Open a storage row's menu. `at` is the pointer; without one (the keyboard,
+ * a finger) the menu hangs from the row's start edge, like "+ New" does.
+ */
+function openStorageMenu(s: NavStorage, at: { clientX: number; clientY: number } | null, sheet = false) {
+  if (!canReorder.value) return;
+  const key = storageOrderKey(s);
+  menuKey.value = key;
+  menuSheet.value = sheet;
+  let point = at;
+  if (!point) {
+    const r = rowEls.get(key)?.getBoundingClientRect();
+    point = r ? { clientX: inlineStartX(r, dir.value), clientY: r.bottom + 4 } : { clientX: 0, clientY: 0 };
+  }
+  void storageMenuRef.value?.show(point, []);
+}
+
+function onStorageContextMenu(s: NavStorage, ev: MouseEvent) {
+  if (!canReorder.value) return;
+  ev.preventDefault();
+  // ⚠⚠ Stopped HERE: FileExplorer's root answers every contextmenu that
+  // reaches it with the blank-canvas menu, whose backdrop then lands on top
+  // of this one and swallows every click (measured, e2e 158).
+  ev.stopPropagation();
+  // A finger's long press: the gesture decides — lifted where it was, it opens
+  // the menu (onStoragePointerUp); moved, it drags. The browser's own
+  // long-press event would otherwise open it under the moving finger.
+  if (reorder.touchActive()) return;
+  openStorageMenu(s, { clientX: ev.clientX, clientY: ev.clientY });
+}
+
+/**
+ * ⚠ The browser can answer the SAME gesture with a `contextmenu` of its own,
+ * AFTER this component has already opened the menu — and the menu's backdrop
+ * closes on a contextmenu ("a right click outside closes me"), so the menu
+ * would shut the moment it opened:
+ *
+ *   · the keyboard: on Windows the Menu key raises one when the key is
+ *     RELEASED, aimed at whatever has focus — by then the menu's first entry.
+ *     Preventing the keydown does not stop it.
+ *   · a finger: a browser that shows its context menu on the long TAP (the
+ *     finger lifting) aims it at the point under the finger — by then the
+ *     sheet's backdrop. (One that shows it while the finger is still down
+ *     aims it at the row, where `onStorageContextMenu` ignores it.)
+ *
+ * Neither is reproducible headless — Playwright's keys never reach the
+ * system, and its touch emulation sends no long-tap contextmenu — so the unit
+ * tests dispatch both echoes themselves. (What the emulation DOES send after a
+ * held finger, an emulated click, is `useReorderDrag`'s to cancel.) For the
+ * next second the one contextmenu that lands inside a menu (or, for a finger,
+ * anywhere — the lifted finger is not a right click) is that echo, and it is
+ * swallowed before anything sees it.
+ */
+let echoOff: (() => void) | null = null;
+function swallowMenuEcho(anywhere = false) {
+  echoOff?.();
+  const swallow = (ev: Event) => {
+    const target = ev.target as Element | null;
+    const inMenu = typeof target?.closest === 'function' && !!target.closest('.fe-ctx-backdrop');
+    if (!anywhere && !inMenu) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    off();
+  };
+  const timer = setTimeout(() => off(), 1000);
+  function off() {
+    clearTimeout(timer);
+    window.removeEventListener('contextmenu', swallow, true);
+    echoOff = null;
+  }
+  window.addEventListener('contextmenu', swallow, true);
+  echoOff = off;
+}
+onBeforeUnmount(() => echoOff?.());
+
+function onStorageKeydown(s: NavStorage, ev: KeyboardEvent) {
+  if (ev.key !== 'ContextMenu' && !(ev.key === 'F10' && ev.shiftKey)) return;
+  if (!canReorder.value) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  swallowMenuEcho();
+  openStorageMenu(s, null);
+}
+
+/** Announce an order, then put focus back on the row that moved. */
+async function commitOrder(keys: string[] | null, focusKey: string) {
+  if (keys === null) return;
+  emit('reorder-storages', keys);
+  // ⚠ The row's element is MOVED in the DOM by the re-render (the list is
+  // keyed), and a node that is moved loses focus — the menu's own focus
+  // restore ran before the move. Without this a keyboard user who pressed
+  // "Move down" would find focus on <body>.
+  await nextTick();
+  rowEls.get(focusKey)?.focus();
+}
+
+function onStorageMenuSelect(a: ContextAction) {
+  const key = menuKey.value;
+  if (a.key === 'storage-move-up') void commitOrder(moveStorage(props.storages, key, -1), key);
+  else if (a.key === 'storage-move-down') void commitOrder(moveStorage(props.storages, key, 1), key);
+  else if (a.key === 'storage-sort-name') void commitOrder(sortStoragesByName(props.storages), key);
+  else if (a.key === 'storage-default-order') void commitOrder([], key);
+}
+
+/* ── the drag ────────────────────────────────────────────────────────────
+ * The gesture is `useReorderDrag`'s — the same one the admin Storages table
+ * drags its rows with. A finger long-presses a row (a finger that only wanted
+ * to scroll the panel scrolls it); lifted where it was, that long press is the
+ * row's menu, as the bottom sheet. */
+const reorder = useReorderDrag({
+  keys: () => props.storages.map(storageOrderKey),
+  rowEl: (key) => rowEls.get(key),
+  scroller: () => navEl.value?.querySelector('.fe-sidenav__scroll'),
+  onDrop: (key, gap) => void commitOrder(dropStorageAt(props.storages, key, gap), key),
+  onHold: (key) => {
+    const s = props.storages.find((x) => storageOrderKey(x) === key);
+    if (!s) return;
+    swallowMenuEcho(true);
+    openStorageMenu(s, null, true);
+  },
+});
+const { dragKey, dropGap, reordering, onClickCapture: onStorageClickCapture } = reorder;
+
+function onStoragePointerDown(s: NavStorage, ev: PointerEvent) {
+  if (!canReorder.value) return;
+  reorder.onPointerDown(storageOrderKey(s), ev);
+}
 </script>
 
 <template>
   <nav
+    ref="navEl"
     class="fe-sidenav"
     :class="{
       'fe-sidenav--rail': !expanded && !narrow,
       'fe-sidenav--drawer': narrow,
+      'fe-sidenav--reordering': reordering /* #57 */,
     }"
     role="navigation"
     :aria-label="t('sidenav.title')"
@@ -796,12 +1027,31 @@ const toggleLabel = computed(() => t('sidenav.close'));
       <div v-if="storages.length" class="fe-sidenav__section">
         <p v-if="showLabels" class="fe-sidenav__heading">{{ t('sidenav.storages') }}</p>
         <hr v-else class="fe-sidenav__rule" aria-hidden="true" />
-        <ul class="fe-sidenav__group" :aria-label="t('sidenav.storages')">
-          <li v-for="s in storages" :key="s.name">
+        <!-- #57 — the rows can be reordered: dragged, or from their own menu
+             (right click, a long press, Shift+F10). The drop marker is the
+             `is-drop-*` class on the <li> the row would land beside. -->
+        <ul
+          class="fe-sidenav__group"
+          :aria-label="t('sidenav.storages')"
+          data-testid="sidenav-storages"
+          @click.capture="onStorageClickCapture"
+        >
+          <li
+            v-for="(s, i) in storages"
+            :key="s.name"
+            :class="{
+              'is-drop-before': dropGap === i,
+              'is-drop-after': dropGap === storages.length && i === storages.length - 1,
+            }"
+          >
             <button
+              :ref="(el) => setRowEl(storageOrderKey(s), el)"
               type="button"
-              class="fe-sidenav__item"
-              :class="{ 'is-active': !activeView && activeStorage === s.name }"
+              class="fe-sidenav__item fe-sidenav__item--storage"
+              :class="{
+                'is-active': !activeView && activeStorage === s.name,
+                'is-dragging': dragKey === storageOrderKey(s),
+              }"
               :title="
                 sharedSet.has(s.name)
                   ? `${s.label || s.name} — ${t('sidenav.storage.shared')}`
@@ -814,6 +1064,9 @@ const toggleLabel = computed(() => t('sidenav.close'));
               "
               :data-testid="`sidenav-storage-${s.name}`"
               @click="emit('open-storage', s.name)"
+              @contextmenu="onStorageContextMenu(s, $event)"
+              @keydown="onStorageKeydown(s, $event)"
+              @pointerdown="onStoragePointerDown(s, $event)"
             >
               <!-- A granted storage gets a different glyph, not a badge glued
                    into the label: a badge inside the name span changes the
@@ -984,6 +1237,17 @@ const toggleLabel = computed(() => t('sidenav.close'));
       :theme="theme"
       :actions="newActions"
       @select="onNewSelect"
+    />
+    <!-- #57 — a storage row's order menu. The same ContextMenu as every other
+         menu here (teleported, one keyboard grammar), a sheet when a finger
+         opened it. -->
+    <ContextMenu
+      ref="storageMenuRef"
+      :locale="locale"
+      :theme="theme"
+      :sheet="menuSheet"
+      :actions="storageActions"
+      @select="onStorageMenuSelect"
     />
   </nav>
 </template>

@@ -541,6 +541,27 @@ func (h *AppPluginsAdmin) Logs(w http.ResponseWriter, r *http.Request) {
 // language falls back to English per string (wire.Text.Get).
 func langOf(r *http.Request) string { return requestLang(r) }
 
+// pluginLang is the language an app answers one SCREEN in: the language the
+// screen itself is drawn in when the client names it (`?lang=`, which the
+// explorer puts on every app call — packages/core useFileApi), then langOf
+// (the account's language, then Accept-Language).
+//
+// ⚠⚠ Why the screen outranks the account here, and only here: an embedded
+// explorer (`<filex-explorer>` with `config.locale`) draws the language its
+// HOST page chose, and nobody asked the account. An app picks its plain
+// strings — a form field's label and help, a select's options — by
+// `context.locale`, so a Turkish popup over an English account got
+// "Identity" and "One signer per line…" in the middle of a Turkish wizard
+// (2026-09-26). Accept-Language cannot carry that choice: it ranks below the
+// account on purpose, because for any other client it is the language the
+// browser was installed in. An unknown `?lang=` is ignored (srvtext.Pick).
+func pluginLang(r *http.Request) string {
+	if r == nil {
+		return langOf(r)
+	}
+	return requestLang(r, r.URL.Query().Get("lang"))
+}
+
 // textOf is Text.Get with the request's language.
 func textOf(t wire.Text, r *http.Request) string { return t.Get(langOf(r)) }
 

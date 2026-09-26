@@ -235,7 +235,10 @@ func TestJob_UpperCasesInputs_WritesSiblings_KeepsState(t *testing.T) {
 	job, err := h.runJob(t, p, "upper", []string{"docs/a.txt", "docs/b.txt"}, "tr")
 	require.NoError(t, err)
 	assert.Equal(t, model.AppPluginJobOK, job.Status)
-	assert.Equal(t, "bitti", job.Message, "the plugin's message in the actor's locale")
+	// The row keeps every language the plugin wrote; the ops list reads it in
+	// its reader's (jobtext.go) — the actor's Turkish, and the English too.
+	assert.Equal(t, "bitti", JobText(job.Message, "tr"), "the plugin's message in the actor's locale")
+	assert.Equal(t, "done", JobText(job.Message, "en"), "…and in every other language it wrote")
 	assert.Equal(t, []string{"docs/a-upper.txt", "docs/b-upper.txt"}, h.sink.siblings)
 	var outs []JobOutput
 	require.NoError(t, json.Unmarshal([]byte(job.OutputsJSON), &outs))
@@ -252,7 +255,7 @@ func TestJob_UpperCasesInputs_WritesSiblings_KeepsState(t *testing.T) {
 	// Run again: the sibling gets a unique name, the state accumulates.
 	job, err = h.runJob(t, p, "upper", []string{"docs/a.txt"}, "en")
 	require.NoError(t, err)
-	assert.Equal(t, "done", job.Message)
+	assert.Equal(t, "done", JobText(job.Message, "en"))
 	v, _, _ = h.store.GetAppPluginState(context.Background(), p.Row.ID, h.st.ID, pathkey.Hash(h.st.ID, "/docs/a.txt"), "runs")
 	assert.Equal(t, "1+1", v)
 	assert.Len(t, h.sink.siblings, 3)

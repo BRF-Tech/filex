@@ -109,6 +109,11 @@ export interface StorageRef {
    *  it is assigned once, at creation. Absent on a row written before the
    *  column existed that the migration did not reach. */
   uid?: string;
+  /** #57 — the administrator's position (1 = first; `PUT
+   *  /admin/storages/order`). Null = not placed: listed after the placed
+   *  ones, in creation order. Everybody's navigation panel follows it unless
+   *  they have arranged their own. */
+  sort_order?: number | null;
   driver: StorageDriver;
   enabled: boolean;
   config: Record<string, unknown>;

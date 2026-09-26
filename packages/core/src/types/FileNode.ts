@@ -144,6 +144,14 @@ export interface NewDocType {
   mime: string;
   /** External service the editor for this type needs; absent = built-in. */
   requires?: 'onlyoffice' | 'drawio';
+  /**
+   * Must the file carry this extension? (#56) `true` for the containers — an
+   * office document or a diagram, which its editor finds by extension; `false`
+   * for text, which may be named anything (`LICENSE`, `test.conf`). ABSENT on
+   * a server from before #56, which appends the extension to every type —
+   * lib/newDocName `extLocked` reads that as `true`.
+   */
+  ext_required?: boolean;
 }
 
 export type ArchiveCreateFormat = 'zip' | '7z' | 'tar' | 'tar.gz' | 'tar.bz2' | 'tar.xz';

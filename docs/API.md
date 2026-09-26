@@ -255,7 +255,10 @@ import {
 // removes — the names follow the manager verbs, not the POSIX ones.
 const api = useFileApi(config);
 await api.index('main://projects');
-await api.newFile('main://projects', 'Q3 report', 'docx');
+await api.newFile('main://projects', 'Q3 report', 'docx');   // → Q3 report.docx
+// `exactName`: the name is the whole file name (#56). Text types take it as
+// is; a type with `ext_required` (office, diagrams) still gains its extension.
+await api.newFile('main://projects', 'LICENSE', 'txt', { exactName: true });
 
 // Uploads need the api instance: the staged protocol is several calls.
 const { uploadFile, shouldChunk, threshold } = useUploadChunked(config, api);
@@ -520,6 +523,12 @@ export interface ExplorerConfig {
      *  beside the figure is not complete). Drawn as a lower bound: "at least
      *  1.2 GB used", on the card and in the storage line. */
     usedPartial?: boolean;
+    /** The administrator's position (the server's `sort_order`, 1 = first;
+     *  null/absent = not placed). The navigation panel and Home draw the
+     *  storages in the person's own order when they have one, else in this
+     *  one, else in the order of this array — see STORAGE.md → Ordering
+     *  storages. A host that sends no positions keeps its own order. */
+    sortOrder?: number | null;
   }>;
 
   /** Where to persist the current path across reloads. */
@@ -594,6 +603,11 @@ export interface NewDocType {
    *  crosses this against `external` so it never offers a .docx nobody on this
    *  deployment can then open. */
   requires?: 'onlyoffice' | 'drawio';
+  /** Must the file carry this extension? `true` for office documents and
+   *  diagrams (their editors find them by it), `false` for text, which may be
+   *  named anything (#56). Absent on a server from before #56, which appends
+   *  the extension to every type — treat that as `true`. */
+  ext_required?: boolean;
 }
 
 export type ExternalServiceState = 'ok' | 'error' | 'disabled' | 'unknown';
@@ -670,11 +684,12 @@ allow-list, and because two of them are not shaped like the rest.
 | Route | Why it is here |
 |---|---|
 | `GET \| PUT /api/files/manager/view-prefs` | one opaque JSON document per user: view mode, sort, column widths/order/visibility. On the user row rather than in the browser, because `localStorage` is per-BROWSER and a shared machine would hand the next account the previous one's arrangements. Capped at 128 KB, server-side |
+| `GET /api/files/manager?action=index&path=` → `storage_info[].sort_order` | the administrator's position of each drive the caller can open (absent = not placed), beside `read_only`; the `storages` names come in that order. The right source for `config.storages[].sortOrder` in an embed. A person's own order is on their account (`/api/me/prefs`, `storageOrder`), and the explorer applies it itself — [STORAGE.md → Ordering storages](STORAGE.md#ordering-storages) |
 | `GET /api/files/quota/storages` | per-storage usage, RBAC-filtered — "how full is this drive" for somebody who is not an administrator. `{ storages: [{ name, used_bytes, file_count }] }`. It is the right source for `config.storages[].usedBytes` in an embed; `/api/admin/storages` is the operator's |
-| `POST /api/files/manager?action=newfile` | create a document: `{ path, name, type }`, where `type` is an `ext` from `newdoc_types`. Answers `{ path, name, ext, size, mime }` — deliberately **not** the re-rendered listing, because a create is followed by "open the thing I just made" and the one fact the client cannot reconstruct is the final path (the name may have gained an extension). `409` on a collision: creation is the one verb where replacing is never the intent |
+| `POST /api/files/manager?action=newfile` | create a document: `{ path, name, type, exact_name? }`, where `type` is an `ext` from `newdoc_types`. Without `exact_name` the type's extension is appended when the name lacks it; with `exact_name: true` the name is the whole file name — a text type is created under exactly it (`LICENSE`, `test.conf`), and only a type with `ext_required` still gains its extension (#56). A text type named with an `ext_required` type's extension (`x.docx` as `txt`) is `400 EXT_NEEDS_TYPE`. Answers `{ path, name, ext, size, mime }`, where `ext` is the **type** the bytes were made from, not the name's extension — deliberately **not** the re-rendered listing, because a create is followed by "open the thing I just made" and the one fact the client cannot reconstruct is the final path (the name may have gained an extension). `409` on a collision: creation is the one verb where replacing is never the intent |
 | `GET /api/files/manager?action=changes&path=<storage>://<folder>&since=<cursor>` | `{ cursor, changed }`: has anything under this folder changed since the cursor this caller got last time? No `since` (or a cursor from before a server restart) is always `changed`. One request instead of re-listing a tree; the sync client and the desktop app ask it every round. Same visibility rules as `index`, and a change counts only if the caller can see what it touched. Servers before it answer `501` — walk instead |
 | `POST /api/files/manager?action=rename` | rename one item in place: `{ path, item, name }`. `409 { code: "NAME_TAKEN", name }` when anything already has the name — a rename never replaces it, and is not given a `-copy` name either, because the client's undo assumes the item landed exactly where it was asked to. `503 { code: "EXISTS_CHECK_FAILED" }` when the backend cannot tell. A case-only rename is allowed |
-| `GET /api/files/capabilities` → `newdoc_types` | the document types **this build** can create, from a template registry compiled into the binary. Each row is `{ ext, group, mime, requires }`. Published to anonymous callers too: it is a static property of the build and names no host |
+| `GET /api/files/capabilities` → `newdoc_types` | the document types **this build** can create, from a template registry compiled into the binary. Each row is `{ ext, group, mime, requires, ext_required }` — `ext_required` is `true` where the editor finds the file by its extension (office, diagrams) and `false` for text, which may be named anything (#56). Published to anonymous callers too: it is a static property of the build and names no host |
 | `GET /api/branding` → `sso_label` | the operator's text for the sign-in page's SSO button (settings key `branding.sso_label`, tenant-overlaid like the rest of branding). Empty means the translated default |
 | `GET /api/me/custom-css` | the operator stylesheet (settings key `ui.custom_css`), **behind authentication** and `no-store`: `{ css, enabled }`, already sanitised and already wrapped in its `@scope` guard. ⚠ It used to ride `GET /api/branding`, which is public — so it reached anonymous visitors and the sign-in form. The `custom_css` field is **removed** from that payload rather than emptied, so a client still reading it fails loudly instead of quietly rendering nothing. Off by default (`ui.custom_css_enabled`); see [INTEGRATION.md](INTEGRATION.md#operator-custom-css) |
 

@@ -172,11 +172,23 @@ function modifiedMs(n: FileNode): number | null {
   return v * (v < 1e12 ? 1000 : 1);
 }
 
-function nameCompare(a: FileNode, b: FileNode): number {
-  return (a.basename || '').localeCompare(b.basename || '', undefined, {
+/**
+ * Two names, in the order the Name column puts them: numbers as numbers
+ * ("Disk 2" before "Disk 10"), case and accents ignored.
+ *
+ * ⚠ Exported because it is not only the listing's rule: the navigation panel's
+ * "Sort by name" (lib/storageOrder) orders the storages by it too, so the
+ * panel and the drives listing sorted by name agree on which drive comes first.
+ */
+export function compareNames(a: string, b: string): number {
+  return (a || '').localeCompare(b || '', undefined, {
     numeric: true,
     sensitivity: 'base',
   });
+}
+
+function nameCompare(a: FileNode, b: FileNode): number {
+  return compareNames(a.basename, b.basename);
 }
 
 /** The word the Type column prints for this row — the thing a user sorting by

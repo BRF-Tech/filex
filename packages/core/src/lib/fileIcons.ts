@@ -20,6 +20,8 @@
  * tile and the row all get one definition (filex lesson #67).
  */
 
+import { isTextualMime } from './textMime';
+
 export type IconFamily =
   | 'folder'
   | 'image'
@@ -91,6 +93,10 @@ export function iconFamilyFor(node: {
   if (node.basename === '.trash') return 'trash';
   if (node.type === 'dir') return 'folder';
   const ext = (node.extension || '').toLowerCase();
+  // #56: `LICENSE`, `Makefile` — no extension to go on, so the server's mime is
+  // the fact that is left. Only then: an unmapped extension keeps its tier-3
+  // name ("ZIG") rather than being relabelled by a guessed mime.
+  if (!ext) return isTextualMime(node.mime_type) ? 'text' : 'unknown';
   return EXT_FAMILIES[ext] ?? 'unknown';
 }
 
@@ -397,6 +403,7 @@ const FAMILY_TYPE_KEYS: Partial<Record<IconFamily, string>> = {
 export function typeLabelKey(node: {
   type?: string;
   extension?: string | null;
+  mime_type?: string | null;
 }): string | null {
   if (node.type === 'dir') return 'node.folder';
   const ext = (node.extension || '').trim().toLowerCase();
@@ -415,7 +422,7 @@ export function typeLabelKey(node: {
  * for a file with no extension.
  */
 export function typeLabelFor(
-  node: { type?: string; extension?: string | null },
+  node: { type?: string; extension?: string | null; mime_type?: string | null },
   t: (key: string) => string,
 ): string {
   const key = typeLabelKey(node);

@@ -36,6 +36,16 @@ export interface UiPrefs {
   /** A language tag the interface offers (`lib/uiLocales`). */
   locale?: string;
   /**
+   * The order this person put their storages in, in the navigation panel
+   * (GitHub #57) — a JSON list of storage keys (`lib/storageOrder`). Absent or
+   * empty = the host's own order, which is what everybody who never reordered
+   * keeps seeing.
+   *
+   * ⚠ A string, like every other value here: `sanitize` keeps strings only, so
+   * a raw array would be dropped on the way in and erased on the next write.
+   */
+  storageOrder?: string;
+  /**
    * Set (to `done`) once the first-use tour has been OFFERED to this person
    * (`lib/tour`). Not a look: it has no first-paint mirror of its own, and it
    * only ever goes one way — nothing in the product clears it.
@@ -56,10 +66,20 @@ export type LookKey = Exclude<PrefKey, 'tour'>;
  * preference that is not a look (the tour) still has to be named here, or the
  * first palette change after it was stored would erase it.
  */
-export const PREF_KEYS: readonly PrefKey[] = ['theme', 'palette', 'density', 'locale', 'tour'];
+export const PREF_KEYS: readonly PrefKey[] = ['theme', 'palette', 'density', 'locale', 'storageOrder', 'tour'];
 
-/** The keys with a first-paint mirror in `localStorage` — the look, nothing else. */
-export const LOOK_KEYS: readonly LookKey[] = ['theme', 'palette', 'density', 'locale'];
+/**
+ * The keys with a first-paint mirror in `localStorage` — what the window is
+ * painted with, nothing else.
+ *
+ * ⚠ `storageOrder` is one: the navigation panel draws the storages on the very
+ * first frame, and without a mirror a person who reordered them would watch
+ * the list jump from the host's order to theirs once the account answered. It
+ * is also the ONLY place the order lives for an embed that never wires the
+ * account document (`prefsConfigured()` false). The tour is not: it is a
+ * one-way flag with a browser key of its own (`lib/tour`).
+ */
+export const LOOK_KEYS: readonly LookKey[] = ['theme', 'palette', 'density', 'locale', 'storageOrder'];
 
 /**
  * The localStorage mirror's key per preference.
@@ -76,6 +96,8 @@ export const PREF_LS_KEYS: Record<LookKey, string> = {
   palette: 'filex.palette',
   density: 'filex.density',
   locale: 'filex.locale',
+  // New in 0.45.2 (#57); no earlier reader to stay compatible with.
+  storageOrder: 'filex.storageOrder',
 };
 
 /** How long a change waits for the next one before it is sent. */

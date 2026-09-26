@@ -33,10 +33,20 @@ type vfNewFileBody struct {
 	Path string `json:"path"`
 	Name string `json:"name"`
 	Type string `json:"type"`
+	// ExactName: `Name` is the WHOLE file name, extension and all (#56). A
+	// text type is then created under exactly that name — `LICENSE`,
+	// `Makefile`, `test.conf` — because its bytes are the same whatever it is
+	// called. Without it the old contract holds and the extension is appended,
+	// which is what a dialog from before #56 means by "Q3 report".
+	ExactName bool `json:"exact_name"`
 }
 
 // vfNewFileResponse tells the caller where the file landed, so it can open it
 // without guessing how the server resolved the name.
+//
+// `Ext` is the TYPE the bytes were made from (the registry key), not the
+// extension of the name: since #56 a Plain text document may be called
+// `LICENSE`, and the caller opens it as the type it asked for.
 //
 // ⚠ Deliberately NOT the re-rendered listing that the other mutating verbs
 // answer with. A create is followed by "open the thing I just made", and the
@@ -52,21 +62,43 @@ type vfNewFileResponse struct {
 	Mime string `json:"mime"`
 }
 
-// resolveNewDocName turns what the person typed into the file name to write.
+// Why a name was refused, as the response's `code`.
+const (
+	newDocBadName = "BAD_NAME"
+	// newDocExtNeedsType: an exact name whose extension belongs to a type that
+	// is a container of its own (#56) — "x.docx" asked for as Plain text.
+	newDocExtNeedsType = "EXT_NEEDS_TYPE"
+)
+
+// resolveNewDocName turns what the person typed into the file name to write,
+// or says why it is not one.
 //
-// The extension is appended unless it is already there, case-insensitively:
-// somebody who types "Q3 report" gets "Q3 report.docx", and somebody who types
-// "Q3 report.docx" gets the same thing rather than "Q3 report.docx.docx".
-// A name that is nothing but the extension ("docx", ".docx") is not a name.
-func resolveNewDocName(raw, ext string) (string, bool) {
+// Without `exact` the extension is appended unless it is already there,
+// case-insensitively: somebody who types "Q3 report" gets "Q3 report.docx",
+// and somebody who types "Q3 report.docx" gets the same thing rather than
+// "Q3 report.docx.docx". A name that is nothing but the extension ("docx",
+// ".docx") is not a name.
+//
+// With `exact` (#56) the name is the whole file name for a text type — the
+// bytes are empty and valid under any name — and only a type whose editor
+// finds it by extension (ty.ExtRequired) still gains its own. What that does
+// NOT open is a way round the registry: an empty "x.docx" is the file this
+// feature exists never to produce, so a text type may not borrow a
+// container's extension.
+//
+// ⚠ Only the extension step differs between the two. Every check on the name
+// itself — a leaf, not all dots, not the bare extension, the upload path's
+// gate, and the reserved-name gate the caller applies to the full path — is
+// the same for both, so an exact name is not a looser name.
+func resolveNewDocName(raw string, ty newdoc.Type, exact bool) (string, string) {
 	name := strings.TrimSpace(raw)
 	if name == "" {
-		return "", false
+		return "", newDocBadName
 	}
 	// Path separators are how a "name" becomes a traversal. The caller already
 	// chose a directory; the name is a leaf and nothing else.
 	if strings.ContainsAny(name, `/\`) {
-		return "", false
+		return "", newDocBadName
 	}
 	// ⚠ A name of nothing but dots is not refused by the checks below: "." and
 	// ".." both survive the extension step (as "..md" and "...md") and both
@@ -75,18 +107,26 @@ func resolveNewDocName(raw, ext string) (string, bool) {
 	// create a file called "...md", so the intent is refused here where it is
 	// still legible, rather than honoured into a file nobody can explain.
 	if strings.Trim(name, ".") == "" {
-		return "", false
+		return "", newDocBadName
 	}
-	suffix := "." + ext
-	if !strings.EqualFold(path.Ext(name), suffix) {
+	suffix := "." + ty.Ext
+	if exact && !ty.ExtRequired {
+		if other, ok := newdoc.Lookup(path.Ext(name)); ok && other.ExtRequired {
+			return "", newDocExtNeedsType
+		}
+	} else if !strings.EqualFold(path.Ext(name), suffix) {
 		name += suffix
 	}
 	if strings.EqualFold(name, suffix) {
-		return "", false
+		return "", newDocBadName
 	}
 	// One shared gate with the upload path: whatever it refuses there it
 	// refuses here, so a name cannot be legal to create and illegal to upload.
-	return sanitizeUploadName(name)
+	clean, ok := sanitizeUploadName(name)
+	if !ok {
+		return "", newDocBadName
+	}
+	return clean, ""
 }
 
 // vfNewFile creates an empty document of a known type.
@@ -126,9 +166,19 @@ func (h *Manager) vfNewFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name, nameOK := resolveNewDocName(body.Name, docType.Ext)
-	if !nameOK {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad file name"})
+	name, refused := resolveNewDocName(body.Name, docType, body.ExactName)
+	switch refused {
+	case "":
+	case newDocExtNeedsType:
+		ext := strings.ToLower(strings.TrimPrefix(path.Ext(strings.TrimSpace(body.Name)), "."))
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "a ." + ext + " file is created as its own type; an empty one would not open",
+			"code":  newDocExtNeedsType,
+			"ext":   ext,
+		})
+		return
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad file name", "code": refused})
 		return
 	}
 

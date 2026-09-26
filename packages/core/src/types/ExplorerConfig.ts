@@ -699,6 +699,14 @@ export interface ExplorerConfig {
     driver?: string;
     readOnly?: boolean;
     /**
+     * #57 — the administrator's position for this storage (the server's
+     * `sort_order`, set on the admin Storages page; 1 = first). Null or absent
+     * = not placed: listed after the placed ones, in the order given here. The
+     * navigation panel and Home draw the storages in the person's own order
+     * when they have one, else in this one (`lib/storageOrder`).
+     */
+    sortOrder?: number | null;
+    /**
      * gorunum:v3-shell — bytes this storage holds, when the host knows. Drawn
      * as the caption on the Home view's storage card; absent means the card
      * names the kind of thing instead. For a person without a quota the

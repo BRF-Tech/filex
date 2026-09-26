@@ -143,6 +143,7 @@ report it came from — read that before changing an assertion.
 | `tests/124-app-plugin-levels.spec.ts` | an app action a person could only be refused is not offered; an admin sees it greyed with the reason |
 | `tests/125-app-plugin-readonly-destination.spec.ts` | Convert on a read-only storage: the wizard's **Where** step and the server's re-check |
 | `tests/126-rtl-server-text.spec.ts` | a right-to-left language: the layout turns, and machine text stays left to right inside it |
+| `tests/158-sidebar-storage-order.spec.ts` | the storages' order (#57): a person drags / uses the row menu / the keyboard / a finger in the navigation panel, the administrator reorders the Storages table, and a person with no order of their own sees the administrator's; nothing overflows at 1280 and 390 px, light and dark |
 
 `helpers/auth.ts`     → `loginAs`, `apiLogin`, `logout`
 `helpers/seed.ts`     → `seedLocalStorage`, `dropStorageByName`, `waitForOp`

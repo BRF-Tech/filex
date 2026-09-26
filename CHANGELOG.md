@@ -7,8 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-09-26
+
+### Added
+
+- **Put the storages in the navigation panel in your own order (#57).** Drag a
+  storage row, or use its menu (right click, a long press, or Shift+F10):
+  Move up, Move down, Sort by name, Use default order. The order is kept on
+  your account, so it follows you to every browser, and Home's storage cards
+  follow it too.
+- **Administrators set the order everybody starts from (#57).** The admin
+  Storages page is a table now: drag a row by its handle, use Move up / Move
+  down in its Actions menu or the arrow keys on the handle, and Reset to
+  default order. People who have not arranged their own see this order;
+  `PUT /api/admin/storages/order` sets it (migration 00060 adds
+  `storages.sort_order`).
+
+### Changed
+
+- **New document: name the file anything — `LICENSE`, `Makefile`,
+  `test.conf`, `example.custom` (#56).** The dialog drew the type's extension
+  as a read-only suffix, so a Plain text document was always `<name>.txt`. The
+  name field now holds the whole file name: the type prefills it
+  (`Untitled.txt`), focusing it selects the stem like a rename, and a type
+  switch keeps what you typed (only swapping the previous type's default
+  extension). The type still decides the contents and the editor — `LICENSE`
+  made as Plain text opens in the text editor, `README` made as Markdown in
+  the markdown editor. Office documents and diagrams keep their extension,
+  because their editors find them by it: the dialog says "will be created as
+  `report.docx`" instead of locking the field, and an empty `x.docx` made as
+  Plain text is refused. Behind it: `POST /api/files/manager?action=newfile`
+  takes `exact_name: true` (without it the extension is appended exactly as
+  before, so older clients are unchanged), `newdoc_types` rows carry
+  `ext_required`, and a refused borrowed extension answers `400
+  EXT_NEEDS_TYPE`. Name checks — a leaf, no `..`, reserved names — are as
+  strict as they were.
+- **A text file whose name has no known extension opens as text and can be
+  saved (#56).** `LICENSE`, `NOTICE` or `notes.custom` fell through to the
+  viewer's Download fallback, and save-text — which allows by extension —
+  refused them with `415`. The viewer now opens such a file as plain text when
+  the server's mime for it says text, and save-text saves an existing file the
+  catalogue calls text (a file it calls anything else, or a path with no
+  catalogue row, is refused as before). The listing draws such a file with the
+  text icon and names it "Plain text" instead of "?" and "—".
+
 ### Fixed
 
+- **A new document opens once in the desktop app.** It came up twice: in its
+  own window and in the viewer over the explorer, because creating a document
+  opened the in-page viewer before telling the app. It now takes the same path
+  as every other open (the app's window only). Found while building #56.
+- **An app screen speaks the language ON SCREEN, not the account's.** An
+  embedded explorer (`<filex-explorer>` with `config.locale: 'tr'`) draws the
+  language its host page chose, and nobody asked the account — whose language
+  defaults to English. The server told every app the ACCOUNT's language
+  (Accept-Language ranks below it on purpose), so an app's plain strings came
+  out English in a Turkish popup: the signing app's wizard asked "Identity"
+  with "One signer per line…" under it. The explorer now names its language on
+  every app call (`?lang=` on `…/run`, the view `GET`, every `…/event`), and
+  the server puts that explicit choice first — then the account's, then
+  Accept-Language, as before. The standalone app is unchanged: its language
+  and the account's are the same one.
+- **The operations tray says an app's job in the reader's language.** The job
+  row froze the action's label and the app's result in ONE language when the
+  job was created, so a Turkish embed read "Convert…" and an English result.
+  The row now keeps every language the app wrote and the tray's poll
+  (`/api/files/ops?lang=`) reads them in its reader's — the label, the result,
+  and the reason an app gave for failing. Rows written before read as they
+  were; no migration.
+- **Every core dialog's close button is named in the explorer's language.**
+  The × of every dialog (modals/Modal.vue) took its accessible name from the
+  dialog's own `locale` prop and fell back to English, and not one of the
+  twenty core dialogs passed it: a screen reader said "Close" over a Turkish
+  app popup. A dialog now inherits the language of the explorer it sits in
+  (an explicit `locale` still wins).
 - **An archive being made no longer looks like a click that did nothing.** An
   archive job read "0%" beside an empty ring for most of its run: reading the
   members off their storage — most of the time on a remote store — was worth
@@ -19,6 +91,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   45–90%, writing 90–99% — and creating or extracting an archive opens the
   operations panel on the job, so its name, progress bar and Cancel are on
   screen when the dialog closes rather than a small badge in the corner.
+
+- **Typing in the code editor no longer triggers the explorer's shortcuts.**
+  In Chrome and Edge the editor types through the browser's EditContext, so
+  its focused element is not a text field, and the explorer took the
+  keystrokes: `I` opened the info panel, `S` starred the file, Space opened
+  quick look and Backspace went up a folder — "MIT License" typed into a new
+  file arrived as "MLcene". The shortcut guard and quick look's arrow keys now
+  treat the editor (and any `role="textbox"`) as typing. Found while building
+  #56.
 
 ## [0.45.1] - 2026-09-25
 

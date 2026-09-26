@@ -116,6 +116,20 @@ const mode = computed<'edit' | 'view'>(() =>
   route.query.mode === 'view' ? 'view' : 'edit',
 );
 
+/**
+ * `type=` when it says something the name does not (#56). The viewer builds
+ * this link with the type it OPENED the file as, so `LICENSE` created as Plain
+ * text arrives as `type=txt` and opens in the text editor here too; a link
+ * whose type is just the name's own extension (every other caller) changes
+ * nothing.
+ */
+const openAs = computed<string | null>(() => {
+  const ty = route.query.type;
+  if (typeof ty !== 'string' || !ty || !node.value) return null;
+  const want = ty.toLowerCase();
+  return want === node.value.extension ? null : want;
+});
+
 const open = ref(true);
 
 function closeWindow() {
@@ -162,6 +176,7 @@ onBeforeUnmount(() => {
       :open="open"
       :file="node"
       :open-mode="mode"
+      :open-as="openAs"
       :theme="currentTheme"
       :preview-url="previewUrl"
       :download-url="downloadUrl"

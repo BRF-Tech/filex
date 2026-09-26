@@ -94,6 +94,13 @@ export const StoragesApi = {
     await api.delete(`/admin/storages/${id}`);
   },
 
+  /** #57 — the WHOLE order as the administrator sees it, first = top; `[]`
+   *  puts every storage back to the default (creation) order. Storages left
+   *  out are "not placed" and come after the placed ones. */
+  async setOrder(ids: number[]): Promise<void> {
+    await api.put('/admin/storages/order', { ids });
+  },
+
   /** POST /admin/storages/{id}/sync answers 202 once the scan has started in
    *  the background (`started`), or when one is already walking the storage
    *  (`running`). There is no run id in the answer — the run shows up under

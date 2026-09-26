@@ -360,11 +360,15 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	// The form sends the row back whole, sort_order included; UpdateStorage
+	// never writes it (SetOrder does), so the answer keeps the stored one.
+	place := cur.SortOrder
 	if err := json.NewDecoder(r.Body).Decode(cur); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
 	cur.ID = id
+	cur.SortOrder = place
 	if err := h.denyOnDemo(cur.Driver); err != nil {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 		return
@@ -399,6 +403,69 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	h.applyLive(cur)
 	writeJSON(w, http.StatusOK, cur)
+}
+
+// SetOrder writes the order storages are listed in (issue #57):
+//
+//	PUT /api/admin/storages/order  {"ids": [3, 1, 7]}
+//
+// The list is the WHOLE order as the admin sees it, first = top: the storages
+// it names get positions 1..n and every other storage the caller may
+// administer is un-placed (NULL: after the placed ones, by id). An empty list
+// is "back to the default order". Answers {"ok": true, "ids": [...]}.
+//
+// "May administer" is what h.Store.ListStorages returns for this request.
+// h.Store is the tenant-scoped store, so for a tenant admin another tenant's
+// storage is not in it: naming one is refused with exactly the words an id
+// that never existed gets, and the other tenant's positions are never
+// written (tenantown.go on why the two must be indistinguishable).
+//
+// Nothing here reaches outward, so a public demo lets it through.
+func (h *Storages) SetOrder(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs *[]int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	if body.IDs == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ids required"})
+		return
+	}
+	ids := *body.IDs
+	all, err := h.Store.ListStorages(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	mine := make(map[int64]bool, len(all))
+	for _, st := range all {
+		mine[st.ID] = true
+	}
+	named := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		if !mine[id] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("unknown storage id %d", id)})
+			return
+		}
+		if named[id] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("duplicate storage id %d", id)})
+			return
+		}
+		named[id] = true
+	}
+	var cleared []int64
+	for _, st := range all {
+		if !named[st.ID] {
+			cleared = append(cleared, st.ID)
+		}
+	}
+	if err := h.Store.SetStorageOrder(r.Context(), ids, cleared); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "ids": ids})
 }
 
 // applyLive makes an edited storage row the one the running process uses.

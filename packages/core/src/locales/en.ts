@@ -1379,6 +1379,17 @@ export const en: Record<string, string> = {
   'sidenav.open': 'Open navigation',
   'sidenav.storage.shared': 'Shared',
   'sidenav.storage.readOnly': 'Read-only',
+  // #57 — a storage row's order menu (right click, a long press, Shift+F10).
+  // "Sort by name" writes an order the person can keep adjusting; it is not a
+  // mode. "Use default order" lets the person's own order go: the panel then
+  // follows the administrator's order (or, with none, the server's). The two
+  // `.done`/`.none` lines are the reason a greyed row gives.
+  'sidenav.storage.moveUp': 'Move up',
+  'sidenav.storage.moveDown': 'Move down',
+  'sidenav.storage.sortName': 'Sort by name',
+  'sidenav.storage.sortName.done': 'Already sorted by name',
+  'sidenav.storage.defaultOrder': 'Use default order',
+  'sidenav.storage.defaultOrder.none': 'Already in the default order',
   // ⚠ `toolbar.nav` is GONE, and nothing replaced it. It was the one label on
   // the panel's collapse control, first as the noun "Navigation" — which names
   // the panel and never says the button does anything to it, so the owner
@@ -1450,10 +1461,13 @@ export const en: Record<string, string> = {
   'newdoc.empty.body': 'This server did not offer any type this app can create.',
   'newdoc.empty.blocked': 'Every type this server can create needs an editor service that is not configured here.',
   'newdoc.name': 'Name',
-  'newdoc.name.placeholder': 'Document name',
+  'newdoc.name.placeholder': 'File name, e.g. notes.txt or LICENSE',
   'newdoc.untitled': 'Untitled',
   'newdoc.err.slash': 'A name cannot contain a slash.',
   'newdoc.err.exists': '{name} is already here. Choose another name.',
+  'newdoc.err.bare_ext': 'Give the file a name, not only an extension.',
+  'newdoc.err.ext_needs_type': 'A .{ext} file has to be created as its own type — an empty one would not open. Choose that type, or another extension.',
+  'newdoc.hint.ext_added': 'This type keeps its extension, so the file will be created as {name}.',
   'newdoc.location': 'Location',
   'newdoc.location.none': 'Choose a folder',
   'newdoc.location.change': 'Change',
