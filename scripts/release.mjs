@@ -249,11 +249,34 @@ console.log(`  export  ${slash(exp)}`);
 console.log(`  ${opts.dry ? 'logs  ' : 'state '}  ${slash(opts.dry ? logsDir : stFile)}`);
 if (!bash) console.log(`  ${red('no bash')}: Git for Windows' bash.exe was not found; every shell gate will fail`);
 
+// ⚠ Once the push is done the release IS the published tag, and main is free
+// to move on — a deploy can take hours. Everything up to the push is a record
+// of how that tag was made, not something to redo on today's HEAD: v0.47.0's
+// resume, after fixes landed on main, re-stamped HEAD as the release commit,
+// re-ran the whole test chain on it, and would have asked for the published
+// tag to be moved. The release commit is read back from the tag, and it has
+// to be the commit the test chain passed on.
+const PUBLISHED = new Set(['preflight', 'audit', 'docs', 'stamp', 'pretag', 'export', 'sign', 'push']);
+const published = !opts.dry && state.stages.push?.status === 'done';
+if (published) {
+  const tagged = revParse(REPO, `${tag}^{commit}`);
+  if (!tagged || tagged !== state.stages.pretag?.head) {
+    console.log(`  ${red('FAILED')}  ${tag} names ${tagged?.slice(0, 10) ?? 'nothing here'}, but the test chain passed on ${state.stages.pretag?.head?.slice(0, 10) ?? 'no commit'}`);
+    process.exit(1);
+  }
+  state.releaseCommit = tagged;
+  save();
+}
+
 let exitCode = 0;
 let dryWaits = 0;
 for (let i = 0; i < STAGES.length; i++) {
   const s = STAGES[i];
   banner(`${i + 1}/${STAGES.length} ${s.title}`, dim(s.what));
+  if (published && PUBLISHED.has(s.id)) {
+    console.log(`  ${green('ok')}      published as ${tag} (${state.releaseCommit.slice(0, 10)}) — recorded ${state.stages[s.id]?.at ?? ''}; main has moved on and that is fine`);
+    continue;
+  }
   let res;
   try {
     forgetRemotes();

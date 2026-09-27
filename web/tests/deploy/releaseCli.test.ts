@@ -268,7 +268,9 @@ function footprint(fx: Fixture) {
 
 /** The published surfaces, as files the fixture plan's fetch serves. */
 function publish(fx: Fixture, { docsFresh }: { docsFresh: boolean }) {
-  const exportHead = gitIn(fx, fx.exp, 'rev-parse', 'HEAD');
+  // The server runs the image the TAG built, not whatever the public main is
+  // at by now: main may have moved on since the push.
+  const exportHead = gitIn(fx, fx.exp, 'rev-parse', `${TAG}^{commit}`);
   write(path.join(fx.site, 'api/capabilities'), JSON.stringify({ version: `${TAG} (${exportHead}, 2026-01-02T00:00:00Z)` }));
   write(path.join(fx.site, 'updates/stable.json'), JSON.stringify({ channel: 'stable', releases: [{ version: TAG }, { version: 'v0.1.0' }] }));
   const app = Buffer.from('the fixture desktop app');
@@ -521,6 +523,26 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     r = await release(fx, [VERSION, '--resume']);
     expect(r.code).toBe(1);
     expect(r.out).toContain('FAILED  the fixture release workflow published');
+    expect(r.out).toContain('STOPPED at ci');
+
+    // ⚠ main moves on while the deploy is still to do (v0.47.0: fixes to the
+    // Store upload landed on both mains between the push and the deploy). The
+    // release is the published tag from here: the next resume re-stamped HEAD
+    // as the release commit, re-ran the whole test chain on it and would have
+    // asked for the tag to be moved to it.
+    fs.writeFileSync(path.join(fx.src, 'AFTER.md'), 'work that is not in the release\n');
+    git(fx.src, 'add', 'AFTER.md');
+    git(fx.src, 'commit', '-q', '-m', 'docs: after the tag');
+    git(fx.src, 'push', '-q', 'origin', 'main');
+    fs.writeFileSync(path.join(fx.exp, 'AFTER.md'), 'work that is not in the release\n');
+    git(fx.exp, 'add', 'AFTER.md');
+    git(fx.exp, 'commit', '-q', '-m', 'docs: after the tag');
+    git(fx.exp, 'push', '-q', 'origin', 'main');
+    r = await release(fx, [VERSION, '--resume']);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(`published as ${TAG}`);
+    expect(r.out).not.toContain('on top of the release commit');
+    expect(r.out).not.toContain('WAITING at sign');
     expect(r.out).toContain('STOPPED at ci');
 
     // 6. deploy: (c) a docs site serving the previous snapshot is refused
