@@ -12,6 +12,13 @@ name: Microsoft Store (resubmit a release)
 # one on the default branch, so a fix to it applies here at once.
 #
 # Nothing is rebuilt: the bytes are the ones the release tested.
+#
+# The package is the .msixbundle (x64 + arm64) when the run built one, else
+# its single .appx. A run that only ADDED the ARM packages to a release
+# (release.yml -f only=arm64) is dispatched from a branch, not the tag: pass
+# its run id as well:
+#
+#   gh workflow run msstore-resubmit.yml -R BRF-Tech/filex -f tag=v0.48.0 -f run=<run id>
 
 on:
   workflow_dispatch:
@@ -20,6 +27,11 @@ on:
         description: Release tag, e.g. v0.47.0
         required: true
         type: string
+      run:
+        description: The release.yml run that kept the package (default, the tag's own run)
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -35,6 +47,7 @@ jobs:
       MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
       MSSTORE_PRODUCT_ID: ${{ vars.MSSTORE_PRODUCT_ID }}
       TAG: ${{ inputs.tag }}
+      RUN: ${{ inputs.run }}
     steps:
       - uses: actions/checkout@v4
       - name: Download the release's Store package
@@ -43,8 +56,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if ($env:TAG -notmatch '^v\d+\.\d+\.\d+$') { throw "tag must look like v1.2.3, got '$env:TAG'" }
-          $run = gh run list -R $env:GITHUB_REPOSITORY --workflow release.yml --limit 100 `
-            --json databaseId,headBranch --jq '[.[] | select(.headBranch == env.TAG)][0].databaseId'
+          if ($env:RUN -and $env:RUN -notmatch '^\d+$') { throw "run must be a run id, got '$env:RUN'" }
+          $run = $env:RUN
+          if (-not $run) {
+            $run = gh run list -R $env:GITHUB_REPOSITORY --workflow release.yml --limit 100 `
+              --json databaseId,headBranch --jq '[.[] | select(.headBranch == env.TAG)][0].databaseId'
+          }
           if (-not $run) { throw "no release.yml run for $env:TAG" }
           gh run download $run -R $env:GITHUB_REPOSITORY -n "msix-$env:TAG" -D pkg
           if ($LASTEXITCODE -ne 0) { throw "run $run has no msix-$env:TAG artifact (kept 90 days)" }
@@ -53,8 +70,12 @@ jobs:
       - name: Submit to the Microsoft Store
         shell: pwsh
         run: |
-          # The CLI looks for .msix/.msixupload; an .appx is the same format.
-          $appx = Get-ChildItem pkg/*.appx | Select-Object -First 1
-          $msix = Join-Path $appx.DirectoryName ($appx.BaseName + '.msix')
-          Copy-Item $appx.FullName $msix
+          # The bundle when there is one; otherwise the .appx, which the CLI
+          # takes under an .msix name (.msix/.msixbundle/.msixupload only).
+          $msix = (Get-ChildItem pkg/*.msixbundle | Select-Object -First 1).FullName
+          if (-not $msix) {
+            $appx = Get-ChildItem pkg/*.appx | Select-Object -First 1
+            $msix = Join-Path $appx.DirectoryName ($appx.BaseName + '.msix')
+            Copy-Item $appx.FullName $msix
+          }
           ./.github/workflows/scripts/msstore-submit.ps1 -Msix $msix -Version $env:TAG.TrimStart('v')

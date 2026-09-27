@@ -8,10 +8,14 @@ name: Release
 #
 # Job graph — and why it is shaped like this:
 #
-#   binaries ───── desktop  (installers, attached to the Release; the snap
-#                     │      also to the Snap Store) ── aur (PKGBUILD push)
-#   docker ─────── docker-manifest   (one native runner per architecture)
-#   npm            (independent)
+#   plan ── test ─┬─ binaries ─┬─ desktop  (installers, attached to the Release;
+#                 │            │     │      the snaps also to the Snap Store)
+#                 │            │     ├─ desktop-arm64-check (install + open on
+#                 │            │     │   real arm64 machines, screenshots)
+#                 │            │     └─ aur (PKGBUILD push)
+#                 │            └─ cli-smoke (CLI + server on arm64 machines)
+#                 ├─ docker ─── docker-manifest   (one native runner per arch)
+#                 └─ npm       (independent)
 #
 # `binaries` is goreleaser alone: it is what CREATES the GitHub Release, and
 # the only thing the other two need. Until v0.25.0 goreleaser and the docker
@@ -26,17 +30,168 @@ name: Release
 # failed publish (e.g. a bad token) does not force goreleaser to re-run, which
 # would fail on the "release already exists" tag. Re-run just the npm job with
 #   gh run rerun <id> --repo BRF-Tech/filex --failed
+#
+# ── Run by hand (workflow_dispatch) ─────────────────────────────────────────
+#
+#   gh workflow run release.yml -R BRF-Tech/filex --ref <branch>
+#       A DRY RUN of the whole release on that branch: everything is built and
+#       tested — the gate, goreleaser (--snapshot), both images, every desktop
+#       package including arm64 — and kept as run artifacts. Nothing is
+#       published: no Release, no image tag, no npm, no store.
+#
+#   gh workflow run release.yml -R BRF-Tech/filex -f tag=v0.48.0 -f only=arm64 [-f publish=true]
+#       The ARM packages for a release that shipped without them: the Linux
+#       arm64 AppImage/.deb/.rpm/.snap, the Windows arm64 installer and
+#       portable .exe, and the arm64 Store package, built from THAT tag. With
+#       publish=true they are attached to its Release, the Windows update feed
+#       (latest.yml) gains the arm64 installer beside the x64 one, the snap
+#       goes to the Snap Store and the Store package to the Microsoft Store.
+#       Without it, a dry run of exactly that.
+#
+# A FULL release publishes from its tag push and nothing else: `plan` refuses
+# publish=true without only=arm64 (goreleaser cannot recreate a Release, and a
+# half-rerun release is how v0.34.0's tag had to be moved).
+#
+# ⚠ In a run on a tag the workflow file comes from the branch it was started
+# on and the code from the tag. The tag's tree has the tag's
+# .github/workflows/scripts, not these; every job that runs a script from there
+# checks this commit's copy out into .ci/ and runs that one (CI_SCRIPTS).
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing release tag to build (v1.2.3). Empty: the branch this runs on."
+        type: string
+        default: ""
+      only:
+        description: "all: every package. arm64: only the ARM packages (needs a tag)."
+        type: choice
+        options: [all, arm64]
+        default: all
+      publish:
+        description: "Attach to the tag's Release and send to the stores. Off: build, test and keep artifacts only."
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # create the GitHub Release + upload assets
   packages: write   # push images to ghcr.io
 
+# ⚠ Never cancels anything. A tag push is its own group (refs/tags/vX), so a
+# run started by hand on a branch cannot touch a release in flight, and a
+# second run on the same branch and tag waits for the first instead of
+# killing it halfway through a store upload. (The gate's own ci.yml groups by
+# ref too, and cancels only a run of the SAME ref.)
+concurrency:
+  group: release-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  # This commit's own helper scripts (see the note on runs on a tag above).
+  CI_SCRIPTS: .ci/.github/workflows/scripts
+
 jobs:
+  # ── What this run is ────────────────────────────────────────────────────
+  #
+  # One place turns the trigger into the few facts every job branches on, so
+  # no job reads `github.ref_name` (the BRANCH name in a dispatch) as a
+  # version:
+  #   tag      v1.2.3, or empty for a dry run of a branch
+  #   ref      what to check out (the tag, or this commit)
+  #   version  1.2.3 (a branch: desktop/package.json's)
+  #   stamp    what the images and binaries report (the tag, or v<version>-dryrun)
+  #   publish  true on a tag push, or when asked for (only=arm64)
+  #   full     false when only the ARM packages are built
+  #   desktop  the desktop matrix
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.p.outputs.tag }}
+      ref: ${{ steps.p.outputs.ref }}
+      version: ${{ steps.p.outputs.version }}
+      stamp: ${{ steps.p.outputs.stamp }}
+      publish: ${{ steps.p.outputs.publish }}
+      full: ${{ steps.p.outputs.full }}
+      desktop: ${{ steps.p.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+          sparse-checkout: desktop/package.json
+          sparse-checkout-cone-mode: false
+      - id: p
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_ONLY: ${{ inputs.only }}
+          IN_PUBLISH: ${{ inputs.publish }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = push ]; then
+            tag="$GITHUB_REF_NAME"; only=all; publish=true
+          else
+            tag="$IN_TAG"; only="${IN_ONLY:-all}"; publish="${IN_PUBLISH:-false}"
+          fi
+          if [ -n "$tag" ]; then
+            [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::a tag looks like v1.2.3, not '$tag'"; exit 1; }
+            version="${tag#v}"
+            stamp="$tag"
+          else
+            version=$(node -p "require('./desktop/package.json').version")
+            stamp="v${version}-dryrun"
+          fi
+          if [ "$only" = arm64 ] && [ -z "$tag" ]; then
+            echo "::error::only=arm64 adds to a release: give its tag (-f tag=v1.2.3)"; exit 1
+          fi
+          if [ "$EVENT" != push ] && [ "$publish" = true ]; then
+            [ "$only" = arm64 ] || { echo "::error::a full release publishes from its tag push only. To add the ARM packages to $tag, run with only=arm64."; exit 1; }
+            gh release view "$tag" -R "$GITHUB_REPOSITORY" --json tagName >/dev/null || { echo "::error::$tag has no GitHub Release to add to"; exit 1; }
+          fi
+          # The desktop rows. `script` is the package.json script for the
+          # row's own (x64 or native) build; `arches` what the row produces.
+          # ⚠ macos-14 is pinned rather than macos-latest: the runner's arch IS
+          # the artifact's arch (electron-builder defaults to the host, and
+          # fetch-cli.mjs compiles the embedded CLI for the host), so a silent
+          # image bump must not silently change what users download.
+          # ⚠ Linux arm64 builds NATIVELY on ubuntu-24.04-arm: its snap has no
+          # prebuilt electron-builder template (x64 and armv7l only) and is
+          # built by real snapcraft, which cannot cross-build. Windows arm64
+          # cross-builds on the x64 runner (no native modules; the embedded
+          # CLI is GOARCH=arm64) and is then installed and opened on a real
+          # windows-11-arm machine by desktop-arm64-check.
+          if [ "$only" = arm64 ]; then
+            desktop='{"include":[
+              {"os":"windows-latest","label":"windows","script":"","arches":"arm64"},
+              {"os":"ubuntu-24.04-arm","label":"linux-arm64","script":"dist:linux","arches":"arm64"},
+              {"os":"windows-latest","label":"store","script":"","arches":"arm64"}]}'
+          else
+            desktop='{"include":[
+              {"os":"windows-latest","label":"windows","script":"dist:win","arches":"x64 arm64"},
+              {"os":"ubuntu-latest","label":"linux","script":"dist:linux","arches":"x64"},
+              {"os":"ubuntu-24.04-arm","label":"linux-arm64","script":"dist:linux","arches":"arm64"},
+              {"os":"macos-14","label":"macos","script":"dist:mac","arches":"arm64"},
+              {"os":"windows-latest","label":"store","script":"dist:store","arches":"x64 arm64"}]}'
+          fi
+          {
+            echo "tag=$tag"
+            echo "ref=${tag:-$GITHUB_SHA}"
+            echo "version=$version"
+            echo "stamp=$stamp"
+            echo "publish=$publish"
+            echo "full=$([ "$only" = all ] && echo true || echo false)"
+            echo "desktop=$(echo "$desktop" | jq -c .)"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### ${tag:-dry run of $GITHUB_REF_NAME} — $([ "$publish" = true ] && echo PUBLISHES || echo publishes nothing)"
+            echo "version $version, only=$only"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # ── The gate ────────────────────────────────────────────────────────────
   #
   # ⚠⚠ Everything that publishes anything needs this. It exists because
@@ -54,8 +209,13 @@ jobs:
   # Cost: the release critical path grows by one CI run (~7 min). A release
   # that has to wait seven minutes to prove it works is not a cost worth
   # arguing about against four releases nobody could see were broken.
+  #
+  # Skipped only when a run adds the ARM packages to a release that already
+  # passed it (only=arm64): the code is that tag's, tested when it shipped.
   test:
     name: Test suite
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
     uses: ./.github/workflows/ci.yml
     # ⚠⚠ No `with: skip_docker`. The gate builds both images before
     # `binaries`, `docker` and `npm` may start: v0.43.0 skipped that build here,
@@ -65,10 +225,14 @@ jobs:
 
   # ── Binaries (linux/macOS/windows × amd64/arm64) → GitHub Release ───────
   # Creates the Release. Everything that uploads to it depends on this job
-  # and on nothing else.
+  # and on nothing else. In a dry run: goreleaser --snapshot, nothing leaves
+  # the runner but the bare binaries cli-smoke tests.
   binaries:
-    needs: test
+    needs: [plan, test]
+    if: needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
+    env:
+      PUBLISH: ${{ needs.plan.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -131,6 +295,7 @@ jobs:
       # That stops the release HERE, before a single binary, image or package
       # is published, rather than after.
       - name: Release notes from CHANGELOG.md
+        if: env.PUBLISH == 'true'
         run: |
           set -euo pipefail
           node scripts/release-notes.mjs --github "${GITHUB_REF_NAME}" > /tmp/release-notes.md
@@ -138,7 +303,10 @@ jobs:
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean --release-notes=/tmp/release-notes.md
+          # A dry run builds the same eight binaries and publishes nothing:
+          # --snapshot needs no tag, --skip=publish keeps the Release, the
+          # Homebrew tap and winget untouched.
+          args: ${{ env.PUBLISH == 'true' && 'release --clean --release-notes=/tmp/release-notes.md' || 'release --snapshot --clean --skip=publish' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # .goreleaser.yml → homebrew_casks (`filex` into BRF-Tech/homebrew-filex,
@@ -147,10 +315,42 @@ jobs:
           # when its secret is absent.
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          # ⚠ The release's own tag, named. The commit also carries the Go
+          # module's tag (backend/vX), and a dry run of a branch found that
+          # one first: "current tag is not semver … tag=backend/v0.48.1", and
+          # --snapshot could not build its version (dry run 36372592649).
+          GORELEASER_CURRENT_TAG: v${{ needs.plan.outputs.version }}
+      # The bare binaries cli-smoke runs, when there is no Release to take
+      # them from. ⚠ goreleaser does not write a `formats: [binary]` archive
+      # under its asset name: dist/artifacts.json maps `filex-linux-arm64` to
+      # dist/filex_linux_arm64_v8.0/filex, renamed only on upload (dry run
+      # 36374963952 found nothing at dist/filex-linux-arm64).
+      - name: The bare binaries under their release names (dry run)
+        if: env.PUBLISH != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bare
+          jq -r '.[] | select(.type == "Binary" and (.name | startswith("filex-"))) | "\(.path) \(.name)"' dist/artifacts.json |
+            while read -r src name; do cp "$src" "bare/$name"; done
+          ls -la bare
+      - name: Keep the binaries for the smoke tests (dry run)
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-binaries
+          path: |
+            bare/filex-linux-arm64
+            bare/filex-linux-amd64
+            bare/filex-darwin-arm64
+            bare/filex-windows-arm64.exe
+          if-no-files-found: error
+          retention-days: 3
       # ⚠ goreleaser logs a failed winget/Homebrew publish and carries on
       # ("will not fail the pipeline"), so a release could miss both stores and
       # still show green. This step makes that visible.
       - name: Did the CLI reach winget and Homebrew?
+        if: env.PUBLISH == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -177,7 +377,82 @@ jobs:
             # for five minutes and warns when there is none.
             GH_TOKEN="$WINGET_TOKEN" CLA_COMPANY="BRF TEKNOLOJİ LİMİTED ŞİRKETİ" \
               bash .github/workflows/scripts/winget-cla.sh "New version: BRFTech.filex ${VER}"
+            # Only the newest version's pull request stays open (Burak,
+            # 2026-09-28): once this one exists, our older ones for the same
+            # package are closed as superseded. Nothing is closed if it does not.
+            GH_TOKEN="$WINGET_TOKEN" bash .github/workflows/scripts/winget-supersede.sh BRFTech.filex "${VER}"
           fi
+
+  # ── The CLI and the server, on the machines they are built for ─────────
+  #
+  # ⚠ Why: every release since the first shipped linux/macOS/windows arm64
+  # binaries and arm64 images, and nothing had ever RUN one. This boots each
+  # arm64 binary's own server on a runner of that architecture and drives it
+  # with its own CLI (.github/workflows/scripts/smoke-cli.mjs: /healthz, login,
+  # mkdir, upload, byte-for-byte download, mv, rm). linux-amd64 is the control
+  # that proves the smoke test itself. In a run on an existing tag the
+  # published images are read back the same way.
+  #
+  # Published binaries come from the Release (what users download), a dry
+  # run's from the artifact `binaries` kept.
+  cli-smoke:
+    name: CLI + server (${{ matrix.label }})
+    needs: [plan, binaries]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.plan.outputs.full != 'true' || needs.binaries.result == 'success') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04-arm, label: linux-arm64, asset: filex-linux-arm64, arch: arm64 }
+          - { os: windows-11-arm, label: windows-arm64, asset: filex-windows-arm64.exe, arch: arm64 }
+          - { os: macos-14, label: macos-arm64, asset: filex-darwin-arm64, arch: arm64 }
+          - { os: ubuntu-latest, label: linux-amd64, asset: filex-linux-amd64, arch: amd64 }
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      VER: ${{ needs.plan.outputs.version }}
+      FROM_RELEASE: ${{ needs.plan.outputs.publish == 'true' || needs.plan.outputs.full != 'true' }}
+      ASSET: ${{ matrix.asset }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .ci
+          sparse-checkout: .github/workflows/scripts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: The binary (from the artifact)
+        if: env.FROM_RELEASE != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-binaries
+          path: bin
+      - name: The binary (from the Release)
+        if: env.FROM_RELEASE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+          curl -fsSL --retry 3 -o "bin/$ASSET" "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ASSET"
+      - name: Boot it and drive it with its own CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x "bin/$ASSET" || true
+          # (the +… form: macOS runs bash 3.2, where an empty array is "unbound")
+          expect=()
+          [ -n "$TAG" ] && expect=(--expect-version "$VER")
+          node "$CI_SCRIPTS"/smoke-cli.mjs --binary "bin/$ASSET" --expect-arch "${{ matrix.arch }}" ${expect[@]+"${expect[@]}"}
+      - name: The published images, read back on this architecture
+        if: env.TAG != '' && github.event_name != 'push' && startsWith(matrix.label, 'linux')
+        shell: bash
+        run: |
+          set -euo pipefail
+          for img in "ghcr.io/brf-tech/filex:$TAG" "ghcr.io/brf-tech/filex:slim-$TAG"; do
+            docker pull -q "$img"
+            node "$CI_SCRIPTS"/smoke-cli.mjs --image "$img" --expect-arch "${{ matrix.arch }}" --expect-version "$VER"
+          done
 
   # ── Docker images → ghcr.io ────────────────────────────────────────────
   #
@@ -207,7 +482,11 @@ jobs:
   #    ONE architecture by digest; `docker-manifest` then joins the digests
   #    into the multi-arch tags.
   #
-  # `needs:` is deliberately absent. The docker job builds its own binary from
+  # Each leg then loads what it built and runs it (smoke-cli.mjs --image) on
+  # its own architecture BEFORE docker-manifest tags anything: an arm64 image
+  # that builds but does not start never becomes `latest`.
+  #
+  # `needs:` is only the gate. The docker job builds its own binary from
   # source inside the Dockerfile and takes nothing from the Release, so waiting
   # for goreleaser only lengthened the critical path (measured on v0.30.0:
   # binaries 544 s, then docker 696 s = 20.7 min wall). The cost of running in
@@ -215,7 +494,8 @@ jobs:
   # GitHub Release beside it — delete the tag from ghcr.io by hand if that
   # happens; it has to be a deliberate cleanup, not a silent inconsistency.
   docker:
-    needs: test
+    needs: [plan, test]
+    if: needs.plan.outputs.full == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -227,6 +507,8 @@ jobs:
             runner: ubuntu-24.04-arm
             arch: arm64
     runs-on: ${{ matrix.runner }}
+    env:
+      PUBLISH: ${{ needs.plan.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
       - id: meta
@@ -250,13 +532,14 @@ jobs:
           file: docker/Dockerfile
           platforms: ${{ matrix.platform }}
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ needs.plan.outputs.stamp }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.meta.outputs.date }}
           cache-from: type=gha,scope=full-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=full-${{ matrix.arch }}
-          # Push by digest only; docker-manifest attaches the human tags.
-          outputs: type=image,name=ghcr.io/brf-tech/filex,push-by-digest=true,name-canonical=true,push=true
+          # Push by digest only; docker-manifest attaches the human tags. A dry
+          # run pushes nothing.
+          outputs: type=image,name=ghcr.io/brf-tech/filex,push-by-digest=true,name-canonical=true,push=${{ env.PUBLISH == 'true' }}
 
       - name: Slim image
         id: slim
@@ -266,16 +549,61 @@ jobs:
           file: docker/Dockerfile.slim
           platforms: ${{ matrix.platform }}
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ needs.plan.outputs.stamp }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.meta.outputs.date }}
           cache-from: type=gha,scope=slim-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=slim-${{ matrix.arch }}
-          outputs: type=image,name=ghcr.io/brf-tech/filex,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=ghcr.io/brf-tech/filex,push-by-digest=true,name-canonical=true,push=${{ env.PUBLISH == 'true' }}
+
+      # The same two builds again into the local daemon — every layer comes
+      # from the builder's cache of the builds above, so this is an export,
+      # not a rebuild — and each image run and driven on this architecture.
+      - name: Load both images for the smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            VERSION=${{ needs.plan.outputs.stamp }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.meta.outputs.date }}
+          cache-from: type=gha,scope=full-${{ matrix.arch }}
+          load: true
+          tags: filex-smoke:full
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.slim
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            VERSION=${{ needs.plan.outputs.stamp }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.meta.outputs.date }}
+          cache-from: type=gha,scope=slim-${{ matrix.arch }}
+          load: true
+          tags: filex-smoke:slim
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .ci
+          sparse-checkout: .github/workflows/scripts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run both images on ${{ matrix.arch }} and drive them with their own CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          for img in filex-smoke:full filex-smoke:slim; do
+            node "$CI_SCRIPTS"/smoke-cli.mjs --image "$img" --expect-arch "${{ matrix.arch }}" --expect-version "${{ needs.plan.outputs.version }}"
+          done
 
       # The digests travel to the manifest job as files named after the digest,
       # so two matrix legs writing into one artifact never collide.
       - name: Record digests
+        if: env.PUBLISH == 'true'
         run: |
           set -euo pipefail
           mkdir -p /tmp/digests/full /tmp/digests/slim
@@ -286,6 +614,7 @@ jobs:
           SLIM_DIGEST: ${{ steps.slim.outputs.digest }}
 
       - uses: actions/upload-artifact@v4
+        if: env.PUBLISH == 'true'
         with:
           name: digests-${{ matrix.arch }}
           path: /tmp/digests/*
@@ -296,7 +625,8 @@ jobs:
   # Nothing is tagged until BOTH architectures have pushed, so a half-built
   # release never appears as `:latest`.
   docker-manifest:
-    needs: docker
+    needs: [plan, docker]
+    if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -344,7 +674,8 @@ jobs:
   # still demands an OTP and fails with EOTP in CI. Package versions are pinned
   # to the tag, so a `v0.1.60` tag publishes @brftech/*@0.1.60.
   npm:
-    needs: test
+    needs: [plan, test]
+    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -387,6 +718,8 @@ jobs:
   # and an 87 MB .deb, then attached neither. It does NOT wait for `docker`:
   # the images are not an input to the installers, and waiting for them cost
   # every release ~25 minutes of idle (v0.20.2 measurement in the header).
+  # (When only the ARM packages are added to an existing release, `test` and
+  # `binaries` do not run and are not waited for: the Release exists.)
   #
   # ⚠ macOS ships UNSIGNED but ad-hoc SEALED (desktop/scripts/adhoc-sign.cjs).
   # The distinction is what dialog the user gets: a linker-signed-only bundle
@@ -404,34 +737,25 @@ jobs:
   # at it would mean embedding a token in the app. The feed stays on
   # filex.sh/desktop/ and is published by scripts/filex-publish-desktop.sh from
   # these files.
+  #
+  # ── arm64 ──
+  # Linux arm64 is its own row on ubuntu-24.04-arm (see `plan`). Windows arm64
+  # is built by the windows and store rows right after their x64 build, with
+  # GOARCH=arm64 for the embedded CLI. electron-updater reads ONE latest.yml on
+  # Windows whatever the CPU, so the two feeds are joined
+  # (merge-latest-yml.mjs: x64 first — the installs that exist today are x64
+  # and read exactly the entry they read before). The Store row bundles both
+  # .appx into one .msixbundle for Partner Center. Every row then checks the
+  # binaries inside what it built are the architecture it claims
+  # (arch-of.mjs): an arm64 installer with an x64 CLI inside would install,
+  # open, and fail at the first sync.
   desktop:
     name: Desktop packages (${{ matrix.label }})
-    needs: binaries
+    needs: [plan, test, binaries]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.plan.outputs.full != 'true' || (needs.test.result == 'success' && needs.binaries.result == 'success')) }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            label: windows
-            script: "dist:win"
-          - os: ubuntu-latest
-            label: linux
-            script: "dist:linux"
-          # Pinned rather than macos-latest: the runner's arch IS the
-          # artifact's arch (electron-builder defaults to the host, and
-          # fetch-cli.mjs compiles the embedded CLI for the host), so a silent
-          # image bump must not silently change what users download.
-          - os: macos-14
-            label: macos
-            script: "dist:mac"
-          # The Microsoft Store package (MSIX). Built, installed and checked
-          # as a Store copy on the runner (desktop/scripts/store-e2e.mjs),
-          # then kept as a workflow artifact and — once the Partner Center
-          # credentials exist — submitted. It is NOT attached to the Release:
-          # an unsigned .appx installs for nobody; the Store signs it.
-          - os: windows-latest
-            label: store
-            script: "dist:store"
+      matrix: ${{ fromJSON(needs.plan.outputs.desktop) }}
     runs-on: ${{ matrix.os }}
     env:
       # Partner Center → an Entra ID app with the Manager role
@@ -447,8 +771,21 @@ jobs:
       WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
       # The tap's deploy key (write access to BRF-Tech/homebrew-filex only).
       HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      VER: ${{ needs.plan.outputs.version }}
+      PUBLISH: ${{ needs.plan.outputs.publish }}
+      FULL: ${{ needs.plan.outputs.full }}
+      LABEL: ${{ matrix.label }}
+      ARCHES: ${{ matrix.arches }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .ci
+          sparse-checkout: .github/workflows/scripts
       - uses: pnpm/action-setup@v4
         with:
           version: "9.12.0"
@@ -471,21 +808,32 @@ jobs:
       # v0.20.1 — which would have stamped `latest.yml` with 0.20.0, so an app
       # already on 0.20.0 would read the feed, compare equal, and report itself
       # up to date forever. The package would have been built, published, and
-      # invisible.
+      # invisible. (A dry run of a branch keeps package.json's version.)
       - name: Stamp the version from the tag
         shell: bash
         run: |
           set -euo pipefail
-          VER="${GITHUB_REF_NAME#v}"
           cd desktop
           npm version "$VER" --no-git-tag-version --allow-same-version
           node -e "console.log('desktop version =', require('./package.json').version)"
       # `dist:linux` builds an .rpm as well (desktop/electron-builder.yml), and
       # fpm hands that to rpmbuild, which ubuntu-latest does not ship.
       - name: rpmbuild for the .rpm
-        if: matrix.label == 'linux'
+        if: startsWith(matrix.label, 'linux')
         run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm
+      # ⚠ electron-builder's own fpm (for the .deb and .rpm) is an x86-64
+      # bundle with its own Ruby: on arm64 it cannot start. USE_SYSTEM_FPM
+      # makes it call this one.
+      - name: fpm for the arm64 .deb and .rpm
+        if: matrix.label == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq ruby ruby-dev build-essential
+          sudo gem install --no-document fpm
+          fpm --version
+          echo "USE_SYSTEM_FPM=true" >> "$GITHUB_ENV"
       - name: Build installer
+        if: matrix.script != ''
         env:
           # Never let the mac runner auction its keychain: a stray self-signed
           # certificate would produce a "signed" build that fails Gatekeeper
@@ -493,25 +841,82 @@ jobs:
           # CSC_KEY_PASSWORD secrets) when a real Developer ID lands.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: pnpm --filter ./desktop run ${{ matrix.script }}
+      # The x64 feed, set aside before the arm64 build writes its own
+      # latest.yml over it (joined below).
+      - name: Set the x64 Windows feed aside
+        if: matrix.label == 'windows' && contains(matrix.arches, 'x64')
+        shell: bash
+        run: mv desktop/release/latest.yml "$RUNNER_TEMP/latest-x64.yml"
+      # NSIS installer + portable .exe for Windows on Arm, cross-built: the
+      # app has no native modules, electron-builder fetches the arm64
+      # Electron, and fetch-cli.mjs compiles the embedded CLI for GOARCH.
+      # ⚠ GOARCH, not `--arch`: a run on an older tag has a fetch-cli.mjs that
+      # only knows the variable.
+      - name: Build the Windows arm64 installers
+        if: matrix.label == 'windows' && contains(matrix.arches, 'arm64')
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd desktop
+          pnpm run build
+          GOARCH=arm64 node scripts/fetch-cli.mjs --platform win32
+          pnpm exec electron-builder --win --arm64 --publish never
+          mv release/latest.yml "$RUNNER_TEMP/latest-arm64.yml"
+      # One latest.yml for both (see merge-latest-yml.mjs). Adding arm64 to a
+      # release that has its x64 installer already: that release's own
+      # latest.yml is the x64 half, byte for byte.
+      - name: One Windows update feed for both architectures
+        if: matrix.label == 'windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          feeds=()
+          if [ -f "$RUNNER_TEMP/latest-x64.yml" ]; then
+            feeds+=("$RUNNER_TEMP/latest-x64.yml")
+          else
+            gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.yml -O "$RUNNER_TEMP/latest-release.yml"
+            feeds+=("$RUNNER_TEMP/latest-release.yml")
+          fi
+          [ -f "$RUNNER_TEMP/latest-arm64.yml" ] && feeds+=("$RUNNER_TEMP/latest-arm64.yml")
+          node "$CI_SCRIPTS"/merge-latest-yml.mjs --out desktop/release/latest.yml "${feeds[@]}"
+          cat desktop/release/latest.yml
       # The snap is its own target (never part of `dist:linux`), packed from
       # the app the step above just built — no second web/main build, no second
-      # CLI. electron-builder's snap template needs no snapcraft here.
+      # CLI. On x64, electron-builder's prebuilt snap template needs no
+      # snapcraft. On arm64 there is no template (electron-builder 24 has x64
+      # and armv7l only): it writes a snapcraft.yaml for the same base (core20)
+      # and runs snapcraft, which builds inside an LXD container.
       # ⚠ `--publish never`: on a tag electron-builder publishes by itself, and
       # a snap's default publisher is the Snap Store — the upload is the
       # explicit step further down, which says so when it cannot run.
+      - name: snapcraft + LXD for the arm64 snap
+        if: matrix.label == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          # ⚠ 8.x: snapcraft 9 refuses base core20 outright ("Base 'core20'
+          # is not supported by this version of Snapcraft", dry run
+          # 36373259912), and core20 is the base the x64 template snap has.
+          sudo snap install snapcraft --classic --channel=8.x/stable
+          sudo snap install lxd 2>/dev/null || sudo snap refresh lxd
+          sudo lxd waitready
+          sudo lxd init --auto
+          sudo usermod -aG lxd "$USER"
+          sudo chmod 666 /var/snap/lxd/common/lxd/unix.socket
+          # Docker's rules drop forwarded traffic, and with them the LXD
+          # container's network (the build fetches its stage packages).
+          sudo iptables -P FORWARD ACCEPT
+          snapcraft --version
+          echo "SNAPCRAFT_BUILD_ENVIRONMENT=lxd" >> "$GITHUB_ENV"
       - name: Build snap
-        if: matrix.label == 'linux'
+        if: startsWith(matrix.label, 'linux')
         run: pnpm --filter ./desktop exec electron-builder --linux snap --publish never
-      # Listed before uploading so a build that produced nothing is visible in
-      # the log as an empty directory rather than as a silently short release.
-      - name: What was produced
-        shell: bash
-        run: ls -la desktop/release
       # store-e2e registers the package from loose files, which needs no
       # certificate but does need Developer Mode. The runner is a throwaway
       # admin VM, so it is switched on here rather than signing a test cert.
       - name: Developer Mode (for the Store package check)
-        if: matrix.label == 'store'
+        if: matrix.label == 'store' && contains(matrix.arches, 'x64')
         shell: pwsh
         run: reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1
       # ⚠ Before anything leaves the runner: installed, launched through its
@@ -524,43 +929,130 @@ jobs:
       # gates in the local release run instead (scripts/release/plan.mjs,
       # "desktop: the Store package works as a Store copy"), on a desktop, for
       # the same commit, before the tag exists.
+      # ⚠ Runs on the x64 package, BEFORE the arm64 one is built: it builds its
+      # own variant from build/bin, which then still holds the x64 CLI.
       - name: Install the Store package and check it as a Store copy
-        if: matrix.label == 'store'
+        if: matrix.label == 'store' && contains(matrix.arches, 'x64')
         run: pnpm --filter ./desktop run e2e:store
+      - name: Build the arm64 Store package
+        if: matrix.label == 'store' && contains(matrix.arches, 'arm64')
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd desktop
+          pnpm run build
+          GOARCH=arm64 node scripts/fetch-cli.mjs --platform win32
+          pnpm exec electron-builder --win appx --arm64 --publish never
+      # One upload for Partner Center: both packages in a .msixbundle (the
+      # Store's own recommendation for more than one architecture). Packages
+      # in a bundle must be identical but for ProcessorArchitecture, and the
+      # bundle carries their version; makeappx refuses anything else.
+      - name: Bundle the Store packages
+        if: matrix.label == 'store' && contains(matrix.arches, 'x64') && contains(matrix.arches, 'arm64')
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $appx = @(Get-ChildItem desktop/release/*.appx)
+          if ($appx.Count -ne 2) { throw "expected the x64 and the arm64 .appx, found: $($appx.Name -join ', ')" }
+          $versions = foreach ($a in $appx) {
+            $zip = [IO.Compression.ZipFile]::OpenRead($a.FullName)
+            try {
+              $reader = New-Object IO.StreamReader($zip.GetEntry('AppxManifest.xml').Open())
+              $id = ([xml]$reader.ReadToEnd()).Package.Identity
+              $reader.Dispose()
+              Write-Host "$($a.Name): $($id.Name) $($id.Version) $($id.ProcessorArchitecture)"
+              $id.Version
+            } finally { $zip.Dispose() }
+          }
+          $v = @($versions | Select-Object -Unique)
+          if ($v.Count -ne 1) { throw "the packages carry different versions: $($versions -join ', ')" }
+          $makeappx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\makeappx.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          $dir = Join-Path $env:RUNNER_TEMP 'bundle'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item $appx.FullName $dir
+          & $makeappx.FullName bundle /d $dir /p desktop/release/filex-desktop.msixbundle /bv $v[0] /o
+          if ($LASTEXITCODE -ne 0) { throw "makeappx bundle failed ($LASTEXITCODE)" }
+          Get-Item desktop/release/filex-desktop.msixbundle
+      # Listed before uploading so a build that produced nothing is visible in
+      # the log as an empty directory rather than as a silently short release.
+      # (After every build step: the Store row builds its arm64 package late.)
+      - name: What was produced
+        shell: bash
+        run: ls -la desktop/release
+      # Every executable in what was built is the architecture it is sold as —
+      # the app itself and the CLI it syncs with (see arch-of.mjs).
+      - name: The binaries inside are the architecture on the label
+        shell: bash
+        run: |
+          set -euo pipefail
+          r=desktop/release
+          check() { node "$CI_SCRIPTS"/arch-of.mjs "$@"; }
+          case "$LABEL" in
+            windows|store)
+              for a in $ARCHES; do
+                d="$r/win-unpacked"; [ "$a" = arm64 ] && d="$r/win-arm64-unpacked"
+                check "$d/filex.exe" "$d/resources/bin/filex.exe" --expect "$a"
+              done ;;
+            linux) check "$r/linux-unpacked/filex-app" "$r/linux-unpacked/resources/bin/filex" --expect amd64 ;;
+            linux-arm64) check "$r/linux-arm64-unpacked/filex-app" "$r/linux-arm64-unpacked/resources/bin/filex" --expect arm64 ;;
+            macos) check "$r/mac-arm64/filex.app/Contents/MacOS/filex" "$r/mac-arm64/filex.app/Contents/Resources/bin/filex" --expect arm64 ;;
+          esac
+      # The arm64 packages, for desktop-arm64-check to install and open on a
+      # real arm64 machine (and for a person to try from a dry run).
+      - name: Keep the arm64 packages for the check on arm64 machines
+        if: matrix.label == 'windows' || matrix.label == 'linux-arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-arm64-${{ matrix.label }}
+          path: |
+            desktop/release/*arm64*.exe
+            desktop/release/*arm64*.AppImage
+            desktop/release/*arm64*.deb
+            desktop/release/*aarch64*.rpm
+            desktop/release/*arm64*.snap
+          if-no-files-found: error
+          retention-days: 7
       - name: Keep the Store package for Partner Center
         if: matrix.label == 'store'
         uses: actions/upload-artifact@v4
         with:
-          name: msix-${{ github.ref_name }}
-          path: desktop/release/*.appx
+          name: msix-${{ needs.plan.outputs.tag || format('run-{0}', github.run_id) }}
+          path: |
+            desktop/release/*.msixbundle
+            desktop/release/*.appx
           if-no-files-found: error
           retention-days: 90
       - name: Microsoft Store CLI
-        if: matrix.label == 'store' && env.MSSTORE_CLIENT_SECRET != '' && env.MSSTORE_PRODUCT_ID != ''
+        if: matrix.label == 'store' && env.PUBLISH == 'true' && env.MSSTORE_CLIENT_SECRET != '' && env.MSSTORE_PRODUCT_ID != ''
         uses: microsoft/microsoft-store-apppublisher@v1.1
       - name: Submit to the Microsoft Store
-        if: matrix.label == 'store' && env.MSSTORE_CLIENT_SECRET != '' && env.MSSTORE_PRODUCT_ID != ''
+        if: matrix.label == 'store' && env.PUBLISH == 'true' && env.MSSTORE_CLIENT_SECRET != '' && env.MSSTORE_PRODUCT_ID != ''
         shell: pwsh
         run: |
-          # The CLI looks for .msix/.msixupload; an .appx is the same format.
-          $appx = Get-ChildItem desktop/release/*.appx | Select-Object -First 1
-          $msix = Join-Path $appx.DirectoryName ($appx.BaseName + '.msix')
-          Copy-Item $appx.FullName $msix
+          # The bundle (x64 + arm64) when this run built both; otherwise the
+          # one .appx, which the CLI takes under an .msix name (same format).
+          $msix = (Get-ChildItem desktop/release/*.msixbundle | Select-Object -First 1).FullName
+          if (-not $msix) {
+            $appx = Get-ChildItem desktop/release/*.appx | Select-Object -First 1
+            $msix = Join-Path $appx.DirectoryName ($appx.BaseName + '.msix')
+            Copy-Item $appx.FullName $msix
+          }
           # Uploads, points "What's new" at the GitHub Release in every
           # listing language and sends the submission to certification; skips
           # with a warning while an earlier one is still in certification
           # (scripts/msstore-submit.ps1). Never fails the release.
-          $ver = "$env:GITHUB_REF_NAME".TrimStart('v')
-          ./.github/workflows/scripts/msstore-submit.ps1 -Msix $msix -Version $ver
+          $ver = "$env:VER"
+          ./.ci/.github/workflows/scripts/msstore-submit.ps1 -Msix $msix -Version $ver
           exit 0
       # Not a silent skip: a release that did not reach the Store says so.
       - name: Store submission skipped
-        if: matrix.label == 'store' && (env.MSSTORE_CLIENT_SECRET == '' || env.MSSTORE_PRODUCT_ID == '')
+        if: matrix.label == 'store' && env.PUBLISH == 'true' && (env.MSSTORE_CLIENT_SECRET == '' || env.MSSTORE_PRODUCT_ID == '')
         shell: bash
         run: |
-          echo "::warning title=Microsoft Store::Not submitted — MSSTORE_* secrets or the MSSTORE_PRODUCT_ID variable are not set. Upload the msix-${GITHUB_REF_NAME} artifact in Partner Center by hand."
+          echo "::warning title=Microsoft Store::Not submitted — MSSTORE_* secrets or the MSSTORE_PRODUCT_ID variable are not set. Upload the msix-${TAG} artifact in Partner Center by hand."
       - name: Attach to the release
-        if: matrix.label != 'store'
+        if: matrix.label != 'store' && env.PUBLISH == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -576,21 +1068,24 @@ jobs:
             exit 1
           fi
           printf 'uploading: %s\n' "${files[@]}"
-          gh release upload "${GITHUB_REF_NAME}" "${files[@]}" --clobber
+          gh release upload "${TAG}" "${files[@]}" --clobber
       # ── winget + Homebrew (the desktop app; the CLI goes through goreleaser) ──
       # desktop/scripts/pkg-manifests.mjs writes both, hashing the files this
-      # job just built and pointing at the VERSIONED release URL.
+      # job just built and pointing at the VERSIONED release URL. The winget
+      # manifest names both Windows installers, x64 and arm64.
       # ⚠ From here on this tag's assets are pinned by hash in two public
       # stores: never re-upload them. A fix is a new patch release.
+      # (Adding the ARM packages to an existing release leaves the manifests
+      # of that release alone: its winget pull request is already open.)
       - name: Package-manager manifests
-        if: matrix.label == 'windows' || matrix.label == 'macos'
+        if: (matrix.label == 'windows' || matrix.label == 'macos') && env.FULL == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          VER="${GITHUB_REF_NAME#v}"
           if [ "${{ matrix.label }}" = windows ]; then
             node desktop/scripts/pkg-manifests.mjs --version "$VER" --release-date "$(date -u +%F)" \
-              --windows desktop/release/filex-desktop-x64.exe --out pkg-out
+              --windows desktop/release/filex-desktop-x64.exe \
+              --windows-arm64 desktop/release/filex-desktop-arm64.exe --out pkg-out
           else
             node desktop/scripts/pkg-manifests.mjs --version "$VER" \
               --mac desktop/release/filex-desktop-arm64.dmg --out pkg-out
@@ -602,7 +1097,7 @@ jobs:
       # failed, so BRFTech.filex-app was never submitted. Warnings are shown
       # as an annotation; only a failed validation stops the release.
       - name: Validate the winget manifests
-        if: matrix.label == 'windows'
+        if: matrix.label == 'windows' && env.FULL == 'true'
         shell: pwsh
         run: |
           $dir = (Get-ChildItem pkg-out/winget/manifests -Recurse -Filter '*.installer.yaml' | Select-Object -First 1).Directory.FullName
@@ -619,29 +1114,37 @@ jobs:
           # run 36182595696 — the desktop winget PR was never opened).
           exit 0
       - name: Submit to winget
-        if: matrix.label == 'windows' && env.WINGET_TOKEN != ''
+        if: matrix.label == 'windows' && env.PUBLISH == 'true' && env.FULL == 'true' && env.WINGET_TOKEN != ''
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
-          $ver = "$env:GITHUB_REF_NAME".TrimStart('v')
+          $ver = "$env:VER"
           ./wingetcreate.exe submit --no-open --prtitle "New version: BRFTech.filex-app $ver" --token $env:WINGET_TOKEN $env:WINGET_DIR
       # The CLA bot asks on every pull request, not once per account
       # (scripts/winget-cla.sh). Same script as the CLI's step.
       - name: Sign the CLA on the winget pull request
-        if: matrix.label == 'windows' && env.WINGET_TOKEN != ''
+        if: matrix.label == 'windows' && env.PUBLISH == 'true' && env.FULL == 'true' && env.WINGET_TOKEN != ''
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
           CLA_COMPANY: BRF TEKNOLOJİ LİMİTED ŞİRKETİ
         run: |
-          bash .github/workflows/scripts/winget-cla.sh "New version: BRFTech.filex-app ${GITHUB_REF_NAME#v}"
+          bash "$CI_SCRIPTS"/winget-cla.sh "New version: BRFTech.filex-app ${VER}"
+      # Only the newest version's pull request stays open (Burak, 2026-09-28),
+      # and only once it exists (scripts/winget-supersede.sh).
+      - name: Close the superseded winget pull requests
+        if: matrix.label == 'windows' && env.PUBLISH == 'true' && env.FULL == 'true' && env.WINGET_TOKEN != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          bash "$CI_SCRIPTS"/winget-supersede.sh BRFTech.filex-app "${VER}"
       - name: Commit the cask to the tap
-        if: matrix.label == 'macos' && env.HOMEBREW_TAP_DEPLOY_KEY != ''
+        if: matrix.label == 'macos' && env.PUBLISH == 'true' && env.HOMEBREW_TAP_DEPLOY_KEY != ''
         shell: bash
         run: |
           set -euo pipefail
-          VER="${GITHUB_REF_NAME#v}"
           KEY="$RUNNER_TEMP/tap_key"
           printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$KEY"
           chmod 600 "$KEY"
@@ -656,17 +1159,17 @@ jobs:
           git push origin HEAD
       # Not a silent skip: a release that did not reach a store says so.
       - name: Package-manager submission skipped
-        if: (matrix.label == 'windows' && env.WINGET_TOKEN == '') || (matrix.label == 'macos' && env.HOMEBREW_TAP_DEPLOY_KEY == '')
+        if: env.PUBLISH == 'true' && env.FULL == 'true' && ((matrix.label == 'windows' && env.WINGET_TOKEN == '') || (matrix.label == 'macos' && env.HOMEBREW_TAP_DEPLOY_KEY == ''))
         shell: bash
         run: |
           echo "::warning title=${{ matrix.label == 'windows' && 'winget' || 'Homebrew' }}::Not submitted — the ${{ matrix.label == 'windows' && 'WINGET_TOKEN' || 'HOMEBREW_TAP_DEPLOY_KEY' }} secret is not set. The manifests are in the pkg-${{ matrix.label }} artifact."
       # always(): a failed validation or submission is exactly when the
       # manifests are needed, to submit them by hand.
       - name: Keep the manifests
-        if: always() && (matrix.label == 'windows' || matrix.label == 'macos')
+        if: always() && (matrix.label == 'windows' || matrix.label == 'macos') && env.FULL == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: pkg-${{ matrix.label }}-${{ github.ref_name }}
+          name: pkg-${{ matrix.label }}-${{ needs.plan.outputs.tag || format('run-{0}', github.run_id) }}
           path: pkg-out
           retention-days: 90
       # ⚠⚠ Never a silent skip. Without the secret the snap is still on the
@@ -677,14 +1180,17 @@ jobs:
       # (desktop/README.md, "Publishing"); the snap is `filex-app` — `filex` is
       # the CLI's name. Straight to `stable`: the snap
       # is the same build the .deb is, and the Store's own review runs first.
+      # Each Linux row uploads its own architecture's revision to the same
+      # channel: amd64 from `linux`, arm64 from `linux-arm64`.
       - name: Upload to the Snap Store
-        if: matrix.label == 'linux'
+        if: startsWith(matrix.label, 'linux') && env.PUBLISH == 'true'
         shell: bash
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         run: |
           set -euo pipefail
           snap=desktop/release/filex-desktop-amd64.snap
+          [ "$LABEL" = linux-arm64 ] && snap=desktop/release/filex-desktop-arm64.snap
           [ -f "$snap" ] || { echo "no $snap to upload" >&2; exit 1; }
           if [ -z "${SNAPCRAFT_STORE_CREDENTIALS:-}" ]; then
             msg="SNAPCRAFT_STORE_CREDENTIALS is not set: $snap was NOT uploaded to the Snap Store (credentials missing). It is attached to the GitHub Release only."
@@ -693,10 +1199,114 @@ jobs:
             echo "$msg" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          sudo snap install snapcraft --classic
+          command -v snapcraft >/dev/null || sudo snap install snapcraft --classic
           snapcraft whoami
           snapcraft upload --release=stable "$snap"
-          echo "### Snap Store: uploaded to stable" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Snap Store: $(basename "$snap") uploaded to stable" >> "$GITHUB_STEP_SUMMARY"
+
+  # ── The arm64 packages, on arm64 machines ─────────────────────────────
+  #
+  # The Windows arm64 packages are cross-built, and nothing about a build
+  # proves the result starts on the CPU it is for. So each is installed the way
+  # a user installs it and OPENED on a real arm64 machine: the .deb (apt), the
+  # AppImage and the snap on ubuntu-24.04-arm, the NSIS installer (silent,
+  # per-user, then uninstalled) and the portable .exe on windows-11-arm.
+  # desktop-look.mjs waits for the window to load a page and photographs it
+  # over DevTools; the pictures are kept as `desktop-arm64-screenshots` and
+  # are looked at before a release is called good.
+  desktop-arm64-check:
+    name: Desktop arm64 on a real ${{ matrix.label }} machine
+    needs: [plan, desktop]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.desktop.result != 'skipped' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04-arm, label: linux-arm64 }
+          - { os: windows-11-arm, label: windows }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .ci
+          sparse-checkout: .github/workflows/scripts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-arm64-${{ matrix.label }}
+          path: pkg
+      - name: .deb, AppImage and snap on Linux arm64
+        if: matrix.label == 'linux-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -la pkg
+          mkdir -p shots
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+          sudo apt-get install -y ./pkg/filex-desktop-arm64.deb
+          node "$CI_SCRIPTS"/arch-of.mjs /opt/filex/filex-app /opt/filex/resources/bin/filex --expect arm64
+          /opt/filex/resources/bin/filex --version
+          xvfb-run -a -s "-screen 0 1280x800x24" node "$CI_SCRIPTS"/desktop-look.mjs --exe /usr/bin/filex-app --out shots/linux-arm64-deb.png
+          chmod +x pkg/filex-desktop-arm64.AppImage
+          # No FUSE on the runner: the AppImage runtime unpacks and runs.
+          # ⚠ Ubuntu 24.04 confines unprivileged user namespaces, which
+          # Chromium's sandbox needs when it has no setuid helper (the .deb
+          # has one, an AppImage cannot). Opened as a user opens it first;
+          # only if that fails, again with --no-sandbox, and the run says so.
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          if ! xvfb-run -a -s "-screen 0 1280x800x24" node "$CI_SCRIPTS"/desktop-look.mjs --exe "$PWD/pkg/filex-desktop-arm64.AppImage" --out shots/linux-arm64-appimage.png --port 9334; then
+            echo "::warning title=AppImage::the arm64 AppImage did not open with the sandbox on Ubuntu 24.04; retrying with --no-sandbox"
+            xvfb-run -a -s "-screen 0 1280x800x24" node "$CI_SCRIPTS"/desktop-look.mjs --exe "$PWD/pkg/filex-desktop-arm64.AppImage" --arg --no-sandbox --out shots/linux-arm64-appimage.png --port 9335
+          fi
+          if [ -f pkg/filex-desktop-arm64.snap ]; then
+            sudo snap install --dangerous pkg/filex-desktop-arm64.snap
+            snap list filex-app
+            xvfb-run -a -s "-screen 0 1280x800x24" node "$CI_SCRIPTS"/desktop-look.mjs --exe /snap/bin/filex-app --out shots/linux-arm64-snap.png --port 9336 --timeout 150
+          else
+            echo "::warning title=snap::no arm64 snap was built"
+          fi
+      - name: NSIS installer and portable .exe on Windows arm64
+        if: matrix.label == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem pkg
+          New-Item -ItemType Directory -Force shots | Out-Null
+          $setup = (Resolve-Path pkg/filex-desktop-arm64.exe).Path
+          $p = Start-Process $setup -ArgumentList '/S', '/currentuser' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "the installer exited $($p.ExitCode)" }
+          $home_ = Join-Path $env:LOCALAPPDATA 'Programs\filex'
+          $app = Join-Path $home_ 'filex.exe'
+          $cli = Join-Path $home_ 'resources\bin\filex.exe'
+          node "$env:CI_SCRIPTS/arch-of.mjs" $app $cli --expect arm64
+          if ($LASTEXITCODE -ne 0) { throw 'not arm64' }
+          & $cli --version
+          if ($LASTEXITCODE -ne 0) { throw 'the bundled CLI does not run' }
+          node "$env:CI_SCRIPTS/desktop-look.mjs" --exe $app --out shots/windows-arm64-nsis.png
+          if ($LASTEXITCODE -ne 0) { throw 'the installed app did not open' }
+          Get-Process filex -ErrorAction SilentlyContinue | Stop-Process -Force
+          $un = Get-ChildItem $home_ -Filter 'Uninstall*.exe' | Select-Object -First 1
+          $u = Start-Process $un.FullName -ArgumentList '/S', '/currentuser' -Wait -PassThru
+          # The uninstaller hands over to a copy of itself in %TEMP% and returns.
+          for ($i = 0; $i -lt 30 -and (Test-Path $app); $i++) { Start-Sleep -Seconds 2 }
+          if (Test-Path $app) { throw "uninstall (exit $($u.ExitCode)) left $app behind" }
+          Write-Host 'installed, opened, uninstalled'
+          $portable = (Resolve-Path pkg/filex-desktop-portable-arm64.exe).Path
+          node "$env:CI_SCRIPTS/desktop-look.mjs" --exe $portable --out shots/windows-arm64-portable.png --port 9334 --timeout 150
+          if ($LASTEXITCODE -ne 0) { throw 'the portable .exe did not open' }
+          Get-Process filex -ErrorAction SilentlyContinue | Stop-Process -Force
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-arm64-screenshots-${{ matrix.label }}
+          path: shots
+          if-no-files-found: warn
+          retention-days: 30
 
   # ── AUR (filex-app-bin) ─────────────────────────────────────────────
   #
@@ -707,7 +1317,8 @@ jobs:
   # it the run says so (warning + summary) instead of pretending.
   aur:
     name: AUR package (filex-app-bin)
-    needs: desktop
+    needs: [plan, desktop]
+    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -757,4 +1368,4 @@ jobs:
           if git diff --cached --quiet; then echo "AUR already at ${GITHUB_REF_NAME}"; exit 0; fi
           git -c user.name="BRF Teknoloji" -c user.email="security@brf.sh" commit -q -m "Update to ${GITHUB_REF_NAME#v}"
           git push origin HEAD:master
-          echo "### AUR: pushed ${GITHUB_REF_NAME#v}" >> "$GITHUB_STEP_SUMMARY"
+          echo "### AUR: pushed ${GITHUB_REF_NAME}" >> "$GITHUB_STEP_SUMMARY"
