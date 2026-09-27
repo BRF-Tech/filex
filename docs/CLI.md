@@ -30,14 +30,17 @@ app is `filex-app`):
 
 ```bash
 brew install brf-tech/filex/filex     # macOS and Linux — Homebrew tap BRF-Tech/homebrew-filex
-winget install BRFTech.filex          # Windows; puts `filex` on the PATH (open a new terminal)
 ```
 
 On macOS the binary is not signed with an Apple Developer ID, so macOS may
 refuse its first run: allow it once in System Settings → Privacy & Security
-(*Open Anyway*). A new winget package waits for winget's review before it can
-be installed, so `winget install` works a few days after the first release
-that submits it.
+(*Open Anyway*).
+
+On Windows the package will be `winget install BRFTech.filex` (it puts `filex`
+on the PATH; open a new terminal after it). Every release submits it, and it is
+**not installable yet**: a new winget package waits for its first review by the
+winget moderators, and until that is approved `winget` does not find it. Take
+`filex-windows-amd64.exe` from the release meanwhile, as above.
 
 A binary installed this way upgrades itself with `filex self-update`
 ([UPDATES.md](./UPDATES.md)). A filex that came from a package manager

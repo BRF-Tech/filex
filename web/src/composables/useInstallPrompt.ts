@@ -144,6 +144,14 @@ const DL = `${DESKTOP_RELEASES_URL}/download`;
  *  desktop/src/channel.ts `STORE_IDS.msstore` (a test holds the two equal). */
 export const MSSTORE_URL = 'https://apps.microsoft.com/detail/9PKXDJLVZWXW';
 
+/** The desktop app's Snap Store page. The snap is named by desktop/src/channel.ts
+ *  `LINUX_APP_NAME` (a test holds the two equal). */
+export const SNAP_STORE_URL = 'https://snapcraft.io/filex-app';
+
+/** The Homebrew tap the macOS cask `filex-app` lives in. Its README carries the
+ *  one-line install; the row's hint repeats it. */
+export const HOMEBREW_TAP_URL = 'https://github.com/BRF-Tech/homebrew-filex';
+
 export interface DesktopDownload {
   /** What the file is, named the way it is named on the release page. */
   label: string;
@@ -200,6 +208,13 @@ export function desktopDownloadsFor(
   }
   if (platform === 'linux') {
     return [
+      // First, as the Store is on Windows: the one-click install from a
+      // software centre (Ubuntu's App Center finds it), updated by snapd.
+      {
+        label: t('install.dl.linux_snap'),
+        hint: t('install.dl.linux_snap_hint'),
+        href: SNAP_STORE_URL,
+      },
       {
         label: t('install.dl.appimage'),
         hint: t('install.dl.appimage_hint'),
@@ -210,17 +225,29 @@ export function desktopDownloadsFor(
         hint: t('install.dl.deb_hint'),
         href: `${DL}/filex-desktop-amd64.deb`,
       },
+      {
+        label: t('install.dl.rpm'),
+        hint: t('install.dl.rpm_hint'),
+        href: `${DL}/filex-desktop-x86_64.rpm`,
+      },
     ];
   }
   // ⚠ Apple Silicon only, and unsigned: the CI runner's arch is the artifact's
   // arch (macos-14 = arm64), and there is no Developer ID yet, so the first
   // launch is a Gatekeeper "Open Anyway" — the hint says so up front instead
   // of letting the user find out from a dialog that reads like a virus alert.
+  // Homebrew second: the Mac app cannot update itself until it is signed, and
+  // `brew upgrade` is the one thing that keeps a Mac copy current.
   return [
     {
       label: t('install.dl.dmg'),
       hint: t('install.dl.dmg_hint'),
       href: `${DL}/filex-desktop-arm64.dmg`,
+    },
+    {
+      label: t('install.dl.mac_brew'),
+      hint: t('install.dl.mac_brew_hint'),
+      href: HOMEBREW_TAP_URL,
     },
   ];
 }

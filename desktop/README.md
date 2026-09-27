@@ -170,12 +170,28 @@ CLI's command.
 |---|---|---|---|
 | Windows installer | `dist:win` | GitHub Release + feed | the app, silently |
 | Windows portable `.exe` | `dist:win` | GitHub Release | nobody: Settings offers the download |
-| Microsoft Store | `dist:store` | Partner Center | the Store |
+| Microsoft Store | `dist:store` | Partner Center → [apps.microsoft.com/detail/9PKXDJLVZWXW](https://apps.microsoft.com/detail/9PKXDJLVZWXW) | the Store |
+| winget `BRFTech.filex-app` | the Windows installer (`wingetcreate` in the release job) | a PR to `microsoft/winget-pkgs` | the app, as the installer above |
 | AppImage | `dist:linux` | GitHub Release + feed | the app |
 | `.deb` / `.rpm` (`filex-app`) | `dist:linux` | GitHub Release + feed | the app, through `pkexec` and dpkg / dnf / zypper (a password prompt) |
-| Snap `filex-app` | `dist:snap` | Snap Store + GitHub Release | snapd |
+| Snap `filex-app` | `dist:snap` | [Snap Store](https://snapcraft.io/filex-app) + GitHub Release | snapd |
 | AUR `filex-app-bin` | `packaging/aur` (from the Release `.deb`) | AUR | pacman / the AUR helper |
 | macOS `.dmg` / `.zip` | `dist:mac` | GitHub Release + feed | nobody until signed (see *Signing*) |
+| Homebrew cask `filex-app` | `scripts/pkg-manifests.mjs` (from the Release `.dmg`) | [`BRF-Tech/homebrew-filex`](https://github.com/BRF-Tech/homebrew-filex) | `brew upgrade` |
+
+Where the store channels stand is measured, not assumed — the user-facing
+pages ([`README.md`](../README.md), [`docs/DESKTOP.md`](../docs/DESKTOP.md), the
+filex.sh install box and the install prompt in `web/`) show a badge or a
+command only for a listing that installs today. As of 0.47.0: the Microsoft
+Store, the Snap Store (stable) and the Homebrew tap are live; the winget PRs
+pass validation and wait for the moderators' first review, so no page offers
+`winget install` as working; the AUR package is not published (new AUR
+accounts were closed), so no page mentions it. Change those pages when one of
+these moves — `gh pr list -R microsoft/winget-pkgs --search "BRFTech in:title"`
+and `curl -s "https://aur.archlinux.org/rpc/v5/info?arg[]=filex-app-bin"` say
+where they are. The badges themselves are the stores' unmodified artwork in
+`docs/badges/`; filex.sh carries a mirror of them (`site/assets/badges/`,
+checked by `web/tests/deploy/siteAssets.test.ts`).
 
 `src/channel.ts` recognises a copy that something else updates
 (`process.windowsStore`, snapd's `SNAP` + `SNAP_NAME`, `FLATPAK_ID`, and the

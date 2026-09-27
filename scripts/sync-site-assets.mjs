@@ -25,6 +25,15 @@
 // left alone: `social-preview.png` is rendered from `social-preview.src.html`
 // and `end-user-drive.png` is a site-only crop. They are site-owned, not
 // copies, and deleting them would break the page.
+//
+// ⚠ The store badges are the second thing copied here. `docs/badges/` holds the
+// Microsoft Store and Snap Store artwork, exactly as the stores publish it,
+// and is the one copy the README and docs/DESKTOP.md show; `site/` is
+// withheld from the public export, so the README cannot point into it, and
+// filex.sh is deployed from `site/` alone, so the page cannot point out of
+// it. `site/assets/badges/` is therefore a mirror of `docs/badges/`, and a
+// badge the site has that `docs/badges/` does not is an error, not a
+// site-owned file: artwork we are not allowed to alter has one source.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,8 +43,44 @@ import { SHOTS_ROOT, SHOTS_ROOT_REL } from '../e2e/shots/release.mjs';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = SHOTS_ROOT;
 const DST = path.join(REPO, 'site', 'assets');
+const BADGES_SRC = path.join(REPO, 'docs', 'badges');
+const BADGES_DST = path.join(DST, 'badges');
 
 const check = process.argv.includes('--check');
+
+/** The store badges: every `docs/badges/*.svg` byte-identical under
+ *  `site/assets/badges/`, and nothing else there. Returns the stale names. */
+function syncBadges() {
+  if (!fs.existsSync(BADGES_SRC)) {
+    console.error('docs/badges does not exist — the store badges have no source');
+    process.exit(1);
+  }
+  const names = fs.readdirSync(BADGES_SRC).filter((f) => f.endsWith('.svg'));
+  if (names.length === 0) {
+    console.error('docs/badges holds no .svg — nothing was compared');
+    process.exit(1);
+  }
+  if (!check) fs.mkdirSync(BADGES_DST, { recursive: true });
+  const out = [];
+  for (const name of names) {
+    const src = path.join(BADGES_SRC, name);
+    const dst = path.join(BADGES_DST, name);
+    if (fs.existsSync(dst) && fs.readFileSync(src).equals(fs.readFileSync(dst))) continue;
+    out.push(`badges/${name}`);
+    if (!check) fs.copyFileSync(src, dst);
+  }
+  const orphans = fs.existsSync(BADGES_DST)
+    ? fs.readdirSync(BADGES_DST).filter((f) => f.endsWith('.svg') && !names.includes(f))
+    : [];
+  if (orphans.length > 0) {
+    for (const o of orphans) console.error(`  not in docs/badges: site/assets/badges/${o}`);
+    console.error('a store badge belongs in docs/badges first; the site copies it from there');
+    process.exit(1);
+  }
+  return out;
+}
+
+const staleBadges = syncBadges();
 
 // ⚠ A release folder that was never written makes every file below look
 // site-owned, and the loop then reports "matches" having compared nothing —
@@ -62,19 +107,21 @@ if (compared === 0) {
   process.exit(1);
 }
 
+stale.push(...staleBadges);
+
 if (stale.length === 0) {
-  console.log(`site/assets matches ${SHOTS_ROOT_REL}`);
+  console.log(`site/assets matches ${SHOTS_ROOT_REL} and docs/badges`);
   process.exit(0);
 }
 
 if (check) {
   for (const n of stale) console.error(`  stale: site/assets/${n}`);
   console.error(
-    `\n${stale.length} site asset(s) differ from ${SHOTS_ROOT_REL} — filex.sh would show ` +
-      'an older picture than the README. Run: node scripts/sync-site-assets.mjs',
+    `\n${stale.length} site asset(s) differ from ${SHOTS_ROOT_REL} or docs/badges — filex.sh ` +
+      'would show an older picture than the README. Run: node scripts/sync-site-assets.mjs',
   );
   process.exit(1);
 }
 
 for (const n of stale) console.log(`  copied ${n}`);
-console.log(`${stale.length} site asset(s) refreshed from ${SHOTS_ROOT_REL}`);
+console.log(`${stale.length} site asset(s) refreshed from ${SHOTS_ROOT_REL} and docs/badges`);

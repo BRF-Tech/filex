@@ -36,6 +36,32 @@
   color: var(--vp-c-text-3);
 }
 
+/* Store badges (DESKTOP.md → Install) — the stores' own artwork, side by side
+   at one height. The theme makes every <img> a block with `height: auto`,
+   which would stack them and ignore the height attribute GitHub honours.
+   52px clears the Microsoft Store minimum of 32px. The space between them is
+   the markdown's own three &nbsp; and a space (~17px, over the quarter of the
+   badge height the Microsoft guidelines ask to keep clear) — inline flow, not
+   flex, so the page spaces them exactly as GitHub does; a flex box would make
+   that text an item of its own and double the gap.
+   ⚠ The <picture> picks its variant from the system colour scheme, not from
+   the theme toggle: both variants carry their own background and border, so
+   the other one stays legible when the two disagree. */
+.vp-doc .store-badges {
+  margin: 16px 0;
+}
+.vp-doc .store-badges a {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 4px 0;
+  text-decoration: none;
+}
+.vp-doc .store-badges img {
+  display: block;
+  height: 52px;
+  width: auto;
+}
+
 @media (min-width: 640px) {
   :root {
     --vp-home-hero-image-filter: blur(56px);

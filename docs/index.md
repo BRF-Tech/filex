@@ -47,7 +47,7 @@ features:
     linkText: Roles and access
   - icon: 🖥️
     title: Desktop app
-    details: The same explorer in its own window on Windows, Linux and macOS — several accounts at once, right-click a folder or file to keep it on the computer, sync that keeps running when the window is closed, and double-click an Office document on your own disk to edit it without Office installed. Not allowed to install software? Every platform also has a copy that runs from wherever you put it, and the Windows portable one keeps all its files in one folder beside the .exe.
+    details: The same explorer in its own window on Windows, Linux and macOS — several accounts at once, right-click a folder or file to keep it on the computer, sync that keeps running when the window is closed, and double-click an Office document on your own disk to edit it without Office installed. Not allowed to install software? Every platform also has a copy that runs from wherever you put it, and the Windows portable one keeps all its files in one folder beside the .exe. Get it from the Microsoft Store, the Snap Store or Homebrew.
     link: /DESKTOP
     linkText: Desktop docs
   - icon: 🪄

@@ -16,18 +16,29 @@ panel, and the app links out to it in your browser.
 
 ## Install
 
+### From a store
+
+<div class="store-badges">
+<a href="https://apps.microsoft.com/detail/9PKXDJLVZWXW"><picture><source media="(prefers-color-scheme: dark)" srcset="./badges/ms-store-light.svg"><img src="./badges/ms-store-dark.svg" alt="Download from the Microsoft Store" height="52"></picture></a>&nbsp;&nbsp;&nbsp;
+<a href="https://snapcraft.io/filex-app"><picture><source media="(prefers-color-scheme: dark)" srcset="./badges/snap-store-white.svg"><img src="./badges/snap-store-black.svg" alt="Get it from the Snap Store" height="52"></picture></a>
+</div>
+
+The Microsoft Store lists it as *filex File Manager* (Windows 10/11); the Snap
+Store as `filex-app`, which Ubuntu's App Center finds when you search for
+*filex*. Both install the same app as the downloads below, and both keep it up
+to date themselves — the app then leaves updating to them.
+
 ### With a package manager
 
-The package managers install the same app and keep it updated themselves (the
-app then leaves updating to them). The desktop app is **`filex-app`** in every
-one of them; plain `filex` is the [CLI](CLI.md).
+The desktop app is **`filex-app`** in every one of them; plain `filex` is the
+[CLI](CLI.md).
 
 | Platform | Command | Notes |
 |---|---|---|
-| Ubuntu and other Linux with snapd | `sudo snap install filex-app` | Also in Ubuntu's App Center — search for *filex*. The sign-in is stored in your keyring once the snap may reach it: `sudo snap connect filex-app:password-manager-service` (the app says so when it is needed). |
-| macOS 13+ (Apple Silicon) | `brew install brf-tech/filex/filex-app` | Homebrew tap [`BRF-Tech/homebrew-filex`](https://github.com/BRF-Tech/homebrew-filex). The first launch is blocked once, as below: the app is not signed with a Developer ID. |
+| Ubuntu and other Linux with snapd | `sudo snap install filex-app` | The Snap Store build above. The sign-in is stored in your keyring once the snap may reach it: `sudo snap connect filex-app:password-manager-service` (the app says so when it is needed). |
+| macOS 13+ (Apple Silicon) | `brew install brf-tech/filex/filex-app` | Homebrew tap [`BRF-Tech/homebrew-filex`](https://github.com/BRF-Tech/homebrew-filex); `brew upgrade` keeps it current (the Mac app does not update itself). The first launch is blocked once, as below: the app is not signed with a Developer ID. |
 | Windows 10/11 | [Microsoft Store](https://apps.microsoft.com/detail/9PKXDJLVZWXW) — *filex File Manager* | **The one Windows build that is code-signed**: Microsoft signs it, so there is no SmartScreen prompt, and the Store installs and updates it. On a machine that also has the installer below, both read the same accounts and folders; Settings says so. |
-| Windows 10/11 | `winget install BRFTech.filex-app` | The same per-user installer as the download below. A new package waits for winget's review before it can be installed, so this works a few days after the first release that submits it. |
+| Windows 10/11 | `winget install BRFTech.filex-app` — **not installable yet** | The same per-user installer as the download below, updating itself the same way. Every release submits it, and the package is still waiting for its first review by the winget moderators: until that is approved, `winget` does not find it. |
 
 ### Download
 

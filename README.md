@@ -56,8 +56,10 @@ get **http://localhost:5212/drive**, the same file manager without the panel aro
 
 Prefer a window over a browser tab? The **desktop app** (Windows / Linux / macOS) signs in
 to any filex server and syncs folders in the background — and on every platform there is a
-copy that runs **without being installed** (a portable `.exe`, an AppImage, a `.zip`):
-[latest release](https://github.com/BRF-Tech/filex/releases/latest) ·
+copy that runs **without being installed** (a portable `.exe`, an AppImage, a `.zip`).
+Get it from the [Microsoft Store](https://apps.microsoft.com/detail/9PKXDJLVZWXW), the
+[Snap Store](https://snapcraft.io/filex-app) or the
+[latest release](https://github.com/BRF-Tech/filex/releases/latest) —
 [docs/DESKTOP.md](docs/DESKTOP.md).
 
 ## Why filex
@@ -418,21 +420,30 @@ the web UI and the embeds render, not a separate half-copy:
   so deleting that folder leaves nothing of yours on a machine that is not yours — the
   trade is that it does not update itself.
 
-Or install it with your package manager:
+**Install it** from the Microsoft Store (Windows 10/11) or the Snap Store (Ubuntu and
+other Linux with snapd):
+
+<p>
+<a href="https://apps.microsoft.com/detail/9PKXDJLVZWXW"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/badges/ms-store-light.svg"><img src="docs/badges/ms-store-dark.svg" alt="Download from the Microsoft Store" height="52"></picture></a>&nbsp;&nbsp;&nbsp;
+<a href="https://snapcraft.io/filex-app"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/badges/snap-store-white.svg"><img src="docs/badges/snap-store-black.svg" alt="Get it from the Snap Store" height="52"></picture></a>
+</p>
+
+or with a package manager:
 
 ```bash
-winget install BRFTech.filex-app            # Windows 10/11
-brew install brf-tech/filex/filex-app       # macOS 13+ (Apple Silicon)
-sudo snap install filex-app                 # Ubuntu and other Linux with snapd
+brew install brf-tech/filex/filex-app       # macOS 13+ (Apple Silicon), Homebrew tap BRF-Tech/homebrew-filex
+sudo snap install filex-app                 # the same snap as the badge above
 ```
 
-On Windows it is also in the [Microsoft Store](https://apps.microsoft.com/detail/9PKXDJLVZWXW) (*filex File Manager*),
-signed by Microsoft and kept up to date by the Store. Installer, portable `.exe`, AppImage,
+The Store build (*filex File Manager*) is the one Windows copy that is code-signed —
+Microsoft signs it — and the Store keeps it up to date. winget (`BRFTech.filex-app`) is
+submitted with every release and is waiting for its first review by the winget
+moderators, so `winget install` does not find it yet. Installer, portable `.exe`, AppImage,
 `.deb`, `.rpm` and `.dmg` are attached to the
 [latest release](https://github.com/BRF-Tech/filex/releases/latest) — not code-signed yet,
 so expect a SmartScreen prompt from the Windows installer. Details:
-[docs/DESKTOP.md](docs/DESKTOP.md). The CLI alone: `brew install brf-tech/filex/filex` or
-`winget install BRFTech.filex` ([docs/CLI.md](docs/CLI.md)).
+[docs/DESKTOP.md](docs/DESKTOP.md). The CLI alone: `brew install brf-tech/filex/filex`
+([docs/CLI.md](docs/CLI.md); its winget package, `BRFTech.filex`, is in the same review).
 
 The same binary is also a client for servers, scripts and headless machines:
 
@@ -719,3 +730,8 @@ Contributions welcome — see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+The store badges in [`docs/badges/`](docs/badges/) are the stores' own artwork, used
+unmodified and not covered by that licence: Microsoft and the Microsoft Store badge are
+trademarks of the Microsoft group of companies; the Snap Store badge is © Canonical Ltd.,
+licensed [CC BY-ND 2.0 UK](https://creativecommons.org/licenses/by-nd/2.0/uk/).

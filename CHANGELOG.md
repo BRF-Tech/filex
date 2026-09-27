@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Store badges.** The README, the desktop documentation and filex.sh show
+  the Microsoft Store's and the Snap Store's own badges, each linking to the
+  app's listing and switching with the reader's colour scheme. The files live
+  once, unmodified, in `docs/badges/`, and a test holds them to the artwork the
+  stores publish — both stores' terms forbid altering it.
+- **The "Install the desktop app" offer covers the other stores.** On Linux it
+  leads with the [Snap Store](https://snapcraft.io/filex-app), as it leads
+  with the Microsoft Store on Windows, and it now offers the `.rpm` every
+  release has attached; on macOS it offers the Homebrew tap after the `.dmg`
+  (`brew upgrade` is what keeps a Mac copy current).
+
+### Fixed
+
+- The README, the desktop documentation and the CLI page gave `winget install`
+  as a working command. The winget packages are submitted with every release
+  and are still waiting for their first review by the winget moderators; until
+  that is approved, winget does not find them, and the pages now say so.
+- The install offer gave the Windows installer and portable `.exe` as ~92 MB;
+  they are ~125 MB.
+
 ## [0.47.0] - 2026-09-26
 
 filex runs under a sub-path behind a reverse proxy, apps keep themselves up

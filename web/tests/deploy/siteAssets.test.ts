@@ -84,3 +84,33 @@ describe.skipIf(!sitePresent)('site assets', () => {
     ).toBe(true);
   });
 });
+
+// The store badges: `docs/badges/` is the one copy (the README and DESKTOP.md
+// show it, and it is public); `site/assets/badges/` mirrors it because filex.sh
+// is deployed from `site/` alone. See scripts/sync-site-assets.mjs.
+// ⚠ Read inside guards, not at describe scope: `describe.skipIf` still runs
+// its callback, and a throw there would take the whole file down to "no tests".
+const BADGES_SRC = path.join(REPO, 'docs', 'badges');
+const BADGES_DST = path.join(DST, 'badges');
+const badgeNames = existsSync(BADGES_SRC) ? readdirSync(BADGES_SRC).filter((f) => f.endsWith('.svg')) : [];
+const siteBadges =
+  sitePresent && existsSync(BADGES_DST) ? readdirSync(BADGES_DST).filter((f) => f.endsWith('.svg')) : [];
+
+it('the store badges have a source to mirror', () => {
+  expect(badgeNames.length, 'docs/badges holds no .svg — the comparison below compares nothing').toBeGreaterThan(0);
+});
+
+describe.skipIf(!sitePresent)('site store badges', () => {
+  it.each(badgeNames)('site/assets/badges/%s is byte-identical to docs/badges', (name) => {
+    const dst = path.join(BADGES_DST, name);
+    expect(existsSync(dst), `site/assets/badges/${name} is missing. Run: node scripts/sync-site-assets.mjs`).toBe(true);
+    expect(
+      readFileSync(dst).equals(readFileSync(path.join(BADGES_SRC, name))),
+      `site/assets/badges/${name} differs from docs/badges. Run: node scripts/sync-site-assets.mjs`,
+    ).toBe(true);
+  });
+
+  it('the site carries no badge docs/badges does not have', () => {
+    expect(siteBadges.filter((f) => !badgeNames.includes(f))).toEqual([]);
+  });
+});

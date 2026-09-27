@@ -25,15 +25,21 @@
       "win_store": "Microsoft Store",
       "win_store_hint": "Microsoft imzalı; Store kurar ve güncel tutar — SmartScreen uyarısı çıkmaz",
       "win_setup": "Windows kurulumu (.exe)",
-      "win_setup_hint": "filex'i kurar, Başlat menüsüne ekler ve kendini günceller · ~92 MB",
+      "win_setup_hint": "filex'i kurar, Başlat menüsüne ekler ve kendini günceller · ~125 MB",
       "win_portable": "Windows taşınabilir (.exe)",
-      "win_portable_hint": "Her yerden çalışır — USB bellek, İndirilenler — ve dosyalarını yanında tutar. Kendini güncellemez · ~92 MB",
+      "win_portable_hint": "Her yerden çalışır — USB bellek, İndirilenler — ve dosyalarını yanında tutar. Kendini güncellemez · ~125 MB",
+      "linux_snap": "Snap Store",
+      "linux_snap_hint": "Ubuntu ve snapd olan diğer Linux'lar, Ubuntu App Center'da da var — snapd kurar ve güncel tutar",
       "appimage": "Linux (.AppImage)",
       "appimage_hint": "Taşınabilir — kurulum yok, çalıştırılabilir yapıp açmanız yeterli · ~140 MB",
       "deb": "Debian / Ubuntu (.deb)",
-      "deb_hint": "apt ile sistem geneline kurar · ~99 MB",
+      "deb_hint": "apt ile sistem geneline kurar · ~100 MB",
+      "rpm": "Fedora / openSUSE (.rpm)",
+      "rpm_hint": "dnf ya da zypper ile sistem geneline kurar · ~100 MB",
       "dmg": "macOS (.dmg, Apple Silicon)",
-      "dmg_hint": "İmzasız — ilk açılışta: Sistem Ayarları → Gizlilik ve Güvenlik → Yine de Aç"
+      "dmg_hint": "İmzasız — ilk açılışta: Sistem Ayarları → Gizlilik ve Güvenlik → Yine de Aç",
+      "mac_brew": "Homebrew",
+      "mac_brew_hint": "brew install brf-tech/filex/filex-app — brew upgrade ile güncel kalır"
     }
   },
   "common": {

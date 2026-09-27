@@ -25,15 +25,21 @@
       "win_store": "Microsoft Store",
       "win_store_hint": "Signed by Microsoft, installed and kept up to date by the Store — no SmartScreen warning",
       "win_setup": "Windows installer (.exe)",
-      "win_setup_hint": "Installs filex and adds it to the Start menu, and updates itself · ~92 MB",
+      "win_setup_hint": "Installs filex and adds it to the Start menu, and updates itself · ~125 MB",
       "win_portable": "Windows portable (.exe)",
-      "win_portable_hint": "Runs from anywhere — a USB stick, Downloads — and keeps its files beside itself. Does not update itself · ~92 MB",
+      "win_portable_hint": "Runs from anywhere — a USB stick, Downloads — and keeps its files beside itself. Does not update itself · ~125 MB",
+      "linux_snap": "Snap Store",
+      "linux_snap_hint": "Ubuntu and other Linux with snapd, also in Ubuntu's App Center — installed and kept up to date by snapd",
       "appimage": "Linux (.AppImage)",
       "appimage_hint": "Portable — no installation, just make it executable and run · ~140 MB",
       "deb": "Debian / Ubuntu (.deb)",
-      "deb_hint": "Installs system-wide with apt · ~99 MB",
+      "deb_hint": "Installs system-wide with apt · ~100 MB",
+      "rpm": "Fedora / openSUSE (.rpm)",
+      "rpm_hint": "Installs system-wide with dnf or zypper · ~100 MB",
       "dmg": "macOS (.dmg, Apple Silicon)",
-      "dmg_hint": "Unsigned — first launch: System Settings → Privacy & Security → Open Anyway"
+      "dmg_hint": "Unsigned — first launch: System Settings → Privacy & Security → Open Anyway",
+      "mac_brew": "Homebrew",
+      "mac_brew_hint": "brew install brf-tech/filex/filex-app — and brew upgrade keeps it up to date"
     }
   },
   "common": {
