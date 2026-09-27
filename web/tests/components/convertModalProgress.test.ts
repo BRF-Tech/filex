@@ -22,9 +22,16 @@ const FORMATS = [
   { index: 1, ext: 'pdf', format: 'pdf', mime: 'application/pdf', name: 'PDF', from: false, to: true, category: null },
 ];
 
+/** The converter's frame, at the converter's origin: nothing else is heard
+ *  (convertFrameMessages.test.ts). */
+let frameWin: Window | null = null;
+const CONVERTER = 'https://convert.example';
+
 /** The converter frame answers the message `id`. */
 function reply(id: number, body: Record<string, unknown>) {
-  window.dispatchEvent(new MessageEvent('message', { data: { source: 'convert-embed', id, ok: true, ...body } }));
+  window.dispatchEvent(
+    new MessageEvent('message', { data: { source: 'convert-embed', id, ok: true, ...body }, source: frameWin, origin: CONVERTER }),
+  );
 }
 
 /* Unmounted after each test (lesson #387): a window left mounted keeps its
@@ -47,7 +54,10 @@ async function openModal(): Promise<VueWrapper> {
   vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation((msg: unknown) => {
     posted.push(msg as Posted);
   });
-  window.dispatchEvent(new MessageEvent('message', { data: { source: 'convert-embed', event: 'ready' } }));
+  frameWin = frame.contentWindow;
+  window.dispatchEvent(
+    new MessageEvent('message', { data: { source: 'convert-embed', event: 'ready' }, source: frameWin, origin: CONVERTER }),
+  );
   await flushPromises();
   reply(posted.find((p) => p.cmd === 'listFormats')!.id, { formats: FORMATS });
   await flushPromises();

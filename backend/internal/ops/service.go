@@ -1330,6 +1330,36 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 // (sweep-2026-05-09 bug 25 — "Kopyasını Oluştur" (Duplicate) was sending
 // source == destination and the S3 driver was 400ing the self-copy.)
 func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string, taken ...Taken) (string, error) {
+	return uniqueDest(ctx, drv, src, dst, copyName, taken...)
+}
+
+// namer spells the i-th name offered beside a taken one (i counts from 1):
+// what the stem (`report`) and extension (`.docx`, or "") become.
+type namer func(stem, ext string, i int) string
+
+// copyName is the copy's spelling: `report-copy.docx`, `report-copy-2.docx`,
+// … — what a copy, a move and an app's output get.
+func copyName(stem, ext string, i int) string {
+	if i == 1 {
+		return stem + "-copy" + ext
+	}
+	return fmt.Sprintf("%s-copy-%d%s", stem, i, ext)
+}
+
+// numberedName is a SECOND DOCUMENT's spelling: `report (2).docx`,
+// `report (3).docx`, … — the numbering the New document dialog suggests
+// (packages/core lib/newDocName suggestDocName) and the one a draft is saved
+// under beside a file that already has its name (UniqueDestNumbered). A draft
+// is not a copy of what is there, so it is not called one.
+func numberedName(stem, ext string, i int) string {
+	return fmt.Sprintf("%s (%d)%s", stem, i+1, ext)
+}
+
+// uniqueDest is uniqueCopyDest with the spelling of the alternatives named:
+// every rule about what counts as taken, the case-only rename and the
+// saturation error is this one function's, whichever way the names are
+// spelled — only `name` differs between the callers.
+func uniqueDest(ctx context.Context, drv storage.Driver, src, dst string, name namer, taken ...Taken) (string, error) {
 	occupied := func(p string) bool {
 		if storage.Exists(ctx, drv, p) {
 			return true
@@ -1370,12 +1400,7 @@ func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string, ta
 		ext = base[dotIdx:]
 	}
 	for i := 1; i <= 100; i++ {
-		var candidate string
-		if i == 1 {
-			candidate = dir + stem + "-copy" + ext
-		} else {
-			candidate = fmt.Sprintf("%s%s-copy-%d%s", dir, stem, i, ext)
-		}
+		candidate := dir + name(stem, ext, i)
 		if candidate != src && !occupied(candidate) {
 			return candidate, nil
 		}

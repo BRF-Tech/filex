@@ -814,6 +814,26 @@ type Store interface {
 	SoftDeleteNodeComment(ctx context.Context, id int64) error
 	DeleteNodeCommentsByNode(ctx context.Context, nodeID int64) error
 
+	// Drafts (migration 00064, issue #71) — a new document before its first
+	// save. The rows are read joined to the draft file's node row: Path, Size,
+	// Mime, Mtime and NodeLive come from there. A draft whose node is trashed
+	// is kept (a restore brings it back); a draft whose node is purged goes
+	// with it (FK CASCADE).
+	CreateDraft(ctx context.Context, d *model.Draft) (*model.Draft, error)
+	// GetDraftByKey returns the draft with that key whatever its node's state,
+	// sql.ErrNoRows when there is none.
+	GetDraftByKey(ctx context.Context, key string) (*model.Draft, error)
+	// GetDraftByNode returns the draft whose file is that node, live or
+	// trashed, sql.ErrNoRows when there is none.
+	GetDraftByNode(ctx context.Context, nodeID int64) (*model.Draft, error)
+	// ListLiveDrafts returns a person's drafts whose file is live, the most
+	// recently made first.
+	ListLiveDrafts(ctx context.Context, userID int64) ([]*model.Draft, error)
+	// CountLiveDrafts is len(ListLiveDrafts) without reading the rows — the
+	// limit check and the navigation panel's badge.
+	CountLiveDrafts(ctx context.Context, userID int64) (int, error)
+	DeleteDraft(ctx context.Context, id int64) error
+
 	// Providers (tenants). See docs/MULTI-TENANCY.md. Inert while multi-tenant
 	// mode is off; a single "default" provider always exists (migration 00014).
 	CreateProvider(ctx context.Context, p *model.Provider) (*model.Provider, error)

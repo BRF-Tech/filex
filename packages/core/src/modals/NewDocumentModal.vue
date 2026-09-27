@@ -60,6 +60,16 @@
  * extension (office documents, diagrams — `ext_required`) still keeps it: the
  * dialog says "will be created as report.docx" instead of locking the field.
  * The rules are lib/newDocName; this file wires them.
+ *
+ * ## It makes a DRAFT (issue #71)
+ *
+ * On a server that keeps drafts for this person (`drafts`, from
+ * `capabilities.drafts`) Create no longer writes the file where it was asked
+ * for: it writes a draft — the same bytes, in the person's own drafts area of
+ * that storage — and the editor opens on it. Nothing appears in the folder
+ * until the draft is saved; a person who changes their mind leaves nothing
+ * behind. At the draft limit Create is refused and the dialog says so, with
+ * the way to Drafts; it never falls back to creating the file instead.
  */
 import { computed, nextTick, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
@@ -70,6 +80,7 @@ import { iconTile, iconFamilyFor, typeLabelFor } from '../lib/fileIcons';
 import { crumbsOfWire, permAllowsWrite, splitWire } from '../lib/destinationTree';
 import Modal from './Modal.vue';
 import DestinationPickerModal from './DestinationPickerModal.vue';
+import { draftLimitOf, isDraftLimit } from '../lib/drafts';
 import { inlineKeyStep } from '../lib/direction';
 import {
   docNameProblem,
@@ -102,12 +113,17 @@ const props = defineProps<{
   /** Could this person set a missing service up (`capabilities.caller_admin`)?
    *  Adds WHERE to the line that says which families are missing. */
   canConfigure?: boolean;
+  /** Make a DRAFT rather than the file (issue #71): the server keeps drafts
+   *  for this person (`capabilities.drafts`). Absent: the file is created. */
+  drafts?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'created', file: NewFileResponse): void;
   (e: 'error', payload: { message: string }): void;
+  /** Drafts: the person asked to see their drafts (from the limit message). */
+  (e: 'open-drafts'): void;
 }>();
 
 const { t, dir } = useLocale(() => props.locale);
@@ -222,6 +238,9 @@ const nameTouched = ref(false);
 const collision = ref(false);
 const busy = ref(false);
 const failure = ref<string | null>(null);
+/** Drafts: the person already keeps as many drafts as the server allows —
+ *  the number, for the sentence. Null: not refused for that. */
+const draftLimitHit = ref<number | null>(null);
 
 /** The name the server will write: what the collision check and the
  *  "will be created as" line quote. */
@@ -323,6 +342,7 @@ watch(
     if (!isOpen) return;
     dirCache.clear();
     failure.value = null;
+    draftLimitHit.value = null;
     collision.value = false;
     nameTouched.value = false;
     busy.value = false;
@@ -454,16 +474,23 @@ async function create() {
   if (!canCreate.value || !selectedType.value) return;
   busy.value = true;
   failure.value = null;
+  draftLimitHit.value = null;
   try {
     // exactName: the field IS the file name (#56). The server still adds the
     // extension a type's editor needs, which extHint has already said.
-    const res = await props.api.newFile(dest.value, name.value.trim(), selectedType.value.ext, {
-      exactName: true,
-    });
+    const res = props.drafts
+      ? await props.api.drafts.create(dest.value, name.value.trim(), selectedType.value.ext, { exactName: true })
+      : await props.api.newFile(dest.value, name.value.trim(), selectedType.value.ext, {
+          exactName: true,
+        });
     emit('created', res);
   } catch (e) {
     const err = e as Error & { status?: number };
-    if (err.status === 409) {
+    if (isDraftLimit(err)) {
+      // ⚠ Said here, where it was pressed, with the way to Drafts — and
+      // nothing else is created in its place (the owner's rule, issue #71).
+      draftLimitHit.value = draftLimitOf(err) ?? 0;
+    } else if (err.status === 409) {
       // The server refused for the reason the dialog warns about. Say it in
       // the same place rather than throwing a toast over the form.
       collision.value = true;
@@ -599,6 +626,17 @@ async function create() {
           </p>
         </div>
 
+        <p v-if="drafts && !draftLimitHit" class="fe-newdoc__hint" data-testid="newdoc-draft-hint">
+          {{ t('newdoc.hint.draft') }}
+        </p>
+        <div v-if="draftLimitHit !== null" class="fe-newdoc__limit" role="alert" data-testid="newdoc-draft-limit">
+          <p class="fe-form__error">
+            {{ draftLimitHit ? t('newdoc.err.draft_limit', { limit: draftLimitHit }) : t('newdoc.err.draft_limit_any') }}
+          </p>
+          <button type="button" class="fe-btn fe-btn--sm" data-testid="newdoc-open-drafts" @click="emit('open-drafts')">
+            {{ t('newdoc.open_drafts') }}
+          </button>
+        </div>
         <p v-if="failure" class="fe-form__error" data-testid="newdoc-failure">{{ failure }}</p>
       </template>
     </div>

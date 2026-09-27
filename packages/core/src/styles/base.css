@@ -4914,6 +4914,35 @@ filex-explorer {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Drafts (issue #71): the row's count. A count, not an alarm — the quiet
+   primary tint the listing's badges wear, pushed to the row's end. */
+.fe-sidenav__count {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fe-primary) 14%, transparent);
+  color: var(--fe-primary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+/* On the collapsed rail there is no row end: the count sits on the icon's
+   corner. */
+.fe-sidenav--rail .fe-sidenav__item {
+  position: relative;
+}
+.fe-sidenav__count--rail {
+  position: absolute;
+  top: 1px;
+  inset-inline-end: 4px;
+  min-width: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 16px;
+}
 .fe-sidenav__section {
   margin-top: 10px;
 }
@@ -6900,6 +6929,154 @@ filex-explorer {
   min-height: 0;
   background: var(--fe-bg);
   color: var(--fe-text);
+}
+
+/* ---- Drafts (issue #71) ----
+   The bar a draft's editor carries, under the viewer's own bar (or alone, on
+   the standalone tab): a pill that says DRAFT, where it will be saved, and
+   the Save that puts it there. Quiet: a tint of the primary colour, never a
+   warning's — nothing is wrong with a draft. */
+.fe-draftbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fe-gap-sm) var(--fe-gap);
+  padding: var(--fe-gap-sm) var(--fe-gap);
+  background: color-mix(in srgb, var(--fe-primary) 7%, var(--fe-bg-elev));
+  border-bottom: 1px solid var(--fe-border);
+  color: var(--fe-text);
+  font-size: 13px;
+  min-width: 0;
+}
+.fe-draftbar__pill {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--fe-primary);
+  color: var(--fe-text-on-primary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.fe-draftbar__text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fe-draftbar__text > bdi {
+  font-weight: 600;
+}
+.fe-draftbar__target {
+  color: var(--fe-text-muted);
+}
+.fe-draftbar__error {
+  color: var(--fe-danger);
+  overflow-wrap: anywhere;
+}
+.fe-draftbar__gap {
+  flex: 1 1 auto;
+}
+.fe-draftbar--saved {
+  background: color-mix(in srgb, var(--fe-ok) 10%, var(--fe-bg-elev));
+}
+.fe-draftbar__done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fe-text);
+}
+.fe-draftbar__done .fe-icon {
+  color: var(--fe-ok);
+}
+
+/* The two questions a draft asks (DraftCloseModal, DraftConflictModal). */
+.fe-draftq__body {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+.fe-draftq__hint {
+  margin: 0;
+  color: var(--fe-text-muted);
+  font-size: 12.5px;
+}
+.fe-draftq__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  width: 100%;
+}
+.fe-draftq__gap {
+  flex: 1 1 auto;
+}
+/* A destructive answer that is not the dialog's point: the danger colour on
+   the text, not a red slab beside the default. */
+.fe-btn--danger-quiet {
+  color: var(--fe-danger);
+  border-color: color-mix(in srgb, var(--fe-danger) 35%, var(--fe-border));
+}
+.fe-btn--danger-quiet:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fe-danger) 10%, transparent);
+}
+
+/* The Drafts view (DraftsView): THE table, under a line saying what a draft
+   is and how many are kept. */
+.fe-drafts {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.fe-drafts__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px var(--fe-gap);
+  padding: var(--fe-gap-sm) var(--fe-gap) 0;
+}
+.fe-drafts__lead,
+.fe-drafts__count {
+  margin: 0;
+  color: var(--fe-text-muted);
+  font-size: 12.5px;
+}
+.fe-drafts__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.fe-drafts__tile {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+.fe-drafts__open {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-drafts__open:hover {
+  text-decoration: underline;
+}
+.fe-drafts__open:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 2px;
+  border-radius: var(--fe-radius-sm);
 }
 
 /* ---- Top bar ---- */
@@ -9745,6 +9922,18 @@ filex-explorer {
 }
 /* "Will be created as report.docx" — a type whose editor needs its extension,
    said before Create. Quiet, not an error: nothing is wrong with the name. */
+/* Drafts (issue #71): the draft limit, and the way to Drafts beside it. */
+.fe-newdoc__limit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px var(--fe-gap);
+  margin-top: var(--fe-gap-sm);
+}
+.fe-newdoc__limit .fe-form__error {
+  margin: 0;
+  flex: 1 1 16rem;
+}
 .fe-newdoc__hint {
   margin: 0;
   font-size: var(--fe-text-xs);

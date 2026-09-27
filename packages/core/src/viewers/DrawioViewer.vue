@@ -34,6 +34,10 @@ const props = defineProps<{
   canConfigure?: boolean;
 }>();
 
+/** The diagram changed (a draft's viewer asks, issue #71: it is how the
+ *  page knows there are edits before the browser's leave-page question). */
+const emit = defineEmits<{ (e: 'change'): void }>();
+
 const iframeRef = ref<HTMLIFrameElement | null>(null);
 const error = ref<string | null>(null);
 const status = ref<'loading' | 'ready' | 'saving' | 'saved' | 'error'>('loading');
@@ -88,8 +92,34 @@ async function loadXml(): Promise<void> {
   }
 }
 
+/**
+ * The origin draw.io is served from: where our messages go, and the only one
+ * whose messages are taken. A relative base (a draw.io behind this site's own
+ * path) is this site's origin.
+ */
+const drawioOrigin = computed<string | null>(() => {
+  if (!drawioBase.value) return null;
+  try {
+    return new URL(drawioBase.value, window.location.href).origin;
+  } catch {
+    return null;
+  }
+});
+
+/** Only to draw.io's origin: if the frame has been navigated anywhere else,
+ *  the diagram is not handed to it. */
 function send(msg: unknown): void {
-  iframeRef.value?.contentWindow?.postMessage(JSON.stringify(msg), '*');
+  const origin = drawioOrigin.value;
+  if (!origin) return;
+  iframeRef.value?.contentWindow?.postMessage(JSON.stringify(msg), origin);
+}
+
+/** Did this message come from OUR draw.io frame, at draw.io's origin? What
+ *  the payload says about itself decides nothing: any window that can reach
+ *  this one can post `{"event":"save"}`. */
+function fromDrawio(ev: MessageEvent): boolean {
+  const frame = iframeRef.value?.contentWindow;
+  return !!frame && ev.source === frame && !!drawioOrigin.value && ev.origin === drawioOrigin.value;
 }
 
 async function persist(xml: string): Promise<void> {
@@ -125,6 +155,7 @@ async function persist(xml: string): Promise<void> {
 }
 
 function onMessage(ev: MessageEvent): void {
+  if (!fromDrawio(ev)) return;
   if (typeof ev.data !== 'string' || ev.data.length === 0) return;
   // Drawio messages always start with '{' or '<'. Ignore anything else
   // (devtools / unrelated postMessage senders inside the same window).
@@ -148,6 +179,7 @@ function onMessage(ev: MessageEvent): void {
       break;
     case 'save':
       if (typeof payload.xml === 'string') {
+        emit('change');
         persist(payload.xml);
       }
       break;
@@ -156,6 +188,7 @@ function onMessage(ev: MessageEvent): void {
       break;
     case 'autosave':
       if (typeof payload.xml === 'string' && !readOnly.value) {
+        emit('change');
         persist(payload.xml);
       }
       break;

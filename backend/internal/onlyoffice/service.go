@@ -415,8 +415,18 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 	//
 	// The message is a constant plus the app's name, never the path: see the
 	// guard below for why this route does not echo paths.
-	if gerr := writegate.Check(acl.New(s.Store).Locks(r.Context(), node.StorageID), 0,
-		writegate.Writes(node.Path).As(syspath.PutWorkCopy)); gerr != nil {
+	//
+	// A draft (issue #71) is the other thing among filex's own saved here:
+	// a new office document lives in its owner's drafts area until its first
+	// save. The save is its OWNER's, and only theirs: the config this editor
+	// session was opened with is handed out only to the draft's owner (their
+	// ACL level on it is editor, everybody else's none — acl.Set), and this
+	// callback is signed by the document server for that session's node.
+	target := writegate.Writes(node.Path).As(syspath.PutWorkCopy)
+	if owner, ok := syspath.DraftOwner(node.Path); ok {
+		target = writegate.Writes(node.Path).As(syspath.OwnDraft).By(owner)
+	}
+	if gerr := writegate.Check(acl.New(s.Store).Locks(r.Context(), node.StorageID), 0, target); gerr != nil {
 		slog.Warn("onlyoffice callback refused",
 			slog.Int64("storage", node.StorageID),
 			slog.String("path", node.Path),

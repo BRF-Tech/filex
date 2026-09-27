@@ -292,7 +292,7 @@ Two things can happen, and filex picks the right one per document:
 | The document is… | What filex does |
 |---|---|
 | inside a folder you **keep on this computer** | Opens its twin on the server directly. Nothing is copied. Saving goes to the server, and sync brings it back down to that same file — the one on your disk. |
-| anywhere else | Copies it to a hidden working folder on your account (`<storage>://.filex-open`), opens that, and **writes every save back over your original file**. When you close the window the copy is deleted. (That folder is the one place among filex's own that the server lets a person write — and only these requests: create it at the root, upload `<session>-<name>` into it, save it from the editor, delete it. See [BACKEND.md](BACKEND.md#names-filex-keeps-for-itself).) |
+| anywhere else | Copies it to a hidden working folder on your account (`<storage>://.filex-open`), opens that, and **writes every save back over your original file**. When you close the window the copy is deleted. (Among filex's own folders the server lets a person write only there — and only these requests: create it at the root, upload `<session>-<name>` into it, save it from the editor, delete it — and into their own drafts. See [BACKEND.md](BACKEND.md#names-filex-keeps-for-itself).) |
 
 In the second case a strip along the bottom of the editor window names the file
 on your disk that saves are landing on, for as long as the window is open. It is

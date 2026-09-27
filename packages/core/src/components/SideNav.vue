@@ -46,7 +46,7 @@ import ContextMenu, { type ContextAction } from './ContextMenu.vue';
  *  list. It is in this union because the panel's selected-row logic, the
  *  address bar and the tab strip all key off ONE type — a second mechanism for
  *  "which destination am I on" is how two of them end up disagreeing. */
-export type NavView = '' | 'home' | 'recent' | 'starred' | 'shared' | 'trash' | 'tag';
+export type NavView = '' | 'home' | 'recent' | 'starred' | 'shared' | 'drafts' | 'trash' | 'tag';
 
 /**
  * A row in the panel's first group — what `open-view` carries.
@@ -110,6 +110,15 @@ const props = defineProps<{
   sharedStorages?: string[];
   /** Show the Trash entry (mirrors ExplorerConfig.trashVisible). */
   trashVisible?: boolean;
+  /**
+   * Drafts (issue #71): draw the "Drafts" row — true when the server keeps
+   * drafts for this caller (`capabilities.drafts`). Absent means no: an older
+   * server, an app token or a confined embed has no drafts to show.
+   */
+  draftsVisible?: boolean;
+  /** How many drafts the person keeps — the row's badge. 0 draws none: a
+   *  count, never a notification. */
+  draftCount?: number;
   /* === etiket:t1 — the Tags section ==================================
    * "Tagged files should show up inside the tag." Tags are the one
    * navigation family whose entries are USER data: unbounded in number and
@@ -251,7 +260,7 @@ const showLabels = computed(() => props.expanded || !!props.narrow);
 const sharedSet = computed(() => new Set(props.sharedStorages ?? []));
 
 /** The views that answer "what did *I* do" — dropped for an app token. */
-const IDENTITY_VIEWS = new Set<string>(['recent', 'starred', 'shared']);
+const IDENTITY_VIEWS = new Set<string>(['recent', 'starred', 'shared', 'drafts']);
 
 /**
  * gorunum:v3-shell — the destinations, and their ORDER.
@@ -302,6 +311,8 @@ const views = computed(() => {
     { key: 'recent', label: t('sidenav.recent') },
     { key: 'starred', label: t('sidenav.starred') },
   ];
+  // Drafts (issue #71): beside Trash, the other place a document waits.
+  if (props.draftsVisible) list.push({ key: 'drafts', label: t('sidenav.drafts') });
   if (props.trashVisible !== false) list.push({ key: 'trash', label: t('sidenav.trash') });
   // Filtered at the end rather than built conditionally: Trash is shared by
   // everyone and the list keeps growing, so one rule at the bottom beats a
@@ -348,6 +359,17 @@ const newShown = computed(() => !activeReadOnly.value && props.activeView !== 't
  * Inside a storage the storage's own row is the active one, so lighting both
  * would claim the selection is in two places.
  */
+/**
+ * A row's name as it is announced: its label, and for Drafts the count the
+ * badge draws — the badge itself is aria-hidden, so a screen reader hears
+ * "Drafts, 3 drafts" once rather than a stray number.
+ */
+function viewLabel(v: { key: NavDest; label: string }): string {
+  const n = props.draftCount ?? 0;
+  if (v.key !== 'drafts' || n <= 0) return v.label;
+  return `${v.label}, ${t('sidenav.drafts.count', { n })}`;
+}
+
 function isActiveDest(key: NavDest): boolean {
   if (key === 'myfiles') return !props.activeView && !props.activeStorage;
   return props.activeView === key;
@@ -822,8 +844,8 @@ function onStoragePointerDown(s: NavStorage, ev: PointerEvent) {
               class="fe-sidenav__item"
               :class="{ 'is-active': isActiveDest(v.key) }"
               :aria-current="isActiveDest(v.key) ? 'page' : undefined"
-              :title="v.label"
-              :aria-label="v.label"
+              :title="viewLabel(v)"
+              :aria-label="viewLabel(v)"
               :data-testid="`sidenav-view-${v.key}`"
               @click="emit('open-view', v.key)"
             >
@@ -859,6 +881,11 @@ function onStoragePointerDown(s: NavStorage, ev: PointerEvent) {
                   <circle cx="17.5" cy="17.5" r="2.5" />
                   <path d="M8.8 10.8l6.4-3.2M8.8 13.2l6.4 3.2" />
                 </template>
+                <template v-else-if="v.key === 'drafts'">
+                  <path d="M13.5 4H7a1.5 1.5 0 0 0-1.5 1.5v13A1.5 1.5 0 0 0 7 20h10a1.5 1.5 0 0 0 1.5-1.5V9z" />
+                  <path d="M13.5 4v5h5" />
+                  <path d="M9 15.5l4.8-4.8 1.7 1.7-4.8 4.8H9z" />
+                </template>
                 <template v-else>
                   <path d="M4.5 7h15" />
                   <path d="M9.5 7V5.2A1.2 1.2 0 0 1 10.7 4h2.6a1.2 1.2 0 0 1 1.2 1.2V7" />
@@ -866,6 +893,15 @@ function onStoragePointerDown(s: NavStorage, ev: PointerEvent) {
                 </template>
               </svg>
               <span v-if="showLabels" class="fe-sidenav__text">{{ v.label }}</span>
+              <!-- Drafts (issue #71): how many, as a count — never a
+                   notification. On the rail it sits on the icon's corner. -->
+              <span
+                v-if="v.key === 'drafts' && (draftCount ?? 0) > 0"
+                class="fe-sidenav__count"
+                :class="{ 'fe-sidenav__count--rail': !showLabels }"
+                aria-hidden="true"
+                data-testid="sidenav-drafts-count"
+              >{{ draftCount }}</span>
             </button>
           </li>
 

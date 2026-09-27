@@ -62,6 +62,7 @@ describe('core catalogue: a label is spelled one way', () => {
  *  interface quoted by name, a language. Not "words we like capitalised". */
 const NAMES = new Set([
   'Trash', 'Home', 'Webhooks', 'Test', // a screen or button quoted by its name
+  'Drafts', // the Drafts view, quoted by name ("Keep in Drafts", issue #71)
   'Esc', 'Claude', 'Keycloak', 'Authentik', 'Hetzner', 'Ubuntu', 'Apple', 'Silicon',
   'Active', 'Directory', 'Sunday', 'English', 'İngilizce',
   'Store', // "Microsoft Store": a product's name (install.dl.win_store)

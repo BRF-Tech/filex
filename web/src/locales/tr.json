@@ -1630,7 +1630,7 @@
   },
   "protection": {
     "title": "Koruma",
-    "subtitle": "Çöp kutusu saklama süresi, sürüm politikası, paylaşım bağlantısı süresi ve antivirüs",
+    "subtitle": "Çöp kutusu saklama süresi, sürüm politikası, paylaşım bağlantısı süresi, taslaklar ve antivirüs",
     "unsupported": "Sunucu bu sürümü desteklemiyor — koruma ayarları API'si bulunamadı. Backend güncellemesinden sonra bu sayfa etkinleşir.",
     "savedOk": "Koruma ayarları kaydedildi",
     "trash": {
@@ -1654,6 +1654,13 @@
       "hint": "0 = sınırsız. Varsayılan 7.",
       "errMin": "0 veya daha büyük bir tam sayı girin",
       "overMax": "Mevcut {n} bağlantı bu sınırı aşıyor. Çalışmaya devam ederler — kaldırmak isterseniz Paylaşımlar sayfasından iptal edin."
+    },
+    "drafts": {
+      "title": "Taslaklar",
+      "desc": "Yeni bir belge, ilk kaydına kadar bir taslaktır: onu oluşturan kişinin, başka kimsenin göremediği Taslaklar’ında bekler ve kaydedilene kadar klasöründe hiçbir şey oluşturulmaz. Bir kişinin tutabileceği en fazla taslak sayısı budur; sınıra gelindiğinde Yeni belge önce bazılarının kaydedilmesini ya da silinmesini ister.",
+      "label": "Kişi başına taslak",
+      "hint": "{min} ile {max} arasında. Varsayılan 50. Yeniden başlatma gerekmeden hemen geçerli olur.",
+      "errRange": "{min} ile {max} arasında tam sayı girin."
     },
     "av": {
       "title": "Antivirüs",

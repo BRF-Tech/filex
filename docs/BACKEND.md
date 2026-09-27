@@ -8,6 +8,7 @@ All endpoints under `/api/*` return JSON. All write endpoints expect
 - [Auth & sessions](#auth--sessions)
 - [Capabilities](#capabilities)
 - [File browsing](#file-browsing)
+- [Drafts](#drafts)
 - [Uploads (multipart)](#uploads-multipart)
 - [Archives](#archives)
 - [Sharing](#sharing)
@@ -264,8 +265,8 @@ List the contents of a directory.
 ### Names filex keeps for itself
 
 `.filex-trash`, `.versions`, `.thumbs`, the desktop app's `.filex-open` (at any
-depth) and the empty-folder marker `.keepdir` are filex's own
-(`backend/internal/syspath`). They are never listed or searched, and every
+depth), the drafts area `.filex-drafts` and the empty-folder marker `.keepdir`
+are filex's own (`backend/internal/syspath`). They are never listed or searched, and every
 write that names one — creating, uploading, renaming, moving, copying,
 extracting, saving, sharing, granting or restoring — answers:
 
@@ -278,6 +279,13 @@ An archive member under one of them is skipped, the way a zip-slip entry is.
 The single exception is the desktop's open-with round trip: `newfolder` of
 `.filex-open` at the storage root, `upload` of `.filex-open/<hex session>-<name>`
 (and the document editor's save of that copy), and `delete` of it.
+
+A draft is the other door, and it opens for one person only: the file at
+`.filex-drafts/<user id>/<key>/<name>` can be read (`preview`, `download`,
+`info`) and saved into (`save-text`, the document server's callback, an app
+editor's save) by the account whose id is in its path — nobody else, an
+administrator included, gets anything but `404`/`403`. Everything else about a
+draft goes through [the drafts endpoints](#drafts).
 
 ### `GET /api/files/manager?action=changes` ![user](https://img.shields.io/badge/-user-blue)
 Has anything under a folder changed since the caller last asked?
@@ -545,6 +553,79 @@ So a burst of Ctrl+S costs exactly one scan, and the window cannot be pushed
 out indefinitely by somebody who keeps typing. The delay is a row in the
 operation queue, not a timer in the process, so it survives a restart. See
 [PROTECTION.md → Files written in the editor](PROTECTION.md#files-written-in-the-editor).
+
+---
+
+## Drafts
+
+A new document is a **draft** until its first save (#71): a real file in the
+person's own `.filex-drafts/<user id>/<key>/` folder of the storage it was made
+for, with a row that remembers where it is meant to go. Nothing is created in
+that folder until the draft is saved. The user guide is
+[ONLYOFFICE.md → Drafts](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save).
+
+Every route answers for the **caller's own** drafts; another person's key is
+`404`. They need a signed-in person: an app token, and a caller confined to a
+root (an embed's shared proxy token), get `403 {"code":"DRAFTS_UNAVAILABLE"}`
+and create documents with `newfile` as before. `GET /api/files/capabilities`
+carries `drafts: { limit }` exactly when the caller may use them.
+
+A draft, as these routes answer it:
+
+```json
+{ "key": "3f9c0a1b2c3d4e5f", "name": "minutes.txt",
+  "path": "docs://.filex-drafts/7/3f9c0a1b2c3d4e5f/minutes.txt",
+  "storage": "docs", "target_dir": "docs://Reports", "target": "docs://Reports/minutes.txt",
+  "type": "txt", "size": 11, "mime": "text/plain; charset=utf-8",
+  "created_at": "2026-09-27T09:12:03Z", "modified_at": "2026-09-27T09:14:40Z" }
+```
+
+`path` is the file an editor opens and saves into; `type` is the `newdoc_types`
+key it was made as.
+
+### `POST /api/files/drafts` ![user](https://img.shields.io/badge/-user-blue)
+Makes a draft: the same body as `newfile` — `{ path, name, type, exact_name? }`
+where `path` is the folder it is for — and the same bytes (an office type gets
+its template). `201 { path, name, ext, size, mime, draft }`, shaped like
+`newfile`'s answer so a client opens `path` the same way. The caller needs
+≥ editor on the folder, and the name and type rules are `newfile`'s. At the
+limit (`drafts.limit`,
+[PROTECTION.md → Drafts](PROTECTION.md#drafts)) it is
+`409 { "code": "DRAFT_LIMIT", "limit": 50, "count": 50 }` and nothing is created.
+
+### `GET /api/files/drafts` ![user](https://img.shields.io/badge/-user-blue)
+`{ drafts: [draft…], count, limit }` — the caller's live drafts on every
+enabled storage, the most recently made first.
+
+### `GET /api/files/drafts/count` ![user](https://img.shields.io/badge/-user-blue)
+`{ count, limit }` — what the navigation panel's badge reads.
+
+### `GET /api/files/drafts/{key}` ![user](https://img.shields.io/badge/-user-blue)
+One draft. An editor that was handed only a path asks this to learn where the
+draft is meant to go.
+
+### `POST /api/files/drafts/{key}/save` ![user](https://img.shields.io/badge/-user-blue)
+Moves the draft to its folder: body `{}` for its own name, or `{ "as": "<name>" }`
+for another. `200 { ok, path, name, target_dir }`; the file keeps its catalogue
+row (an editor still open on it goes on saving into the saved document) and
+from then on is an ordinary file — versioned, listed, announced.
+
+- The name is taken: `409 { "code": "TARGET_TAKEN", "name", "suggested",
+  "target_dir" }`, where `suggested` is the first free `name (2).ext`,
+  `name (3).ext` … Nothing moves. The client asks, and sends `{ "as": suggested }`
+  if the person agrees. ⚠ A save never replaces a file.
+- The folder is gone: `409 { "code": "FOLDER_GONE" }`; the draft stays.
+- The server cannot tell whether the name is free: `503 { "code":
+  "EXISTS_CHECK_FAILED" }` — refused rather than risk a replace.
+- ≥ editor on the folder is checked **now**, not when the draft was made:
+  `403` if the caller lost it meanwhile; a read-only storage is `403` too.
+
+### `DELETE /api/files/drafts/{key}` ![user](https://img.shields.io/badge/-user-blue)
+Discards the draft into the trash: `200 { ok: true, trashed: true }`. It is then
+in the caller's own trash listing with `draft: true` and its name as its path,
+and restoring it puts it back in Drafts ([TRASH-VERSIONING.md → Discarded
+drafts](TRASH-VERSIONING.md#discarded-drafts)). On a storage that cannot keep
+deleted bytes it is deleted outright (`trashed: false`).
 
 ---
 
@@ -1910,7 +1991,8 @@ administers everything. See
 
 ### `GET /api/admin/protection` ![admin](https://img.shields.io/badge/-admin-red)
 Returns the trash-retention window, the version keep count, the share-link life
-ceiling and the whole `antivirus` block — the switch, the mode, the clamd
+ceiling, the drafts limit (`drafts_limit`, with `drafts_limit_min` /
+`drafts_limit_max`) and the whole `antivirus` block — the switch, the mode, the clamd
 address, the size ceiling, the editor save-scan window — plus a **status**
 sub-object describing what this process is actually doing: what would answer
 (`clamscan` / `clamdscan` / `clamd`), whether it is `reachable`, its version,

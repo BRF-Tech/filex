@@ -174,12 +174,20 @@ const CODE_FIELD_WORDS: Readonly<Record<string, string>> = {
   NOT_CANCELLABLE: 'err.not_cancellable',
   FINISHED: 'err.finished',
   TOO_MANY: 'err.too_many',
+  /* Drafts (issue #71, handlers/drafts.go). TARGET_TAKEN is not here: it is a
+     question the client asks ("save as name (2).ext?"), never a refusal. */
+  DRAFT_LIMIT: 'err.draft_limit',
+  FOLDER_GONE: 'err.draft_folder_gone',
+  DRAFTS_UNAVAILABLE: 'err.drafts_unavailable',
 };
 
 function codeFieldWordsWith(fields: Record<string, unknown>, t: T): string {
   const key = typeof fields.code === 'string' ? CODE_FIELD_WORDS[fields.code] : undefined;
   if (!key) return '';
-  return t(key, typeof fields.max === 'number' ? { max: fields.max } : {});
+  // The refusal's numbers are the sentence's placeholders (`{max}`, `{limit}`).
+  const params: Record<string, number> = {};
+  for (const [k, v] of Object.entries(fields)) if (typeof v === 'number') params[k] = v;
+  return t(key, params);
 }
 
 /**

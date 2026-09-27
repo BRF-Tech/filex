@@ -153,84 +153,12 @@ func (h *Manager) vfNewFile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-
-	docType, known := newdoc.Lookup(body.Type)
-	if !known {
-		// A type this build cannot materialise must never reach storage: the
-		// alternative is a file named .docx that no editor can open, which is
-		// worse than the error.
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "unsupported document type: " + body.Type,
-			"code":  "UNSUPPORTED_TYPE",
-		})
-		return
-	}
-
-	name, refused := resolveNewDocName(body.Name, docType, body.ExactName)
-	switch refused {
-	case "":
-	case newDocExtNeedsType:
-		ext := strings.ToLower(strings.TrimPrefix(path.Ext(strings.TrimSpace(body.Name)), "."))
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "a ." + ext + " file is created as its own type; an empty one would not open",
-			"code":  newDocExtNeedsType,
-			"ext":   ext,
-		})
-		return
-	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad file name", "code": refused})
-		return
-	}
-
-	// ACL (acl.LevelEditor on the destination) happens in here. The picker
-	// also refuses to offer a folder the person cannot write to, but that is
-	// a courtesy to the person, not a permission check: the client is never
-	// the check.
-	current, destRel, _, ok := h.resolveAdapterDir(w, r, body.Path)
+	plan, ok := h.planNewDoc(w, r, body)
 	if !ok {
 		return
 	}
-	if current.ReadOnly {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
-		return
-	}
-
-	blob, err := newdoc.Bytes(docType.Ext)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	size := int64(len(blob))
-
-	// The templates are kilobytes, but "small" is not a reason to skip the
-	// ceiling: a quota that the New-document button can step over is not a
-	// quota. Same status + code as the upload path so one client branch
-	// handles both.
-	if err := h.checkQuota(r.Context(), size); err != nil {
-		if errors.Is(err, quota.ErrQuotaExceeded) {
-			slog.Info("newfile refused: quota",
-				slog.Int64("user", quotastore.OwnerFrom(r.Context())),
-				slog.Int64("size", size))
-			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
-				"error": "quota exceeded",
-				"code":  "QUOTA_EXCEEDED",
-			})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
-	drv, err := h.StorageResolver(current.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no driver: " + err.Error()})
-		return
-	}
-	wr, ok := drv.(storage.Writer)
-	if !ok {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "driver does not support write"})
-		return
-	}
+	current, destRel, name, docType := plan.storage, plan.destRel, plan.name, plan.ty
+	blob, size, drv, wr := plan.blob, int64(len(plan.blob)), plan.drv, plan.wr
 
 	fullRel := path.Join(destRel, name)
 	if gate(w, r, h.ACL, current.ID, writegate.Writes(fullRel)) {
@@ -319,6 +247,108 @@ func (h *Manager) vfNewFile(w http.ResponseWriter, r *http.Request) {
 		Size: size,
 		Mime: mime,
 	})
+}
+
+// newDocPlan is what a New-document request resolved to before anything was
+// written: the type and its bytes, the name, and where it was asked for — the
+// half vfNewFile (a file at the destination) and CreateDraft (a draft meant
+// for it, issue #71) share, so a name, a type, a folder or a quota that one of
+// them refuses the other refuses the same way.
+type newDocPlan struct {
+	ty      newdoc.Type
+	name    string
+	storage *model.Storage
+	destRel string
+	blob    []byte
+	drv     storage.Driver
+	wr      storage.Writer
+}
+
+// planNewDoc resolves a New-document request, answering the refusal itself
+// (ok=false) when there is one: an unknown type, a name that is not one, a
+// folder the caller may not write to or a read-only storage, a quota the
+// bytes would step over, a driver that cannot write.
+func (h *Manager) planNewDoc(w http.ResponseWriter, r *http.Request, body vfNewFileBody) (*newDocPlan, bool) {
+	docType, known := newdoc.Lookup(body.Type)
+
+	if !known {
+		// A type this build cannot materialise must never reach storage: the
+		// alternative is a file named .docx that no editor can open, which is
+		// worse than the error.
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "unsupported document type: " + body.Type,
+			"code":  "UNSUPPORTED_TYPE",
+		})
+		return nil, false
+	}
+
+	name, refused := resolveNewDocName(body.Name, docType, body.ExactName)
+	switch refused {
+	case "":
+	case newDocExtNeedsType:
+		ext := strings.ToLower(strings.TrimPrefix(path.Ext(strings.TrimSpace(body.Name)), "."))
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "a ." + ext + " file is created as its own type; an empty one would not open",
+			"code":  newDocExtNeedsType,
+			"ext":   ext,
+		})
+		return nil, false
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad file name", "code": refused})
+		return nil, false
+	}
+
+	// ACL (acl.LevelEditor on the destination) happens in here. The picker
+	// also refuses to offer a folder the person cannot write to, but that is
+	// a courtesy to the person, not a permission check: the client is never
+	// the check.
+	current, destRel, _, ok := h.resolveAdapterDir(w, r, body.Path)
+	if !ok {
+		return nil, false
+	}
+	if current.ReadOnly {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		return nil, false
+	}
+
+	blob, err := newdoc.Bytes(docType.Ext)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return nil, false
+	}
+	size := int64(len(blob))
+
+	// The templates are kilobytes, but "small" is not a reason to skip the
+	// ceiling: a quota that the New-document button can step over is not a
+	// quota. Same status + code as the upload path so one client branch
+	// handles both.
+	if err := h.checkQuota(r.Context(), size); err != nil {
+		if errors.Is(err, quota.ErrQuotaExceeded) {
+			slog.Info("newfile refused: quota",
+				slog.Int64("user", quotastore.OwnerFrom(r.Context())),
+				slog.Int64("size", size))
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+				"error": "quota exceeded",
+				"code":  "QUOTA_EXCEEDED",
+			})
+			return nil, false
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return nil, false
+	}
+
+	drv, err := h.StorageResolver(current.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no driver: " + err.Error()})
+		return nil, false
+	}
+	wr, ok := drv.(storage.Writer)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "driver does not support write"})
+		return nil, false
+	}
+
+	return &newDocPlan{ty: docType, name: name, storage: current, destRel: destRel, blob: blob, drv: drv, wr: wr}, true
 }
 
 // mirrorNewDocNode puts the new file into the catalogue: node row, search

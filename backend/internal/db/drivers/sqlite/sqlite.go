@@ -89,6 +89,8 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	s.StorageOrderSQL = &db.StorageOrderSQL{Pool: sqlDB}
 	// Who put a row in the trash (00061), the same way.
 	s.NodeDeletedBySQL = &db.NodeDeletedBySQL{Pool: sqlDB}
+	// Drafts (00064), the same way.
+	s.DraftSQL = &db.DraftSQL{Pool: sqlDB}
 	return s
 }
 
@@ -105,6 +107,8 @@ type Store struct {
 	*db.StorageOrderSQL
 	// SetNodeDeletedBy (internal/db node_deleted_by_sql.go).
 	*db.NodeDeletedBySQL
+	// The drafts methods (internal/db drafts_sql.go).
+	*db.DraftSQL
 }
 
 // upsertClause matches SQLite's upsert tail so it can be swapped for MySQL's.
@@ -1034,7 +1038,7 @@ func (s *Store) StorageStats(ctx context.Context, storageID int64) (int64, int64
 	)
 	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM nodes
-		   WHERE storage_id=? AND type='file' AND deleted_at IS NULL`,
+		   WHERE storage_id=? AND type='file' AND deleted_at IS NULL AND `+db.NotInDraftsSQL("path"),
 		storageID,
 	).Scan(&count, &size)
 	if err != nil {

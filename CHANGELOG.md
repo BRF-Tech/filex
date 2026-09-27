@@ -19,6 +19,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the Microsoft Store on Windows, and it now offers the `.rpm` every
   release has attached; on macOS it offers the Homebrew tap after the `.dmg`
   (`brew upgrade` is what keeps a Mac copy current).
+- **A new document is a draft until its first save**
+  ([#71](https://github.com/BRF-Tech/filex/issues/71)). Choosing New
+  document, naming it and closing the editor used to leave an empty file in
+  the folder. Now Create makes a draft — a real file with the name and type
+  you chose, kept in your own drafts area of that storage — and the folder
+  gets nothing until you press **Save**
+  ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save)).
+  - The editor opens on the draft under a bar that says where it will go,
+    and every editor writes into it as you type: the text, code and Markdown
+    editors every few seconds, the document server and the diagram editor
+    through their own saves. The browser asks before a tab with unsaved
+    changes is closed, and so does the desktop app's document window.
+  - **Save** puts it in its folder. If a file has taken the name meanwhile,
+    filex asks — *save as `report (2).txt` instead?* — and nothing moves
+    before the answer; a save never replaces a file.
+  - Closing a draft that was never saved asks **Save to disk**, **Keep in
+    Drafts** (the default) or **Discard**, which moves it to the Trash;
+    restoring it from there puts it back in Drafts.
+  - **Drafts**, in the navigation panel beside Recent, Starred and Trash,
+    lists your drafts from every storage in the explorer's own table — name,
+    where it will be saved, storage, modified — with Open, Save to disk and
+    Delete, and the panel shows how many there are. No notifications.
+  - A draft is its owner's alone: not in any listing, search, share, WebDAV,
+    S3, SFTP, FTPS or NFS view, desktop sync, storage usage figure or version
+    history, and not shown to anybody else — administrators included. On
+    disk it is `.filex-drafts/<user id>/<key>/<name>`, one of the names filex
+    keeps for itself.
+  - At most **50 drafts per person** by default: *Admin → Protection →
+    Drafts* (1–1000), or `FILEX_DRAFTS_LIMIT` on a fresh install. At the limit
+    New document says so and offers Drafts; it never creates the file in the
+    folder instead.
+  - For integrators: `POST /api/files/drafts` takes `newfile`'s body, with
+    `GET`, `…/count`, `…/{key}`, `POST …/{key}/save` (`409 TARGET_TAKEN` with
+    a `suggested` name) and `DELETE …/{key}`
+    ([docs/BACKEND.md](docs/BACKEND.md#drafts)). Drafts belong to a person, so
+    an app token and an embed confined to one folder by its host keep
+    creating the file directly; `capabilities.drafts` is present exactly when
+    the caller's New document makes drafts. Migration `00064` adds the
+    `drafts` table.
+
+### Changed
+
+- **filex's pages are shown in a frame only by filex itself, unless you name
+  the site.** A dashboard that shows filex in an `<iframe>` (Homarr, Organizr
+  and the like) needs its origin in the new `FILEX_FRAME_ANCESTORS`
+  (`frame_ancestors`), for example `https://home.example.com`; otherwise the
+  browser refuses the frame. The embedded explorer (`<filex-explorer>`, the
+  React and Vue components) is not a frame and is not affected, nor is what it
+  shows from filex on the host page, nor the desktop app
+  ([docs/CONFIGURATION.md](docs/CONFIGURATION.md#security-headers-and-framing)).
 
 ### Fixed
 
@@ -28,6 +78,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that is approved, winget does not find them, and the pages now say so.
 - The install offer gave the Windows installer and portable `.exe` as ~92 MB;
   they are ~125 MB.
+- **A draw.io diagram can be saved.** The draw.io viewer saves through the
+  text-save endpoint, which did not accept `.drawio` / `.dio`, and a new
+  diagram's catalogue type (`application/vnd.jgraph.mxfile`) was not taken
+  for text either: every Save in draw.io answered 415 "extension not allowed".
+
+### Security
+
+- **filex sends its own browser-facing headers**, whatever proxy is in front:
+  `X-Content-Type-Options: nosniff` and
+  `Referrer-Policy: strict-origin-when-cross-origin` on every answer, and
+  `Content-Security-Policy: frame-ancestors 'self'` (plus
+  `FILEX_FRAME_ANCESTORS`) on its pages.
+- **The draw.io editor and the legacy converter talk only to their own
+  frame.** Messages are taken only from that frame at the configured
+  service's origin, and sent only to that origin.
+- **Documented: the Document Server is trusted like filex's own pages.** Its
+  editor API script runs inside the filex page, so filex should only be
+  pointed at a Document Server that is run or trusted as fully as filex
+  ([docs/ONLYOFFICE.md → Security notes](docs/ONLYOFFICE.md#security-notes)).
 
 ## [0.47.0] - 2026-09-26
 

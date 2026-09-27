@@ -51,6 +51,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/replica"
 	"github.com/brf-tech/filex/backend/internal/s3api"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/secheaders"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/staging"
@@ -270,6 +271,11 @@ func BuildRouter(d *Deps) http.Handler {
 
 	r.Use(LoggerAt(d.Cfg.BasePath))
 	r.Use(Recoverer)
+	// The browser-facing headers every answer carries, whatever proxy is (or
+	// is not) in front: nosniff, the referrer policy, and on filex's own pages
+	// who may frame them (FILEX_FRAME_ANCESTORS). Above the base-path
+	// middleware, so its own refusals carry them too. See internal/secheaders.
+	r.Use(secheaders.Middleware(d.Cfg.FrameAncestors))
 	// A sub-path deployment (https://example.com/filex/, FILEX_BASE_PATH):
 	// the base comes off here, so every route below, and every middleware
 	// that reads the path (APINoStore, the demo guard, confine), sees the paths
@@ -1169,6 +1175,18 @@ func BuildRouter(d *Deps) http.Handler {
 
 			// Plain-text save target for the SFC's code/markdown editor.
 			r.Post("/save-text", saveTextH.Save)
+
+			// Drafts (issue #71): a new document until its first save —
+			// handlers/drafts.go, docs/API.md → Drafts. `count` is declared
+			// before `{key}` so chi cannot route the literal into the key.
+			r.Route("/drafts", func(r chi.Router) {
+				r.Get("/", mh.ListDrafts)
+				r.Post("/", mh.CreateDraft)
+				r.Get("/count", mh.CountDrafts)
+				r.Get("/{key}", mh.GetDraft)
+				r.Post("/{key}/save", mh.SaveDraft)
+				r.Delete("/{key}", mh.DiscardDraft)
+			})
 
 			// Per-file/per-folder permissions panel (RBAC). Owner/admin only —
 			// enforced inside the handler, not the route.

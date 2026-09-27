@@ -36,6 +36,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 	"github.com/brf-tech/filex/backend/internal/writegate"
@@ -802,7 +803,17 @@ func (h *AppPlugins) CommitVersion(ctx context.Context, storageID int64, rel str
 	// that is what the freeze is for, and writegate lets the lock holder
 	// through (the job runner tells it who is writing, WithApp). Another
 	// app's output landing on it is refused, whoever queued the job.
-	if err := writegate.Check(h.ACL.Locks(ctx, storageID), writegate.AppFrom(ctx), writegate.Writes(rel)); err != nil {
+	//
+	// An app's editor may also be working on a DRAFT (issue #71): a new
+	// document of a type the app edits lives in its owner's drafts area until
+	// its first save, and a new version of it is that person's own save
+	// (syspath.OwnDraft) — for the person who queued the job, nobody else.
+	var person int64
+	if actor != nil {
+		person = *actor
+	}
+	if err := writegate.Check(h.ACL.Locks(ctx, storageID), writegate.AppFrom(ctx),
+		writegate.Writes(rel).As(syspath.OwnDraft).By(person)); err != nil {
 		return err
 	}
 	if err := storage.EnsureFileTarget(ctx, drv, rel); err != nil {

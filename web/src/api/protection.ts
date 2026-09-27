@@ -90,6 +90,11 @@ export interface ProtectionSettings {
   share_max_ttl_days: number;
   /** How many existing live links outlive the ceiling (reported only). */
   shares_over_max_ttl: number;
+  /** Drafts (issue #71): how many drafts one person may keep, and the bounds
+   *  the API enforces. Absent on a server from before drafts. */
+  drafts_limit?: number;
+  drafts_limit_min?: number;
+  drafts_limit_max?: number;
   antivirus: ProtectionAntivirus;
 }
 
@@ -97,6 +102,7 @@ export interface ProtectionPatch {
   trash_retention_days?: number;
   versions_keep_n?: number;
   share_max_ttl_days?: number;
+  drafts_limit?: number;
   av_save_scan_window_minutes?: number;
   av_max_scan_mb?: number;
   /** ⚠⚠ These three take effect at the NEXT RESTART, in both directions. */

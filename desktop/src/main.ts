@@ -2092,6 +2092,14 @@ const OPEN_WITH_STRINGS: Bilingual = {
     'Right-click any .docx → Get Info → "Open with" → filex → Change All…',
     'Herhangi bir .docx dosyasına sağ tıkla → Bilgi Al → “Şununla aç” → filex → Tümünü Değiştir…',
   ],
+  // Drafts (issue #71) — a draft's document window closing with edits in it.
+  draftLeaveMessage: ['Close this draft?', 'Bu taslak kapatılsın mı?'],
+  draftLeaveDetail: [
+    'What was typed stays in Drafts, where it can be opened or saved later.',
+    'Yazılanlar Taslaklar’da kalır; daha sonra açılabilir ya da kaydedilebilir.',
+  ],
+  draftLeave: ['Close', 'Kapat'],
+  draftStay: ['Keep editing', 'Düzenlemeye devam et'],
 };
 
 function openText(key: string, vars: Record<string, string> = {}): string {
@@ -2485,6 +2493,23 @@ function makeDocumentWindow(
     void win.webContents
       .executeJavaScript(extra + docChromeScript(), true)
       .catch(() => undefined);
+  });
+  // Drafts (issue #71): a draft's editor asks before its page goes away while
+  // it holds edits not yet saved where they belong (PreviewModal's
+  // `beforeunload`). A browser draws that question itself; Electron does not —
+  // it only reports it here, and without an answer the window would simply
+  // refuse to close. The same question, as the OS's own dialog. Leaving loses
+  // nothing: the draft keeps what was typed, and stays in Drafts.
+  win.webContents.on('will-prevent-unload', (e) => {
+    const leave = dialog.showMessageBoxSync(win, {
+      type: 'question',
+      buttons: [openText('draftLeave'), openText('draftStay')],
+      defaultId: 1,
+      cancelId: 1,
+      message: openText('draftLeaveMessage'),
+      detail: openText('draftLeaveDetail'),
+    });
+    if (leave === 0) e.preventDefault();
   });
   void win.loadURL(url);
   return win;

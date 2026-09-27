@@ -39,6 +39,11 @@ import { requestFailure, sayFailure } from '../lib/errorWords';
 import { createArchivePreviewCache } from '../lib/archivePreviewCache';
 import { isTextualMime } from '../lib/textMime';
 import { withAppBase } from '../lib/appBase';
+import { draftKeyOf } from '../lib/internalPaths';
+import { draftFolderLabel, draftsClient, type DraftDto } from '../lib/drafts';
+import { useDraftSave, type SavedDraft } from '../composables/useDraftSave';
+import DraftCloseModal from './DraftCloseModal.vue';
+import DraftConflictModal from './DraftConflictModal.vue';
 
 const props = defineProps<{
   open: boolean;
@@ -113,6 +118,18 @@ const props = defineProps<{
    * as it always has. The host passes it for the one file it applies to.
    */
   openAs?: string | null;
+  /**
+   * Drafts (issue #71): the drafts API, `<api>/api/files/drafts`. With it, a
+   * file whose path is a draft's (`<storage>://.filex-drafts/…`, lib/
+   * internalPaths `draftKeyOf`) is edited AS a draft: the bar across the top
+   * says where it will be saved and carries the Save that puts it there,
+   * closing asks what should become of it (DraftCloseModal), and leaving the
+   * page with edits in it asks the browser's own question. Every host passes
+   * it — the explorer, the standalone editor tab, the desktop's document
+   * windows (which load that tab) — so a draft behaves the same wherever it
+   * is opened. Absent: nothing here changes.
+   */
+  draftsEndpoint?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -125,6 +142,11 @@ const emit = defineEmits<{
   (e: 'share'): void;
   /** The star toggle succeeded — so the host can update its listing row. */
   (e: 'starred', value: boolean): void;
+  /** Drafts (issue #71): the draft was saved — it is a file at `path` now.
+   *  The viewer keeps editing it there; the host refreshes what it shows. */
+  (e: 'draft-saved', saved: SavedDraft): void;
+  /** Drafts: the draft was discarded (it is in the trash). Followed by `close`. */
+  (e: 'draft-discarded'): void;
 }>();
 
 const { t, formatSize, formatDate, nodeDisplayName } = useLocale(() => props.locale);
@@ -320,6 +342,9 @@ const viewerProps = computed(() => {
     }
   }
   if (e === 'drawio' || e === 'dio') {
+    // ⚠ The adapter-qualified path: the diagram is saved through save-text,
+    // which resolves a bare path against the first storage (see saveMarkdown).
+    base.filePath = livePath.value;
     base.drawioUrl = props.drawioUrl ?? undefined;
     base.canConfigure = props.canConfigure === true;
     base.saveUrl = props.saveTextEndpoint ?? undefined;
@@ -409,7 +434,10 @@ const editTitle = computed(() =>
 // Keep adapter prefix so backend resolves the right storage — stripping
 // it defaults to storages[0] and 404s on any non-default adapter.
 const src = computed(() => (props.file ? props.previewUrl(props.file.path) : ''));
-const download = computed(() => (props.file ? props.downloadUrl(props.file.path) : ''));
+/* Drafts: after its Save the draft is a file somewhere else — the download
+   is of THAT file (livePath); the preview source is left alone, because
+   changing it would reload the editor that is still open on the document. */
+const download = computed(() => (props.file ? props.downloadUrl(livePath.value) : ''));
 
 function stripAdapter(p: string): string {
   const idx = p.indexOf('://');
@@ -555,7 +583,7 @@ function toggleFullscreen(): void {
  */
 function onGroundClick(): void {
   if (!showChrome.value) return;
-  emit('close');
+  requestClose();
 }
 
 const loading = ref(false);
@@ -590,6 +618,7 @@ let mdReRenderTimer: ReturnType<typeof setTimeout> | undefined;
 let mdAutosaveTimer: ReturnType<typeof setTimeout> | undefined;
 function onMdInput() {
   mdDirty.value = true;
+  draftTouched.value = true;
   if (mdReRenderTimer) clearTimeout(mdReRenderTimer);
   mdReRenderTimer = setTimeout(() => {
     renderMarkdown(rawText.value);
@@ -604,6 +633,7 @@ function onMdInput() {
 async function saveMarkdown() {
   if (!props.saveTextEndpoint || !props.file || mdSaving.value) return;
   mdSaving.value = true;
+  const sent = rawText.value;
   fetchError.value = null;
   fetchErrorDetail.value = null;
   try {
@@ -615,12 +645,16 @@ async function saveMarkdown() {
       method: 'POST',
       headers,
       credentials: props.authCredentials || 'same-origin',
-      body: JSON.stringify({ path: stripAdapter(props.file.path), content: rawText.value }),
+      // ⚠ The adapter-qualified path. It was sent stripped since v0.1, and
+      // save-text then resolved the bare path against the FIRST storage — an
+      // edit to a file on any other storage was written to the first one
+      // (found with drafts, issue #71, which live on every storage).
+      body: JSON.stringify({ path: livePath.value, content: rawText.value }),
     });
     if (!res.ok) {
       throw requestFailure(res.status, await res.text().catch(() => ''), props.locale);
     }
-    mdDirty.value = false;
+    if (sent === rawText.value) mdDirty.value = false;
   } catch (err) {
     showFetchError(said(err, 'err.save_failed'));
   } finally {
@@ -853,6 +887,8 @@ const monacoUnavailable = ref(false);
 const saving = ref(false);
 const saveOk = ref(false);
 const saveError = ref<string | null>(null);
+/** Typed into the editor and not yet written (a draft's leave-page question). */
+const codeDirty = ref(false);
 
 function disposeMonaco(): void {
   if (monacoEditor) {
@@ -933,6 +969,8 @@ async function tryMountMonaco(text: string, extension: string): Promise<boolean>
       // overlap, so a manual save during the debounce window just wins
       // and the queued autosave becomes a no-op.
       monacoEditor.onDidChangeModelContent(() => {
+        codeDirty.value = true;
+        draftTouched.value = true;
         if (codeAutosaveTimer) clearTimeout(codeAutosaveTimer);
         codeAutosaveTimer = setTimeout(() => {
           void saveCode();
@@ -962,14 +1000,16 @@ async function saveCode(): Promise<void> {
       method: 'POST',
       headers,
       credentials: props.authCredentials || 'same-origin',
+      // ⚠ Adapter-qualified — see saveMarkdown.
       body: JSON.stringify({
-        path: stripAdapter(props.file.path),
+        path: livePath.value,
         content: text,
       }),
     });
     if (!res.ok) {
       throw requestFailure(res.status, await res.text().catch(() => ''), props.locale);
     }
+    if (!monacoEditor || monacoEditor.getValue() === text) codeDirty.value = false;
     saveOk.value = true;
     setTimeout(() => {
       saveOk.value = false;
@@ -1147,6 +1187,12 @@ async function mountOnlyOfficeEditor(): Promise<void> {
       onError: (err: any) => {
         officeError.value = formatOnlyOfficeError(err);
       },
+      // Drafts: the document server keeps the edits until the session ends
+      // and then saves them into the draft itself; this only tells the page
+      // there ARE edits (the leave-page question).
+      onDocumentStateChange: (ev: any) => {
+        if (ev?.data) draftTouched.value = true;
+      },
     };
 
     const W = window as any;
@@ -1230,6 +1276,242 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
     document.head.appendChild(script);
   });
 }
+
+/* === Drafts (issue #71) ===================================================
+ *
+ * A new document is a DRAFT until its first save: a real file in the
+ * person's own drafts area, which this viewer opens and saves like any other
+ * file (the text editor, draw.io, ONLYOFFICE). What a draft adds is here, and
+ * nowhere in the editors themselves:
+ *
+ *   · the bar across the top — where it will be saved, and the Save that
+ *     puts it there (the "name (2).ext?" question when that name is taken);
+ *   · closing asks what should become of it — Save to disk, Keep in Drafts
+ *     (the default), Discard (to the trash);
+ *   · leaving the PAGE with edits in it asks the browser's own question, and
+ *     whatever the text editors still hold is sent on the way out.
+ *
+ * ⚠ The draft is found by its PATH (`draftKeyOf`), not handed over by the
+ * host: the explorer, the standalone editor tab and the desktop's document
+ * windows all open a viewer on a path and nothing else, so the path is the
+ * one thing they agree on.
+ */
+
+/** The request every draft call goes out on: this viewer's credentials. */
+async function authedFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const headers: Record<string, string> = { ...((init.headers as Record<string, string>) ?? {}) };
+  if (props.authHeaders) Object.assign(headers, await props.authHeaders());
+  return fetch(url, { ...init, headers, credentials: props.authCredentials || 'same-origin' });
+}
+
+const draftsApi = computed(() =>
+  props.draftsEndpoint
+    ? draftsClient(props.draftsEndpoint, { request: authedFetch, locale: props.locale })
+    : null,
+);
+const draftKey = computed(() => (props.draftsEndpoint && props.file ? draftKeyOf(props.file.path) : ''));
+const draft = ref<DraftDto | null>(null);
+/** Where the draft went when it was saved — it is a file there now. */
+const draftSaved = ref<SavedDraft | null>(null);
+/** Edits were made to the draft in this editor (the leave-page question). */
+const draftTouched = ref(false);
+const draftActive = computed(() => !!draft.value && !draftSaved.value);
+const draftFolder = computed(() => (draft.value ? draftFolderLabel(draft.value.target_dir) : ''));
+const savedFolder = computed(() => (draftSaved.value ? draftFolderLabel(draftSaved.value.targetDir) : ''));
+/** "Saved to …" stays on the bar for a moment after the Save. */
+const draftSavedNote = ref(false);
+let draftNoteTimer: ReturnType<typeof setTimeout> | undefined;
+const draftBusy = ref(false);
+const draftError = ref<string | null>(null);
+const showDraftClose = ref(false);
+
+/** The path the file is at NOW: the draft's, or where its Save put it. */
+const livePath = computed(() => draftSaved.value?.path ?? props.file?.path ?? '');
+
+function sayDraft(err: unknown): string {
+  return said(err, 'err.save_failed').text;
+}
+const draftSave = useDraftSave(() => draftsApi.value, sayDraft);
+
+watch(
+  () => [props.open, draftKey.value] as const,
+  async ([open, key]) => {
+    draft.value = null;
+    draftSaved.value = null;
+    draftTouched.value = false;
+    draftSavedNote.value = false;
+    draftError.value = null;
+    showDraftClose.value = false;
+    if (!open || !key || !draftsApi.value) return;
+    try {
+      const d = await draftsApi.value.get(key);
+      // Still the same draft on screen when the answer came back.
+      if (draftKey.value === key && props.open) draft.value = d;
+    } catch {
+      // Not a draft of this person's (or a server without drafts): the file
+      // is edited as the file it is, which is all anybody else could do.
+      draft.value = null;
+    }
+  },
+  { immediate: true },
+);
+
+/**
+ * Write whatever the built-in editors still hold into the draft, and wait for
+ * a save already on its way — before the draft is saved elsewhere or its tab
+ * goes away. (ONLYOFFICE saves on its own once its session ends; draw.io
+ * saves on every change.)
+ */
+async function flushEditors(): Promise<void> {
+  if (mdAutosaveTimer) {
+    clearTimeout(mdAutosaveTimer);
+    mdAutosaveTimer = undefined;
+  }
+  if (codeAutosaveTimer) {
+    clearTimeout(codeAutosaveTimer);
+    codeAutosaveTimer = undefined;
+  }
+  for (let i = 0; i < 100 && (saving.value || mdSaving.value); i++) {
+    await new Promise<void>((r) => setTimeout(r, 50));
+  }
+  if (mdDirty.value && kind.value === 'markdown') await saveMarkdown();
+  if (codeDirty.value && monacoEditor) await saveCode();
+}
+
+/** Every close goes through here: a draft asks first (DraftCloseModal). */
+function requestClose(): void {
+  if (draftActive.value) {
+    draftError.value = null;
+    showDraftClose.value = true;
+    return;
+  }
+  emit('close');
+}
+
+function afterSave(saved: SavedDraft): void {
+  draftSaved.value = saved;
+  draftSavedNote.value = true;
+  if (draftNoteTimer) clearTimeout(draftNoteTimer);
+  draftNoteTimer = setTimeout(() => {
+    draftSavedNote.value = false;
+  }, 5000);
+  emit('draft-saved', saved);
+}
+
+/** The bar's Save (and the close question's "Save to disk"). */
+async function saveDraftToDisk(): Promise<boolean> {
+  const d = draft.value;
+  if (!d || draftBusy.value) return false;
+  draftBusy.value = true;
+  draftError.value = null;
+  try {
+    await flushEditors();
+    const saved = await draftSave.save(d);
+    if (!saved) return false;
+    afterSave(saved);
+    return true;
+  } catch (err) {
+    draftError.value = sayDraft(err);
+    return false;
+  } finally {
+    draftBusy.value = false;
+  }
+}
+
+async function onCloseSave(): Promise<void> {
+  if (await saveDraftToDisk()) {
+    showDraftClose.value = false;
+    emit('close');
+  }
+}
+
+async function onCloseKeep(): Promise<void> {
+  draftBusy.value = true;
+  try {
+    await flushEditors();
+  } finally {
+    draftBusy.value = false;
+  }
+  showDraftClose.value = false;
+  emit('close');
+}
+
+async function onCloseDiscard(): Promise<void> {
+  const d = draft.value;
+  const api = draftsApi.value;
+  if (!d || !api || draftBusy.value) return;
+  draftBusy.value = true;
+  draftError.value = null;
+  // Nothing more goes into a draft that is on its way to the trash.
+  if (mdAutosaveTimer) clearTimeout(mdAutosaveTimer);
+  if (codeAutosaveTimer) clearTimeout(codeAutosaveTimer);
+  try {
+    await api.discard(d.key);
+    showDraftClose.value = false;
+    draft.value = null;
+    emit('draft-discarded');
+    emit('close');
+  } catch (err) {
+    draftError.value = sayDraft(err);
+  } finally {
+    draftBusy.value = false;
+  }
+}
+
+/**
+ * The browser's own "leave this page?" — while a draft has edits in it that
+ * were not saved where it belongs. (Its content is kept either way: the text
+ * editors send what they hold on the way out, below, and the document server
+ * saves its session when it ends.)
+ */
+function onBeforeUnload(e: BeforeUnloadEvent): void {
+  if (!props.open || !draftActive.value) return;
+  const edited = draftTouched.value || mdDirty.value || codeDirty.value || saving.value || mdSaving.value;
+  if (!edited) return;
+  e.preventDefault();
+  // Chrome and Edge still want the legacy field set to show the question.
+  e.returnValue = '';
+}
+
+/** On the way out: what the text editors hold, sent with `keepalive` so the
+ *  request outlives the page. */
+function onPageHide(): void {
+  if (!props.open || !props.saveTextEndpoint || !props.file) return;
+  let content: string | null = null;
+  if (codeDirty.value && monacoEditor) content = monacoEditor.getValue();
+  else if (mdDirty.value && kind.value === 'markdown') content = rawText.value;
+  if (content === null) return;
+  const endpoint = props.saveTextEndpoint;
+  const body = JSON.stringify({ path: livePath.value, content });
+  const send = (h: Record<string, string>) => {
+    try {
+      void fetch(endpoint, {
+        method: 'POST',
+        keepalive: true,
+        credentials: props.authCredentials || 'same-origin',
+        headers: { 'Content-Type': 'application/json', ...h },
+        body,
+      });
+    } catch {
+      /* the page is going away; nothing is left to tell */
+    }
+  };
+  // Awaited like every other call of it (a function token resolves
+  // asynchronously); the send still happens in the microtask right after this
+  // handler, while the page is still here to send it.
+  void (async () => send(props.authHeaders ? await props.authHeaders() : {}))();
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', onBeforeUnload);
+  window.addEventListener('pagehide', onPageHide);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload);
+  window.removeEventListener('pagehide', onPageHide);
+  if (draftNoteTimer) clearTimeout(draftNoteTimer);
+});
+
 </script>
 
 <template>
@@ -1240,7 +1522,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
     :chromeless="chromeless"
     :fullbleed="!chromeless"
     :theme="theme"
-    @close="emit('close')"
+    @close="requestClose"
   >
     <!-- === gorunum:v1-viewer ===
          A full-bleed overlay, not a card: one bar across the top, a chevron on
@@ -1265,7 +1547,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
             :aria-label="t('viewer.download')"
           ><span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('download')"></span></a>
           <button
-            v-if="shareEnabled"
+            v-if="shareEnabled && !draftKey"
             type="button"
             class="fe-viewer__act"
             :title="t('viewer.share')"
@@ -1275,7 +1557,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
           <!-- The listing's StarButton, not a copy of it: same component, same
                lib/star.ts request, same optimistic rollback. -->
           <StarButton
-            v-if="starNodeId !== null"
+            v-if="starNodeId !== null && !draftKey"
             class="fe-viewer__act fe-viewer__act--star"
             :starred="file.starred === true"
             :node-id="starNodeId"
@@ -1311,10 +1593,54 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
             class="fe-viewer__act fe-viewer__close"
             :title="t('viewer.close')"
             :aria-label="t('viewer.close')"
-            @click="emit('close')"
+            data-testid="viewer-close"
+            @click="requestClose"
           ><span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('close')"></span></button>
         </div>
       </header>
+
+      <!-- Drafts (issue #71): the bar a draft's editor carries — what it is,
+           where it will be saved, and the Save that puts it there. The same
+           bar with or without the overlay's chrome: on the standalone tab
+           (chromeless) it is the only bar, so it carries Close too. -->
+      <div
+        v-if="file && (draftActive || draftSavedNote)"
+        class="fe-draftbar"
+        :class="{ 'fe-draftbar--saved': !draftActive }"
+        role="region"
+        :aria-label="t('draft.badge')"
+        data-testid="draft-bar"
+      >
+        <template v-if="draftActive && draft">
+          <span class="fe-draftbar__pill">{{ t('draft.badge') }}</span>
+          <span class="fe-draftbar__text">
+            <bdi>{{ draft.name }}</bdi>
+            <span class="fe-draftbar__target" data-testid="draft-bar-target">{{ t('draft.bar.target', { folder: draftFolder }) }}</span>
+          </span>
+          <span v-if="draftError" class="fe-draftbar__error" role="alert" data-testid="draft-bar-error">{{ draftError }}</span>
+          <span class="fe-draftbar__gap" aria-hidden="true"></span>
+          <button
+            type="button"
+            class="fe-btn fe-btn--primary fe-btn--sm"
+            :disabled="draftBusy"
+            :aria-busy="draftBusy ? 'true' : undefined"
+            data-testid="draft-save"
+            @click="saveDraftToDisk"
+          >{{ t('draft.save') }}</button>
+          <button
+            v-if="chromeless"
+            type="button"
+            class="fe-btn fe-btn--sm"
+            :disabled="draftBusy"
+            data-testid="draft-close"
+            @click="requestClose"
+          >{{ t('viewer.close') }}</button>
+        </template>
+        <span v-else class="fe-draftbar__done" role="status" data-testid="draft-saved-note">
+          <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('check')"></span>
+          {{ t('draft.saved_to', { name: draftSaved?.name ?? '', folder: savedFolder }) }}
+        </span>
+      </div>
 
       <div class="fe-viewer__stage" @click.self="onGroundClick">
         <div v-if="file" class="fe-preview" :class="stageModifier" @click.self="onGroundClick">
@@ -1359,7 +1685,14 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
               <div class="fe-preview__md-split-bar">
                 <span class="fe-preview__md-split-label">MARKDOWN</span>
                 <span v-if="fetchError" class="fe-preview__md-split-error">{{ fetchError }}</span>
+                <!-- A draft is written as it is typed; its one Save is the
+                     bar's, which puts it where it belongs. Two "Save" buttons
+                     meaning two different things is one too many. -->
+                <span v-if="draftActive" class="fe-preview__code-status" data-testid="draft-autosave">
+                  {{ mdSaving ? t('viewer.saving') : (mdDirty ? t('draft.editing') : t('draft.kept')) }}
+                </span>
                 <button
+                  v-else
                   type="button"
                   class="fe-btn fe-btn--primary"
                   :disabled="!mdDirty || mdSaving"
@@ -1428,7 +1761,8 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
               v-bind="viewerProps"
               class="fe-preview__viewer"
               @fallback="onPdfFallback"
-              @close="emit('close')"
+              @change="draftTouched = true"
+              @close="requestClose"
             />
           </template>
 
@@ -1460,7 +1794,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
                 <span v-if="saveOk" class="fe-preview__code-status fe-preview__code-status--ok">
                   <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
                   <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('check')"></span>
-                  {{ t('viewer.saved') }}
+                  {{ draftActive ? t('draft.kept') : t('viewer.saved') }}
                 </span>
                 <span v-if="saveError" class="fe-preview__code-status fe-preview__code-status--err" :title="saveError">
                   <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
@@ -1469,7 +1803,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
                 </span>
                 <span v-if="openMode === 'view'" class="fe-preview__code-status">{{ t('viewer.read_only') }}</span>
                 <button
-                  v-else-if="saveTextEndpoint && monacoReady"
+                  v-else-if="saveTextEndpoint && monacoReady && !draftActive"
                   type="button"
                   class="fe-btn fe-btn--primary"
                   :disabled="saving"
@@ -1586,8 +1920,40 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
           </svg>
         </button>
       </div>
+
     </div>
   </Modal>
+
+  <!-- Drafts (issue #71): what closing a draft's editor asks, and the
+       question a Save beside a taken name asks. SIBLINGS of the viewer's
+       dialog, not children: Modal is not teleported, and a fixed overlay
+       inside the viewer's card would sit in its box (NewDocumentModal
+       keeps its folder picker beside it for the same reason). -->
+  <DraftCloseModal
+    :open="showDraftClose"
+    :locale="locale"
+    :theme="theme"
+    :name="draft?.name ?? ''"
+    :folder="draftFolder"
+    :busy="draftBusy && !draftSave.question.value"
+    :error="draftError"
+    @cancel="showDraftClose = false"
+    @save="onCloseSave"
+    @keep="onCloseKeep"
+    @discard="onCloseDiscard"
+  />
+  <DraftConflictModal
+    :open="!!draftSave.question.value"
+    :locale="locale"
+    :theme="theme"
+    :name="draftSave.question.value?.name ?? ''"
+    :suggested="draftSave.question.value?.suggested ?? ''"
+    :folder="draftSave.question.value?.folder ?? ''"
+    :busy="draftSave.busy.value"
+    :error="draftSave.error.value"
+    @cancel="draftSave.cancel"
+    @confirm="draftSave.confirm"
+  />
 </template>
 
 <style>

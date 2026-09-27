@@ -160,6 +160,11 @@ export interface Capabilities {
   /** Document types this build can create. Absent on a server older than the
    *  "New document" feature — hosts must treat that as "offer nothing". */
   newdoc_types?: NewDocType[];
+  /** Drafts (issue #71): present when the server keeps drafts for THIS caller
+   *  (a person acting for themselves — not an app token, not a caller
+   *  confined to one folder). New document then makes a draft; absent, it
+   *  creates the file directly. `limit` is how many one person may keep. */
+  drafts?: { limit: number };
   ffmpeg?: boolean;
   ghostscript?: boolean;
   libreoffice?: boolean;
@@ -288,4 +293,7 @@ export interface TrashEntry {
   deleted_by_name?: string;
   /** The asker's own delete ("You"). */
   deleted_by_self?: boolean;
+  /** One of the asker's own drafts (#71), discarded: it came from Drafts,
+   *  and Restore puts it back there. `path` is then just its name. */
+  draft?: boolean;
 }

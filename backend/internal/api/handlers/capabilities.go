@@ -10,6 +10,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/multioidc"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/drafts"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/newdoc"
@@ -246,6 +247,15 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	// Published to anonymous callers too. It is a static property of the
 	// build, identical on every install of this version, and names no host.
 	merged["newdoc_types"] = newdoc.Types()
+
+	// Drafts (issue #71): New document makes a draft rather than the file,
+	// for a caller who may keep them (draftsFor — a person acting for
+	// themselves: not an app, not confined to a folder). Absent otherwise,
+	// and absent on a server from before drafts: the explorer then creates
+	// the file directly (action=newfile), as it always did.
+	if h.Store != nil && draftsFor(r) {
+		merged["drafts"] = map[string]any{"limit": drafts.Limit(r.Context(), h.Store)}
+	}
 
 	// The address a client PROGRAM should be pointed at — the WebDAV URL, the
 	// `filex mount` / rclone lines in the connection guides.

@@ -1630,7 +1630,7 @@
   },
   "protection": {
     "title": "Protection",
-    "subtitle": "Trash retention, version policy, share-link life and antivirus",
+    "subtitle": "Trash retention, version policy, share-link life, drafts and antivirus",
     "unsupported": "The server does not support this version — the protection settings API was not found. This page activates after a backend update.",
     "savedOk": "Protection settings saved",
     "trash": {
@@ -1654,6 +1654,13 @@
       "hint": "0 = no limit. Default 7.",
       "errMin": "Enter an integer greater than or equal to 0",
       "overMax": "{n} existing link outlives this limit. It keeps working — revoke it under Shares if you want it gone. | {n} existing links outlive this limit. They keep working — revoke them under Shares if you want them gone."
+    },
+    "drafts": {
+      "title": "Drafts",
+      "desc": "A new document is a draft until its first save: it waits in the Drafts of the person who made it, where nobody else can see it, and nothing is created in its folder until it is saved. This is how many drafts one person may keep; at the limit, New document asks them to save or delete some first.",
+      "label": "Drafts per person",
+      "hint": "Between {min} and {max}. Default 50. Takes effect at once, with no restart.",
+      "errRange": "Enter a whole number between {min} and {max}."
     },
     "av": {
       "title": "Antivirus",

@@ -85,6 +85,7 @@ import PendingOpsTray from './components/PendingOpsTray.vue';
 import InspectorPanel from './components/InspectorPanel.vue'; /* koru:k1 */
 import SideNav, { type NavDest } from './components/SideNav.vue'; /* gezinti:g1 */
 import HomeView from './components/HomeView.vue'; /* gorunum:v3-shell */
+import DraftsView from './components/DraftsView.vue'; /* Drafts, issue #71 */
 import ConnectionsPanel from './components/ConnectionsPanel.vue'; /* gezinti:g1 */
 import TokensPanel from './components/TokensPanel.vue'; /* gezinti:g1 */
 /* cila:c wiring */
@@ -215,6 +216,10 @@ import ArchiveCreateModal from './modals/ArchiveCreateModal.vue';
 import ArchiveExtractModal from './modals/ArchiveExtractModal.vue';
 import ArchivePasswordModal from './modals/ArchivePasswordModal.vue';
 import NewDocumentModal from './modals/NewDocumentModal.vue'; /* belge:n1 */
+import DraftConflictModal from './modals/DraftConflictModal.vue'; /* Drafts, issue #71 */
+import { draftFolderLabel, type DraftDto } from './lib/drafts';
+import { draftKeyOf } from './lib/internalPaths';
+import { useDraftSave, type SavedDraft } from './composables/useDraftSave';
 import RenameModal from './modals/RenameModal.vue';
 import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
 import Modal from './modals/Modal.vue'; /* tablo:t1 — the empty-trash confirmation */
@@ -566,7 +571,7 @@ const trashActive = computed(() => trashMode.value);
  * pattern is trashMode's, generalised — including the part that matters most,
  * that load() clears the mode, or the view sticks and every later navigation
  * renders under the wrong heading. */
-type NavView = '' | 'home' | 'recent' | 'starred' | 'shared' | 'trash' | 'tag';
+type NavView = '' | 'home' | 'recent' | 'starred' | 'shared' | 'drafts' | 'trash' | 'tag';
 const navView = ref<NavView>('');
 /** Where the view was entered from, so "up" goes back there. */
 const navViewOrigin = ref<string>('');
@@ -791,6 +796,7 @@ const NAV_VIEW_DIRNAME: Record<Exclude<NavView, '' | 'trash' | 'tag'>, string> =
   recent: '.recent',
   starred: '.starred',
   shared: '.shared',
+  drafts: '.drafts',
 };
 
 /**
@@ -1818,6 +1824,160 @@ const canNewDocument = computed(() => {
   );
 });
 
+/* === Drafts (issue #71) =================================================
+ * A new document is a DRAFT until its first save: New document writes it
+ * into the person's own drafts area of the storage they chose, the editor
+ * opens on it, and nothing appears in the folder until it is saved. The
+ * server says whether it keeps drafts for this caller (`capabilities.drafts`
+ * — a person acting for themselves: not an app token, not a confined embed);
+ * without that answer New document creates the file, as it always did.
+ *
+ * This holds the explorer's half: the count on the panel's "Drafts" row, the
+ * Drafts view's rows and its three verbs. The editor's half (the Save bar,
+ * the close question) is PreviewModal's, so every host that mounts a viewer
+ * gets it — not only this explorer.
+ */
+const draftsEnabled = computed(() => !!capabilitiesData.value?.drafts);
+/** The panel row's badge — a count, never a notification. */
+const draftCount = ref(0);
+const draftRows = ref<DraftDto[]>([]);
+const draftLimit = ref(0);
+const draftsLoading = ref(false);
+/** A verb is running on this draft (its row's actions are greyed). */
+const draftBusyKey = ref<string | null>(null);
+
+async function refreshDraftCount(): Promise<void> {
+  if (!draftsEnabled.value) {
+    draftCount.value = 0;
+    return;
+  }
+  try {
+    const { count, limit } = await api.drafts.count();
+    draftCount.value = count;
+    draftLimit.value = limit;
+  } catch {
+    /* A badge that could not be read keeps what it last said. */
+  }
+}
+
+async function loadDraftRows(): Promise<void> {
+  draftsLoading.value = true;
+  try {
+    const list = await api.drafts.list();
+    draftRows.value = list.drafts;
+    draftLimit.value = list.limit;
+    draftCount.value = list.count;
+  } catch (err) {
+    draftRows.value = [];
+    const msg = failureText(err);
+    emit('error', { message: msg, context: { op: 'nav-view:drafts' } });
+    flashToast(msg);
+  } finally {
+    draftsLoading.value = false;
+  }
+}
+
+/** After any change to a draft: the badge, and the view when it is open. */
+async function afterDraftsChanged(): Promise<void> {
+  if (navView.value === 'drafts') await loadDraftRows();
+  else await refreshDraftCount();
+}
+
+watch(draftsEnabled, (on) => void (on ? refreshDraftCount() : (draftCount.value = 0)), { immediate: true });
+
+function extOfName(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+}
+
+/**
+ * Open a draft in its editor — the same viewer a file opens in, on the
+ * draft's path; the viewer finds the draft by that path and draws its bar.
+ * A host that opens files in windows of its own (the desktop app) gets it
+ * the same way it gets any file.
+ */
+function openDraft(d: DraftDto): void {
+  const node = {
+    type: 'file',
+    path: d.path,
+    basename: d.name,
+    extension: extOfName(d.name),
+    storage: d.storage,
+    size: d.size,
+    file_size: d.size,
+    mime_type: d.mime ?? '',
+    visibility: 'private',
+    extra_metadata: {},
+  } as unknown as FileNode;
+  if (openSurface(props.config, node) === 'host') {
+    emit('file-opened', { path: node.path, basename: node.basename });
+    return;
+  }
+  // The type it was MADE as: `LICENSE` made as Plain text opens in the text
+  // editor (#56), as it did when it was created.
+  previewOpenAs.value = d.type ? { path: node.path, ext: d.type } : null;
+  previewTarget.value = node;
+  previewMode.value = 'edit';
+  showPreview.value = true;
+}
+
+/** "Saved to …" — the file is where it belongs now. */
+function sayDraftSaved(saved: SavedDraft): void {
+  flashToast(t('draft.saved_to', { name: saved.name, folder: draftFolderLabel(saved.targetDir) }));
+}
+
+const draftListSave = useDraftSave(() => (draftsEnabled.value ? api.drafts : null), (err) => failureText(err));
+
+async function saveDraftFromList(d: DraftDto): Promise<void> {
+  if (draftBusyKey.value) return;
+  draftBusyKey.value = d.key;
+  try {
+    const saved = await draftListSave.save(d);
+    if (saved) {
+      sayDraftSaved(saved);
+      await afterDraftsChanged();
+    }
+  } catch (err) {
+    showToast({ message: failureText(err) }, ERROR_TOAST_MS);
+  } finally {
+    draftBusyKey.value = null;
+  }
+}
+
+/** Delete from the Drafts view: to the trash, like any deleted file. */
+async function discardDraftFromList(d: DraftDto): Promise<void> {
+  if (draftBusyKey.value) return;
+  draftBusyKey.value = d.key;
+  try {
+    await api.drafts.discard(d.key);
+    flashToast(t('draft.discarded', { name: d.name }));
+    await afterDraftsChanged();
+  } catch (err) {
+    showToast({ message: failureText(err) }, ERROR_TOAST_MS);
+  } finally {
+    draftBusyKey.value = null;
+  }
+}
+
+function onPreviewDraftSaved(saved: SavedDraft): void {
+  sayDraftSaved(saved);
+  void afterDraftsChanged();
+  // Standing in the folder it went to: show it there.
+  if (!navView.value && !trashMode.value) void load();
+}
+
+function onPreviewDraftDiscarded(): void {
+  const name = previewTarget.value?.basename ?? '';
+  flashToast(t('draft.discarded', { name }));
+  void afterDraftsChanged();
+}
+
+/** The New document dialog's "Open Drafts" (at the draft limit). */
+function openDraftsFromNewDocument(): void {
+  showNewDocument.value = false;
+  void loadNavView('drafts');
+}
+
 // Upload
 const uploadJobs = ref<UploadJob[]>([]);
 const fileInputEl = ref<HTMLInputElement | null>(null);
@@ -1913,6 +2073,10 @@ const previewOpenAsExt = computed(() =>
 );
 watch(showPreview, (open) => {
   if (!open) previewOpenAs.value = null;
+  // Drafts: a draft's editor closed — its row changed (and may be gone).
+  if (!open && draftsEnabled.value && previewTarget.value && draftKeyOf(previewTarget.value.path)) {
+    void afterDraftsChanged();
+  }
 });
 const showConvert = ref(false);
 const convertTarget = ref<FileNode | null>(null);
@@ -2661,6 +2825,25 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
   if (kind === 'tag') {
     // The tag view needs a name; the panel calls loadTagView directly.
     if (navTag.value) await loadTagView(navTag.value, navTagKind.value);
+    return;
+  }
+  if (kind === 'drafts') {
+    // Drafts (issue #71) is drawn by its own view (DraftsView), like Home: the
+    // mode and the address move first (lesson #608 — a refresh in the gap
+    // must reload THIS view), then the rows come.
+    if (!navView.value) navViewOrigin.value = currentPath.value ?? '';
+    navView.value = 'drafts';
+    navTag.value = '';
+    navTagKind.value = '';
+    trashMode.value = false;
+    e2eRoot.value = '';
+    forgetFolderPerm();
+    selection.clear();
+    files.value = [];
+    dirname.value = NAV_VIEW_DIRNAME.drafts;
+    currentPath.value = NAV_VIEW_DIRNAME.drafts;
+    adapter.value = '';
+    await loadDraftRows();
     return;
   }
   if (kind === 'trash') {
@@ -3687,6 +3870,9 @@ async function loadTrash() {
             ttl_days: e.ttl_days ?? null,
             /* A permanent delete is on its way for it (purgeSelection). */
             purging: trashPurging.value.has(e.id),
+            /* #71 — a discarded draft of the asker's: its Location reads
+               "Drafts" (ListView), which is where Restore puts it back. */
+            ...(e.draft ? { draft: true } : {}),
           },
           /* Who put it here — the Trash draws it where a folder draws the
              owner. Keys absent when nobody is named, as the listing sends. */
@@ -4225,7 +4411,12 @@ useKeyboardShortcuts(rootEl, {
     showNewFolder.value = false;
     showRename.value = false;
     showDelete.value = false;
-    showPreview.value = false;
+    /* #71 — a draft's editor is closed only through its own question (Save
+       to disk / Keep in Drafts / Discard). Its dialog answers Escape itself
+       (modals/Modal → PreviewModal.requestClose); closing it from here as
+       well dropped the editor behind the question the moment Escape was
+       pressed — measured in a real browser, question and editor both gone. */
+    if (!(previewTarget.value && draftKeyOf(previewTarget.value.path))) showPreview.value = false;
     ctxRef.value?.hide();
     dismissToast();
     /* gezinti:g1 — an open Connections / API-keys overlay is the topmost thing
@@ -5528,8 +5719,17 @@ async function onDestinationPicked(dest: string): Promise<void> {
 
 /* belge:n1 — after creating it, OPEN it. Creating a file and leaving the
  * person looking at a listing is half the feature. */
-async function onDocumentCreated(file: { path: string; name: string; ext: string }) {
+async function onDocumentCreated(file: { path: string; name: string; ext: string; draft?: DraftDto }) {
   showNewDocument.value = false;
+  // Drafts (issue #71): nothing was created in the folder — the document is a
+  // draft, and its editor opens on it. The folder is not reloaded: there is
+  // nothing new in it yet.
+  if (file.draft) {
+    draftCount.value += 1;
+    openDraft(file.draft);
+    void refreshDraftCount();
+    return;
+  }
   const dir = file.path.slice(0, file.path.lastIndexOf('/'));
   if (dir && dir !== qualify(currentPath.value)) await load(dir);
   else await load();
@@ -7214,8 +7414,9 @@ const paneRowVisible = computed(
  * a folder that is still loading does not flash its lock screen and a failed
  * listing still gets the retry state rather than "not found".
  */
-const hostBodyState = computed<'' | 'home' | 'notfound' | 'locked'>(() => {
+const hostBodyState = computed<'' | 'home' | 'drafts' | 'notfound' | 'locked'>(() => {
   if (navView.value === 'home') return 'home';
+  if (navView.value === 'drafts') return 'drafts';
   if (loading.value && files.value.length === 0) return '';
   if (notFoundPath.value) return 'notfound';
   if (loadError.value && files.value.length === 0) return '';
@@ -8224,6 +8425,8 @@ function closeRecoveryKey() {
       @reorder-storages="onReorderStorages"
       :shared-storages="sharedStorageNames"
       :trash-visible="config.trashVisible !== false"
+      :drafts-visible="draftsEnabled && identitySurfaces /* Drafts, issue #71 */"
+      :draft-count="draftCount"
       :show-connections="connectionsEnabled"
       :show-my-shares="mySharesEnabled /* paylas:m1 — off unless the host has the page */"
       :show-identity-surfaces="identitySurfaces"
@@ -8598,6 +8801,22 @@ function closeRecoveryKey() {
         @open-storage="openNavStorage"
         @open-node="openNode"
         @context-node="onContextTarget"
+      />
+      <!-- Drafts (issue #71): the person's drafts, across every storage — THE
+           table (DataTable), with Open / Save to disk / Delete per row. Like
+           Home it has no listing behind it, so it short-circuits the states
+           below. -->
+      <DraftsView
+        v-else-if="hostBodyState === 'drafts'"
+        :drafts="draftRows"
+        :loading="draftsLoading"
+        :limit="draftLimit"
+        :locale="locale"
+        :name-filter="driveFilters.name ?? ''"
+        :busy-key="draftBusyKey"
+        @open="openDraft"
+        @save="saveDraftFromList"
+        @delete="discardDraftFromList"
       />
       <!-- Dead deep link (404) or RBAC-hidden dir (403, shown identically):
            a dedicated state instead of a misleading "this folder is empty". -->
@@ -9076,7 +9295,9 @@ function closeRecoveryKey() {
       :only-office-ready="!!effectiveOnlyOfficeBase"
       :drawio-ready="!!effectiveDrawioUrl"
       :can-configure="callerAdmin"
+      :drafts="draftsEnabled /* issue #71 — a new document is a draft until saved */"
       @close="showNewDocument = false"
+      @open-drafts="openDraftsFromNewDocument"
       @created="onDocumentCreated"
       @error="emit('error', { message: $event.message, context: { op: 'newdoc' } })"
     />
@@ -9256,8 +9477,24 @@ function closeRecoveryKey() {
         if (n) { permTarget = n; permInitialTab = undefined; showPerm = true; }
       }"
       :api-base="props.config.apiBase ?? ''"
+      :drafts-endpoint="draftsEnabled ? api.draftsBase : null /* Drafts, issue #71 */"
       @nav="onPreviewNav"
+      @draft-saved="onPreviewDraftSaved"
+      @draft-discarded="onPreviewDraftDiscarded"
       @close="showPreview = false"
+    />
+    <!-- Drafts (issue #71): the Drafts view's Save, when the name is taken. -->
+    <DraftConflictModal
+      :open="!!draftListSave.question.value"
+      :locale="locale"
+      :theme="themeMode"
+      :name="draftListSave.question.value?.name ?? ''"
+      :suggested="draftListSave.question.value?.suggested ?? ''"
+      :folder="draftListSave.question.value?.folder ?? ''"
+      :busy="draftListSave.busy.value"
+      :error="draftListSave.error.value"
+      @cancel="draftListSave.cancel"
+      @confirm="draftListSave.confirm"
     />
     <!-- App plugins — a `modal` view, and the manifest's confirm question. -->
     <PluginViewModal

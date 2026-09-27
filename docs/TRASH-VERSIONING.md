@@ -151,6 +151,21 @@ The listing resolves the names in one lookup per page, as the file listing
 does for owners. Nothing is backfilled: there is no honest way to know who
 deleted an item before the column existed.
 
+### Discarded drafts
+
+A [draft](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save) (a new
+document not saved yet) that its owner discards — *Discard* when closing it, or
+*Delete* in Drafts — goes to the trash like any other file, and the usual
+retention deletes it.
+
+- **Only its owner sees it there.** Drafts are private, and so is a discarded
+  one: the trash listing leaves it out for everybody else, administrators
+  included.
+- **"Deleted from" reads Drafts.** The entry carries `draft: true`, and its
+  `path` is just its name — never the hidden `.filex-drafts/…` folder it lived in.
+- **Restore puts it back in Drafts**, still meant for the folder it was
+  created for.
+
 ### Retention & purge
 
 Trashed items are kept for a fixed window, then hard‑deleted automatically.
@@ -196,7 +211,7 @@ logged; the next run tries again).
 
 | Method & path | Body / query | Notes |
 |---|---|---|
-| `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, **`ttl_days`** (days remaining before purge, floored at 0), and who deleted it: **`deleted_by_id`**, **`deleted_by_name`**, and **`deleted_by_self`** (`true` when it was the caller). The three are absent when nobody is recorded (see *Who deleted it* below). `total` counts the entries **the caller may see**, and `offset`/`limit` page through those — up to v0.46.0 a member whose trash was interleaved with entries they may not see was told `total` = the length of the filtered first page, and could not reach the rest. `limit` above 500 is read as 50. |
+| `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, **`ttl_days`** (days remaining before purge, floored at 0), and who deleted it: **`deleted_by_id`**, **`deleted_by_name`**, and **`deleted_by_self`** (`true` when it was the caller). The three are absent when nobody is recorded (see *Who deleted it* below). **`draft: true`** marks one of the caller's own [discarded drafts](#discarded-drafts), whose `path` is then just its name; nobody else is shown it. `total` counts the entries **the caller may see**, and `offset`/`limit` page through those — up to v0.46.0 a member whose trash was interleaved with entries they may not see was told `total` = the length of the filtered first page, and could not reach the rest. `limit` above 500 is read as 50. |
 | `POST /api/files/manager/restore` | `{ "node_id": 123 }` | Moves the file back to its original path and re‑attaches the row. Returns **409** `{ "code": "EXISTS", "name", "path" }` when something already holds that path; nothing moves and the entry stays in the trash. |
 | `POST /api/files/manager/restore?queued=1` | `{ "node_ids": [123, 124] }` | The same checks for every entry, and one refusal refuses the batch. What they allow is queued, one job per storage: **202** `{ "ops": [{ "kind": "restore", … }] }`, followed with `GET /api/files/ops`. An entry whose place is taken fails on its own, and the job's `error` says so; the others come back. Offered when `capabilities.queued` lists `restore`; the explorer's Restore uses it then. At most **1000** entries per request: more answer **400** `{ "code": "TOO_MANY", "max": 1000 }`. |
 
@@ -431,8 +446,11 @@ stays restorable from there.
 
 A snapshot is taken **only when** there is something to lose: the path already
 holds a catalogued **file**. A brand‑new file, a directory, and filex's own
-internal trees (`.versions/`, `.thumbs/`, `.filex-trash/`, `.keepdir` markers)
-cost one indexed lookup and nothing else.
+internal trees (`.versions/`, `.thumbs/`, `.filex-trash/`, `.filex-drafts/`,
+`.keepdir` markers) cost one indexed lookup and nothing else. So a draft,
+which the editor saves into every few seconds, collects no version history;
+once it is saved into its folder, its later saves are versioned like any
+other file's.
 
 > ⚠ **This used to be untrue, and the untrue version was written down.** Until
 > the pre‑write guard landed, the only wired trigger really was the text‑editor
@@ -467,7 +485,8 @@ non‑default state is visible without reading the config.
 - **Extension whitelist:** only text/code types round‑trip here — `txt`, `md`,
   `json`, `jsonc`, `yaml`/`yml`, `toml`, `ini`, `env`, `csv`, `xml`, `svg`,
   `html`, CSS/SCSS/LESS, JS/TS/JSX/Vue/Svelte, and common source languages
-  (`go`, `py`, `php`, `rb`, `rs`, `java`, `c`/`cpp`/`h`, `sh`, `sql`, …), plus
+  (`go`, `py`, `php`, `rb`, `rs`, `java`, `c`/`cpp`/`h`, `sh`, `sql`, …), draw.io
+  diagrams (`drawio`, `dio` — their XML, saved by the draw.io viewer), plus
   special filenames like `Dockerfile`, `Makefile`, `.gitignore`,
   `.editorconfig`. Anything else returns **415 `extension not allowed for
   save-text`** — binary/office formats have dedicated edit channels (e.g.

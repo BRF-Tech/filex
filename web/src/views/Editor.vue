@@ -136,6 +136,24 @@ const openAs = computed<string | null>(() => {
 
 const open = ref(true);
 
+/**
+ * Drafts (issue #71): the draft this tab was editing was saved — it is a file
+ * where it belongs now. The address and the tab's name follow it, so a reload
+ * opens the saved document rather than a draft that is gone. `replaceState`,
+ * not the router: a route change would remount the viewer and close the
+ * editor that is still open on the document.
+ */
+function onDraftSaved(saved: { path: string; name: string }) {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set('path', saved.path);
+    window.history.replaceState(window.history.state, '', url.toString());
+  } catch {
+    /* an address the browser would not take — the reload is the only loss */
+  }
+  document.title = saved.name;
+}
+
 function closeWindow() {
   try {
     window.close();
@@ -189,10 +207,12 @@ onBeforeUnmount(() => {
       :can-configure="callerAdmin"
       :drawio-url="drawioUrl"
       :save-text-endpoint="api('/api/files/save-text')"
+      :drafts-endpoint="api('/api/files/drafts')"
       :auth-headers="authHeaders"
       :auth-credentials="'same-origin'"
       :locale="locale"
       chromeless
+      @draft-saved="onDraftSaved"
       @close="closeWindow"
     />
     <div v-else-if="!node" class="empty">

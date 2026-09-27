@@ -395,7 +395,10 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 	// desktop app lists, uploads to and downloads from it by exact path, and a
 	// refusal would read to it as "unchanged" and drop the edit. It is kept out
 	// of every listing, search and view instead.
-	if syspath.Sealed(rel) {
+	//
+	// A draft (issue #71) is sealed to everybody but its owner, whose editor
+	// previews and downloads it by exact path (sealedFor).
+	if sealedFor(r.Context(), rel) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
@@ -608,7 +611,12 @@ func (h *Manager) streamBody(w http.ResponseWriter, r *http.Request, s *model.St
 	} else {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 	}
-	if mode.linked {
+	// ⚠ A draft (#71) is never cached: it is a document being written, saved
+	// into every few seconds under the same path. With a minute of browser
+	// cache, a draft closed and reopened from Drafts opened with the body it
+	// had the FIRST time it was fetched (an empty file), and the next autosave
+	// would have written that emptiness over the person's text.
+	if mode.linked || syspath.InDrafts(rel) {
 		w.Header().Set("Cache-Control", "no-store")
 	} else {
 		w.Header().Set("Cache-Control", "private, max-age=60")
@@ -1295,8 +1303,9 @@ func (h *Manager) Stat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A row inside filex's own trash / version / thumbnail trees is not
-	// described here either — the same 404 as a miss (see Read).
-	if syspath.Sealed(node.Path) {
+	// described here either — the same 404 as a miss (see Read). A draft
+	// only to its owner (sealedFor).
+	if sealedFor(r.Context(), node.Path) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
@@ -1401,7 +1410,7 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 	// filex's own trash / version / thumbnail trees are never served by path
 	// or by the id of a row that lives in them (a trashed row's path IS its
 	// trash key). Same rule, same 404, as the manager's listVuefinder guard.
-	if syspath.Sealed(aclRel) || syspath.Sealed(filePath) {
+	if sealedFor(r.Context(), aclRel) || sealedFor(r.Context(), filePath) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}

@@ -78,6 +78,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.StorageOrderSQL = &db.StorageOrderSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Who put a row in the trash (00061), written once in internal/db.
 	s.NodeDeletedBySQL = &db.NodeDeletedBySQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// Drafts (00064), written once in internal/db.
+	s.DraftSQL = &db.DraftSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	return s
 }
 
@@ -95,6 +97,8 @@ type Store struct {
 	*db.StorageOrderSQL
 	// SetNodeDeletedBy (internal/db node_deleted_by_sql.go).
 	*db.NodeDeletedBySQL
+	// The drafts methods (internal/db drafts_sql.go).
+	*db.DraftSQL
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
@@ -905,7 +909,7 @@ func (s *Store) StorageStats(ctx context.Context, storageID int64) (int64, int64
 	)
 	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM nodes
-		   WHERE storage_id=$1 AND type='file' AND deleted_at IS NULL`,
+		   WHERE storage_id=$1 AND type='file' AND deleted_at IS NULL AND `+db.NotInDraftsSQL("path"),
 		storageID,
 	).Scan(&count, &size)
 	if err != nil {

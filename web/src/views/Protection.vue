@@ -20,6 +20,7 @@ import {
   ExternalLink,
   Link2,
   RefreshCw,
+  FilePen,
 } from 'lucide-vue-next';
 
 import { ProtectionApi, type ProtectionAntivirus, type ProtectionPatch } from '@/api/protection';
@@ -48,6 +49,13 @@ const trashDays = ref<number>(30);
 const versionsKeepN = ref<number>(0);
 const shareMaxTtl = ref<number>(7);
 const sharesOverMax = ref<number>(0);
+// Drafts (issue #71): how many drafts one person may keep. Null = a server from
+// before drafts, and the card is not drawn. Bounds come with the value.
+const draftsLimit = ref<number | null>(null);
+const draftsMin = ref<number>(1);
+const draftsMax = ref<number>(1000);
+const savingDrafts = ref(false);
+const errDrafts = ref<string | null>(null);
 const antivirus = ref<ProtectionAntivirus | null>(null);
 // Save-scan window (minutes). Bounds come from the server with the value, so
 // the form enforces exactly what the API enforces.
@@ -105,6 +113,9 @@ async function load() {
     versionsKeepN.value = s.versions_keep_n;
     shareMaxTtl.value = s.share_max_ttl_days ?? 0;
     sharesOverMax.value = s.shares_over_max_ttl ?? 0;
+    draftsLimit.value = typeof s.drafts_limit === 'number' ? s.drafts_limit : null;
+    draftsMin.value = s.drafts_limit_min ?? 1;
+    draftsMax.value = s.drafts_limit_max ?? 1000;
     antivirus.value = s.antivirus ?? { enabled: false, binary: '' };
     avSaveWindow.value = s.antivirus?.save_scan_window_minutes ?? 30;
     avWindowMin.value = s.antivirus?.save_scan_window_min ?? 2;
@@ -172,6 +183,26 @@ async function saveShare() {
     errShare.value = extractError(e, t('errors.generic'));
   } finally {
     savingShare.value = false;
+  }
+}
+
+// Drafts: refused, not clamped, when out of range — like the numbers below.
+async function saveDrafts() {
+  errDrafts.value = null;
+  const v = draftsLimit.value;
+  if (!validInt(v, draftsMin.value) || (v as number) > draftsMax.value) {
+    errDrafts.value = t('protection.drafts.errRange', { min: draftsMin.value, max: draftsMax.value });
+    return;
+  }
+  savingDrafts.value = true;
+  try {
+    const s = await ProtectionApi.update({ drafts_limit: v as number });
+    draftsLimit.value = s.drafts_limit ?? v;
+    toast.success(t('protection.savedOk'));
+  } catch (e: unknown) {
+    errDrafts.value = extractError(e, t('errors.generic'));
+  } finally {
+    savingDrafts.value = false;
   }
 }
 
@@ -415,6 +446,40 @@ async function saveVersions() {
         </p>
         <div class="flex justify-end pt-1">
           <Button type="submit" :loading="savingShare">
+            <Save class="h-4 w-4" />
+            {{ t('common.save') }}
+          </Button>
+        </div>
+      </form>
+
+      <!-- Drafts (issue #71): how many unsaved new documents one person may
+           keep. Only on a server that has drafts. -->
+      <form
+        v-if="draftsLimit !== null"
+        class="card card-body space-y-3"
+        novalidate
+        data-testid="protection-drafts"
+        @submit.prevent="saveDrafts"
+      >
+        <h2 class="flex items-center gap-2 text-base font-semibold">
+          <FilePen class="h-4 w-4" /> {{ t('protection.drafts.title') }}
+        </h2>
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('protection.drafts.desc') }}</p>
+        <Input
+          :model-value="draftsLimit"
+          type="number"
+          :min="draftsMin"
+          :max="draftsMax"
+          :step="1"
+          :label="t('protection.drafts.label')"
+          :hint="t('protection.drafts.hint', { min: draftsMin, max: draftsMax })"
+          :error="errDrafts"
+          class="max-w-xs"
+          data-testid="protection-drafts-limit"
+          @update:model-value="(v) => ((draftsLimit = v as number), (errDrafts = null))"
+        />
+        <div class="flex justify-end pt-1">
+          <Button type="submit" :loading="savingDrafts" data-testid="protection-drafts-save">
             <Save class="h-4 w-4" />
             {{ t('common.save') }}
           </Button>

@@ -249,6 +249,9 @@ export const VIRTUAL_SEGMENTS: Record<string, string> = {
   '.recent': 'node.recent',
   '.starred': 'node.starred',
   '.shared': 'node.shared',
+  /* Drafts (issue #71): a view like the rest — a reload on `#.drafts` opens
+     it, instead of asking the backend for a folder called `.drafts`. */
+  '.drafts': 'node.drafts',
 };
 
 /**

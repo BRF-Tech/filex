@@ -92,6 +92,15 @@ func (s *Service) Snapshot(ctx context.Context, nodeID int64) (*model.NodeVersio
 	if livePath == "" {
 		return nil, nil // nothing to snapshot
 	}
+	// filex's own trees are not versioned — the same rule GuardOverwrite
+	// applies (isInternalPath). The text editor calls Snapshot directly
+	// before every save, and a draft (syspath.Drafts, issue #71) is saved
+	// every few seconds while it is being typed: without this each autosave
+	// left a copy of the unfinished document in `.versions/`, kept for the
+	// whole retention window, for a file that is not yet anybody's document.
+	if isInternalPath(livePath) {
+		return nil, nil
+	}
 	drv, err := s.Resolver(node.StorageID)
 	if err != nil {
 		return nil, fmt.Errorf("versioning: resolve storage: %w", err)

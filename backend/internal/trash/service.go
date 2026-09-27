@@ -432,6 +432,10 @@ type TrashEntry struct {
 	DeletedByID   *int64 `json:"deleted_by_id,omitempty"`
 	DeletedByName string `json:"deleted_by_name,omitempty"`
 	DeletedBySelf bool   `json:"deleted_by_self,omitempty"`
+	// Draft is set by the handler on a discarded draft of the asker's own
+	// (issue #71): it came from their Drafts, not from a folder, and Path is
+	// then just its name — the drafts area is never named to a client.
+	Draft bool `json:"draft,omitempty"`
 }
 
 // RunDailyLoop ticks PurgeExpired every interval until ctx is cancelled.

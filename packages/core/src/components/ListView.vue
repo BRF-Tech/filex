@@ -420,6 +420,11 @@ function isPlainDir(n: FileNode): boolean {
  * stripped and this printed `My files/My files://Photos` (2026-09-14).
  */
 function locationLabel(n: FileNode): string {
+  // #71 — a discarded draft came from Drafts, not from a folder: the server
+  // sends only its name as the path, and Restore puts it back in Drafts.
+  if (((n as Record<string, unknown>).extra_metadata as { draft?: boolean } | undefined)?.draft) {
+    return t('node.drafts');
+  }
   const dir = parentDirOf(n.path);
   const store = String((n as Record<string, unknown>).storage ?? '').trim();
   return [store, dir].filter(Boolean).join('/');

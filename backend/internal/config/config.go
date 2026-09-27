@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/brf-tech/filex/backend/internal/basepath"
+	"github.com/brf-tech/filex/backend/internal/secheaders"
 )
 
 // Config is the top-level runtime configuration object.
@@ -160,6 +161,14 @@ type Config struct {
 	Upload           UploadConfig  `yaml:"upload"`
 	Cache            CacheConfig   `yaml:"cache"`
 	Archive          ArchiveConfig `yaml:"archive"`
+	// FrameAncestors names the pages, besides filex itself, that may show
+	// filex's own pages inside a frame (a home dashboard such as Homarr or
+	// Organizr): FILEX_FRAME_ANCESTORS / `frame_ancestors`, origins such as
+	// https://home.example.com or https://*.example.com, or * for any page.
+	// Empty (the default) means filex only. Load validates it and refuses to
+	// start on a value that is not an origin. internal/secheaders,
+	// docs/CONFIGURATION.md.
+	FrameAncestors []string `yaml:"frame_ancestors"`
 	/* kimlik:e3 cloud */
 	Cloud CloudConfig `yaml:"cloud"`
 	// VersionsOnOverwrite installs the pre-write versioning guard. Default on.
@@ -895,6 +904,13 @@ func Load(path string) (Config, error) {
 	if err := resolveBasePath(&cfg, basePathFrom); err != nil {
 		return Config{}, err
 	}
+	// Who may frame filex's pages: a value that is not an origin stops the
+	// server here, with what to write instead (internal/secheaders).
+	fa, err := secheaders.Normalize(cfg.FrameAncestors)
+	if err != nil {
+		return Config{}, fmt.Errorf("config: %w", err)
+	}
+	cfg.FrameAncestors = fa
 	// Default the OIDC redirect to <public_url>/api/auth/oidc/callback so an
 	// issuer + client id/secret are enough to stand up SSO (no need to also
 	// spell out the callback URL).
@@ -1287,6 +1303,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_CORS_ALLOWED_ORIGINS"); v != "" {
 		c.CORS.AllowedOrigins = strings.Split(v, ",")
+	}
+	if v := os.Getenv("FILEX_FRAME_ANCESTORS"); strings.TrimSpace(v) != "" {
+		c.FrameAncestors = secheaders.Split(v)
 	}
 	if v := os.Getenv("FILEX_QUEUE_DRIVER"); v != "" {
 		c.Queue.Driver = v

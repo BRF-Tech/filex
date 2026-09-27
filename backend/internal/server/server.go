@@ -26,6 +26,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/drafts"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/external"
 	"github.com/brf-tech/filex/backend/internal/filebody"
@@ -849,6 +850,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// The env var is inert once a row exists (see package dbsetting).
 	antivirus.SeedSettings(ctx, store)
 	usage.SeedSettings(ctx, store)
+	drafts.SeedSettings(ctx, store)
 	// ⚠⚠ This resolution is what the process RUNS with until it restarts.
 	// enabled / mode / clamd address are read once, here, because the lines
 	// below are the wiring itself: registering the queue handler and handing
@@ -1183,6 +1185,14 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			slog.String("public_url", cfg.PublicURL))
 	} else {
 		slog.Info("http: serving at the root of the host (no base path)")
+	}
+	// Who may show filex's pages in a frame (internal/secheaders): the first
+	// thing to check when a dashboard that embeds filex shows a refusal.
+	if len(cfg.FrameAncestors) > 0 {
+		slog.Info("http: pages may be framed by filex and these origins",
+			slog.String("frame_ancestors", strings.Join(cfg.FrameAncestors, " ")))
+	} else {
+		slog.Info("http: pages may be framed by filex itself only (FILEX_FRAME_ANCESTORS unset)")
 	}
 
 	// The staging directory itself is created here (not lazily in the router)

@@ -15,6 +15,11 @@ trash, convert) is built in.
 
 All three render the **same** explorer — they differ only in how you mount it.
 
+None of them is an `<iframe>`: the explorer runs in your page. Showing filex's
+own pages inside a frame instead (a home dashboard's tile) is refused by the
+browser unless the dashboard's origin is in `FILEX_FRAME_ANCESTORS` — see
+[CONFIGURATION.md → Security headers and framing](CONFIGURATION.md#security-headers-and-framing).
+
 ⚠ The stylesheet column is not a detail: the look is one global sheet plus the
 `--fe-*` tokens on it, and only the Vue wrapper imports it by hand. The web
 component carries the same bytes *inside its JavaScript* and appends them to

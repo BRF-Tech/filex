@@ -206,8 +206,9 @@ nothing polling to pick the file up. Writes that go through filex — the web
 app, the API, WebDAV, SFTP, FTPS, S3, NFS — all announce.
 
 **filex's own folders** never announce. A change inside `.filex-trash`,
-`.versions`, `.thumbs` or the desktop's `.filex-open` — a trash move, a
-version snapshot, a working copy being saved — and a change that names one
+`.versions`, `.thumbs`, the desktop's `.filex-open` or `.filex-drafts` — a
+trash move, a version snapshot, a working copy or a draft being saved — and a
+change that names one
 (the desktop creating `.filex-open` at the root) are dropped as the first
 thing `Hub.EmitChange` does, before any delivery: the one door the HTTP
 handlers, the protocol servers and the folder-size refresher all publish

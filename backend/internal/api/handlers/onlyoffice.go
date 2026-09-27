@@ -215,8 +215,11 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 	// edit gets back to the person's own file (syspath.PutWorkCopy).
 	// Anything else among filex's own (a trashed file, a version) opens
 	// read-only, the same downgrade a viewer gets: a save would write into
-	// the bin or the history behind their back.
-	if node != nil && mode == "edit" && syspath.Refused(syspath.PutWorkCopy, node.Path) {
+	// the bin or the history behind their back. The one other thing edited
+	// here is a draft of the caller's OWN (issue #71, syspath.OwnDraft): a
+	// new office document lives in the drafts area until its first save.
+	if node != nil && mode == "edit" && syspath.Refused(syspath.PutWorkCopy, node.Path) &&
+		syspath.RefusedBy(syspath.OwnDraft, node.Path, user.ID) {
 		mode = "view"
 	}
 

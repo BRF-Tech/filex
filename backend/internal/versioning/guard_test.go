@@ -127,6 +127,9 @@ func TestGuardOverwrite_SkipsInternalTrees(t *testing.T) {
 		// replaces it, and its history is of a transient copy nobody can
 		// see (the original lives on the person's computer).
 		".filex-open/0123456789ab-Plan.docx",
+		// A person's draft (issue #71): saved every few seconds while it is
+		// typed, and not anybody's document yet.
+		".filex-drafts/7/0123456789abcdef/Plan.txt",
 	} {
 		n := seedLiveFile(t, store, stID, root, rel, "internal")
 		require.NoError(t, svc.GuardOverwrite(context.Background(), stID, rel), rel)
@@ -134,6 +137,26 @@ func TestGuardOverwrite_SkipsInternalTrees(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, versions, "expected no snapshot for internal path %q", rel)
 	}
+}
+
+// Snapshot itself skips filex's own trees too: the text editor calls it
+// directly (not through the guard) before every save, and a draft is saved
+// every few seconds while it is typed (issue #71). Without the skip each
+// autosave left a copy of the unfinished document in `.versions/`.
+func TestSnapshot_SkipsADraft(t *testing.T) {
+	store, svc, stID, root := newGuardFixture(t)
+	n := seedLiveFile(t, store, stID, root, ".filex-drafts/7/0123456789abcdef/Plan.txt", "half a sentence")
+	v, err := svc.Snapshot(context.Background(), n.ID)
+	require.NoError(t, err)
+	assert.Nil(t, v, "a draft was versioned")
+	_, statErr := os.Stat(filepath.Join(root, ".versions"))
+	assert.True(t, os.IsNotExist(statErr), "a snapshot of a draft was written")
+
+	// …and an ordinary file still is.
+	m := seedLiveFile(t, store, stID, root, "Documents/Plan.txt", "a whole sentence")
+	v, err = svc.Snapshot(context.Background(), m.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, v)
 }
 
 // The contract the whole feature rests on: a snapshot that cannot be taken is

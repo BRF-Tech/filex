@@ -114,8 +114,34 @@ function send(
       if (pending.has(id)) { pending.delete(id); reject(new Error('convert timeout')); }
     }, timeoutMs);
     pending.set(id, { resolve, reject, timer });
-    iframeRef.value?.contentWindow?.postMessage({ target: 'convert-embed', id, cmd, ...extra }, '*', transfer);
+    // Only to the converter's origin: if the frame has been navigated
+    // anywhere else, the file's bytes are not handed to it.
+    const origin = convertOrigin.value;
+    if (!origin) {
+      pending.delete(id);
+      clearTimeout(timer);
+      reject(new Error('convert: no converter origin'));
+      return;
+    }
+    iframeRef.value?.contentWindow?.postMessage({ target: 'convert-embed', id, cmd, ...extra }, origin, transfer);
   });
+}
+
+/** The origin the converter is served from (a relative base is this site's). */
+const convertOrigin = computed<string | null>(() => {
+  try {
+    return new URL(props.convertUrl, window.location.href).origin;
+  } catch {
+    return null;
+  }
+});
+
+/** Did this message come from OUR converter frame, at the converter's
+ *  origin? `source: 'convert-embed'` inside the payload is only what the
+ *  sender chose to write; any window that can reach this one can write it. */
+function fromConverter(ev: MessageEvent): boolean {
+  const frame = iframeRef.value?.contentWindow;
+  return !!frame && ev.source === frame && !!convertOrigin.value && ev.origin === convertOrigin.value;
 }
 
 /**
@@ -138,6 +164,7 @@ function failWith(key: string, detail: unknown): void {
 }
 
 function onMessage(ev: MessageEvent) {
+  if (!fromConverter(ev)) return;
   const d = ev.data;
   if (!d || d.source !== 'convert-embed') return;
   if (d.event === 'ready') {

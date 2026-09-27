@@ -49,6 +49,12 @@ func TestCheck(t *testing.T) {
 		{"reserved is judged before locks", 0, []Target{Writes("imza"), Writes(".versions/1")}, syspath.ErrReserved},
 		{"the desktop's claim", 0, []Target{Writes(".filex-open/a1b2c3d4e5f6-x.docx").As(syspath.PutWorkCopy)}, nil},
 		{"a protocol's keep marker", 0, []Target{Writes("docs/.keepdir").As(syspath.Mounted)}, nil},
+		// A draft (issue #71): its owner's editor, by the owner, and nobody else.
+		{"the owner's draft, by the owner", 0, []Target{Writes(".filex-drafts/7/0123456789abcdef/a.txt").As(syspath.OwnDraft).By(7)}, nil},
+		{"somebody's draft, by another", 0, []Target{Writes(".filex-drafts/7/0123456789abcdef/a.txt").As(syspath.OwnDraft).By(8)}, syspath.ErrReserved},
+		{"a draft, by nobody", 0, []Target{Writes(".filex-drafts/7/0123456789abcdef/a.txt").As(syspath.OwnDraft)}, syspath.ErrReserved},
+		{"a draft, without the claim", 0, []Target{Writes(".filex-drafts/7/0123456789abcdef/a.txt").By(7)}, syspath.ErrReserved},
+		{"the claim buys nothing elsewhere", 0, []Target{Writes(".versions/1").As(syspath.OwnDraft).By(7)}, syspath.ErrReserved},
 	}
 	for _, c := range cases {
 		err := Check(locks, c.app, c.targets...)

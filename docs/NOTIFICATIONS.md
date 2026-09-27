@@ -348,8 +348,9 @@ otherwise hit:
 ### filex's own directories
 
 filex keeps machinery inside every storage — the bin (`.filex-trash`), version
-history (`.versions`), legacy thumbnails (`.thumbs`) and the desktop app's
-"open with filex" working copies (`.filex-open`), one list in
+history (`.versions`), legacy thumbnails (`.thumbs`), the desktop app's
+"open with filex" working copies (`.filex-open`) and people's unsaved new
+documents (`.filex-drafts`), one list in
 `backend/internal/syspath`. Every write, move and delete there goes through the
 same post-write gate as a person's own files, so one rule decides what reaches
 a person, applied in `notify.Service.Send` (the door every event goes through)

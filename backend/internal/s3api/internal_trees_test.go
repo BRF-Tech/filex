@@ -31,6 +31,9 @@ var internalKeys = []string{
 	// its own copy of the list above and none of them knew this name (they
 	// now share syspath), so an S3 client listed the working copies.
 	".filex-open/0123456789ab-Plan.docx",
+	// A person's drafts area (issue #71): one person's unfinished documents,
+	// reachable through their own editor and through nothing else.
+	".filex-drafts/7/0123456789abcdef/Plan.docx",
 }
 
 // They must not appear in a listing...

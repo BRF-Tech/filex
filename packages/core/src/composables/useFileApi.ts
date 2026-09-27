@@ -26,6 +26,7 @@ import type { MeasuredDrive } from '../lib/storageLine';
 import type { ExplorerConfig, AuthConfig, EndpointMap, SearchAccount } from '../types/ExplorerConfig';
 import { resolveLocale } from '../locales/resolve';
 import { listingAddress } from '../lib/internalPaths';
+import { draftsClient, type DraftDto } from '../lib/drafts';
 import { localeTag } from './useLocale';
 import { networkFailure, requestFailure } from '../lib/errorWords';
 // ⚠ The same folding rule the web app's axios layer applies, applied by the
@@ -78,6 +79,10 @@ export interface NewFileResponse {
   ext: string;
   size: number;
   mime: string;
+  /** Drafts (issue #71): set when the document was made as a DRAFT — then
+   *  `path` is the draft's, in the person's drafts area, and nothing is at
+   *  the destination yet (lib/drafts). */
+  draft?: DraftDto;
 }
 
 export interface ManagerResponse {
@@ -408,6 +413,31 @@ export function useFileApi(config: ExplorerConfig) {
   const lang = () => resolveLocale(config.locale);
 
   async function jsonFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
+    const res = await rawRequest(url, init);
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw requestFailure(res.status, text, lang());
+    }
+    // ⚠⚠ A 204 carries NO BODY, and several endpoints answer with one (every
+    // delete does). Parsing it throws "Unexpected end of JSON input" AFTER the
+    // server has already done the work, so the caller reports a failure for an
+    // operation that succeeded — measured 2026-08-16 in a browser: revoking an
+    // S3 access key deleted it on the server and left it on screen with an
+    // error under it, which invites the user to trust a credential that is
+    // gone. An empty success is a success.
+    if (res.status === 204 || res.status === 205) return undefined as T;
+    const body = await res.text();
+    if (!body) return undefined as T;
+    return JSON.parse(body) as T;
+  }
+
+  /**
+   * One request with this client's credentials and language, answered as the
+   * Response itself — for a caller that reads a refusal's body as an ANSWER
+   * (a draft saved beside a taken name is a question, not a failure:
+   * lib/drafts). Every other caller wants jsonFetch.
+   */
+  async function rawRequest(url: string, init: RequestInit = {}): Promise<Response> {
     const headers = {
       // ⚠⚠ The language on SCREEN, not the one the browser was installed in.
       // Everything the server writes for a person — a plugin's surface, the
@@ -441,22 +471,22 @@ export function useFileApi(config: ExplorerConfig) {
     // Any answer — a 404 and a 500 included — means the connection is not
     // what is wrong, and the shared notice must not keep saying it is.
     noteRequestSucceeded();
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw requestFailure(res.status, text, lang());
-    }
-    // ⚠⚠ A 204 carries NO BODY, and several endpoints answer with one (every
-    // delete does). Parsing it throws "Unexpected end of JSON input" AFTER the
-    // server has already done the work, so the caller reports a failure for an
-    // operation that succeeded — measured 2026-08-16 in a browser: revoking an
-    // S3 access key deleted it on the server and left it on screen with an
-    // error under it, which invites the user to trust a credential that is
-    // gone. An empty success is a success.
-    if (res.status === 204 || res.status === 205) return undefined as T;
-    const body = await res.text();
-    if (!body) return undefined as T;
-    return JSON.parse(body) as T;
+    return res;
   }
+
+  // --------------------------------------------------------------------
+  // Drafts (issue #71) — a new document until its first save. Derived from
+  // the manager endpoint like permissions/versions, so an embed's proxy that
+  // forwards /api/files/* reaches it. The calls are lib/drafts', which the
+  // viewer uses too; this only hands it this client's credentials.
+  // --------------------------------------------------------------------
+  const draftsBase = endpoints.manager.replace(/\/manager(\?.*)?$/, '/drafts');
+  const drafts = draftsClient(draftsBase, {
+    request: rawRequest,
+    get locale() {
+      return lang();
+    },
+  });
 
   // --------------------------------------------------------------------
   // Permissions (RBAC) — derived from the manager endpoint by swapping the
@@ -1275,6 +1305,8 @@ export function useFileApi(config: ExplorerConfig) {
     subfolders,
     newFolder,
     newFile,
+    drafts,
+    draftsBase,
     rename,
     renameQueued,
     move,
