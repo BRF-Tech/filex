@@ -641,10 +641,13 @@ func (r *Registry) storeItems(ctx context.Context, p *Installed, items []wire.Sc
 			refuse(it.Key, why)
 			continue
 		}
-		params := it.Params
-		if params == nil {
-			params = map[string]any{}
+		if why := r.scheduleOwns(ctx, p, storageID, rels); why != "" {
+			refuse(it.Key, why)
+			continue
 		}
+		// The host's own parameter names (the per-job output choice, the page
+		// job's link stamps) are never the app's to set.
+		params := StripHostParams(it.Params)
 		pb, err := json.Marshal(params)
 		if err != nil || len(pb) > maxScheduleParamsBytes {
 			refuse(it.Key, fmt.Sprintf("params must be JSON of at most %d KiB", maxScheduleParamsBytes>>10))
@@ -724,6 +727,27 @@ func (r *Registry) resolveSchedulePaths(ctx context.Context, paths []string) (in
 	return storageID, out, ""
 }
 
+// scheduleOwns answers "" when every file an item names is one this app keeps
+// state on, else the refusal.
+//
+// ⚠⚠ A scheduled job runs with no person behind it, so no ACL narrows it
+// (docs/APP-PLUGINS-API.md → the scheduled wake-up), and its files are the
+// paths the wake-up returns, so what bounds them has to be said here: the
+// administrator granted `files:*` as "the files you pick", not every file of
+// the instance. The work a wake-up exists for is always about files the app was handed
+// before and recorded (the signing app returns its state_list rows), so
+// that is now the rule: state is the proof a person gave the app the file.
+// It is asked again when the item runs (runScheduledItem), because the
+// state may be gone by then.
+func (r *Registry) scheduleOwns(ctx context.Context, p *Installed, storageID int64, rels []string) string {
+	for _, rel := range rels {
+		if !r.keepsStateOn(ctx, p, storageID, rel) {
+			return "a scheduled item may only name files this app keeps state on (as state_list answers them): " + clip(rel, 80)
+		}
+	}
+	return ""
+}
+
 // splitQualified splits `name://rel`. A path without an adapter is refused
 // rather than assumed: an unattended run has no "current storage".
 func splitQualified(raw string) (string, string, bool) {
@@ -762,9 +786,15 @@ func (r *Registry) runScheduledItem(ctx context.Context, p *Installed, row *mode
 		r.finish(ctx, row, model.AppPluginScheduleFailed, "", "the item names no files", nil)
 		return
 	}
+	if why := r.scheduleOwns(ctx, p, row.StorageID, rels); why != "" {
+		r.finish(ctx, row, model.AppPluginScheduleSkipped, "", why, nil)
+		return
+	}
+	var params map[string]any
+	_ = json.Unmarshal([]byte(row.ParamsJSON), &params)
 	job := &model.AppPluginJob{
 		ID: NewJobID(), PluginID: p.Row.ID, PluginName: p.Row.Name, ActionID: row.ActionID,
-		StorageID: row.StorageID, PathsJSON: row.PathsJSON, ParamsJSON: row.ParamsJSON,
+		StorageID: row.StorageID, PathsJSON: row.PathsJSON, ParamsJSON: jsonOf(StripHostParams(params)),
 		// ActorID nil is SYSTEM, which is what the ops row means by a job
 		// nobody asked for. There is no person to attribute this to and
 		// pretending otherwise would put somebody's name on work they did

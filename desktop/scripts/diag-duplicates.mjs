@@ -45,7 +45,9 @@ try {
   });
   console.log('HEADER TAIL:', JSON.stringify(header, null, 2));
 
-  // The "⋯" menu — where density and theme live in every profile.
+  // The "⋯" menu — where density and theme live in every profile. Since
+  // 2026-09-27 the window draws the avatar (config.account) and the "⋯" folds
+  // into it at this width, so both are listed: whichever is on screen.
   await win.evaluate(() => document.querySelector('[data-testid="drive-more"]')?.click());
   await sleep(700);
   const more = await win.evaluate(() =>
@@ -54,6 +56,16 @@ try {
       .filter(Boolean));
   console.log('MORE MENU:', JSON.stringify(more, null, 2));
   await win.screenshot({ path: path.join(OUT, `${TAG}-more-menu.png`), timeout: 60_000 });
+  await win.keyboard.press('Escape');
+  await sleep(400);
+  await win.evaluate(() => document.querySelector('[data-testid="explore-account"]')?.click());
+  await sleep(700);
+  const avatar = await win.evaluate(() =>
+    [...document.querySelectorAll('[data-testid="explore-account-menu"] .fx-acctmenu__item')]
+      .map((e) => (e.textContent ?? '').trim())
+      .filter(Boolean));
+  console.log('AVATAR MENU:', JSON.stringify(avatar, null, 2));
+  await win.screenshot({ path: path.join(OUT, `${TAG}-avatar-menu.png`), timeout: 60_000 });
   await win.keyboard.press('Escape');
   await sleep(400);
 

@@ -160,9 +160,9 @@ one order, decided in three layers — the most personal wins:
 3. **Creation order**, when neither has been set — what every install showed
    before this existed.
 
-![A storage row's order menu in the navigation panel](screenshots/v0.47.0/sidenav/storage-order-menu-1440.png)
+![A storage row's order menu in the navigation panel](screenshots/v0.48.0/sidenav/storage-order-menu-1440.png)
 
-![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](screenshots/v0.47.0/sidenav/admin-storages-order-1440.png)
+![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](screenshots/v0.48.0/sidenav/admin-storages-order-1440.png)
 
 A storage the person's own order does not name — one added after they
 arranged theirs, or one they could not see then — keeps the position the
@@ -911,6 +911,27 @@ its key has the committed size and is not older than the commit — is marked
 Short of that evidence the row is left alone, metadata included (see
 [UPLOADS.md → transfer_state](UPLOADS.md#transfer_state)).
 
+**A file deleted outside filex leaves the catalogue; it does not go to the
+Trash** (issue #74). When a scan finds that a file or folder is gone from the
+storage — deleted in a shell, by another program, with `aws s3 rm` — its row is
+removed from the catalogue, with its search entry, thumbnail, shares, comments,
+tags and version records, and the owner's quota is released. The Trash holds
+only what was deleted **in filex**, whose bytes wait in `.filex-trash/` and can
+be restored; an item deleted outside filex has nothing there to restore. Up to
+0.47 such an item was listed in the Trash with a Restore that could bring
+nothing back. Those entries are no longer listed or restorable from the first
+start of 0.48, and the next full scan of their storage removes them (the
+nightly retention purge and **Empty trash** remove them too); nothing on the
+storage is touched.
+
+Because removal cannot be undone, what counts as gone is decided carefully:
+the whole-listing guard below still applies, every missing row — **folders
+included** — must be confirmed gone by the driver's own `Stat` (an object the
+listing missed but `Stat` still sees is kept, and so is one that could not be
+checked), nothing below a folder whose listing failed is removed, and a folder
+row is removed only when nothing is left under it. An object that comes back
+at the same path is catalogued as a **new** file.
+
 **What a sync does not do: it never un‑deletes.** Deleting in filex is a
 rename — the bytes move to `.filex-trash/` and the row is soft‑deleted and
 retagged to that key — and the walk used to see the object, find no live row,
@@ -949,9 +970,9 @@ every version of every file. Three rules now hold:
   first, search documents included. The backend is never touched, and the
   version history's own rows (`node_versions`, keyed by the versioned file)
   are unaffected;
-- the delete pass **never moves a row inside `.filex-trash/`, `.versions/` or
-  `.thumbs/` into the trash**, whatever else went wrong, so a failed cleanup
-  is only a cleanup deferred to the next pass.
+- the delete pass **never removes a row inside `.filex-trash/`, `.versions/`
+  or `.thumbs/`**, whatever else went wrong, so a failed cleanup is only a
+  cleanup deferred to the next pass.
 
 A **tombstone guard** protects against transient backend glitches: if a run sees
 fewer than ~70 % of the objects the previous run saw, the delete pass is skipped
@@ -1003,7 +1024,7 @@ twenty minutes, and every row's `seen_at` is rewritten). It is the same walk
 with the same rules — new objects catalogued, changed ones updated, staged
 uploads settled — and three differences that keep it the folder's business:
 
-- only rows **inside the folder** can go to the trash, and the ~70 % guard
+- only rows **inside the folder** can be removed, and the ~70 % guard
   compares what the listing saw with the folder's own catalogued size;
 - a listing that **failed part-way** removes nothing (a folder the walk could
   not look into is not a deleted folder);
@@ -1077,9 +1098,8 @@ takes its `.git` with it. To keep people out of a folder, use
 [permissions](RBAC.md).
 
 ⚠ **What was catalogued before you add a pattern stays as it is.** The scan
-no longer looks at those rows, so it neither refreshes them nor removes them —
-and it never moves them to the trash for being unseen, since a folder row in
-the trash is purged by deleting its prefix on the backend. Shares, comments,
+no longer looks at those rows, so it neither refreshes them nor removes them
+for being unseen — the folder is still there. Shares, comments,
 tags and version history on them are untouched; lifting the pattern brings
 them back under the scan. On the first full pass after a pattern that covers
 more than ~30 % of what the previous pass saw, the tombstone guard trips once

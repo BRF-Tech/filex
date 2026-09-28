@@ -40,6 +40,21 @@ app adds the five things a browser tab cannot do:
    back over the local file — see *Open with filex* below. A browser tab cannot
    be a file handler at all.
 
+The top bar ends as the web app's does, in the **notification bell** and the
+**avatar** — the web app's own components, which the explorer draws itself
+because no slot reaches a custom element (`config.notifications`,
+`config.account`; see [docs/DESKTOP.md → Notifications and your
+account](../docs/DESKTOP.md#notifications-and-your-account)). The main process
+reads the bell for the native notifications and the dock badge and hands the
+count to the window (`notify:unread`), so the window adds no second poll; a
+clicked native notification marks its row read and lands where the bell's row
+does (the explorer's `revealNotification`). The avatar carries *User settings*
+(the web app's settings dialog, opened in this window — `config.account
+.settings`), *Admin panel ↗* for an administrator and the file list's shortcut
+and tour rows. It carries no *Sign out*: signing an account out of the app is
+an app setting, in Settings → Accounts, beside the language, sync and the
+other accounts.
+
 Settings also opens a full-screen **Connections** surface, and that too is the
 shared component (`<filex-connections>`) rather than an app-specific screen: it
 manages the account's storages and mints the credentials for reaching the same

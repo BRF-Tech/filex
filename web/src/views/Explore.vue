@@ -16,7 +16,18 @@ import { useI18n } from 'vue-i18n';
 // explorer's `sidenav-connect` and the admin panel's /connections page mount.
 // It is imported (not lazily loaded) beside the explorer because the screen
 // that needs it is the screen where nothing else is loading.
-import { ConnectionsPanel, FileExplorer, type ExplorerConfig } from '@brftech/filex-core';
+import {
+  ConnectionsPanel,
+  EXPLORER_DRAWN_ROWS,
+  FileExplorer,
+  accountMenuRows,
+  explorerRowKey,
+  qualifiedFromHash,
+  sameRowPath,
+  type AccountAction,
+  type ExplorerConfig,
+  type ExplorerMenuRow,
+} from '@brftech/filex-core';
 // gorunum:v3-shell — `actionIconSvg` is no longer imported here. The account
 // cluster was three icon buttons drawn with the explorer's own glyph set (so
 // three marks at a foreign stroke weight would not sit in the same row); it is
@@ -30,7 +41,7 @@ import { useStoragesStore } from '@/stores/storages';
 import Button from '@/components/ui/Button.vue';
 // gorunum:v3-shell — the product mark, handed to the explorer's own header.
 import LogoMark from '@/components/LogoMark.vue';
-import AccountMenu, { type AccountAction } from '@/components/AccountMenu.vue';
+import AccountMenu from '@/components/AccountMenu.vue';
 // The admin panel's own bell, not a second one — see the header cluster below.
 import NotificationBell from '@/components/NotificationBell.vue';
 
@@ -46,9 +57,10 @@ import { currentMountBase } from '@/router';
 import { getServerRoot } from '@/api/runtimeConfig';
 import { fetchVisibleStorages, type VisibleStorage } from '@/lib/visibleStorages';
 // ⚠ `#<storage>/<folder>` → `<storage>://<path>` is converted by the module
-// that owns both shapes, never by slicing a string here. See its note.
-import { qualifiedFromHash, sameRowPath } from '@/lib/notificationTarget';
+// that owns both shapes (core lib/notificationTarget: `qualifiedFromHash`,
+// imported above), never by slicing a string here. See its note.
 import { signOut } from '@/lib/signOut';
+import { useSettingsDeepLink } from '@/composables/useSettingsDeepLink';
 // Live collaboration (WebSocket + presence) now lives INSIDE @brftech/filex-core's
 // FileExplorer, so every consumer (this panel + the embedded webcomponent) gets
 // it automatically — no per-page realtime wiring here anymore.
@@ -90,6 +102,10 @@ const storages = useStoragesStore();
 // comment below — and the screen itself is still the package's. This page
 // mounts it; it does not re-draw it.
 const showSettings = ref(false);
+// `?settings=1` — the settings dialog's address, for EVERY role: this page is
+// the front door of a non-admin, and the desktop app's "User settings ↗" opens
+// `/drive/home?settings=1` in the browser. TopNav (admin-only) honours it too.
+useSettingsDeepLink(showSettings);
 /** baglan:b1 — the connections guide, on the one screen with no panel to open
  *  it. Set ONLY from `emptyStateActions`'s row; `headerActions` must never
  *  grow one, or the explorer carries two doors a glyph apart again. */
@@ -112,13 +128,6 @@ async function doLogout() {
  * so the toolbar knows before its next paint whether to keep drawing its own
  * button. An embed claims nothing and keeps its "⋯" exactly as it was.
  */
-interface ExplorerMenuRow {
-  key: string;
-  label: string;
-  divider?: boolean;
-  disabled?: boolean;
-  icon?: string;
-}
 interface HeaderMenuClaim {
   items: ExplorerMenuRow[];
   run: (key: string) => void;
@@ -157,12 +166,11 @@ let runExplorerRow: ((key: string) => void) | null = null;
 const ROWS_WITH_ANOTHER_DOOR = new Set([
   'theme',
   'density',
-  'view-list',
-  'view-grid',
-  'view-gallery',
-  'inspector',
-  'nav',
   'timezone',
+  // view-list/grid/gallery, inspector, nav — the controls the explorer draws
+  // itself; core names them once (EXPLORER_DRAWN_ROWS), and the desktop app's
+  // avatar leaves out the same ones.
+  ...EXPLORER_DRAWN_ROWS,
 ]);
 
 function onHeaderMenu(ev: Event) {
@@ -224,23 +232,18 @@ const headerActions = computed<AccountAction[]>(() => {
   // ⚠ Admins only, and it is the ONLY role check in this cluster. Everything
   // else here belongs to whoever is signed in.
   if (auth.isAdmin) rows.push({ key: 'admin', label: t('explore.gotoAdmin'), icon: 'admin' });
-  // The explorer's own settings, between this account's doors and the exit:
-  // they are neither "who am I" nor "goodbye", and burying them under Sign out
-  // would put the one destructive row in the middle of the list.
-  explorerRows.value.forEach((r, i) =>
-    rows.push({
-      key: `fe:${r.key}`,
-      label: r.label,
-      icon: r.icon || r.key,
-      separated: i === 0,
-    }),
-  );
+  // The explorer's own settings, between this account's doors and the exit,
+  // in the order core's lib/accountMenu puts them — the same rule the desktop
+  // app's avatar follows (FileExplorer `config.account`), so the two menus
+  // cannot drift. `explorerRows` is already filtered against
+  // ROWS_WITH_ANOTHER_DOOR (onHeaderMenu).
   // ⚠ `nav.logout`, not `explore.logout`. They are the same verb and the
   // English differed — "Sign out" in the admin panel's account menu, "Log out"
   // in the explorer's — which is one product speaking with two voices about
   // one action. One string, both menus.
-  rows.push({ key: 'signout', label: t('nav.logout'), separated: true, icon: 'sign-out' });
-  return rows;
+  return accountMenuRows(rows, explorerRows.value, {
+    tail: [{ key: 'signout', label: t('nav.logout'), icon: 'sign-out' }],
+  });
 });
 
 /**
@@ -295,8 +298,9 @@ function runAccountAction(key: string) {
      — run through the callback it handed us, which is the SAME handler its own
      "⋯" uses, so a claimed row and an unclaimed one cannot do different
      things. */
-  if (key.startsWith('fe:')) {
-    runExplorerRow?.(key.slice(3));
+  const explorerKey = explorerRowKey(key);
+  if (explorerKey !== null) {
+    runExplorerRow?.(explorerKey);
     return;
   }
   if (key === 'admin') void router.push({ name: 'dashboard' });

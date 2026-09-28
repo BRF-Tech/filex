@@ -68,16 +68,28 @@ func (r *Registry) FetchGitHub(ctx context.Context, in GitHubInput) (*InstallInp
 	if m.IsLanguagePack() {
 		return &InstallInput{Manifest: manifest, Source: "github", SourceURL: "https://github.com/" + repo + "@" + usedRef}, nil
 	}
+	fromRepo := func(u string) string {
+		u = strings.ReplaceAll(u, "{tag}", usedRef)
+		if !strings.Contains(u, "://") {
+			u = "https://raw.githubusercontent.com/" + repo + "/" + url.PathEscape(usedRef) + "/" + strings.TrimPrefix(u, "/")
+		}
+		return u
+	}
+	ui, err := r.fetchUIBundle(ctx, m, fromRepo)
+	if err != nil {
+		return nil, err
+	}
+	if (m.Wasm == nil || strings.TrimSpace(m.Wasm.URL) == "") && m.UI != nil && !m.NeedsModule() {
+		// An app that is only an interface: the bundle is the whole download.
+		return &InstallInput{Manifest: manifest, UI: ui, Source: "github", SourceURL: "https://github.com/" + repo + "@" + usedRef}, nil
+	}
 	if m.Wasm == nil || strings.TrimSpace(m.Wasm.URL) == "" {
 		return nil, installErr(ErrCodeManifestInvalid, "the manifest has no wasm.url; a repository install needs a prebuilt module address")
 	}
 	if strings.TrimSpace(m.Wasm.SHA256) == "" {
 		return nil, installErr(ErrCodeSHA256Required, "the manifest has no wasm.sha256; a downloaded module must be pinned by hash")
 	}
-	wasmURL := strings.ReplaceAll(m.Wasm.URL, "{tag}", usedRef)
-	if !strings.Contains(wasmURL, "://") {
-		wasmURL = "https://raw.githubusercontent.com/" + repo + "/" + url.PathEscape(usedRef) + "/" + strings.TrimPrefix(wasmURL, "/")
-	}
+	wasmURL := fromRepo(m.Wasm.URL)
 	wasm, err := r.fetch(ctx, wasmURL, r.opts.MaxWasmBytes)
 	if err != nil {
 		ie := fetchFailure(err, FetchReasonModuleNotFound, wasmURL)
@@ -85,9 +97,33 @@ func (r *Registry) FetchGitHub(ctx context.Context, in GitHubInput) (*InstallInp
 		return nil, ie
 	}
 	return &InstallInput{
-		Manifest: manifest, Wasm: bytes.NewReader(wasm), SHA256: m.Wasm.SHA256,
+		Manifest: manifest, Wasm: bytes.NewReader(wasm), SHA256: m.Wasm.SHA256, UI: ui,
 		Source: "github", SourceURL: "https://github.com/" + repo + "@" + usedRef,
 	}, nil
+}
+
+// fetchUIBundle downloads the interface bundle a manifest names — `resolve`
+// turns its `url` into an address (a repository's ref, a manifest's own
+// address) — pinned by ui.bundle.sha256, which a download must have. Nil when
+// the manifest has no interface.
+func (r *Registry) fetchUIBundle(ctx context.Context, m *Manifest, resolve func(string) string) (io.Reader, error) {
+	if m.UI == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(m.UI.Bundle.URL) == "" {
+		return nil, installErr(ErrCodeManifestInvalid, "the manifest has no ui.bundle.url; an install from a repository or an address needs the interface bundle's address")
+	}
+	if m.UI.Bundle.SHA256 == "" {
+		return nil, installErr(ErrCodeSHA256Required, "the manifest has no ui.bundle.sha256; a downloaded interface must be pinned by hash")
+	}
+	u := resolve(strings.TrimSpace(m.UI.Bundle.URL))
+	b, err := r.fetch(ctx, u, r.maxUIBytes())
+	if err != nil {
+		ie := fetchFailure(err, FetchReasonModuleNotFound, u)
+		ie.Message = "interface bundle: " + err.Error()
+		return nil, ie
+	}
+	return bytes.NewReader(b), nil
 }
 
 // githubManifest reads filex-app.json from a repository at the first of refs
@@ -135,6 +171,27 @@ func (r *Registry) FetchURL(ctx context.Context, in URLInput) (*InstallInput, er
 		return &InstallInput{Manifest: manifest, SHA256: strings.TrimSpace(in.SHA256), Signature: in.Signature,
 			Source: "url", SourceURL: in.ManifestURL, ManifestURL: in.ManifestURL, Pinned: strings.TrimSpace(in.SHA256) != ""}, nil
 	}
+	// The interface bundle's address may be relative to the manifest's.
+	fromManifest := func(ref string) string {
+		base, err := url.Parse(in.ManifestURL)
+		if err != nil {
+			return ref
+		}
+		rel, err := url.Parse(ref)
+		if err != nil {
+			return ref
+		}
+		return base.ResolveReference(rel).String()
+	}
+	ui, err := r.fetchUIBundle(ctx, m, fromManifest)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(in.URL) == "" && m.UI != nil && !m.NeedsModule() {
+		// Only an interface: `sha256`, when given, pins the manifest.
+		return &InstallInput{Manifest: manifest, UI: ui, SHA256: strings.TrimSpace(in.SHA256), Signature: in.Signature,
+			Source: "url", SourceURL: in.ManifestURL, ManifestURL: in.ManifestURL, Pinned: strings.TrimSpace(in.SHA256) != ""}, nil
+	}
 	if strings.TrimSpace(in.URL) == "" {
 		return nil, &InstallError{Code: ErrCodeFetch, Reason: FetchReasonMissingURL,
 			Message: "url (the module's address) and manifest_url are required"}
@@ -153,7 +210,7 @@ func (r *Registry) FetchURL(ctx context.Context, in URLInput) (*InstallInput, er
 		return nil, ie
 	}
 	return &InstallInput{
-		Manifest: manifest, Wasm: bytes.NewReader(wasm), SHA256: sum, Signature: in.Signature,
+		Manifest: manifest, Wasm: bytes.NewReader(wasm), SHA256: sum, Signature: in.Signature, UI: ui,
 		Source: "url", SourceURL: in.URL, ManifestURL: in.ManifestURL, Pinned: strings.TrimSpace(in.SHA256) != "",
 	}, nil
 }

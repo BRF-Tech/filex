@@ -263,6 +263,20 @@ func hfShareCreate(ctx context.Context, s *Scope, in json.RawMessage) (any, erro
 		if rel == "" {
 			return nil, hostErr(wire.ErrInvalid, "no document for this link: pass ref or path, or run the action on a file")
 		}
+		// ⚠⚠ WHOSE FILE, asked BEFORE the catalogue is: asked after, "no such
+		// file" against "not one of its inputs" told the app whether any path
+		// it cared to name existed. A page-less link must be of an input (why:
+		// below). A PAGE link's document is never handed over — the visitor
+		// gets the copies — but it is what the page's state hangs on and what
+		// a visitor's follow-up job runs on, so it too must be a file this call
+		// was handed: an input, or one the app keeps state on (hostfn.go
+		// targetRel, the same rule for a lock or a notice).
+		if spec == nil && !s.hasInput(rel) {
+			return nil, hostErr(wire.ErrPermissionDenied, "a link without a page may only share a file this job was given: "+rel+" is not one of its inputs")
+		}
+		if spec != nil && !s.handedPath(ctx, rel) {
+			return nil, errPathNotHanded
+		}
 		node, _ = s.reg.opts.Store.GetNodeByPath(ctx, s.storageID, pathkey.Hash(s.storageID, "/"+rel))
 		if node == nil && s.hasInput(rel) {
 			// ⚠⚠ THE FILE IS THERE; THE CATALOGUE HAS NOT SEEN IT YET. A share
@@ -289,18 +303,15 @@ func hfShareCreate(ctx context.Context, s *Scope, in json.RawMessage) (any, erro
 		if node == nil {
 			return nil, hostErr(wire.ErrNotFound, "no such file: "+rel)
 		}
-		// ⚠⚠ WHOSE FILE. A page-less link hands over the node's own bytes to
-		// a stranger, so it may only be of a file this call was already
-		// handed — one of its inputs. The job was queued by a person whose
-		// ACL was checked against exactly those paths (and the link is minted
-		// as that person), which is what makes the share no more powerful
-		// than the Share dialog they could have used themselves. Without
-		// this, `public_pages` would read "download any file on this storage,
-		// through a link", because a `path` is otherwise just a string the
-		// plugin chose.
-		if spec == nil && !s.hasInput(rel) {
-			return nil, hostErr(wire.ErrPermissionDenied, "a link without a page may only share a file this job was given: "+rel+" is not one of its inputs")
-		}
+		// ⚠⚠ (The page-less rule, checked above before the catalogue.) A
+		// page-less link hands over the node's own bytes to a stranger, so it
+		// may only be of a file this call was already handed — one of its
+		// inputs. The job was queued by a person whose ACL was checked against
+		// exactly those paths (and the link is minted as that person), which
+		// is what makes the share no more powerful than the Share dialog they
+		// could have used themselves. Without it, `public_pages` would read
+		// "download any file on this storage, through a link", because a
+		// `path` is otherwise just a string the plugin chose.
 	} else if s.outputMode == "none" {
 		// The same ACL question, answered before it is asked: an output is a
 		// file this job is MAKING for the person who queued it, out of the
@@ -312,6 +323,23 @@ func hfShareCreate(ctx context.Context, s *Scope, in json.RawMessage) (any, erro
 		// commits anything, which would be a token nothing ever answers. Said
 		// plainly, now, rather than as silence when the job finishes.
 		return nil, hostErr(wire.ErrInvalid, "this action keeps no outputs (output mode \"none\"), so "+outRef+" will never become a file: share one of the job's inputs, or give the action an output")
+	}
+
+	// ⚠⚠ WHO may publish. The job was authorised for what it READS — viewer
+	// is enough for an action that writes nothing — while a public link is an
+	// outbound-access grant, and the Share dialog asks editor for it
+	// (handlers/share.go). Everything a link hands over (the node, a copy, an
+	// output) is made from this job's inputs, so the person must hold editor
+	// on every one of them; the lock of THIS app is waived, as it is for the
+	// app's own writes. A job nobody asked for (the wake-up's, actor id 0)
+	// runs only on files the app keeps state on (schedule.go), and is judged
+	// there.
+	if s.actor != nil && s.actor.ID > 0 {
+		for _, f := range s.Inputs() {
+			if !s.reg.actorHoldsEditor(ctx, s.actor, s.storageID, f.PathRel, s.plugin.Row.ID) {
+				return nil, hostErr(wire.ErrPermissionDenied, "the person this job runs for may not share "+f.Name+": a public link needs editor on the file, as in the Share dialog")
+			}
+		}
 	}
 
 	// PIN policy is the manifest page's when there is one; a page-less link
@@ -697,6 +725,11 @@ func (r *Registry) PageEvent(ctx context.Context, sh *model.Share, p *Installed,
 	if err != nil {
 		return nil, err
 	}
+	release, err := p.enterCall(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	storageID, rel := r.pageAnchor(ctx, sh)
 	scope, err := newScope(p, r, "", storageID, nil, nil, in.Context.Locale, false)
 	if err != nil {

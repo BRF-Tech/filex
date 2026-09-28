@@ -4,6 +4,7 @@
     "ok": true,
     "requires": ">=0.47.0"
   },
+  "engine": false,
   "engines_missing": [
     {
       "id": "libreoffice",

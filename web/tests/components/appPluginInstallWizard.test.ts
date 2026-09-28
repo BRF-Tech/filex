@@ -352,6 +352,46 @@ describe('AppPluginInstallWizard — upgrade review and range', () => {
     w.unmount();
   });
 
+  // ⚠⚠ Nothing updates itself (filex 0.48): this review is where every
+  // newer version is approved, so it says what the version changes beyond
+  // the grant — the server's own bytes (app-plugin-upgrade-review.json).
+  it('says what else the version changes: module and interface, their files, the range, the signature, the notes', async () => {
+    const review = upgradeReview();
+    review.compat.ok = true;
+    dryRunAnswer = review;
+    const w = mountUpdate();
+    await w.setProps({ modelValue: true });
+    await flushPromises();
+    expect(w.find('[data-testid="app-plugin-upgrade-module-hash"]').text()).toBe('Module: 5f1c0de90000 → a9950e0d84a6');
+    expect(w.find('[data-testid="app-plugin-upgrade-ui"]').text()).toBe('This version adds its own interface.');
+    const files = w.find('[data-testid="app-plugin-upgrade-files"]');
+    expect(files.find('summary').text()).toBe('Interface files: 2 added, 0 removed, 0 changed');
+    expect(files.text()).toContain('Added: index.html, app.js');
+    expect(files.text()).not.toContain('Removed:');
+    expect(w.find('[data-testid="app-plugin-upgrade-range"]').text()).toBe('Works with filex: >=0.45.0 → >=0.48.0');
+    expect(w.find('[data-testid="app-plugin-upgrade-signed"]').text()).toBe('Signature: signed → unsigned');
+    const notes = w.find('[data-testid="app-plugin-upgrade-notes"]');
+    expect(notes.text()).toContain('Signers can now be reminded.');
+    w.unmount();
+  });
+
+  it('shows the source’s notes as text, never as markup', async () => {
+    const review = upgradeReview();
+    review.compat.ok = true;
+    review.upgrade.notes = 'Fixed <img src=x onerror="window.pwned=1"> and <b>more</b>';
+    dryRunAnswer = review;
+    const w = mountUpdate('tr');
+    await w.setProps({ modelValue: true });
+    await flushPromises();
+    const notes = w.find('[data-testid="app-plugin-upgrade-notes"]');
+    expect(notes.find('h4').text()).toBe('Sürüm notları');
+    expect(notes.find('img').exists()).toBe(false);
+    expect(notes.find('b').exists()).toBe(false);
+    expect(notes.text()).toContain('<img src=x onerror="window.pwned=1">');
+    expect(w.find('[data-testid="app-plugin-upgrade-signed"]').text()).toBe('İmza: imzalı → imzasız');
+    w.unmount();
+  });
+
   it('a range that leaves this filex out is said at the review, and nothing can be installed from it', async () => {
     dryRunAnswer = upgradeReview();
     const w = mountUpdate('tr');
@@ -374,6 +414,126 @@ describe('AppPluginInstallWizard — upgrade review and range', () => {
     expect(w.find('[data-testid="app-plugin-wizard-error"]').text()).toBe(
       'Bu sürüm filex >=0.48.0 ile çalışıyor; bu sunucu filex 0.47.0, bu yüzden burada kurulamaz.',
     );
+    w.unmount();
+  });
+});
+
+// ── An app's own interface: the review's "Interface" group ────────────────
+describe('AppPluginInstallWizard — an app with its own interface', () => {
+  const FONT = 'https://fonts.example.net/inter/';
+  const CSS = 'https://cdn.example.net/lib/x.css';
+  const withUI = () => ({
+    ...wireDryRun(),
+    engine: false,
+    wasm_sha256: '',
+    ui: {
+      sha256: 'ab'.repeat(32),
+      files: 4,
+      bytes: 2048,
+      unpacked: 8192,
+      external: [
+        { url: FONT, as: 'font', mode: 'live', reason: { en: 'The Inter font', tr: 'Inter yazı tipi' } },
+        { url: CSS, as: 'style', mode: 'mirror', sha256: 'cd'.repeat(32), bytes: 10, path: 'ext/cdn.example.net/lib/x.css' },
+      ],
+    },
+  });
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    posts.length = 0;
+    refuse = null;
+    document.body.innerHTML = '';
+  });
+
+  it('shows the package, the addresses by risk — mirrored green, live amber — and always the honest note', async () => {
+    dryRunAnswer = withUI();
+    const w = mountWizard();
+    await reachReview(w);
+    const group = w.find('[data-testid="app-plugin-ui-group"]');
+    expect(group.exists()).toBe(true);
+    expect(group.text()).toContain(en.appPlugins.wizard.uiGroup.badge);
+    expect(w.find('[data-testid="app-plugin-ui-sha256"]').text()).toBe('ab'.repeat(32));
+    expect(w.find('[data-testid="app-plugin-ui-no-engine"]').text()).toBe(en.appPlugins.wizard.uiGroup.noEngine);
+    expect(w.text(), 'no module: no module hash row').not.toContain(en.appPlugins.wizard.facts.sha256);
+
+    const rows = w.findAll('[data-testid^="app-plugin-ui-external-"]');
+    expect(rows.map((r) => r.attributes('data-testid')), 'mirrored first').toEqual(['app-plugin-ui-external-mirror', 'app-plugin-ui-external-live']);
+    expect(rows[0].classes().join(' ')).toMatch(/emerald/);
+    expect(rows[0].text()).toContain(en.appPlugins.wizard.uiGroup.mirror);
+    expect(rows[0].text()).toContain(en.appPlugins.wizard.uiGroup.mirrorText);
+    expect(rows[0].text()).toContain(CSS);
+    expect(rows[1].classes().join(' ')).toMatch(/amber/);
+    expect(rows[1].text()).toContain(en.appPlugins.wizard.uiGroup.live);
+    expect(rows[1].text()).toContain(en.appPlugins.wizard.uiGroup.liveText);
+    expect(rows[1].text()).toContain('The Inter font');
+    expect(rows[1].text()).toContain(en.appPlugins.wizard.uiGroup.as.font);
+
+    expect(w.find('[data-testid="app-plugin-ui-honest"]').text()).toBe(en.appPlugins.wizard.uiGroup.honest);
+    // ⚠⚠ Never promise what a browser does not keep.
+    expect(w.text()).not.toMatch(/cannot reach the network|no network|offline/i);
+    w.unmount();
+  });
+
+  it('says it in Turkish on a Turkish screen, and the honest note is there with no address at all', async () => {
+    const d = withUI();
+    d.ui.external = [];
+    dryRunAnswer = d;
+    const w = mountWizard('tr');
+    await reachReview(w);
+    expect(w.find('[data-testid="app-plugin-ui-group"]').text()).toContain('Kendi arayüzü var');
+    expect(w.find('[data-testid="app-plugin-ui-external"]').exists()).toBe(false);
+    expect(w.find('[data-testid="app-plugin-ui-honest"]').text()).toBe(
+      'Tarayıcılar bir arayüzün dışarı veri göndermesini tamamen engelleyemiyor (WebRTC; Chrome’da kapatılabiliyor, Firefox’ta kapatılamıyor). Bu uygulamaya, onunla açtığınız dosyaları görmesine güvendiğiniz biri kadar güvenin.',
+    );
+    expect(w.text()).not.toMatch(/ağa çıkamaz/i);
+    w.unmount();
+  });
+
+  // ⚠ Measured against a built server (2026-09-27): the grant was the
+  // manifest's list, and an app with an interface was refused
+  // permissions_incomplete — `ui` is derived, it is in the review, not in
+  // the manifest.
+  it('grants what the review lists, the derived interface permissions included', async () => {
+    const d = withUI();
+    d.permissions = [...d.permissions, { id: 'ui', label: 'Runs its own interface in your browser' }];
+    dryRunAnswer = d;
+    const w = mountWizard();
+    await reachReview(w);
+    await w.find('input[type="checkbox"]').setValue(true);
+    await w.find('[data-testid="app-plugin-install"]').trigger('click');
+    await flushPromises();
+    const real = posts.find((p) => !p.cfg?.params?.dry_run)!;
+    expect((real.body as { permissions: string[] }).permissions).toContain('ui');
+    expect((real.body as { permissions: string[] }).permissions).toEqual(d.permissions.map((p: { id: string }) => p.id));
+    w.unmount();
+  });
+
+  it('an app without an interface has no Interface group', async () => {
+    dryRunAnswer = wireDryRun();
+    const w = mountWizard();
+    await reachReview(w);
+    expect(w.find('[data-testid="app-plugin-ui-group"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('uploads the interface bundle as its own part', async () => {
+    dryRunAnswer = withUI();
+    const w = mountWizard();
+    await w.find('[data-testid="app-plugin-source-file"]').trigger('click');
+    const manifest = new File(['{}'], 'filex-app.json');
+    const ui = new File([new Uint8Array([80, 75, 3, 4])], 'ui.zip');
+    for (const [id, file] of [['app-plugin-manifest', manifest], ['app-plugin-ui', ui]] as const) {
+      const input = w.find(`[data-testid="${id}"]`);
+      Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
+      await input.trigger('change');
+    }
+    await w.find('form').trigger('submit');
+    await flushPromises();
+    const body = posts[0].body as FormData;
+    const sent = body.get('ui') as File;
+    expect([sent?.name, sent?.size]).toEqual(['ui.zip', 4]);
+    expect((body.get('manifest') as File)?.name).toBe('filex-app.json');
+    expect(body.has('wasm')).toBe(false);
     w.unmount();
   });
 });

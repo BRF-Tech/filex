@@ -159,9 +159,7 @@ func hostOf(rawURL string) string {
 }
 
 // browserLoaded names the services the BROWSER fetches directly: OnlyOffice's
-// api.js goes into a <script>, drawio goes into an <iframe>. The converter is
-// only ever called server-to-server, so a container name is perfectly fine for
-// it and must not be warned about.
+// api.js goes into a <script>, drawio goes into an <iframe>.
 var browserLoaded = map[string]bool{OnlyOffice: true, Drawio: true}
 
 // callsBack names the services that fetch from filex and POST back to it, and

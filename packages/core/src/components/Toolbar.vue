@@ -79,8 +79,6 @@ const props = defineProps<{
   selectionPane?: string;
   /** True when clipboard has cut/copy items, so we can enable Paste. */
   pasteEnabled?: boolean;
-  /** True when the universal converter (FILEX_CONVERT_URL) is available. */
-  convertEnabled?: boolean;
   /**
    * True when the current dir has a parent the user can step up to.
    *

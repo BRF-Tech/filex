@@ -8,7 +8,7 @@
 // plural forms by CLDR category.
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { NOTIFICATION_PHRASES, renderNotification } from '@/lib/notificationText';
+import { NOTIFICATION_PHRASES, renderNotification } from '@brftech/filex-core/src/lib/notificationText';
 import { loadNotifyTables } from '../../../scripts/lib/i18n-catalogue.mjs';
 
 const drop = (count: number, uploader = '') => ({
@@ -59,7 +59,7 @@ describe('a pack language in the bell', () => {
 });
 
 describe('the catalogue reads these phrases as server keys', () => {
-  const t = loadNotifyTables(path.resolve(__dirname, '../../src/lib/notificationText.ts'));
+  const t = loadNotifyTables(path.resolve(__dirname, '../../../packages/core/src/lib/notificationText.ts'));
 
   /** A value a translator could only copy: the whole string is one placeholder. */
   const bare = (v: string) => /^\s*\{[A-Za-z0-9_]+\}\s*$/.test(v);

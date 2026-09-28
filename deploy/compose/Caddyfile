@@ -13,12 +13,6 @@
 		max_size 5GB
 	}
 
-	# Universal converter (convert profile) is served under /convert.
-	@convert path /convert /convert/*
-	handle @convert {
-		reverse_proxy convert:80
-	}
-
 	# Everything else → filex. WebSocket/SSE (e.g. /api/ai/mcp) upgrades itself.
 	handle {
 		reverse_proxy filex:5212 {
@@ -45,3 +39,18 @@
 {$MINIO_CONSOLE_DOMAIN} {
 	reverse_proxy minio:9001
 }
+
+# Apps' own interfaces on an origin of their own (optional) — FILEX_APP_UI_ORIGIN,
+# docs/APP-PLUGINS.md "An origin of their own". Point a second host at the same
+# filex; filex answers ONLY the interface route (/_appui/…) there, and refuses
+# that route on its own host. ⚠ Pick a host on ANOTHER registrable domain
+# (apps.example-usercontent.com for files.example.com), so no cookie of filex's
+# can ever be sent to it. Then set FILEX_APP_UI_ORIGIN=https://<that host> on
+# the filex service. Left commented: without it, interfaces are served from
+# filex's own origin, opaque by sandbox (the default).
+#
+# {$FILEX_APP_UI_DOMAIN} {
+# 	reverse_proxy filex:5212 {
+# 		header_up X-Real-IP {remote_host}
+# 	}
+# }

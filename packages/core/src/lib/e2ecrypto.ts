@@ -54,7 +54,17 @@
  *     and it is the reason `escrowAvailability` says "not as things stand"
  *     rather than "never".
  *
- * File layout ('filexe2e' magic, fixed 97-byte header) — UNCHANGED in v2:
+ * v3 is v2 plus REQUIRED FEATURES (`req`). A client must understand every
+ * entry of `req` or refuse the folder — the ext4 "incompat flag" rule. The
+ * only feature today is `names` (encrypted file and folder names, see
+ * lib/e2enames.ts): the marker then carries a `names` slot, a random name
+ * key wrapped by the FMK. A folder without encrypted names stays v2 on
+ * purpose, so every filex since 0.31 keeps opening it. A folder WITH them
+ * must not open in an older filex at all: that build would show ciphertext
+ * as names and write plaintext names next to them. filex ≤ 0.47 rejects
+ * `v: 3` outright, which is the refusal we want.
+ *
+ * File layout ('filexe2e' magic, fixed 97-byte header) — UNCHANGED in v2/v3:
  *   [0..8)   magic  "filexe2e"
  *   [8]      version 0x01
  *   [9..21)  wrapIV  (12B)  — GCM IV of the DEK wrap
@@ -64,14 +74,37 @@
  *   [97..)   ciphertext (content + 16B GCM tag)
  */
 
+import {
+  E2E_NAMES_ALG,
+  E2E_NAMES_ENC,
+  E2E_NAMES_LONG_DEFAULT,
+  b64urlDecode,
+  b64urlEncode,
+  E2E_DIR_ID_BYTES,
+  generateNameKeyBytes,
+  generateRootId,
+  importNameKey,
+  type E2eNameKey,
+} from './e2enames';
+/* wiring:e2 stream — a folder file over E2E_MAX_FILE_BYTES is a STREAM file,
+ * header version 0x02 (lib/e2estream.ts). `decryptFile` and `rewrapFileKey`
+ * below read both versions; the header up to offset 69 is the same. */
+import { E2E_FILE_VERSION_STREAM, decryptStreamFolderFileBytes } from './e2estream';
+
 export const E2E_MARKER_NAME = '.filex-e2e.json';
 export const E2E_MAGIC = 'filexe2e';
 /** File-header version byte. Unchanged by the recovery work. */
 export const E2E_VERSION = 1;
-/** Marker schema version written by this build. v1 markers still read. */
+/** Marker schema version written for a folder WITHOUT encrypted names. v1 still reads. */
 export const E2E_MARKER_VERSION = 2;
+/** Marker schema version of a folder that carries required features (`req`). */
+export const E2E_MARKER_VERSION_FEATURES = 3;
+/** Required features this build understands. Anything else in `req` → refuse. */
+export const E2E_KNOWN_FEATURES: readonly string[] = ['names', 'rekey', 'conv'];
 export const E2E_DEFAULT_ITERATIONS = 600_000;
 export const E2E_MIN_ITERATIONS = 600_000;
+/** The most a marker may ask for (a hostile `iter` would hang the tab). */
+export const E2E_MAX_ITERATIONS = 100_000_000;
 /** MVP single-shot in-memory ceiling — larger uploads are refused with a warning. */
 export const E2E_MAX_FILE_BYTES = 200 * 1024 * 1024;
 export const E2E_MIN_PASSWORD_LEN = 8;
@@ -110,8 +143,74 @@ export interface E2eEscrowSlot {
   blob: string; // base64: RSA-OAEP-256(escrow public key, FMK)
 }
 
+/**
+ * Encrypted-names slot (marker v3, feature `names`). Nothing in it is secret:
+ * the key is sealed under the FMK, and the rest is the recipe.
+ */
+export interface E2eNamesSlot {
+  /** E2E_NAMES_ALG — AES-SIV (RFC 5297) with AES-256. */
+  alg: string;
+  /** E2E_NAMES_ENC — base64url, no padding. */
+  enc: string;
+  /** Encoded names longer than this are shortened to `<hash>.fxl` + sidecar. */
+  long: number;
+  /** base64: 12B IV || AES-GCM(FMK, 64-byte name key). */
+  key: string;
+  /**
+   * base64url of the encrypted root's own 16-byte folder id: the associated
+   * data of every name directly inside the root (lib/e2enames → "Folder
+   * ids"). Not secret; random, minted with the name key.
+   */
+  root_id: string;
+  /**
+   * A switch from plaintext names to encrypted names started and has not
+   * finished: some entries may still carry their plaintext name. The client
+   * offers to resume; the rename pass is idempotent, so resuming is simply
+   * running it again. Absent on a folder created with encrypted names.
+   */
+  pending?: boolean;
+}
+
+/**
+ * A re-key in progress (marker v3, feature `rekey`): the folder has a NEW
+ * folder master key, and some files still have their DEK wrapped under the
+ * previous one. `from` is that previous key, sealed under the new one, so any
+ * way into the folder also reaches the files not re-wrapped yet — and resuming
+ * the re-wrap needs nothing but an unlock. Removed when the last file is done.
+ */
+export interface E2eRekeySlot {
+  /** base64: 12B IV || AES-GCM(new FMK, previous FMK raw 32B). */
+  from: string;
+  pending: true;
+}
+
+/**
+ * An existing folder being encrypted in place (marker v3, feature `conv`):
+ * some of its files may still be plaintext. The folder is an encrypted folder
+ * to the server from the moment this key file lands (the transfer guard, the
+ * thumbnailer and the indexer treat it so), and while `pending` the server
+ * lets a write replace a plaintext file with its ciphertext without keeping
+ * the plaintext as a version. Removed when every file carries the magic.
+ */
+export interface E2eConvSlot {
+  pending: true;
+  /** ISO time the conversion started. */
+  started?: string;
+  /** What to remove when it finishes (the owner's choice in the dialog,
+   *  kept here so a resumed run honours it): versions, trash entries. */
+  cleanup?: { versions: boolean; trash: boolean };
+}
+
 export interface E2eMarker {
   v: number;
+  /** v3 only: features a client must understand to open this folder. */
+  req?: string[];
+  /** v3 + req 'rekey': a re-key in progress. */
+  rekey?: E2eRekeySlot;
+  /** v3 + req 'conv': an in-place conversion in progress. */
+  conv?: E2eConvSlot;
+  /** v3 + req 'names': the encrypted-names slot. */
+  names?: E2eNamesSlot;
   salt: string; // base64, PBKDF2 salt for the password slot
   iter: number;
   verify: string; // base64: 12B IV || AES-GCM ciphertext of VERIFY_PLAINTEXT
@@ -190,6 +289,19 @@ async function gcmSeal(key: CryptoKey, plain: Uint8Array): Promise<string> {
   );
   return joinIvCt(iv, ct);
 }
+
+/* wiring:e2 fxe — the sealed-blob shape, for a container that reuses the
+ * marker's slots (lib/e2efile.ts seals a file's DEK and its name with these).
+ * Same bytes as every blob in a marker: base64(12B IV ‖ ciphertext ‖ tag). */
+/** Seal `plain` under `key` as a marker-style blob. */
+export function sealBlob(key: CryptoKey, plain: Uint8Array): Promise<string> {
+  return gcmSeal(key, plain);
+}
+/** Open a marker-style blob; null for a wrong key or a damaged blob. */
+export function openBlob(key: CryptoKey, b64: string): Promise<Uint8Array | null> {
+  return gcmOpen(key, b64);
+}
+/* /wiring:e2 fxe */
 
 /** Returns null (never throws) on a tag mismatch — i.e. "wrong key". */
 async function gcmOpen(key: CryptoKey, b64: string): Promise<Uint8Array | null> {
@@ -444,6 +556,12 @@ export interface CreateFolderOptions {
   iterations?: number;
   /** Base64 SPKI of the installation escrow key, when escrow is enabled. */
   escrowPublicKey?: string | null;
+  /**
+   * Encrypt file and folder names too (marker v3, feature `names`). The
+   * default for a new folder in the UI; false keeps the v2 content-only
+   * folder that every filex since 0.31 can open.
+   */
+  encryptNames?: boolean;
 }
 
 export interface CreatedFolder {
@@ -452,6 +570,28 @@ export interface CreatedFolder {
   fmk: CryptoKey;
   /** Show this ONCE. filex never stores it and can never show it again. */
   recoveryKey: string;
+  /** The name key, when the folder was created with encrypted names. */
+  names?: E2eNameKey;
+}
+
+/** Mint a name key and seal it under the FMK. The raw bytes are zeroed. */
+async function sealNamesSlot(
+  fmk: CryptoKey,
+  pending: boolean,
+): Promise<{ slot: E2eNamesSlot; key: E2eNameKey }> {
+  const raw = generateNameKeyBytes();
+  const rootId = generateRootId();
+  const slot: E2eNamesSlot = {
+    alg: E2E_NAMES_ALG,
+    enc: E2E_NAMES_ENC,
+    long: E2E_NAMES_LONG_DEFAULT,
+    key: await gcmSeal(fmk, raw),
+    root_id: b64urlEncode(rootId),
+  };
+  if (pending) slot.pending = true;
+  const key = await importNameKey(raw, slot.long, rootId);
+  raw.fill(0);
+  return { slot, key };
 }
 
 /**
@@ -482,7 +622,12 @@ export async function createEncryptedFolder(
 
   const fmk = await importFmk(rawFmk);
   rawFmk.fill(0);
-  return { marker, fmk, recoveryKey };
+  if (!opts.encryptNames) return { marker, fmk, recoveryKey };
+  const sealed = await sealNamesSlot(fmk, false);
+  marker.v = E2E_MARKER_VERSION_FEATURES;
+  marker.req = ['names'];
+  marker.names = sealed.slot;
+  return { marker, fmk, recoveryKey, names: sealed.key };
 }
 
 /**
@@ -563,7 +708,7 @@ export async function addEscrowSlot(
   password: string,
   escrowPublicKey: string,
 ): Promise<E2eMarker> {
-  if (marker.v !== 2) throw new Error('e2e: not a v2 marker');
+  if (!hasSlots(marker)) throw new Error('e2e: not a v2 marker');
   if (marker.esc) throw new Error('e2e: this folder already has an escrow slot');
   if (!escrowPublicKey) throw new Error('e2e: no escrow public key');
 
@@ -642,35 +787,209 @@ export function escrowOfferState(
   installationKid: string | null | undefined,
 ): EscrowOfferState {
   if (!installationKid) return 'n/a';
-  if (!m || m.v !== 2 || m.esc) return 'n/a';
+  if (!m || !hasSlots(m) || m.esc) return 'n/a';
   return m.esc_declined ? 'declined' : 'offer';
 }
 
-/** Parse marker JSON text; returns null when the shape is not a marker we read. */
-export function parseMarker(text: string): E2eMarker | null {
+/** True for a marker that carries key slots: v2, and v3 (v2 + features). */
+function hasSlots(m: E2eMarker): boolean {
+  return m.v === 2 || m.v === E2E_MARKER_VERSION_FEATURES;
+}
+
+/** A parsed marker, plus the required features this build does not know. */
+export interface ParsedMarker {
+  marker: E2eMarker;
+  /**
+   * Entries of `req` this build cannot honour. Non-empty means: do NOT open
+   * the folder — say which feature is missing and that a newer filex is
+   * needed. Opening it anyway is how an old client writes plaintext into a
+   * folder that promised otherwise.
+   */
+  unsupported: string[];
+}
+
+/**
+ * Parse marker JSON text, keeping what the caller needs to REFUSE a folder
+ * honestly. Null when the text is not a marker at all (or a malformed one);
+ * a well-formed v3 marker with a feature this build does not know comes back
+ * with that feature in `unsupported`.
+ */
+export function parseMarkerDetailed(text: string): ParsedMarker | null {
+  let m: E2eMarker;
   try {
-    const m = JSON.parse(text) as E2eMarker;
-    if (!m || (m.v !== 1 && m.v !== 2)) return null;
-    if (typeof m.salt !== 'string' || typeof m.verify !== 'string') return null;
-    if (typeof m.iter !== 'number' || m.iter < 1) return null;
-    if (m.v === 2) {
-      if (m.fmk !== 'kek' && m.fmk !== 'wrapped') return null;
-      if (m.fmk === 'wrapped' && typeof m.fmk_pw !== 'string') return null;
-    }
-    return m;
+    m = JSON.parse(text) as E2eMarker;
   } catch {
     return null;
   }
+  if (!m || typeof m !== 'object') return null;
+  if (m.v !== 1 && !hasSlots(m)) return null;
+  if (typeof m.salt !== 'string' || typeof m.verify !== 'string') return null;
+  // An integer, and bounded: the unlock derives with whatever the marker says,
+  // and `iter: 1e12` in a hostile key file would hang the tab (filex writes
+  // 600 000; `filex decrypt` accepts the same range).
+  if (typeof m.iter !== 'number' || !Number.isInteger(m.iter) || m.iter < 1 || m.iter > E2E_MAX_ITERATIONS) {
+    return null;
+  }
+  if (hasSlots(m)) {
+    if (m.fmk !== 'kek' && m.fmk !== 'wrapped') return null;
+    if (m.fmk === 'wrapped' && typeof m.fmk_pw !== 'string') return null;
+  }
+  const unsupported: string[] = [];
+  if (m.v === E2E_MARKER_VERSION_FEATURES) {
+    if (!Array.isArray(m.req) || m.req.some((f) => typeof f !== 'string')) return null;
+    for (const f of m.req) if (!E2E_KNOWN_FEATURES.includes(f)) unsupported.push(f);
+    if (m.req.includes('names') && !validNamesSlot(m.names)) return null;
+    if (m.req.includes('rekey')) {
+      if (m.fmk !== 'wrapped' || !m.rekey || typeof m.rekey.from !== 'string') return null;
+    } else if (m.rekey !== undefined) {
+      return null;
+    }
+    if (m.req.includes('conv')) {
+      if (!m.conv || typeof m.conv !== 'object' || m.conv.pending !== true) return null;
+    } else if (m.conv !== undefined) {
+      return null;
+    }
+  } else if (m.req !== undefined || m.names !== undefined || m.rekey !== undefined || m.conv !== undefined) {
+    // A v1/v2 marker carrying v3 fields is not something any filex wrote.
+    return null;
+  }
+  return { marker: m, unsupported };
+}
+
+function validNamesSlot(n: E2eNamesSlot | undefined): boolean {
+  return (
+    !!n &&
+    typeof n === 'object' &&
+    n.alg === E2E_NAMES_ALG &&
+    n.enc === E2E_NAMES_ENC &&
+    typeof n.key === 'string' &&
+    typeof n.long === 'number' &&
+    Number.isInteger(n.long) &&
+    n.long >= 64 &&
+    n.long <= 255 &&
+    typeof n.root_id === 'string' &&
+    b64urlDecode(n.root_id)?.length === E2E_DIR_ID_BYTES
+  );
+}
+
+/**
+ * Parse marker JSON text; returns null when the shape is not a marker this
+ * build can OPEN — including a v3 marker that requires a feature it does not
+ * know. Callers that want to explain a refusal use `parseMarkerDetailed`.
+ */
+export function parseMarker(text: string): E2eMarker | null {
+  const p = parseMarkerDetailed(text);
+  if (!p || p.unsupported.length > 0) return null;
+  return p.marker;
+}
+
+/** True when the folder's file and folder names are encrypted (feature `names`). */
+export function markerHasNames(m: E2eMarker | null): boolean {
+  return (
+    !!m &&
+    m.v === E2E_MARKER_VERSION_FEATURES &&
+    Array.isArray(m.req) &&
+    m.req.includes('names') &&
+    !!m.names
+  );
+}
+
+/**
+ * Unwrap the folder's name key with the FMK an unlock returned. Null when the
+ * folder has no encrypted names, or the slot does not open under this FMK
+ * (a marker from another folder, or a damaged one).
+ */
+export async function unlockNameKey(marker: E2eMarker, fmk: CryptoKey): Promise<E2eNameKey | null> {
+  if (!markerHasNames(marker)) return null;
+  const raw = await gcmOpen(fmk, marker.names!.key);
+  if (!raw || raw.length !== 64) return null;
+  const key = await importNameKey(raw, marker.names!.long, b64urlDecode(marker.names!.root_id)!);
+  raw.fill(0);
+  return key;
+}
+
+/**
+ * Start encrypting the names of an EXISTING content-only folder (v2 → v3).
+ *
+ * Only the marker changes here, and it changes FIRST: the returned marker
+ * carries a fresh name key and `names.pending`, and must be written before a
+ * single entry is renamed. That order is what makes the switch resumable —
+ * an interrupted pass leaves a folder whose marker already says "names are
+ * encrypted, some may not be yet", every renamed entry decrypts, and every
+ * entry not yet renamed is recognisably plaintext. Running the pass again
+ * finishes it.
+ *
+ * Needs the FMK, not the password: the folder has to be unlocked, which is
+ * the only state in which the offer is shown, and the ring's FMK came from
+ * unlocking this very marker.
+ *
+ * ⚠ After this the folder is v3, which filex ≤ 0.47 refuses to open. That
+ * is deliberate (an old client would write plaintext names into it) and the
+ * UI says so before asking.
+ */
+export async function enableNames(
+  marker: E2eMarker,
+  fmk: CryptoKey,
+): Promise<{ marker: E2eMarker; names: E2eNameKey }> {
+  if (marker.v !== 2) throw new Error('e2e: only a v2 folder can switch to encrypted names');
+  const sealed = await sealNamesSlot(fmk, true);
+  const next: E2eMarker = {
+    ...marker,
+    v: E2E_MARKER_VERSION_FEATURES,
+    req: ['names'],
+    names: sealed.slot,
+  };
+  return { marker: next, names: sealed.key };
+}
+
+/** A switch to encrypted names finished: drop `pending`. */
+export function finishNames(marker: E2eMarker): E2eMarker {
+  if (!markerHasNames(marker)) throw new Error('e2e: this folder has no encrypted names');
+  const names = { ...marker.names! };
+  delete names.pending;
+  return { ...marker, names };
+}
+
+/**
+ * A folder's encryption LEVEL — a property of the folder, chosen when it is
+ * encrypted and changed only by a deliberate act in its settings, never by an
+ * offer that pops up (docs/E2E-ENCRYPTION.md → "Encryption levels").
+ *
+ *   'content'   level 1: contents encrypted, names readable (marker v1/v2).
+ *               Can move up to 'names' (v2; a v1 folder first gets its
+ *               recovery upgrade, which makes it v2).
+ *   'names'     level 2: contents and names encrypted (v3, req 'names').
+ *   'pending'   a move from 1 to 2 started and did not finish.
+ *
+ * Level 3, the vault, is designed (docs/E2E-ROADMAP.md) and not built; no
+ * marker carries it yet, and nothing offers it.
+ */
+export type EncryptionLevel = 'content' | 'names' | 'pending';
+
+/** The levels a folder can be GIVEN today, in order (level 1 first — the
+ *  default). The vault joins this list when it works, not before. */
+export type ChoosableLevel = 'content' | 'names';
+export const E2E_CHOOSABLE_LEVELS: readonly ChoosableLevel[] = ['content', 'names'];
+export const E2E_DEFAULT_LEVEL: ChoosableLevel = 'content';
+
+export function encryptionLevel(m: E2eMarker | null): EncryptionLevel {
+  if (m && markerHasNames(m)) return m.names!.pending ? 'pending' : 'names';
+  return 'content';
+}
+
+/** May this folder move from level 1 to level 2 now? (v2 only.) */
+export function canRaiseToNames(m: E2eMarker | null): boolean {
+  return !!m && m.v === 2 && !markerHasNames(m);
 }
 
 /** True when the folder has a user recovery key slot. */
 export function markerHasRecovery(m: E2eMarker | null): boolean {
-  return !!m && m.v === 2 && !!m.rk;
+  return !!m && hasSlots(m) && !!m.rk;
 }
 
 /** True when the folder has an operator escrow slot. */
 export function markerHasEscrow(m: E2eMarker | null): boolean {
-  return !!m && m.v === 2 && !!m.esc;
+  return !!m && hasSlots(m) && !!m.esc;
 }
 
 /**
@@ -764,6 +1083,22 @@ export async function unlockWithPassword(
 }
 
 /**
+ * `unlockWithPassword`, telling a wrong password from a damaged key file: the
+ * password proved right (the verify blob opened) and the folder key still did
+ * not unwrap. "Wrong password" for that case sends a person hunting for a
+ * password they already have.
+ */
+export async function unlockWithPasswordDetailed(
+  marker: E2eMarker,
+  password: string,
+): Promise<{ fmk: CryptoKey } | { error: 'wrong' | 'damaged' }> {
+  const kek = await verifyPassword(marker, password);
+  if (!kek) return { error: 'wrong' };
+  const fmk = await fmkFromKek(marker, kek);
+  return fmk ? { fmk } : { error: 'damaged' };
+}
+
+/**
  * Unlock with the user recovery key shown when the folder was created.
  * Returns null for a malformed key, a wrong key, or a folder that has no
  * recovery slot at all — the caller cannot tell those apart, and neither can
@@ -773,7 +1108,7 @@ export async function unlockWithRecoveryKey(
   marker: E2eMarker,
   recoveryKey: string,
 ): Promise<CryptoKey | null> {
-  if (marker.v !== 2 || !marker.rk) return null;
+  if (!hasSlots(marker) || !marker.rk) return null;
   const raw = parseRecoveryKey(recoveryKey);
   if (!raw) return null;
   let salt: Uint8Array;
@@ -802,7 +1137,7 @@ export async function unlockWithEscrowKey(
   marker: E2eMarker,
   privateKey: CryptoKey,
 ): Promise<CryptoKey | null> {
-  if (marker.v !== 2 || !marker.esc || marker.esc.alg !== E2E_ESCROW_ALG) return null;
+  if (!hasSlots(marker) || !marker.esc || marker.esc.alg !== E2E_ESCROW_ALG) return null;
   let raw: Uint8Array;
   try {
     raw = new Uint8Array(
@@ -888,6 +1223,8 @@ export async function decryptFile(fmk: CryptoKey, data: ArrayBuffer): Promise<Ar
   if (!hasMagic(b) || b.length < HEADER_LEN) {
     throw new Error('e2e: not an encrypted file');
   }
+  /* wiring:e2 stream — a 0x02 file, whole in memory. */
+  if (b[8] === E2E_FILE_VERSION_STREAM) return decryptStreamFolderFileBytes(fmk, b);
   if (b[8] !== E2E_VERSION) {
     throw new Error(`e2e: unsupported version ${b[8]}`);
   }
@@ -913,31 +1250,407 @@ export async function decryptFile(fmk: CryptoKey, data: ArrayBuffer): Promise<Ar
 }
 
 // ---------------------------------------------------------------------
+// Changing the password, and re-keying
+// ---------------------------------------------------------------------
+//
+// A folder whose FMK is random (`fmk: 'wrapped'`, every folder since 0.31)
+// changes its password by re-wrapping that one key: a new salt, a new verify
+// blob and a new `fmk_pw`, and nothing else — no file, and no other slot,
+// because the recovery key, the escrow key and the name key all reach the
+// same FMK.
+//
+// A folder whose FMK IS the password-derived key (v1, and v2 `fmk: 'kek'`)
+// cannot: a new password is a new FMK, and every file's DEK is wrapped under
+// the old one. That is a RE-KEY: a fresh random FMK, every DEK re-wrapped
+// under it (the 48 bytes at [21..69) of each header, plus its IV — the
+// content ciphertext is never touched), and the marker moved to
+// `fmk: 'wrapped'`. It is resumable: the marker is written FIRST, with the
+// previous FMK sealed under the new one (`rekey.from`, feature `rekey`), so a
+// later session reaches every file whichever key its DEK is under, and
+// running the re-wrap again finishes it. The same machinery re-keys a wrapped
+// folder on purpose, when the old password may be known to someone.
+
+/** How the person proves they may change the password. */
+export type E2eCredential = { password: string } | { recoveryKey: string };
+
+/**
+ * The raw FMK, from the password or the recovery key. Throws E2eDecryptError
+ * for a wrong one. The caller zeroes the result.
+ *
+ * ⚠ The second place raw FMK bytes exist (after unlockWithRecoveryKey's
+ * import): re-wrapping a key needs its bytes, and a non-extractable CryptoKey
+ * has none to give.
+ */
+async function fmkRawFrom(marker: E2eMarker, cred: E2eCredential): Promise<Uint8Array> {
+  if ('recoveryKey' in cred) {
+    if (!hasSlots(marker) || !marker.rk) throw new E2eDecryptError('e2e: this folder has no recovery key');
+    const raw = parseRecoveryKey(cred.recoveryKey);
+    if (!raw) throw new E2eDecryptError('e2e: wrong recovery key');
+    let salt: Uint8Array;
+    try {
+      salt = b64ToBytes(marker.rk.salt);
+    } catch {
+      throw new E2eDecryptError('e2e: damaged recovery slot');
+    }
+    const rkek = await deriveRecoveryKek(raw, salt);
+    raw.fill(0);
+    const fmk = await gcmOpen(rkek, marker.rk.blob);
+    if (!fmk || fmk.length !== FMK_LEN) throw new E2eDecryptError('e2e: wrong recovery key');
+    return fmk;
+  }
+  const salt = b64ToBytes(marker.salt);
+  const kek = await deriveKek(cred.password, salt, marker.iter);
+  const proof = await gcmOpen(kek, marker.verify);
+  if (!proof || new TextDecoder().decode(proof) !== VERIFY_PLAINTEXT) {
+    throw new E2eDecryptError('e2e: wrong password');
+  }
+  if (marker.v === 1 || marker.fmk === 'kek') return deriveKekBits(cred.password, salt, marker.iter);
+  const fmk = marker.fmk_pw ? await gcmOpen(kek, marker.fmk_pw) : null;
+  if (!fmk || fmk.length !== FMK_LEN) throw new E2eDecryptError('e2e: could not unwrap the folder master key');
+  return fmk;
+}
+
+/** A fresh password slot (salt, iterations, verify blob, `fmk_pw`) for `rawFmk`. */
+async function passwordSlot(
+  newPassword: string,
+  rawFmk: Uint8Array,
+  iterations?: number,
+): Promise<Pick<E2eMarker, 'salt' | 'iter' | 'verify' | 'fmk' | 'fmk_pw'>> {
+  if ((newPassword ?? '').length < E2E_MIN_PASSWORD_LEN) {
+    throw new Error(`e2e: the new password must be at least ${E2E_MIN_PASSWORD_LEN} characters`);
+  }
+  const iter = Math.max(E2E_MIN_ITERATIONS, iterations ?? E2E_DEFAULT_ITERATIONS);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const kek = await deriveKek(newPassword, salt, iter);
+  return {
+    salt: bytesToB64(salt),
+    iter,
+    verify: await gcmSeal(kek, new TextEncoder().encode(VERIFY_PLAINTEXT)),
+    fmk: 'wrapped',
+    fmk_pw: await gcmSeal(kek, rawFmk),
+  };
+}
+
+/**
+ * True when a new password needs a re-key: the folder key IS the old
+ * password's key (v1, or v2 `fmk: 'kek'`).
+ */
+export function passwordChangeNeedsRekey(m: E2eMarker): boolean {
+  return m.v === 1 || m.fmk === 'kek';
+}
+
+/** A re-key has started and not finished. */
+export function rekeyPending(m: E2eMarker | null): boolean {
+  return !!m && Array.isArray(m.req) && m.req.includes('rekey') && !!m.rekey;
+}
+
+/**
+ * Change the password of a folder whose FMK is wrapped. Only the password slot
+ * changes: every file, the recovery key, the escrow slot and the name key are
+ * untouched and keep working. Proof is the current password OR the recovery
+ * key (a reset).
+ *
+ * ⚠ The previous password stops opening THIS marker. It still opens any copy
+ * of the old marker — a version of `.filex-e2e.json`, a backup — and through
+ * it the same FMK. When that matters, re-key instead (`startRekey`).
+ */
+export async function changePassword(
+  marker: E2eMarker,
+  cred: E2eCredential,
+  newPassword: string,
+  opts: { iterations?: number } = {},
+): Promise<E2eMarker> {
+  if (passwordChangeNeedsRekey(marker)) {
+    throw new Error('e2e: this folder needs its file keys re-wrapped to change its password (startRekey)');
+  }
+  if (rekeyPending(marker)) throw new Error('e2e: finish the re-key first');
+  const raw = await fmkRawFrom(marker, cred);
+  try {
+    return { ...marker, ...(await passwordSlot(newPassword, raw, opts.iterations)) };
+  } finally {
+    raw.fill(0);
+  }
+}
+
+export interface RekeyStart {
+  /** Write this FIRST, before any file is re-wrapped. */
+  marker: E2eMarker;
+  /** The new folder master key. */
+  fmk: CryptoKey;
+  /** The previous one — what the files not re-wrapped yet are under. */
+  previous: CryptoKey;
+  /** The recovery key that opens the new FMK. Show it when `recoveryKeyIsNew`. */
+  recoveryKey: string;
+  recoveryKeyIsNew: boolean;
+  /** The folder's name key, re-sealed under the new FMK, when it has one. */
+  names?: E2eNameKey;
+}
+
+/** Thrown when a re-key would lose the folder's escrow slot. */
+export class E2eRekeyEscrowError extends Error {
+  constructor(msg = 'e2e: the escrow slot cannot be carried over to the new folder key') {
+    super(msg);
+    this.name = 'E2eRekeyEscrowError';
+  }
+}
+
+/**
+ * Start a re-key: a fresh random FMK, the new password, and every other slot
+ * carried over to it.
+ *
+ *   - recovery: a reset made WITH the recovery key keeps that key (it is in
+ *     hand, so it is re-sealed to the new FMK). Otherwise a new recovery key is
+ *     minted — the old slot wraps the old FMK and nothing can re-seal it
+ *     without the key itself — and the caller shows it once.
+ *   - escrow: re-sealed to the new FMK when the installation's key is the one
+ *     the slot names. Otherwise REFUSED (E2eRekeyEscrowError): a re-key never
+ *     quietly drops an escrow slot. It never adds one either.
+ *   - names: the same name key (no entry is renamed), re-sealed under the new
+ *     FMK.
+ *   - `rekey.from`: the previous FMK sealed under the new one, until
+ *     `finishRekey`.
+ */
+export async function startRekey(
+  marker: E2eMarker,
+  cred: E2eCredential,
+  newPassword: string,
+  opts: { escrowPublicKey?: string | null; iterations?: number } = {},
+): Promise<RekeyStart> {
+  if (rekeyPending(marker)) throw new Error('e2e: a re-key is already in progress; resume it');
+  const oldRaw = await fmkRawFrom(marker, cred);
+  const newRaw = crypto.getRandomValues(new Uint8Array(FMK_LEN));
+  try {
+    const oldFmk = await importFmk(oldRaw);
+    const newFmk = await importFmk(newRaw);
+
+    let esc: E2eEscrowSlot | undefined;
+    if (hasSlots(marker) && marker.esc) {
+      const pub = opts.escrowPublicKey || null;
+      if (!pub || (await escrowKeyId(pub)) !== marker.esc.kid) throw new E2eRekeyEscrowError();
+      esc = await sealEscrowSlot(newRaw, pub);
+    }
+
+    const reuse = 'recoveryKey' in cred;
+    const recoveryKey = reuse ? cred.recoveryKey : generateRecoveryKey();
+
+    let names: E2eNameKey | undefined;
+    let namesSlot: E2eNamesSlot | undefined;
+    if (markerHasNames(marker)) {
+      const nkRaw = await gcmOpen(oldFmk, marker.names!.key);
+      if (!nkRaw || nkRaw.length !== 64) throw new E2eDecryptError('e2e: could not open the name key');
+      namesSlot = { ...marker.names!, key: await gcmSeal(newFmk, nkRaw) };
+      names = await importNameKey(nkRaw, marker.names!.long, b64urlDecode(marker.names!.root_id)!);
+      nkRaw.fill(0);
+    }
+
+    const req = Array.from(new Set([...(marker.req ?? []), 'rekey']));
+    const next: E2eMarker = {
+      ...marker,
+      v: E2E_MARKER_VERSION_FEATURES,
+      req,
+      ...(await passwordSlot(newPassword, newRaw, opts.iterations)),
+      rk: await sealRecoverySlot(newRaw, recoveryKey),
+      rekey: { from: await gcmSeal(newFmk, oldRaw), pending: true },
+    };
+    if (esc) next.esc = esc;
+    if (namesSlot) next.names = namesSlot;
+    return {
+      marker: next,
+      fmk: newFmk,
+      previous: oldFmk,
+      recoveryKey,
+      recoveryKeyIsNew: !reuse,
+      ...(names ? { names } : {}),
+    };
+  } finally {
+    oldRaw.fill(0);
+    newRaw.fill(0);
+  }
+}
+
+/**
+ * The previous FMK of a folder mid re-key, reached through the new one.
+ * Null when no re-key is in progress (or the slot does not open under `fmk`).
+ */
+export async function unlockPrevious(marker: E2eMarker, fmk: CryptoKey): Promise<CryptoKey | null> {
+  if (!rekeyPending(marker)) return null;
+  const raw = await gcmOpen(fmk, marker.rekey!.from);
+  if (!raw || raw.length !== FMK_LEN) return null;
+  const key = await importFmk(raw);
+  raw.fill(0);
+  return key;
+}
+
+/**
+ * Re-wrap one encrypted file's DEK from `previous` to `fmk`. Returns the new
+ * bytes — the same length, the same content ciphertext, a new wrap IV and
+ * wrapped DEK — or null when the file is already under `fmk` (so resuming is
+ * running this again). Throws E2eDecryptError when neither key opens it, and
+ * a plain Error when it is not an encrypted file.
+ */
+export async function rewrapFileKey(
+  data: ArrayBuffer,
+  previous: CryptoKey,
+  fmk: CryptoKey,
+): Promise<ArrayBuffer | null> {
+  const b = new Uint8Array(data);
+  if (!hasMagic(b) || b.length < HEADER_LEN) throw new Error('e2e: not an encrypted file');
+  /* wiring:e2 stream — 0x02 wraps its DEK at the same offsets; `data` may be
+   * just the 97-byte header of a large file (the body is re-sent unread). */
+  if (b[8] !== E2E_VERSION && b[8] !== E2E_FILE_VERSION_STREAM) throw new Error(`e2e: unsupported version ${b[8]}`);
+  const wrapIV = b.slice(WRAP_IV_OFF, WRAP_IV_OFF + IV_LEN);
+  const wrapped = b.slice(WRAPPED_DEK_OFF, WRAPPED_DEK_OFF + WRAPPED_DEK_LEN);
+  try {
+    await crypto.subtle.decrypt({ name: 'AES-GCM', iv: buf(wrapIV) }, fmk, buf(wrapped));
+    return null; // already re-wrapped
+  } catch {
+    /* not under the new key: try the previous one */
+  }
+  let rawDek: Uint8Array;
+  try {
+    rawDek = new Uint8Array(
+      await crypto.subtle.decrypt({ name: 'AES-GCM', iv: buf(wrapIV) }, previous, buf(wrapped)),
+    );
+  } catch {
+    throw new E2eDecryptError('e2e: this file opens under neither the new nor the previous folder key');
+  }
+  const iv = crypto.getRandomValues(new Uint8Array(IV_LEN));
+  const rewrapped = new Uint8Array(
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: buf(iv) }, fmk, buf(rawDek)),
+  );
+  rawDek.fill(0);
+  const out = b.slice();
+  out.set(iv, WRAP_IV_OFF);
+  out.set(rewrapped, WRAPPED_DEK_OFF);
+  return out.buffer;
+}
+
+/**
+ * The re-key is done: every file is under the new FMK. Drop `rekey` (and the
+ * previous FMK with it); a marker left with no required feature goes back to
+ * v2, which every filex since 0.31 opens.
+ */
+/** Is an in-place conversion of this folder under way? */
+export function conversionPending(m: E2eMarker | null): boolean {
+  return !!m && Array.isArray(m.req) && m.req.includes('conv') && m.conv?.pending === true;
+}
+
+/**
+ * The key file of a folder about to be encrypted in place: v3, `conv`
+ * required (an older filex refuses a folder whose files are half plaintext),
+ * the conversion marked pending.
+ */
+export function startConversion(
+  marker: E2eMarker,
+  when: string = new Date().toISOString(),
+  cleanup?: { versions: boolean; trash: boolean },
+): E2eMarker {
+  const req = Array.from(new Set([...(marker.req ?? []), 'conv']));
+  const conv: E2eConvSlot = { pending: true, started: when, ...(cleanup ? { cleanup } : {}) };
+  return { ...marker, v: E2E_MARKER_VERSION_FEATURES, req, conv };
+}
+
+/** Every file carries the magic: the conversion is over. Back to v2 when
+ *  nothing else is required. */
+export function finishConversion(marker: E2eMarker): E2eMarker {
+  const next: E2eMarker = { ...marker };
+  delete next.conv;
+  const req = (marker.req ?? []).filter((f) => f !== 'conv');
+  if (req.length > 0) {
+    next.req = req;
+  } else {
+    delete next.req;
+    next.v = E2E_MARKER_VERSION;
+  }
+  return next;
+}
+
+export function finishRekey(marker: E2eMarker): E2eMarker {
+  const next: E2eMarker = { ...marker };
+  delete next.rekey;
+  const req = (marker.req ?? []).filter((f) => f !== 'rekey');
+  if (req.length > 0) {
+    next.req = req;
+  } else {
+    delete next.req;
+    next.v = E2E_MARKER_VERSION;
+  }
+  return next;
+}
+
+/**
+ * Decrypt with the FMK, falling back to the previous FMK of a folder mid
+ * re-key. Throws exactly what decryptFile throws when neither opens it.
+ */
+export async function decryptFileAny(
+  fmk: CryptoKey,
+  previous: CryptoKey | null | undefined,
+  data: ArrayBuffer,
+): Promise<ArrayBuffer> {
+  try {
+    return await decryptFile(fmk, data);
+  } catch (err) {
+    if (!previous || !(err instanceof E2eDecryptError)) throw err;
+    return decryptFile(previous, data);
+  }
+}
+
+// ---------------------------------------------------------------------
 // In-memory session key ring
 // ---------------------------------------------------------------------
 
 /**
- * Tiny per-explorer key ring: encrypted-folder root (wire path) → FMK.
+ * Tiny per-explorer key ring: encrypted-folder root (wire path) → FMK, and
+ * the folder's name key when its names are encrypted.
  * Lives ONLY in memory — "Lock" drops the entry, a reload drops all.
  */
 export function createKeyRing() {
   const keys = new Map<string, CryptoKey>();
+  const nameKeys = new Map<string, E2eNameKey>();
+  const previousKeys = new Map<string, CryptoKey>();
   return {
     get(root: string): CryptoKey | undefined {
       return keys.get(root);
     },
-    set(root: string, fmk: CryptoKey): void {
+    set(root: string, fmk: CryptoKey, names?: E2eNameKey | null, previous?: CryptoKey | null): void {
       keys.set(root, fmk);
+      if (names) nameKeys.set(root, names);
+      else nameKeys.delete(root);
+      if (previous) previousKeys.set(root, previous);
+      else previousKeys.delete(root);
     },
-    /** Drop one folder's key ("Lock"). */
+    /** The previous FMK of a folder mid re-key (files not re-wrapped yet). */
+    previous(root: string): CryptoKey | undefined {
+      return previousKeys.get(root);
+    },
+    /** A re-key finished: the previous FMK is no longer needed. */
+    dropPrevious(root: string): void {
+      previousKeys.delete(root);
+    },
+    /** The folder's name key; undefined for a content-only folder or a locked one. */
+    names(root: string): E2eNameKey | undefined {
+      return nameKeys.get(root);
+    },
+    setNames(root: string, names: E2eNameKey): void {
+      if (keys.has(root)) nameKeys.set(root, names);
+    },
+    /** Every unlocked root, for resolving a path from any view. */
+    roots(): string[] {
+      return [...keys.keys()];
+    },
+    /** Drop one folder's keys ("Lock"). */
     lock(root: string): void {
       keys.delete(root);
+      nameKeys.delete(root);
+      previousKeys.delete(root);
     },
     has(root: string): boolean {
       return keys.has(root);
     },
     clear(): void {
       keys.clear();
+      nameKeys.clear();
+      previousKeys.clear();
     },
   };
 }

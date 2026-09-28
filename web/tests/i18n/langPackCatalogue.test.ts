@@ -150,10 +150,10 @@ describe('the server table', () => {
   });
 
   it('…and the desktop shell’s offline copy of those words says the same thing', () => {
-    /* web/src/lib/notificationText.ts keeps a `WORDS` table because the
+    /* packages/core/src/lib/notificationText.ts keeps a `WORDS` table because the
        desktop main process has no catalogue to read. Two copies of a string
        drift; this is what stops them. */
-    const words = notifyWords(path.join(ROOT, 'web/src/lib/notificationText.ts'));
+    const words = notifyWords(path.join(ROOT, 'packages/core/src/lib/notificationText.ts'));
     for (const lang of ['en', 'tr'] as const) {
       const table = lang === 'en' ? cat.server : cat.serverTr;
       for (const [w, v] of Object.entries(words[lang])) {

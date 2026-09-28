@@ -12,7 +12,7 @@
  *
  * ⚠ No imports, and none may be added. The desktop main process and its
  * `node --test` runner import this file by relative path (the way
- * `web/src/lib/notificationTarget.ts` is imported), and plain node does not
+ * `packages/core/src/lib/notificationTarget.ts` is imported), and plain node does not
  * resolve an extensionless specifier.
  */
 

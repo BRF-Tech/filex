@@ -138,13 +138,13 @@
   ],
   "plugin": {
     "actions": 1,
-    "auto_update": true,
     "created_at": "2026-09-20T10:00:00Z",
     "description": {
       "en": "Send a document out for signature.",
       "tr": "Bir belgeyi imzaya gönderin."
     },
     "enabled": true,
+    "engine": false,
     "id": 7,
     "kind": "app",
     "label": {

@@ -86,8 +86,12 @@ echo "== 3. helm template"
 render defaults
 # shellcheck disable=SC2086
 render all-on $SWITCHES
-DEFAULTS_N="$(grep -c '^kind:' "$OUT/defaults.yaml" 2>/dev/null || echo 0)"
-ALL_N="$(grep -c '^kind:' "$OUT/all-on.yaml" 2>/dev/null || echo 0)"
+# grep -c prints 0 AND exits 1 on no match, so `|| echo 0` made it "0<newline>0"
+# and the -le below died with "integer expected" (the v0.48.0 run).
+DEFAULTS_N="$(grep -c '^kind:' "$OUT/defaults.yaml" 2>/dev/null || true)"
+ALL_N="$(grep -c '^kind:' "$OUT/all-on.yaml" 2>/dev/null || true)"
+DEFAULTS_N="${DEFAULTS_N:-0}"
+ALL_N="${ALL_N:-0}"
 if [ "$ALL_N" -le "$DEFAULTS_N" ]; then
   echo "  every part on rendered $ALL_N documents, the defaults $DEFAULTS_N — the switches changed nothing"
   fail=1

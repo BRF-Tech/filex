@@ -86,6 +86,9 @@ export function hitToNode(h: GlobalSearchHit, storageName: string): FileNode {
     owner_id: typeof h.owner_id === 'number' ? h.owner_id : undefined,
     owner_name: typeof h.owner_name === 'string' ? h.owner_name : undefined,
     owner_self: h.owner_self === true ? true : undefined,
+    /* wiring:e2 names — the encrypted folder the hit sits in (the server
+       answers it); the explorer's name view reads it. */
+    ...(typeof h.e2e_root === 'string' && h.e2e_root ? { e2e_root: h.e2e_root } : {}),
   };
 }
 

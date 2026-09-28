@@ -136,6 +136,10 @@ func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if errors.Is(err, trash.ErrNotInTrash) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -162,15 +166,27 @@ func (h *Trash) mayRestore(w http.ResponseWriter, r *http.Request, id int64) (no
 	if n, err := h.Store.GetNode(r.Context(), id); err == nil {
 		node = n
 	}
+	// A row deleted where it stood holds nothing in the trash (issue #74):
+	// the list does not offer it, and restoring it by id is the same "not
+	// found" — not a permission question.
+	if trash.Vanished(node) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
+		return nil, false
+	}
 	// A swept open-with working copy (or anything else whose original path
 	// is filex's own) is not offered by the trash list, and restoring it by
 	// id would put it back where nobody can see it — the same "not found"
 	// the list implies.
+	//
+	// The one exception is a discarded draft of the caller's OWN (issue #71):
+	// restoring it puts it back in their drafts folder, and it is a draft
+	// again (syspath.OwnDraft). Anybody else's reads as not found.
 	if node != nil {
-		if orig, known := trash.OriginalPath(node); known && syspath.Hidden(orig) {
+		uid := currentUserID(r.Context())
+		if orig, known := trash.OriginalPath(node); known && syspath.Hidden(orig) && !syspath.IsDraftOf(orig, uid) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
 			return nil, false
-		} else if known && gate(w, r, h.ACL, node.StorageID, writegate.Writes(orig)) {
+		} else if known && gate(w, r, h.ACL, node.StorageID, writegate.Writes(orig).As(syspath.OwnDraft).By(uid)) {
 			// Restoring writes the file back: not onto a path an app has
 			// frozen. Asked before the permission check below, which would
 			// read the lock's viewer cap as a plain 403.
@@ -685,6 +701,14 @@ func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	// An item deleted from inside an end-to-end encrypted folder: say which
+	// one, so the client can name it (its name may be encrypted) instead of
+	// printing ciphertext. The folder's key file never needed restoring on
+	// its own and is not listed.
+	roots := newE2eRoots(h.Store)
+	for i := range entries {
+		entries[i].E2eRoot = roots.of(r.Context(), entries[i].StorageID, entries[i].StorageName, entries[i].Path)
+	}
 	// "You" is the client's word for the asker's own deletes, and the client
 	// is not told who it is signed in as (the core package is embedded in
 	// hosts that do not know): the listing says so, as it does for owners.
@@ -692,6 +716,13 @@ func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 		for i := range entries {
 			if by := entries[i].DeletedByID; by != nil && *by == u.ID {
 				entries[i].DeletedBySelf = true
+			}
+			// A discarded draft of the asker's (the only kind trashListKeep
+			// lets through): it came from their Drafts, and the drafts area is
+			// not a place a client is ever told about.
+			if syspath.IsDraftOf(entries[i].Path, u.ID) {
+				entries[i].Draft = true
+				entries[i].Path = "/" + entries[i].Name
 			}
 		}
 	}
@@ -711,6 +742,7 @@ const trashListBatch = 500
 // trashListKeep is the rule List judges each trash entry by, for the caller.
 func (h *Trash) trashListKeep(r *http.Request) func(trash.TrashEntry) bool {
 	ctx := r.Context()
+	uid := currentUserID(ctx)
 	scope, scoped := confinedScope(ctx)
 	root, rooted := confine.RootFrom(ctx)
 	var perms *aclByName
@@ -718,6 +750,13 @@ func (h *Trash) trashListKeep(r *http.Request) func(trash.TrashEntry) bool {
 		perms = newACLByName(ctx, h.ACL, h.Store)
 	}
 	return func(e trash.TrashEntry) bool {
+		// ⚠⚠ Only what the trash holds (issue #74). A row deleted where it
+		// stood — the storage sync found the file gone from the storage, up
+		// to 0.47 — has no bytes in the trash: listing it offered a Restore
+		// that could bring nothing back.
+		if e.Vanished {
+			return false
+		}
 		// ⚠ A trashed item that CAME FROM one of filex's own directories is
 		// not something the person deleted. In practice it is the desktop
 		// app's open-with working copy: the app's sweep deletes
@@ -729,7 +768,11 @@ func (h *Trash) trashListKeep(r *http.Request) func(trash.TrashEntry) bool {
 		// else (the app relies on that); they are just never offered for
 		// restore, which would put the working copy back into a folder nobody
 		// can see.
-		if syspath.Hidden(e.Path) {
+		//
+		// A discarded DRAFT is the exception, for its owner alone (issue #71):
+		// "Discard" sends it here like any deleted file, so the person can
+		// bring it back within the retention window (List presents it).
+		if syspath.Hidden(e.Path) && !syspath.IsDraftOf(e.Path, uid) {
 			return false
 		}
 		// Tenancy: only trashed nodes from storages the caller's tenant can

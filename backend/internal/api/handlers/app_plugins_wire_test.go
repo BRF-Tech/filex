@@ -37,6 +37,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,8 +99,8 @@ func wireFixtureApp(t *testing.T) *wasmplugin.Installed {
 			ID: 7, Name: m.Name, Version: m.Version, Source: "github",
 			SourceURL: "https://github.com/BRF-Tech/filex-sign@v1.2.0", Signed: true, Enabled: true,
 			SHA256:     "a9950e0d84a62a1b30c952736b097e5f3cde019564724dc3c0432a36f7c0d091",
-			AutoUpdate: true, UpdateJSON: found,
-			CreatedAt: at, UpdatedAt: at,
+			UpdateJSON: found,
+			CreatedAt:  at, UpdatedAt: at,
 		},
 		Manifest: m,
 		Perms:    m.Perms,
@@ -185,7 +186,14 @@ func TestAppPluginWireFixtures(t *testing.T) {
 			WasmBytes:   5242880,
 			Kind:        wasmplugin.KindApp,
 			Compat:      &wasmplugin.Compat{Requires: ">=0.48.0", OK: false, Filex: "0.47.0"},
-			Upgrade:     &wasmplugin.DryRunUpgrade{From: "1.1.0", Added: []string{"public_pages"}, Removed: []string{"mail:send"}},
+			Upgrade: &wasmplugin.DryRunUpgrade{
+				From: "1.1.0", Added: []string{"public_pages"}, Removed: []string{"mail:send"},
+				ModuleFrom: "5f1c0de9" + strings.Repeat("0", 56), ModuleTo: "a9950e0d84a62a1b30c952736b097e5f3cde019564724dc3c0432a36f7c0d091",
+				UITo:      "c0ffee00" + strings.Repeat("1", 56),
+				UIFiles:   &wasmplugin.UIFileDiff{Added: []string{"index.html", "app.js"}, AddedCount: 2},
+				FilexFrom: ">=0.45.0", FilexTo: ">=0.48.0", SignedFrom: true, SignedTo: false,
+				Notes: "Signers can now be reminded.\n\nNeeds filex 0.48.",
+			},
 		},
 		// An install or upgrade refused because the app's range leaves this
 		// filex out.
@@ -198,7 +206,7 @@ func TestAppPluginWireFixtures(t *testing.T) {
 		"app-plugin-update-check.json": map[string]any{
 			"report": &wasmplugin.UpdateReport{
 				CheckedAt: time.Date(2026, 9, 26, 9, 30, 0, 0, time.UTC), Checked: 2,
-				Updated: []string{"lang-es"}, Available: []string{}, NeedsApproval: []string{"sign"}, Failed: []string{},
+				Updated: []string{}, Available: []string{"lang-es"}, NeedsApproval: []string{"sign"}, Failed: []string{},
 			},
 			"runtime": wireRuntime(),
 			"plugins": []*wasmplugin.Status{reg.StatusOf(app), packStatus(t, reg)},
@@ -323,12 +331,12 @@ func packStatus(t *testing.T, reg *wasmplugin.Registry) *wasmplugin.Status {
 		Row: &model.AppPlugin{
 			ID: 9, Name: m.Name, Version: m.Version, Source: "github",
 			SourceURL: "https://github.com/BRF-Tech/filex-lang-es@main", Enabled: true,
-			SHA256:     "5d41402abc4b2a76b9719d911017c592ae2e8e9e5d41402abc4b2a76b9719d91",
-			AutoUpdate: true,
-			// It moved to 1.0.0 by itself in the last check.
+			SHA256: "5d41402abc4b2a76b9719d911017c592ae2e8e9e5d41402abc4b2a76b9719d91",
+			// The last check found 1.1.0 and waits for an administrator
+			// (filex 0.48: nothing updates itself), with the release's notes.
 			UpdateJSON: wireJSON(t, wasmplugin.UpdateInfo{
-				CheckedAt: &updated, Status: wasmplugin.UpdateCurrent,
-				Auto: &wasmplugin.AutoUpdated{From: "0.9.0", To: "1.0.0", At: updated},
+				CheckedAt: &updated, Status: wasmplugin.UpdateAvailable, Version: "1.1.0", Ref: "main",
+				Notes: "Arreglos de plurales.", Announced: "available@1.1.0",
 			}),
 			CreatedAt: at, UpdatedAt: at,
 		},
@@ -336,6 +344,9 @@ func packStatus(t *testing.T, reg *wasmplugin.Registry) *wasmplugin.Status {
 	})
 	st.State = wasmplugin.StateRunning
 	st.Languages = packRows
+	// The version an administrator's last approval replaced, kept to go
+	// back to (wasmplugin/versions.go).
+	st.Previous = &wasmplugin.PreviousVersion{Version: "0.9.0", ReplacedAt: time.Date(2026, 9, 24, 8, 0, 0, 0, time.UTC)}
 	return st
 }
 

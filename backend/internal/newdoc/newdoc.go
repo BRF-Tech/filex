@@ -75,6 +75,9 @@ const (
 	GroupText Group = "text"
 	// GroupDiagram — diagram sources.
 	GroupDiagram Group = "diagram"
+	// GroupApp — a kind an installed app adds (`new_documents`): the app's
+	// own row, made and opened by the app, not by this registry.
+	GroupApp Group = "app"
 )
 
 // Requirement names the external service a client needs before it should
@@ -96,6 +99,9 @@ const (
 	RequiresOnlyOffice Requirement = "onlyoffice"
 	// RequiresDrawio — only the drawio surface can open it.
 	RequiresDrawio Requirement = "drawio"
+	// RequiresApp — an app's interface opens it; the server lists the row
+	// only while the app runs, so there is nothing for a client to resolve.
+	RequiresApp Requirement = "app"
 )
 
 // Type is one creatable document type, as published to clients.
@@ -119,6 +125,20 @@ type Type struct {
 	// key being ABSENT (that server appends the extension to every type), so
 	// `false` has to be on the wire.
 	ExtRequired bool `json:"ext_required"`
+	// Key is what a create request names when it is not Ext: an app's row
+	// (`app:<plugin>:<ext>`), whose extension may be one this registry also
+	// makes. Empty for the registry's own types.
+	Key string `json:"key,omitempty"`
+	// App says whose row it is and which of its views opens the new file,
+	// with the app's own label for it. Nil for the registry's own types.
+	App *AppDoc `json:"app,omitempty"`
+}
+
+// AppDoc is the app behind an app's row of the "New" menu.
+type AppDoc struct {
+	Plugin string            `json:"plugin"`
+	View   string            `json:"view"`
+	Label  map[string]string `json:"label"`
 }
 
 // part is one entry in the produced ZIP.

@@ -8,6 +8,7 @@ All endpoints under `/api/*` return JSON. All write endpoints expect
 - [Auth & sessions](#auth--sessions)
 - [Capabilities](#capabilities)
 - [File browsing](#file-browsing)
+- [Drafts](#drafts)
 - [Uploads (multipart)](#uploads-multipart)
 - [Archives](#archives)
 - [Sharing](#sharing)
@@ -150,12 +151,10 @@ build metadata and a set of flat aliases kept for older embeds)
   "antivirus_mode": "daemon",
   "external": {
     "onlyoffice": { "enabled": true, "url": "https://docs.example.com", "state": "ok" },
-    "drawio":     { "enabled": false, "url": "", "state": "" },
-    "convert":    { "enabled": false, "url": "", "state": "" }
+    "drawio":     { "enabled": false, "url": "", "state": "" }
   },
   "onlyoffice_url": "https://docs.example.com",
   "drawio_url": "",
-  "convert_url": "",
   "max_upload_size": 5368709120,
   "chunk_size": 8388608,
   "auth_drivers": ["local", "oidc"],
@@ -171,12 +170,12 @@ link may be given (0 = no ceiling; [PROTECTION.md](PROTECTION.md)).
 lives.** The endpoint is deliberately public — an embedder probes it before
 anybody logs in ([INTEGRATION.md](INTEGRATION.md)) — so for a request carrying
 no usable credential the `url` is dropped from every `external.<service>` entry
-and the flat `onlyoffice_url` / `drawio_url` / `convert_url` aliases come back
+and the flat `onlyoffice_url` / `drawio_url` aliases come back
 empty. `enabled` and `state` are unchanged, which is what a feature probe
 actually asks.
 
-Signed-in callers see the payload above in full, because two consumers need a
-real host in the browser: the draw.io iframe and the convert modal. OnlyOffice
+Signed-in callers see the payload above in full, because one consumer needs a
+real host in the browser: the draw.io iframe. OnlyOffice
 does not — the browser gets its document-server URL from the authenticated
 `POST /api/files/onlyoffice/config` (`documentServerUrl`) — so that host now
 travels only with a credential as well.
@@ -212,6 +211,13 @@ client from carrying a hardcoded extension list that rots the moment the
 registry grows a type. Published to anonymous callers too: it is a static
 property of the build, identical on every install of this version, and names no
 host.
+
+A signed-in person also gets the rows **running apps** add to the menu
+(`new_documents`, [APP-PLUGINS-API.md](APP-PLUGINS-API.md#new-documents)):
+`group` and `requires` are `"app"`, `key` is what the create call sends
+(`app:<plugin>:<ext>`), and `app` names the app, the view that opens the new
+file and the app's own label. They are not a property of the build, so an
+anonymous caller or an app token is never told them.
 
 ⚠ `antivirus` means **configured**, not answering: the setting is on and either
 a scanner binary resolved or a clamd address is set. Reachability costs a
@@ -264,8 +270,8 @@ List the contents of a directory.
 ### Names filex keeps for itself
 
 `.filex-trash`, `.versions`, `.thumbs`, the desktop app's `.filex-open` (at any
-depth) and the empty-folder marker `.keepdir` are filex's own
-(`backend/internal/syspath`). They are never listed or searched, and every
+depth), the drafts area `.filex-drafts` and the empty-folder marker `.keepdir`
+are filex's own (`backend/internal/syspath`). They are never listed or searched, and every
 write that names one — creating, uploading, renaming, moving, copying,
 extracting, saving, sharing, granting or restoring — answers:
 
@@ -278,6 +284,13 @@ An archive member under one of them is skipped, the way a zip-slip entry is.
 The single exception is the desktop's open-with round trip: `newfolder` of
 `.filex-open` at the storage root, `upload` of `.filex-open/<hex session>-<name>`
 (and the document editor's save of that copy), and `delete` of it.
+
+A draft is the other door, and it opens for one person only: the file at
+`.filex-drafts/<user id>/<key>/<name>` can be read (`preview`, `download`,
+`info`) and saved into (`save-text`, the document server's callback, an app
+editor's save) by the account whose id is in its path — nobody else, an
+administrator included, gets anything but `404`/`403`. Everything else about a
+draft goes through [the drafts endpoints](#drafts).
 
 ### `GET /api/files/manager?action=changes` ![user](https://img.shields.io/badge/-user-blue)
 Has anything under a folder changed since the caller last asked?
@@ -545,6 +558,79 @@ So a burst of Ctrl+S costs exactly one scan, and the window cannot be pushed
 out indefinitely by somebody who keeps typing. The delay is a row in the
 operation queue, not a timer in the process, so it survives a restart. See
 [PROTECTION.md → Files written in the editor](PROTECTION.md#files-written-in-the-editor).
+
+---
+
+## Drafts
+
+A new document is a **draft** until its first save (#71): a real file in the
+person's own `.filex-drafts/<user id>/<key>/` folder of the storage it was made
+for, with a row that remembers where it is meant to go. Nothing is created in
+that folder until the draft is saved. The user guide is
+[ONLYOFFICE.md → Drafts](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save).
+
+Every route answers for the **caller's own** drafts; another person's key is
+`404`. They need a signed-in person: an app token, and a caller confined to a
+root (an embed's shared proxy token), get `403 {"code":"DRAFTS_UNAVAILABLE"}`
+and create documents with `newfile` as before. `GET /api/files/capabilities`
+carries `drafts: { limit }` exactly when the caller may use them.
+
+A draft, as these routes answer it:
+
+```json
+{ "key": "3f9c0a1b2c3d4e5f", "name": "minutes.txt",
+  "path": "docs://.filex-drafts/7/3f9c0a1b2c3d4e5f/minutes.txt",
+  "storage": "docs", "target_dir": "docs://Reports", "target": "docs://Reports/minutes.txt",
+  "type": "txt", "size": 11, "mime": "text/plain; charset=utf-8",
+  "created_at": "2026-09-27T09:12:03Z", "modified_at": "2026-09-27T09:14:40Z" }
+```
+
+`path` is the file an editor opens and saves into; `type` is the `newdoc_types`
+key it was made as.
+
+### `POST /api/files/drafts` ![user](https://img.shields.io/badge/-user-blue)
+Makes a draft: the same body as `newfile` — `{ path, name, type, exact_name? }`
+where `path` is the folder it is for — and the same bytes (an office type gets
+its template). `201 { path, name, ext, size, mime, draft }`, shaped like
+`newfile`'s answer so a client opens `path` the same way. The caller needs
+≥ editor on the folder, and the name and type rules are `newfile`'s. At the
+limit (`drafts.limit`,
+[PROTECTION.md → Drafts](PROTECTION.md#drafts)) it is
+`409 { "code": "DRAFT_LIMIT", "limit": 50, "count": 50 }` and nothing is created.
+
+### `GET /api/files/drafts` ![user](https://img.shields.io/badge/-user-blue)
+`{ drafts: [draft…], count, limit }` — the caller's live drafts on every
+enabled storage, the most recently made first.
+
+### `GET /api/files/drafts/count` ![user](https://img.shields.io/badge/-user-blue)
+`{ count, limit }` — what the navigation panel's badge reads.
+
+### `GET /api/files/drafts/{key}` ![user](https://img.shields.io/badge/-user-blue)
+One draft. An editor that was handed only a path asks this to learn where the
+draft is meant to go.
+
+### `POST /api/files/drafts/{key}/save` ![user](https://img.shields.io/badge/-user-blue)
+Moves the draft to its folder: body `{}` for its own name, or `{ "as": "<name>" }`
+for another. `200 { ok, path, name, target_dir }`; the file keeps its catalogue
+row (an editor still open on it goes on saving into the saved document) and
+from then on is an ordinary file — versioned, listed, announced.
+
+- The name is taken: `409 { "code": "TARGET_TAKEN", "name", "suggested",
+  "target_dir" }`, where `suggested` is the first free `name (2).ext`,
+  `name (3).ext` … Nothing moves. The client asks, and sends `{ "as": suggested }`
+  if the person agrees. ⚠ A save never replaces a file.
+- The folder is gone: `409 { "code": "FOLDER_GONE" }`; the draft stays.
+- The server cannot tell whether the name is free: `503 { "code":
+  "EXISTS_CHECK_FAILED" }` — refused rather than risk a replace.
+- ≥ editor on the folder is checked **now**, not when the draft was made:
+  `403` if the caller lost it meanwhile; a read-only storage is `403` too.
+
+### `DELETE /api/files/drafts/{key}` ![user](https://img.shields.io/badge/-user-blue)
+Discards the draft into the trash: `200 { ok: true, trashed: true }`. It is then
+in the caller's own trash listing with `draft: true` and its name as its path,
+and restoring it puts it back in Drafts ([TRASH-VERSIONING.md → Discarded
+drafts](TRASH-VERSIONING.md#discarded-drafts)). On a storage that cannot keep
+deleted bytes it is deleted outright (`trashed: false`).
 
 ---
 
@@ -950,7 +1036,11 @@ holding a token how this instance is configured.
 ### `GET /api/public/s/{token}/file/{ref}` ![public](https://img.shields.io/badge/-public-lightgrey)
 
 One copy an app link exposed (`pub:N`), Range-capable, `inline`, `nosniff`,
-RFC 6266 filename. Behind the same PIN gate.
+RFC 6266 filename. Behind the same PIN gate. An active kind (HTML, SVG, XML,
+unknown) carries `Content-Security-Policy: sandbox; default-src 'none'…`, as
+every file body filex serves from its own origin does (`httpx.ProtectServedFile`:
+the preview, `/api/files/read`, a share's `?inline=1`, a shared folder's
+entries).
 
 ### `GET /api/public/d/{token}` ![public](https://img.shields.io/badge/-public-lightgrey)
 
@@ -1350,13 +1440,22 @@ the state is what the manager sees right now.
           { "name": "presign", "status": "skip", "detail": "not declared", "took_ms": 0 }
         ]
       },
-      "load": { "in_flight": 0, "waited": 0, "rejected": 0, "max_in_flight": 10 } }
-  ]
+      "load": { "in_flight": 0, "waited": 0, "rejected": 0, "max_in_flight": 10 },
+      "source": "acme/filex-memfs",
+      "update": { "checked_at": "…", "status": "available", "version": "1.1.0",
+                  "sha256": "…", "platform": "linux/amd64", "notes": "…" } }
+  ],
+  "update_check": true,
+  "updates_checked_at": "2026-09-27T03:00:00Z"
 }
 ```
 `state` is one of `running` · `starting` · `failed` · `refused` · `disabled`;
 `state_error` carries the reason for the last two. `in_use` counts storages on
-this plugin's driver.
+this plugin's driver. `source` is where newer versions are published and
+`update` what the last check of it found — `status` `current` · `available` ·
+`incompatible` (`requires`) · `check_failed` (`error`); both absent without a
+source ([PLUGINS.md → Updates from a source](PLUGINS.md#updates-from-a-source)).
+Nothing updates itself.
 
 Top level: **`requires_signature`** says this instance refuses unsigned binaries
 (trusted keys are configured), and **`conformance`** is the *mode* —
@@ -1381,12 +1480,14 @@ because the plugin is saturated).
 > milliseconds.
 
 ### `POST /api/admin/plugins` ![admin](https://img.shields.io/badge/-admin-red)
-Install, in one of three shapes — the Content-Type picks which:
+Install, in one of four shapes — the Content-Type picks which (an upload or a
+download may also carry `source`, kept for the daily check):
 
 | Shape | Body |
 |---|---|
 | upload | `multipart/form-data` with `name`, `file` and optionally `signature` |
 | download | `{"name":"…","url":"https://…","sha256":"…","signature":"…"}` — the hash is **required** |
+| from its source | `{"name":"…","source":"owner/name"}` (or the https address of a `filex-storage.json`) — the build for this platform, held to the feed's SHA-256; the source is kept |
 | remote | `{"name":"…","kind":"remote","address":"http(s)://…","token":"…"}` |
 
 **201** with the same object as above. `409` when the name is taken, `400` for
@@ -1415,9 +1516,22 @@ put back and started again, and the body carries the status so a page can show
 what is running now instead of leaving the operator guessing. `400` too for a
 remote plugin: it is upgraded where it runs.
 
+`{"from_source": true}` (JSON) is the administrator's approval of the newer
+version the plugin's source has: the build for this platform is downloaded and
+refused (`400 … sha256 mismatch`, nothing stopped) unless its SHA-256 is the
+one the feed names, then upgraded as above. `400` when the source has nothing
+newer, or only a version for another filex.
+
+### `POST /api/admin/plugins/updates/check` ![admin](https://img.shields.io/badge/-admin-red)
+Reads every binary plugin's source now and records what it found — it
+installs nothing. **200** `{"report": {"checked_at", "checked", "available":
+[names], "failed": [names]}, "plugins": [...]}`.
+
 ### `PATCH /api/admin/plugins/{id}` ![admin](https://img.shields.io/badge/-admin-red)
-`{"enabled": true|false}`. Disabling unregisters the driver, so storages on it
-stop opening — they are not deleted.
+`{"enabled": true|false}` and/or `{"source": "owner/name"}` (`""` clears it;
+`400` for anything but `owner/name` or an https address, and for a remote
+plugin). Disabling unregisters the driver, so storages on it stop opening —
+they are not deleted.
 
 ### `POST /api/admin/plugins/{id}/restart` ![admin](https://img.shields.io/badge/-admin-red)
 Stop and start it. The way out of `refused` once the cause is fixed. The
@@ -1570,7 +1684,7 @@ create form, which has no storage to name yet.
 
 The sandboxed WebAssembly apps of [APP-PLUGINS.md](APP-PLUGINS.md). The admin
 routes are listed there ([Admin API](APP-PLUGINS.md#admin-api) — install,
-upgrade, `PATCH /{id} {enabled, auto_update}`, `POST /updates/check` and the
+upgrade, `PATCH /{id} {enabled}`, `POST /{id}/rollback`, `POST /updates/check` and the
 rest; [APP-PLUGINS-API.md](APP-PLUGINS-API.md) has the shapes); these are the
 ones the explorer and the public page call. All under the user block unless marked public. Every answer when the
 runtime is off: `404 app_plugins_disabled`.
@@ -1910,7 +2024,8 @@ administers everything. See
 
 ### `GET /api/admin/protection` ![admin](https://img.shields.io/badge/-admin-red)
 Returns the trash-retention window, the version keep count, the share-link life
-ceiling and the whole `antivirus` block — the switch, the mode, the clamd
+ceiling, the drafts limit (`drafts_limit`, with `drafts_limit_min` /
+`drafts_limit_max`) and the whole `antivirus` block — the switch, the mode, the clamd
 address, the size ceiling, the editor save-scan window — plus a **status**
 sub-object describing what this process is actually doing: what would answer
 (`clamscan` / `clamdscan` / `clamd`), whether it is `reachable`, its version,

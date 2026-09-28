@@ -112,6 +112,7 @@ func TestAppUpdateNoticesReachOnlyAdministrators(t *testing.T) {
 	kinds := []notify.EventType{
 		notify.EventAppUpdated, notify.EventAppUpdateAvailable,
 		notify.EventAppUpdateNeedsApproval, notify.EventAppUpdateFailed,
+		notify.EventPluginUpdateAvailable,
 	}
 	for _, k := range kinds {
 		_, err := svc.Send(ctx, notify.Event{Event: k, Severity: notify.SeverityInfo, Title: "lang-es",

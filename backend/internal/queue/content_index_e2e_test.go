@@ -106,3 +106,19 @@ func TestContentIndexer_MarkerFileNeverEligible(t *testing.T) {
 	m.Mime = "application/json"
 	assert.False(t, ci.Eligible(m))
 }
+
+// wiring:e2 fxe — a single encrypted file (.fxe) is ciphertext too: nothing
+// of it reaches the content index, whatever it is called.
+func TestContentIndexer_SkipsSingleEncryptedFiles(t *testing.T) {
+	ctx := context.Background()
+	idx := newContentTestIndex(t)
+	n := textNode(21, "rapor.txt", "/belgeler/rapor.txt", 64)
+	require.NoError(t, idx.IndexNode(ctx, n))
+	nodes := fakeNodes{21: n}
+	drv := &fakeStorage{files: map[string][]byte{
+		"/belgeler/rapor.txt": append([]byte("filexfxe\x01"), []byte("gizlibirsözcük ciphertext")...),
+	}}
+	ci := queue.NewContentIndexer(nodes, func(int64) (storage.Driver, error) { return drv, nil }, idx, 0)
+	require.NoError(t, ci.Handle(ctx, queue.Op{Type: queue.TypeContentIndex, Payload: map[string]any{"node_id": int64(21)}}))
+	assert.Len(t, idx.SafeSearchScoped(ctx, "gizlibirsözcük", 10, search.ScopeContent), 0)
+}

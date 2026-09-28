@@ -2,7 +2,8 @@
 
 This is the author's side of [APP-PLUGINS.md](APP-PLUGINS.md): the manifest,
 the exports filex calls, the host functions it offers, the screens it can
-draw for you, and a complete example. The Go SDK is `pkg/pluginkit` in the
+draw for you, your own interface if you bring one
+([Writing an interface](#writing-an-interface)), and a complete example. The Go SDK is `pkg/pluginkit` in the
 filex repository; a language with an Extism PDK can speak the same ABI (the
 tables below are the whole contract; see [Other languages](#other-languages)
 for what has been measured).
@@ -225,14 +226,14 @@ the module and the manifest.
 | `users:lookup` | `users_lookup` — the caller's directory (tenant-scoped, ≤ 20 rows); also lets the `people-picker` screen part search |
 | `notify:send` | `notify_send` — a `plugin.notice` notification |
 | `mail:send` | `mail_send` — plain text through the server's SMTP, 60/hour |
-| `http:<host>` / `http:*.domain` | `http_request` to that host (private addresses refused after DNS), and `asset_fetch` of a pinned file from it |
+| `http:<host>` / `http:*.domain` | `http_request` to that host (private, loopback, link-local and shared 100.64.0.0/10 addresses refused after DNS), and `asset_fetch` of a pinned file from it. A wildcard covers the subdomains of a name with at least two labels; no port |
 | `public_pages` | `share_create` / `share_revoke` / `share_state` — open a real share link for an outside participant. (`public_page_create` / `_revoke` / `_state` are the older names for exactly these and still work.) |
 | `sign` | `host_sign_info` / `cert_issue` / `host_sign` / `key_destroy` |
 | `schedule` | the `tick` export — filex wakes your app once an hour and runs the work you ask for at the minute you name. The only permission that makes your code run with nobody present; see *A scheduled wake-up* |
 
 The administrator grants the list exactly; there is no partial grant in v1.
 
-## The six exports
+## The exports
 
 filex calls these on a **fresh instance per call**: nothing survives between
 calls except what you write through host functions. Input and output are
@@ -245,6 +246,7 @@ JSON in Extism's buffers (`pluginkit` does the plumbing).
 | `view_event` | `ViewEventInput` | `Surface` | a screen event: `open`, `change`, `submit`, `action` |
 | `page_event` | `ViewEventInput` | `Surface` | the same for an outside participant on a public link (`data.page` carries `{subject, state, visits, visitor_ip}`) |
 | `tick` | `TickInput` | `TickOutput` | once an hour, if you asked for `schedule`. Nobody is waiting: the budget is your `call_timeout_s` capped at 30 s, and the call is READ-ONLY |
+| `ui_call` | `UICallInput` | `UICallOutput` | your own interface asked (`fx.call`) — [Writing an interface](#writing-an-interface); screen mode, no file writes |
 | `on_event` | — | — | reserved — nothing calls it yet, and the `events:<name>` permission that would gate it is **refused at install** until something does (a grant that does nothing is not a grant) |
 
 `ActionRunInput`: `job_id`, `action_id`, `params` (from the screen or the
@@ -421,7 +423,7 @@ tells the one case apart.
 | `mail_send {to, subject, body, lang?}` | `MailSend`, `MailSendIn(lang, …)` | plain text ≤ 64 KiB; filex appends "Sent by the *App* app on filex" — in `lang`, the language you wrote the mail in (`MailSendIn`), when this server speaks it (English, Turkish or a language pack's), else in the language the call runs in (empty on a scheduled wake-up: say it, or a reminder in the requester's language gets the instance's footer) |
 | `http_request {method, url, headers, body_b64, timeout_s}` → `{status, headers, body_b64}` | `HTTPDo(HTTPRequest)` | GET/POST/PUT/PATCH/DELETE/HEAD; 8 MiB each way, 30 s; no cookies either way |
 | `asset_fetch {url, sha256, max_bytes}` → `{ref, size, cached}` | `AssetFetch(url, sha256, maxBytes)` → `*Asset{Ref, Size, Cached}`, then `OpenInput(a.Ref)` | a file your app needs (a font, a model, a dictionary) downloaded ONCE by the host into your app's cache and read like an input. `https` on a granted `http:` host; `sha256` is required and checked before you see a byte (`integrity`, nothing kept); `max_bytes` ≤ 32 MiB, and one app's cache is held under **256 MiB, least recently used first**, so a file fetched long ago may have to be fetched again; later calls are served from disk (`Cached`). Offline is `unavailable` — tried again after a minute, logged once per outage; a download slower than your call goes on without it and your call gets `timeout` ("still downloading"). Read it into a buffer of exactly `Size` — a growing one holds a large file twice. See APP-PLUGINS-API.md → `asset_fetch` |
-| `share_create {page_id, ref\|path, subject, pin, ttl_days, max_visits, state, files[{ref,name}], purpose{label, revoke?, section?}}` → `{token, url, pin?, expires_at}` · `share_revoke {token}` · `share_state {token?, state?}` | `ShareCreate`, `ShareRevoke`, `ShareState`, `ShareStateSet`, `ShareInfo` | jobs only for create. Opens a **real share** at `/s/<token>`, so the administrator revokes it in **Shares** like any link; the PIN comes back once — show it to the requester or send it by a second channel, never in the same mail as the link. `ref`/`path` names the document the link is about (empty = the job's first input), and `ref` may name one of **this job's own outputs** — the link is answered at once and the row is written when that output is committed, which is how an app shares the file it has just made (a job that fails writes no row, so the token answers nothing). A ref that is neither an input nor an output is `not_found` by name, never the first input. `purpose` wins over the page's and is the **only** way a page-less link — the finished document handed to everybody — says what it is. ⚠ `public_page_create` / `_revoke` / `_state` and the `PublicPage*` wrappers are the older spelling of these three, still bound, now deprecated |
+| `share_create {page_id, ref\|path, subject, pin, ttl_days, max_visits, state, files[{ref,name}], purpose{label, revoke?, section?}}` → `{token, url, pin?, expires_at}` · `share_revoke {token}` · `share_state {token?, state?}` | `ShareCreate`, `ShareRevoke`, `ShareState`, `ShareStateSet`, `ShareInfo` | jobs only for create. Opens a **real share** at `/s/<token>`, so the administrator revokes it in **Shares** like any link; the PIN comes back once — show it to the requester or send it by a second channel, never in the same mail as the link. `ref`/`path` names the document the link is about (empty = the job's first input) and must be one of the job's **inputs** (a page link may also name a file this app keeps state on) — or `ref` may name one of **this job's own outputs** — the link is answered at once and the row is written when that output is committed, which is how an app shares the file it has just made (a job that fails writes no row, so the token answers nothing). A ref that is neither an input nor an output is `not_found` by name, never the first input. The person the job runs for must hold **editor** on every input (the bar the Share dialog sets for a public link), else `permission_denied`. `purpose` wins over the page's and is the **only** way a page-less link — the finished document handed to everybody — says what it is. ⚠ `public_page_create` / `_revoke` / `_state` and the `PublicPage*` wrappers are the older spelling of these three, still bound, now deprecated |
 | `host_sign_info {}` → `{available, reason?, ca_cert_pem, ca_certs_pem, algorithm}` · `cert_issue {common_name, email, days}` → `{key_ref, cert_pem, chain_pem, not_after}` · `cert_issue {purpose: "platform"}` (the seal) · `host_sign {key_ref, hash: "sha256", digest_b64}` → `{signature_b64}` · `key_destroy {key_ref}` | `HostSignInfo`, `CertIssue`, `PlatformSeal`, `HostSign`, `KeyDestroy`, and `NewHostSigner(issued)` → a `crypto.Signer` | ECDSA P-256 over a 32-byte sha256 digest, DER-encoded; the certificate carries the document-signing EKU and the app's name as OU, and runs ten years by default; issue → sign → destroy per signer. ⚠ Build a verifier's root pool from **`ca_certs_pem`** — every authority the tenant ever signed with, retired ones included — not from `ca_cert_pem`, which is only the live one |
 
 ### Signing a PDF with the host key
@@ -727,7 +729,7 @@ ONE flat object of dotted keys:
 | **explorer** | `packages/core/src/locales/en.ts` | as written: `ctx.download` | the explorer, its dialogs, the public pages |
 | **admin** | `web/src/locales/en.json` (nested) | the dotted path: `appPlugins.wizard.title` | the admin panel and the settings dialog |
 | **both** | 55 keys in both (`storages.driver.*`, `storages.fields.*`, `storages.fieldHelp.*`, `home.title`) | the same key | both, with the same English — one translation serves both |
-| **server** | `backend/internal/srvtext/locales/en.json` and the notification phrases of `web/src/lib/notificationText.ts` | everything under `server.`: `server.mail.greeting` | the server: emails, notifications, the no-JavaScript pages, the install review ([Text the server writes](#text-the-server-writes)) |
+| **server** | `backend/internal/srvtext/locales/en.json` and the notification phrases of `packages/core/src/lib/notificationText.ts` | everything under `server.`: `server.mail.greeting` | the server: emails, notifications, the no-JavaScript pages, the install review ([Text the server writes](#text-the-server-writes)) |
 
 It is one namespace because no key of one table is a dotted prefix of a key
 of another, a shared key has identical English in both interface tables, and
@@ -960,6 +962,183 @@ check (once a day, or **Check for updates** on the Apps tab — see
 installed from a file is upgraded with **Upgrade** on its row.
 Removing the pack removes its languages at once; a person who had chosen one
 falls back to their next choice (and gets it back if the pack returns).
+
+## Writing an interface
+
+An app may bring its **own interface** — HTML, CSS and JavaScript you write
+with whatever you like — instead of, or beside, the screens filex draws from
+your surfaces. An app can be a module, an interface, or both; an interface
+with nothing for a module to do (a diagram editor, a text editor for a format
+of your own) needs **no module and no Go at all**. The contract, message by
+message, is [APP-PLUGINS-API.md → An app's own interface](APP-PLUGINS-API.md#an-apps-own-interface-v4);
+this is how to build one.
+
+```
+my-editor/
+  filex-app.json      the manifest, with a `ui` block and an interface view
+  ui/                 the interface: index.html and everything it loads
+    index.html
+    app.js
+    style.css
+  ui.zip              the build: the contents of ui/ zipped (index.html at the top)
+```
+
+```json
+{
+  "manifest_version": 1,
+  "name": "fxtext",
+  "version": "0.1.0",
+  "label": { "en": "Text notes", "tr": "Metin notları" },
+  "languages": ["en", "tr"],
+  "permissions": ["files:read", "files:write"],
+  "ui": { "bundle": { "url": "https://github.com/me/fxtext/releases/download/{tag}/ui.zip", "sha256": "<64 hex>" } },
+  "views": [
+    { "id": "editor", "placement": "viewer", "ui": "index.html",
+      "applies": { "ext": ["fxtxt"] }, "label": { "en": "Text notes", "tr": "Metin notları" } }
+  ]
+}
+```
+
+- **No `wasm` block, no module.** An app whose views are all interfaces, whose
+  actions only open them and whose permissions are `files:read`,
+  `files:write` and `settings` installs from the manifest and the bundle
+  alone. Anything that needs a module — an action that runs, a surface view,
+  a public page, `schedule`, an engine, `http:` — refuses the install and
+  says which line needs it.
+- **Don't list `ui` permissions yourself.** `ui`, `ui:eval`, `ui:wasm-eval`,
+  `ui:package-fetch`, `ui:download`, `ui-net:<as>:<url>`, `ui-viewer:<kind>`
+  and `ui-new:.<ext>` are derived from the manifest; the review shows them like
+  any other.
+- **New files of your kind.** `"new_documents": [{ "ext": "fxtxt", "label":
+  {…}, "view": "editor", "template": "new/blank.txt" }]` adds a row to
+  filex's **New document** dialog: the file is a copy of the template (a
+  file of your bundle, on the served list) or empty, and opens in your
+  viewer. The view must open that kind; the app needs `files:write`.
+- **A file for the person's disk?** Say `"ui": { …, "download": true }` and
+  call `fx.download('plan.png', blob)` from a click: filex saves it where
+  the person picks (Chromium streams it there) or downloads it, 256 MiB at
+  most. Without a click filex asks them first.
+- **Your interface loads its own files at run time?** Say
+  `"ui": { …, "package_fetch": true }`. `fetch('stencils/basic.xml')` and a
+  (synchronous) `XMLHttpRequest` then reach the package's own files — this
+  version's, nothing else. Without it every connection is refused.
+- **`placement: "viewer"`** opens files of the types in `applies` the way
+  filex's own viewers do (and adds **Open with** to the file menu). Name
+  them: a viewer's `applies` needs an `ext` or `mime` list (`image/*` is
+  fine, `*/*` is not) — one with no rule is refused, because it would open
+  every file — and each kind is a line of the review. `modal`,
+  `page`, `inspector` and `home` work as for surfaces, with your interface in
+  the frame.
+- **Build and pin:** `cd ui && zip -r ../ui.zip . && sha256sum ../ui.zip`.
+  Upload installs take the zip as the `ui` part of the form (or the
+  **Interface bundle** field of the wizard); a GitHub or URL install
+  downloads `ui.bundle.url` (`{tag}` works like in `wasm.url`, a relative
+  address is read from the repository) and refuses it unless it matches
+  `ui.bundle.sha256`.
+
+### The SDK
+
+```bash
+npm install @brftech/filex-app-ui
+```
+
+```js
+import { connect } from '@brftech/filex-app-ui';
+
+const fx = await connect();                 // the handshake; rejects outside filex
+const file = await fx.open();               // name, ext, size, mime, readOnly
+editor.value = await file.text();           // or file.bytes(), file.stream()
+editor.addEventListener('input', () => fx.dirty(true));
+fx.onSave(() => editor.value);              // Save, a draft's "Save to disk", Ctrl+S
+if (file.readOnly) editor.readOnly = true;
+```
+
+Without a bundler, put `node_modules/@brftech/filex-app-ui/dist/filex-app-ui.iife.js`
+in your bundle and load it with `<script src="filex-app-ui.iife.js"></script>`:
+it defines `window.FilexAppUI.connect`.
+
+What the SDK gives you: `fx.session` (the app, the view, the reader's
+language and direction, filex's colours, the person's display name, the
+files), `open()`, `save()`, `saveAs(name, data)` (a new file, in a folder the
+person picks in filex's own dialog), `dirty()`, `title()`, `toast()`,
+`confirm()`, `close()`, `copy()`, `call(method, params)` (your module),
+`submit(action, params)` (queue one of your actions), `state.get/set` (a small
+per-person store), `on(event)`. By default it paints filex's colours
+(`--fe-bg`, `--fe-text`, `--fe-primary`…), `lang`, `dir` and `data-theme` onto
+your `<html>` and keeps them current — style with those variables and the
+interface looks like the explorer around it, in light and dark.
+
+### What the frame allows, and what it does not
+
+Your pages are served with a policy filex writes from your grant; nothing in
+your package can widen it.
+
+- **Scripts only from your package**, as files: `<script src>` and
+  `<script type="module">` both work. **No inline script, no `onclick=""`
+  attribute, no `javascript:` link** — they are refused. (filex's own
+  bootstrap is the one inline script on the page.) `eval` and `new Function`
+  only with `"csp": ["unsafe-eval"]`; WebAssembly compiled in the page only
+  with `"wasm-unsafe-eval"`.
+- **Styles** from your package and inline `<style>` / `style=""`. **Images**
+  from your package, `data:` and `blob:`. **Fonts** from your package and
+  `data:`.
+- **No network.** `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`,
+  `sendBeacon` are refused. Read files with `fx.open()`; ask your module with
+  `fx.call()` (its `http:<host>` permission is where the network is).
+- **No storage.** The frame is an opaque origin: `localStorage`,
+  `sessionStorage`, `IndexedDB`, `document.cookie` throw. Use `fx.state`.
+- **Workers only from `blob:`** (`new Worker(URL.createObjectURL(blob))`); a
+  worker from a URL cannot start on an opaque origin.
+- **No frames, forms, pop-ups or top-level navigation.** One page: build a
+  single-page interface. ⚠ If your page navigates itself to another page,
+  filex closes the channel — the second page gets no connection.
+- **Keys stay yours.** filex does not see the keys pressed in your frame;
+  Ctrl+S reaches your `onSave` through the SDK.
+- **External files.** A font or a stylesheet from a CDN: name it in
+  `ui.external` with its `sha256` and filex mirrors it — download it once at
+  install and serve it from your package as `ext/<host>/<path>`, so write
+  `<link rel="stylesheet" href="ext/cdn.example.net/katex@0.16.9/katex.min.css">`.
+  Without `sha256` the address is *live*: the reader's browser fetches it,
+  the administrator sees a yellow warning, and only `style`, `font`, `img` and
+  `media` are possible. Prefer mirroring.
+- **Paths are relative.** Your files are served under a versioned address
+  (`/_appui/<name>/<sha>/…`); refer to them relatively (`app.js`, not
+  `/app.js`). With Vite: `base: './'`.
+
+### Asking your module: `ui_call`
+
+An app with both a module and an interface answers `fx.call(method, params)`
+with a `UI` handler:
+
+```go
+pluginkit.Run(&pluginkit.Plugin{
+	Manifest: manifest,
+	UI: map[string]pluginkit.UICallFunc{
+		"wordcount": func(in *wire.UICallInput) (any, error) {
+			data, err := pluginkit.ReadInput(in.Context.Inputs[0].Ref)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]int{"words": len(strings.Fields(string(data)))}, nil
+		},
+	},
+})
+```
+
+It runs like a screen event — the files the interface was opened with as
+refs, settings, state, `http:` — and may not write a file (the interface
+saves; a job writes). `&pluginkit.UIError{Text: wire.Text{…}}` refuses with a
+sentence in every language you speak. Test it with `plugintest`:
+`h.UICall("editor", "wordcount", nil, plugintest.File{Name: "a.fxtxt", Data: …})`.
+
+⚠ **A module app with an interface describes the interface too.** Put the
+same `ui` block — the bundle's `sha256`, the `csp` exceptions, the `external`
+addresses — into the `Manifest` your module embeds. On an instance that only
+runs signed apps (`FILEX_PLUGIN_TRUSTED_KEYS`) your signature covers the
+module, so the module's describe is what vouches for the interface: a module
+that declares no interface, or another one, is refused there. Anywhere, a
+module that describes a different interface than its manifest is refused.
+Build the interface first, pin its hash, then build the module.
 
 ## Testing with plugintest
 
@@ -1200,8 +1379,9 @@ browser through install → run → output. That is the end-to-end pass;
 
 ## Other languages
 
-The ABI is the tables above: six exports named `describe`, `action_run`,
-`view_event`, `page_event`, `tick`, `on_event`; Extism's input/output/error buffers;
+The ABI is the tables above: seven exports named `describe`, `action_run`,
+`view_event`, `page_event`, `tick`, `ui_call`, `on_event` (an older module
+without `ui_call` keeps working; its interface just has no module to call); Extism's input/output/error buffers;
 host imports in the `extism:host/user` namespace taking and returning one
 Extism memory pointer each (JSON, except the two framed chunk functions:
 `file_read` answers `[status u8][bytes]` with status 0 data / 1 EOF / 2 error

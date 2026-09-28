@@ -3,10 +3,11 @@
 // Admin surface for app plugins (internal/wasmplugin, docs/APP-PLUGINS.md):
 //
 //	GET    /api/admin/app-plugins                — runtime facts + every plugin
-//	POST   /api/admin/app-plugins[?dry_run=1]    — install: multipart {wasm?, manifest, signature?, grant} | JSON {github_repo, ref?, permissions} | JSON {url?, manifest_url, sha256?, permissions}
+//	POST   /api/admin/app-plugins[?dry_run=1]    — install: multipart {wasm?, ui?, manifest, signature?, grant} | JSON {github_repo, ref?, permissions} | JSON {url?, manifest_url, sha256?, permissions}
 //	                                             (no module — `wasm`/`url` — for a language pack; wire.Manifest.IsLanguagePack)
 //	GET    /api/admin/app-plugins/{id}
-//	PATCH  /api/admin/app-plugins/{id}           — {"enabled"?: bool, "auto_update"?: bool}
+//	PATCH  /api/admin/app-plugins/{id}           — {"enabled": bool}
+//	POST   /api/admin/app-plugins/{id}/rollback  — back to the version the last upgrade replaced
 //	POST   /api/admin/app-plugins/{id}/upgrade   — same bodies as install
 //	POST   /api/admin/app-plugins/updates/check  — check every app's source now (updates.go)
 //	DELETE /api/admin/app-plugins/{id}
@@ -20,6 +21,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -335,6 +337,28 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 			}
 			wasmR = strings.NewReader(string(wasm))
 		}
+		// The interface bundle (a zip), when the manifest has a `ui` block.
+		// Optional here for the same reason the module is: the registry
+		// decides, from the manifest (wasmplugin.stageUI).
+		var uiR io.Reader
+		uf, _, err := r.FormFile("ui")
+		switch {
+		case errors.Is(err, http.ErrMissingFile):
+		case err != nil:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest_invalid", "message": "ui bundle unreadable"})
+			return nil, false
+		default:
+			// Read here, like the module: the form's files go when this
+			// request's multipart form is removed. One byte past the ceiling
+			// so the registry refuses it as too large, never truncated.
+			b, rerr := io.ReadAll(io.LimitReader(uf, h.Registry.MaxUIBytes()+1))
+			uf.Close()
+			if rerr != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest_invalid", "message": "ui bundle unreadable"})
+				return nil, false
+			}
+			uiR = bytes.NewReader(b)
+		}
 		var granted []string
 		if g := strings.TrimSpace(r.FormValue("grant")); g != "" {
 			var body struct {
@@ -347,8 +371,8 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 			granted = body.Permissions
 		}
 		return &wasmplugin.InstallInput{
-			Manifest: manifest, Wasm: wasmR, Signature: r.FormValue("signature"),
-			Source: "upload", Granted: granted, DryRun: dry, Lang: langOf(r),
+			Manifest: manifest, Wasm: wasmR, UI: uiR, Signature: r.FormValue("signature"),
+			Source: "upload", Granted: granted, DryRun: dry, Lang: langOf(r), ActorID: actorIDOf(r),
 		}, true
 	}
 
@@ -394,6 +418,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 	in.Granted = req.Permissions
 	in.DryRun = dry
 	in.Lang = langOf(r)
+	in.ActorID = actorIDOf(r)
 	return in, true
 }
 
@@ -453,25 +478,50 @@ func (h *AppPluginsAdmin) Patch(w http.ResponseWriter, r *http.Request) {
 		Enabled    *bool `json:"enabled"`
 		AutoUpdate *bool `json:"auto_update"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.Enabled == nil && req.AutoUpdate == nil) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "enabled or auto_update (bool) required"})
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
+		msg := "enabled (bool) required"
+		if req.AutoUpdate != nil {
+			// ⚠ filex 0.48: nothing updates itself any more — every newer
+			// version waits for an administrator (wasmplugin/updates.go).
+			msg = "automatic updates were removed: every newer version waits for an administrator's approval (Review update)"
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": msg})
 		return
 	}
-	var st *wasmplugin.Status
-	var err error
-	if req.AutoUpdate != nil {
-		if st, err = h.Registry.SetAutoUpdate(r.Context(), p.Row.ID, *req.AutoUpdate); err != nil {
-			h.fail(w, err)
-			return
-		}
-	}
-	if req.Enabled != nil {
-		if st, err = h.Registry.SetEnabled(r.Context(), p.Row.ID, *req.Enabled); err != nil {
-			h.fail(w, err)
-			return
-		}
+	st, err := h.Registry.SetEnabled(r.Context(), p.Row.ID, *req.Enabled)
+	if err != nil {
+		h.fail(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, st)
+}
+
+// Rollback puts the version an upgrade replaced back:
+// POST /api/admin/app-plugins/{id}/rollback. No new approval — that version's
+// grant was approved when it was installed (wasmplugin/versions.go).
+func (h *AppPluginsAdmin) Rollback(w http.ResponseWriter, r *http.Request) {
+	if !h.gate(w, r) {
+		return
+	}
+	p, ok := h.plugin(w, r)
+	if !ok {
+		return
+	}
+	st, err := h.Registry.Rollback(context.WithoutCancel(r.Context()), p.Row.ID, actorIDOf(r), langOf(r))
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+// actorIDOf is the signed-in administrator's id, for the audit row.
+func actorIDOf(r *http.Request) *int64 {
+	if u := auth.UserFrom(r.Context()); u != nil {
+		id := u.ID
+		return &id
+	}
+	return nil
 }
 
 func (h *AppPluginsAdmin) Delete(w http.ResponseWriter, r *http.Request) {

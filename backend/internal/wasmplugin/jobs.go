@@ -52,6 +52,23 @@ type ActionRow struct {
 	// with the reason for an administrator, not shown to anybody else", so
 	// the explorer draws each as a disabled row that says what is missing.
 	Gated []GatedRule `json:"gated,omitempty"`
+	// UI: the action opens the app's own interface (its view has a `ui`
+	// file) — the explorer draws the frame; nothing is queued.
+	UI *UIRef `json:"ui,omitempty"`
+}
+
+// UIRef is how a client opens an app's own interface.
+type UIRef struct {
+	// URL is the interface file's address: relative to the server's root
+	// (`/_appui/<app>/<sha16>/<file>`, joined with the client's API base),
+	// or absolute when interfaces have an origin of their own.
+	URL string `json:"url"`
+	// Grants are what the app was granted — what its bridge calls may do.
+	Grants []string `json:"grants"`
+	// Engine: the app has a module (engine.call and job.submit answer).
+	Engine bool `json:"engine"`
+	// Version is the app's version (the "updated" note compares it).
+	Version string `json:"version"`
 }
 
 // GatedRule is one "offered once X is there" part of an action's rule.
@@ -76,6 +93,8 @@ type ViewRow struct {
 	Label     wire.Text    `json:"label"`
 	Icon      string       `json:"icon,omitempty"`
 	Applies   wire.Applies `json:"applies"`
+	// UI: the view is the app's own interface.
+	UI *UIRef `json:"ui,omitempty"`
 }
 
 // ActionsAnswer is the whole list for one caller.
@@ -111,6 +130,7 @@ func (r *Registry) ActionsFor(ctx context.Context, isAdmin bool) (*ActionsAnswer
 			}
 			if v, ok := p.Manifest.View(e.Action.View); ok {
 				row.ViewPlacement = v.Placement
+				row.UI = r.uiRef(p, v)
 			}
 			out.Actions = append(out.Actions, row)
 		}
@@ -118,10 +138,27 @@ func (r *Registry) ActionsFor(ctx context.Context, isAdmin bool) (*ActionsAnswer
 			if v.Placement == "modal" || v.Placement == "page" {
 				continue
 			}
-			out.Views = append(out.Views, ViewRow{Plugin: p.Row.Name, ID: v.ID, Placement: v.Placement, Label: v.Label, Icon: p.Manifest.Icon, Applies: v.Applies})
+			out.Views = append(out.Views, ViewRow{Plugin: p.Row.Name, ID: v.ID, Placement: v.Placement, Label: v.Label, Icon: p.Manifest.Icon, Applies: v.Applies, UI: r.uiRef(p, &v)})
 		}
 	}
 	return out, nil
+}
+
+// uiRef is how a client opens view v of p, when v is the app's interface.
+func (r *Registry) uiRef(p *Installed, v *wire.View) *UIRef {
+	if v == nil || v.UI == "" {
+		return nil
+	}
+	b := p.UI()
+	if b == nil {
+		return nil
+	}
+	return &UIRef{
+		URL:     r.uiOrigin() + UIPrefix + p.Row.Name + "/" + b.short + "/" + v.UI,
+		Grants:  permStrings(p.Perms),
+		Engine:  p.HasModule(),
+		Version: p.Row.Version,
+	}
 }
 
 // ResolveAction finds a running plugin's enabled action for a run request.
@@ -611,6 +648,35 @@ func (r *Registry) outputFolder(ctx context.Context, qualified string) (*model.S
 	return st, rel, nil
 }
 
+// Parameter names only the HOST writes into a job row: the per-job output a
+// person chose on a screen (outputOverrideKey, which runJob obeys without
+// asking again), and the stamps the public page door adds (which visitor's
+// link acted — an app binds a signature to a signer by it).
+const (
+	ParamPageTokenHash = "page_token_hash"
+	ParamShareID       = "share_id"
+)
+
+var hostParamKeys = map[string]bool{outputOverrideKey: true, ParamPageTokenHash: true, ParamShareID: true}
+
+// StripHostParams is params without the host's own keys, never nil.
+//
+// ⚠⚠ runJob obeys these without asking again, so they may only carry what a
+// door checked: the output-folder validation (the storage's tenant, the
+// person's editor right there, filex's own folders) lives at submit. Every
+// door that queues a job — the run request, a surface's job, a public page's
+// job, a scheduled item — strips them first and then stamps only its own.
+func StripHostParams(params map[string]any) map[string]any {
+	out := make(map[string]any, len(params))
+	for k, v := range params {
+		if hostParamKeys[k] {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
 // SetOutputOverride stores o under the override key.
 func SetOutputOverride(params map[string]any, o *wire.Output) {
 	v := map[string]any{"mode": o.Mode, "name": o.Name}
@@ -711,6 +777,34 @@ func (r *Registry) DecorateOps(ctx context.Context, rows []*ops.Op) {
 
 // ── Views (M1: modal views opened from an action; sanitised surfaces) ──
 
+// screenScope is the call scope of a SCREEN — a view event, and an
+// interface's call to its module (uicall.go): read-only, the files the screen
+// was opened on as inputs (refs, never paths), the storage's facts. The
+// caller closes it.
+func (r *Registry) screenScope(ctx context.Context, p *Installed, storageID int64, rels []string, actor *model.User, locale string) (*Scope, error) {
+	var drv storage.Driver
+	if storageID > 0 && r.opts.StorageResolver != nil {
+		drv, _ = r.opts.StorageResolver(storageID)
+	}
+	scope, err := newScope(p, r, "", storageID, drv, actor, locale, false)
+	if err != nil {
+		return nil, err
+	}
+	scope.storageName, scope.readOnly = r.storageFacts(ctx, storageID)
+	for _, rel := range rels {
+		rel = strings.TrimPrefix(rel, "/")
+		var size int64
+		var mime string
+		if drv != nil {
+			if obj, err := drv.Stat(ctx, rel); err == nil {
+				size, mime = obj.Size, obj.Mime
+			}
+		}
+		scope.AddInput(rel, size, mime)
+	}
+	return scope, nil
+}
+
 // ViewEvent runs one view event and returns the sanitised surface.
 func (r *Registry) ViewEvent(ctx context.Context, plugin, view string, storageID int64, rels []string, actor *model.User, locale string, in wire.ViewEventInput) (*wire.Surface, error) {
 	p, ok := r.ByName(plugin)
@@ -724,27 +818,16 @@ func (r *Registry) ViewEvent(ctx context.Context, plugin, view string, storageID
 	if _, ok := p.Manifest.View(view); !ok {
 		return nil, &CallError{Code: CodeUnsupported, Message: "no such view"}
 	}
-	var drv storage.Driver
-	if storageID > 0 && r.opts.StorageResolver != nil {
-		drv, _ = r.opts.StorageResolver(storageID)
+	release, err := p.enterCall(ctx)
+	if err != nil {
+		return nil, err
 	}
-	scope, err := newScope(p, r, "", storageID, drv, actor, locale, false)
+	defer release()
+	scope, err := r.screenScope(ctx, p, storageID, rels, actor, locale)
 	if err != nil {
 		return nil, err
 	}
 	defer scope.Close()
-	scope.storageName, scope.readOnly = r.storageFacts(ctx, storageID)
-	for _, rel := range rels {
-		rel = strings.TrimPrefix(rel, "/")
-		var size int64
-		var mime string
-		if drv != nil {
-			if obj, err := drv.Stat(ctx, rel); err == nil {
-				size, mime = obj.Size, obj.Mime
-			}
-		}
-		scope.AddInput(rel, size, mime)
-	}
 	in.ViewID = view
 	in.Context = wire.CallContext{Inputs: scope.Inputs(), Locale: locale, Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(p),
 		ShareMaxTTLDays: r.linkCeiling(ctx, p)}

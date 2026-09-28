@@ -22,6 +22,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/testutil/dbtest"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
@@ -94,9 +95,23 @@ func (h *harness) installScheduled(t *testing.T, settings map[string]string, ext
 	p, ok := h.reg.ByID(st.ID)
 	require.True(t, ok)
 	require.NoError(t, h.reg.PutSettings(context.Background(), st.ID, settings))
+	// A wake-up may only schedule work on files the app keeps state on
+	// (scheduleOwns): the file the tick names was, in real life, handed to
+	// the app by a person earlier. Record that, as that earlier job would.
+	if rel, ok := strings.CutPrefix(settings["tick_path"], "main://"); ok && rel != "" {
+		h.ownFile(t, p, rel)
+	}
 	q := &fakeQueue{}
 	h.reg.SetJobQueue(q)
 	return p, q
+}
+
+// ownFile records a state key of p's on a file of the main storage — what a
+// person's earlier job on that file leaves behind.
+func (h *harness) ownFile(t *testing.T, p *Installed, rel string) {
+	t.Helper()
+	require.NoError(t, h.reg.opts.Store.SetAppPluginState(context.Background(), p.Row.ID, h.st.ID,
+		pathkey.Hash(h.st.ID, "/"+rel), rel, "tracked", "1"))
 }
 
 // row returns one schedule row of a plugin, or nil.

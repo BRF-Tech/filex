@@ -20,22 +20,24 @@
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { appBase } from '@brftech/filex-core';
+import {
+  NOTIFY_POLL_MS as POLL_MS,
+  appBase,
+  isNotificationClickable,
+  notificationHref,
+  resolveNotificationTarget,
+} from '@brftech/filex-core';
 
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationsStore } from '@/stores/notifications';
 import { openNotificationTarget } from '@/lib/notificationNav';
-import {
-  isNotificationClickable,
-  notificationHref,
-  resolveNotificationTarget,
-} from '@/lib/notificationTarget';
 import { currentMountBase } from '@/router';
 import { canShowBrowserNotification, raiseBrowserNotification } from '@/lib/browserNotify';
 import { useNotificationText } from '@/composables/useNotificationText';
 
-/** Same cadence the bell has always polled at. */
-export const NOTIFY_POLL_MS = 15_000;
+/** Same cadence the bell has always polled at — core's, the one every
+ *  surface that polls the bell uses (the explorer's own loop included). */
+export const NOTIFY_POLL_MS = POLL_MS;
 
 export function useNotificationWatcher() {
   const auth = useAuthStore();

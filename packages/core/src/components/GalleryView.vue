@@ -27,7 +27,7 @@ import {
 import StarButton from './StarButton.vue';
 import ThumbTile from './ThumbTile.vue';
 import { applyDragGhost } from '../lib/dragGhost';
-import { parentDirOf } from '../lib/listing'; /* the folder a row sits in — one split rule for every view */
+import { displayParentDirOf } from '../lib/listing'; /* the folder a row sits in — one split rule for every view */
 import {
   groupByDate,
   groupingActive,
@@ -415,10 +415,10 @@ function metaFor(n: FileNode): string {
         <div class="fe-gal__meta" aria-hidden="true">
           <span v-if="metaFor(n)" class="fe-gal__meta-line">{{ metaFor(n) }}</span>
           <span
-            v-if="showParentPath && parentDirOf(n.path)"
+            v-if="showParentPath && displayParentDirOf(n)"
             class="fe-gal__meta-line fe-gal__meta-line--path"
-            :title="parentDirOf(n.path)"
-          ><bdi>{{ parentDirOf(n.path) }}</bdi></span>
+            :title="displayParentDirOf(n)"
+          ><bdi>{{ displayParentDirOf(n) }}</bdi></span>
         </div>
       </div>
       <div class="fe-gal__label" :title="n.basename">

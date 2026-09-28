@@ -53,6 +53,11 @@ func (s *Service) GuardOverwrite(ctx context.Context, storageID int64, rel strin
 	if isInternalPath(rel) {
 		return nil
 	}
+	// An in-place E2E conversion write: the bytes it replaces are the
+	// plaintext the conversion removes (skip.go).
+	if SnapshotSkipped(ctx) {
+		return nil
+	}
 	// pathkey.Hash cleans the path it is handed (leading slash, no trailing
 	// slash), so callers may pass either spelling.
 	node, err := s.Store.GetNodeByPath(ctx, storageID, pathkey.Hash(storageID, rel))

@@ -45,6 +45,13 @@ type PageFunc func(in *wire.ViewEventInput) (*wire.Surface, error)
 // and the common one.
 type TickFunc func(in *wire.TickInput) (*wire.TickOutput, error)
 
+// UICallFunc answers one call the app's OWN interface made (`fx.call(method,
+// params)` in @brftech/filex-app-ui): any JSON-encodable value back, or an
+// error that the interface's promise rejects with. It runs in screen mode —
+// read inputs and settings, no file writes (docs/PLUGIN-KIT.md → Writing an
+// interface).
+type UICallFunc func(in *wire.UICallInput) (any, error)
+
 // Plugin is what a program registers with Run.
 type Plugin struct {
 	// Manifest is echoed by describe. It must equal the filex-app.json the
@@ -59,6 +66,10 @@ type Plugin struct {
 	// app that leaves this nil but asks for the permission answers every
 	// wake-up with an error, which lands in its log in the admin panel.
 	Tick TickFunc
+	// UI answers the app's own interface, by method name (`engine.call`).
+	// An interface-only app has no module at all; an app with both registers
+	// here what its interface may ask the module.
+	UI map[string]UICallFunc
 }
 
 var registered *Plugin
@@ -140,6 +151,36 @@ func dispatchView(input []byte, pages bool) ([]byte, error) {
 		s = &wire.Surface{Done: true}
 	}
 	return json.Marshal(s)
+}
+
+// UIError refuses an interface's call with a sentence per language; the
+// interface's promise rejects with it (code `failed`), in the reader's
+// language. A plain error works too, in whatever language it was written.
+type UIError struct{ Text wire.Text }
+
+func (e *UIError) Error() string { return e.Text.Get("en") }
+
+func dispatchUICall(input []byte) ([]byte, error) {
+	if registered == nil {
+		return nil, ErrNotRegistered
+	}
+	var in wire.UICallInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return nil, err
+	}
+	fn, ok := registered.UI[in.Method]
+	if !ok {
+		return json.Marshal(wire.UICallOutput{Error: wire.Text{"en": "this app's module answers no " + in.Method}})
+	}
+	out, err := fn(&in)
+	if err != nil {
+		var ue *UIError
+		if errors.As(err, &ue) {
+			return json.Marshal(wire.UICallOutput{Error: ue.Text})
+		}
+		return json.Marshal(wire.UICallOutput{Error: wire.Text{"en": err.Error()}})
+	}
+	return json.Marshal(wire.UICallOutput{Result: out})
 }
 
 func dispatchTick(input []byte) ([]byte, error) {

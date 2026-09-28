@@ -172,6 +172,25 @@ describe('the Docker images build the frontend from what they copy', () => {
     });
   }
 
+  // v0.48.0's first image build: packages/app-ui was new and its
+  // package.json was not copied before `pnpm install`, so the workspace had
+  // no node_modules for it and `vite build` was "not found" - in both images.
+  // Every workspace package's manifest must be in the install layer.
+  for (const image of IMAGES) {
+    it(`${image} copies every workspace package's package.json before \`pnpm install\``, () => {
+      const lines = fs.readFileSync(path.join(REPO, image), 'utf8').split(/\r?\n/);
+      const install = lines.findIndex((l) => /^RUN\s+pnpm\s+install\b/.test(l));
+      expect(install, `${image} runs pnpm install`).toBeGreaterThan(0);
+      const before = lines.slice(0, install).filter((l) => /^COPY\s/i.test(l)).join('\n');
+      const pkgs = fs
+        .readdirSync(path.join(REPO, 'packages'))
+        .filter((d) => fs.existsSync(path.join(REPO, 'packages', d, 'package.json')));
+      expect(pkgs.length).toBeGreaterThanOrEqual(4);
+      const missing = pkgs.filter((d) => !before.includes(`packages/${d}/package.json`));
+      expect(missing, `${image} installs without these packages' manifests`).toEqual([]);
+    });
+  }
+
   it('the copies come before the first build step (a COPY after `vite build` is no copy)', () => {
     for (const image of IMAGES) {
       const lines = fs.readFileSync(path.join(REPO, image), 'utf8').split(/\r?\n/);

@@ -26,7 +26,7 @@ import {
   emailProblem,
   refusalField,
   usernameProblem,
-} from '@/lib/accountRules';
+} from '@brftech/filex-core/src/lib/accountRules';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 

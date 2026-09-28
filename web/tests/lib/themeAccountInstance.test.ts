@@ -44,7 +44,7 @@ import {
 
 import { applyInstanceThemes, applySessionLook, primeInstanceDefault } from '@/lib/instanceThemes';
 import { getStoredTheme, setStoredTheme } from '@/lib/theme';
-import { setDensity } from '@/lib/density';
+import { setDensity } from '@brftech/filex-core/src/lib/density';
 
 const ACME = {
   id: 'custom:acme',

@@ -116,6 +116,10 @@ export function nodeRowToFileNode(
     // exactly when there is an image behind it (handlers/meta.go, the folder
     // listing's rule), so a file with none is never asked about.
     thumb_url: !isDir && typeof row.thumb_url === 'string' && row.thumb_url ? row.thumb_url : undefined,
+    /* wiring:e2 names — the encrypted folder the row sits in (the server
+       answers it for rows outside a folder listing). The explorer's name view
+       reads it to name the row, and openNode to open it in its folder. */
+    ...(typeof row.e2e_root === 'string' && row.e2e_root ? { e2e_root: row.e2e_root } : {}),
     extra_metadata: {},
   } as unknown as FileNode;
 }

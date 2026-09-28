@@ -9,7 +9,7 @@
 // of a problem everybody knows about and nobody is told about again.
 //
 // A hand-maintained list is the right answer here (see the note in
-// `src/lib/webhookEvents.ts` — the UI is compiled into the server binary, so a
+// `packages/core/src/lib/webhookEvents.ts` — the UI is compiled into the server binary, so a
 // runtime endpoint could never disagree and would only add a failure mode).
 // What a hand list needs is a build-time gate, which is this file: it parses
 // the Go constants and fails when the two sets differ, so the next drift is
@@ -21,8 +21,8 @@ import { fileURLToPath } from 'node:url';
 
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
-import { WEBHOOK_EVENTS, userEventKey, webhookEventKey } from '@/lib/webhookEvents';
-import { NOTIFICATION_PHRASES, renderNotification } from '@/lib/notificationText';
+import { WEBHOOK_EVENTS, userEventKey, webhookEventKey } from '@brftech/filex-core/src/lib/webhookEvents';
+import { NOTIFICATION_PHRASES, renderNotification } from '@brftech/filex-core/src/lib/notificationText';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const EVENT_GO = path.resolve(here, '../../../backend/internal/notify/event.go');
@@ -74,7 +74,7 @@ describe('webhook event catalogue', () => {
     expect(
       missing,
       `emitted by the backend but not offered in the admin UI: ${missing.join(', ')} — ` +
-        'add them to web/src/lib/webhookEvents.ts with a label in en.json and tr.json',
+        'add them to packages/core/src/lib/webhookEvents.ts with a label in en.json and tr.json',
     ).toEqual([]);
   });
 
@@ -188,7 +188,7 @@ describe('webhook event catalogue', () => {
       expect(
         missing,
         `emitted by the backend with no ${lang} phrasing: ${missing.join(", ")} — ` +
-          "add it to web/src/lib/notificationText.ts, or the bell, the browser " +
+          "add it to packages/core/src/lib/notificationText.ts, or the bell, the browser " +
           "toast and the desktop app will all show the raw event id",
       ).toEqual([]);
     });

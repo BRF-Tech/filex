@@ -206,9 +206,9 @@ func TestScanExclusions_RowsCataloguedBeforeThePatternStayAndAreNeverTrashed(t *
 		assert.Nil(t, n.DeletedAt, "%s went to the trash although it is still on the storage", p)
 	}
 	assert.Nil(t, node(t, store, st.ID, "/proj/.git/NEW"), "a file under an excluded folder was catalogued")
-	gone := rowAnywhere(t, store, st.ID, "/proj/doc9.txt")
-	require.NotNil(t, gone)
-	assert.NotNil(t, gone.DeletedAt, "a file really deleted outside the excluded folder must still be tombstoned")
+	// Removed from the catalogue, not put in the trash (issue #74).
+	assert.Nil(t, rowAnywhere(t, store, st.ID, "/proj/doc9.txt"),
+		"a file really deleted outside the excluded folder must still leave the catalogue")
 }
 
 // A folder rescan compares what it saw with the folder's catalogued size. A

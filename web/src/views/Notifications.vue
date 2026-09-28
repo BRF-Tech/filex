@@ -9,7 +9,7 @@ import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import { formatDate } from '@/lib/format';
 import { useNotificationText } from '@/composables/useNotificationText';
-import { eventSlug } from '@/lib/webhookEvents';
+import { eventSlug } from '@brftech/filex-core';
 import type { Severity } from '@/api/types';
 
 import Button from '@/components/ui/Button.vue';

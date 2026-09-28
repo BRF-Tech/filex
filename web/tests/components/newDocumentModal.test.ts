@@ -166,3 +166,69 @@ describe('where the extension is not optional', () => {
     expect(w.get('[data-testid="newdoc-ext-hint"]').text()).toContain('LICENSE.txt');
   });
 });
+
+// Burak, 2026-09-27: an app's rows in the New menu (`new_documents`). The
+// server lists them with the other types (a key, the app, its label); the
+// dialog offers them under "Apps" in the app's own words, even where the
+// built-in kind of the same extension is withheld, and asks the server for
+// the ROW (its key), not the extension.
+describe('an app’s rows', () => {
+  const APP_TYPES: NewDocType[] = [
+    ...TYPES,
+    { ext: 'drawio', group: 'diagram', mime: 'application/vnd.jgraph.mxfile', requires: 'drawio', ext_required: true },
+    {
+      ext: 'drawio',
+      key: 'app:drawio:drawio',
+      group: 'app',
+      mime: 'application/vnd.jgraph.mxfile',
+      requires: 'app',
+      ext_required: true,
+      app: { plugin: 'drawio', view: 'editor', label: { en: 'Whiteboard (draw.io)', tr: 'Beyaz tahta (draw.io)' } },
+    },
+  ];
+
+  it('are offered under Apps, in the app’s own words, and made by their key', async () => {
+    const { w, newFile, input } = await open([], APP_TYPES);
+    expect(w.find('[data-testid="newdoc-type-drawio"]').exists()).toBe(false);
+    const tile = w.get('[data-testid="newdoc-type-app:drawio:drawio"]');
+    expect(tile.text()).toContain('Whiteboard (draw.io)');
+    expect(w.text()).toContain('Apps');
+    await tile.trigger('click');
+    await settle();
+    expect(input().element.value).toBe('Untitled.drawio');
+    await input().setValue('Plan');
+    await debounce();
+    await settle();
+    await w.get('[data-testid="newdoc-create"]').trigger('click');
+    await settle();
+    expect(newFile).toHaveBeenCalledWith('main://', 'Plan', 'app:drawio:drawio', { exactName: true });
+    expect(w.emitted('created')?.[0]?.[0]).toMatchObject({ app: { plugin: 'drawio', view: 'editor' } });
+  });
+});
+
+describe('a kind an app makes is not said to be missing', () => {
+  it('does not say "Diagrams need draw.io" when an app offers the .drawio row', async () => {
+    const withApp: NewDocType[] = [
+      ...TYPES,
+      { ext: 'drawio', group: 'diagram', mime: 'application/vnd.jgraph.mxfile', requires: 'drawio', ext_required: true },
+      {
+        ext: 'drawio',
+        key: 'app:drawio:drawio',
+        group: 'app',
+        mime: 'application/vnd.jgraph.mxfile',
+        requires: 'app',
+        ext_required: true,
+        app: { plugin: 'drawio', view: 'editor', label: { en: 'draw.io diagram' } },
+      },
+    ];
+    const { w } = await open([], withApp);
+    const line = w.find('[data-testid="newdoc-withheld"]');
+    expect(line.exists() ? line.text() : '').not.toMatch(/draw\.io/i);
+
+    // Without the app, the line still says it.
+    mounted?.unmount();
+    mounted = null;
+    const { w: w2 } = await open([], withApp.slice(0, -1));
+    expect(w2.get('[data-testid="newdoc-withheld"]').text()).toMatch(/draw\.io/i);
+  });
+});

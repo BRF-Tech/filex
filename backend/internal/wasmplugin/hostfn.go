@@ -485,14 +485,71 @@ const (
 	lockDefaultDays = 30
 )
 
-func (s *Scope) targetRel(ref, qualified string) (string, error) {
+// targetRel resolves the file a lock, an unlock or a notice names: a ref of
+// this call, or an adapter-qualified path on the call's storage.
+//
+// ⚠⚠ A `path` is a string the app chose, and the scope's promise is that an
+// app reaches the files it was HANDED, never ones it names (scope.go) — the
+// person's ACL and a confined token's root were checked against those, not
+// against whatever the app spells. So a path is accepted only when it names
+// one of this call's inputs or a file this app already keeps state on (a
+// file some earlier call was handed and the app recorded), and a refusal is
+// one sentence whether or not the file exists.
+func (s *Scope) targetRel(ctx context.Context, ref, qualified string) (string, error) {
+	rel, byPath, err := s.targetRelRaw(ref, qualified)
+	if err != nil || !byPath {
+		return rel, err
+	}
+	if !s.handedPath(ctx, rel) {
+		return "", errPathNotHanded
+	}
+	return rel, nil
+}
+
+// errPathNotHanded is the one answer for a path the call may not name —
+// whether or not the file exists, whether or not somebody locked it.
+var errPathNotHanded = hostErr(wire.ErrPermissionDenied, "path is not a file this call was handed: name an input by ref, or a file this app keeps state on")
+
+// handedPath reports whether rel is one of this call's inputs or a file this
+// app keeps state on (on the call's storage).
+func (s *Scope) handedPath(ctx context.Context, rel string) bool {
+	return s.hasInput(rel) || s.reg.keepsStateOn(ctx, s.plugin, s.storageID, rel)
+}
+
+// keepsStateOn reports whether app p keeps any state key on the file.
+func (r *Registry) keepsStateOn(ctx context.Context, p *Installed, storageID int64, rel string) bool {
+	if p == nil || p.Row == nil || storageID <= 0 {
+		return false
+	}
+	h := pathkey.Hash(storageID, "/"+strings.Trim(rel, "/"))
+	keys, err := r.opts.Store.ListAppPluginStateKeys(ctx, storageID, []string{h})
+	if err != nil {
+		return false
+	}
+	for _, k := range keys[h] {
+		if strings.HasPrefix(k, p.Row.Name+":") {
+			return true
+		}
+	}
+	return false
+}
+
+// targetRelRaw is targetRel without the confinement: the path it names and
+// whether it came from `path` rather than a ref.
+func (s *Scope) targetRelRaw(ref, qualified string) (string, bool, error) {
 	if ref != "" {
 		f, ok := s.file(ref)
 		if !ok || f.Rel == "" {
-			return "", hostErr(wire.ErrNotFound, "ref is not a storage file")
+			return "", false, hostErr(wire.ErrNotFound, "ref is not a storage file")
 		}
-		return strings.TrimPrefix(f.Rel, "/"), nil
+		return strings.TrimPrefix(f.Rel, "/"), false, nil
 	}
+	rel, err := s.pathRel(qualified)
+	return rel, err == nil, err
+}
+
+// pathRel reads an adapter-qualified (or bare) path on the call's storage.
+func (s *Scope) pathRel(qualified string) (string, error) {
 	qualified = strings.TrimSpace(qualified)
 	if qualified == "" {
 		return "", hostErr(wire.ErrInvalid, "ref or path is required")
@@ -576,9 +633,18 @@ func hfFileLock(ctx context.Context, s *Scope, in json.RawMessage) (any, error) 
 			return map[string]any{"ok": true, "until": l.Until, "promised": true}, nil
 		}
 	}
-	rel, err := s.targetRel(req.Ref, req.Path)
+	rel, err := s.targetRel(ctx, req.Ref, req.Path)
 	if err != nil {
 		return nil, err
+	}
+	// ⚠⚠ A lock freezes the file for EVERYONE, owner and administrators
+	// included, and makes every folder above it immovable — a write in all
+	// but name, so the person must hold editor on it (this app's own lock
+	// waived), whatever ACL the job was submitted under. A job with nobody
+	// behind it (the wake-up's) may lock only the files it was handed, which
+	// the scheduler binds to the app's own state.
+	if !s.mayFreeze(ctx, rel) {
+		return nil, hostErr(wire.ErrPermissionDenied, "a lock needs editor on the file for the person this job runs for: "+rel)
 	}
 	// Files only. A folder lock would read differently on each write door
 	// (the browser upload asks the ACL about the FOLDER, the staged one about
@@ -676,7 +742,7 @@ func hfFileUnlock(ctx context.Context, s *Scope, in json.RawMessage) (any, error
 	if !s.writable {
 		return nil, hostErr(wire.ErrPermissionDenied, "locks are lifted from action jobs only")
 	}
-	rel, err := s.targetRel(req.Ref, req.Path)
+	rel, byPath, err := s.targetRelRaw(req.Ref, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -685,10 +751,17 @@ func hfFileUnlock(ctx context.Context, s *Scope, in json.RawMessage) (any, error
 	if err != nil {
 		return nil, hostErr(wire.ErrUnavailable, "lock: "+err.Error())
 	}
+	// An app may always lift its OWN lock by path — that tells it nothing it
+	// did not know. Any other path answers exactly as targetRel would, so
+	// "no lock here" and "another app's lock here" cannot be told apart.
+	mine := cur != nil && cur.PluginID == s.plugin.Row.ID
+	if byPath && !mine && !s.handedPath(ctx, rel) {
+		return nil, errPathNotHanded
+	}
 	if cur == nil {
 		return map[string]any{"ok": true, "was_locked": false}, nil
 	}
-	if cur.PluginID != s.plugin.Row.ID {
+	if !mine {
 		return nil, hostErr(wire.ErrPermissionDenied, "locked by app "+cur.PluginName+", not by this one")
 	}
 	if err := s.reg.opts.Store.DeleteAppPluginLock(ctx, s.storageID, ph); err != nil {

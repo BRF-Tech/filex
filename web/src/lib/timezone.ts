@@ -24,12 +24,11 @@
 
 import {
   activeTimeZone as coreActiveTimeZone,
-  accountTimeZoneOf,
+  accountZoneControl,
   deviceTimeZone,
   isValidTimeZone,
   rememberedAccountTimeZone,
   setAccountTimeZone,
-  setViewerTimeZone,
   supportedTimeZones,
   TIMEZONE_ACCOUNT_LS_KEY,
 } from '@brftech/filex-core';
@@ -38,6 +37,9 @@ export { deviceTimeZone, isValidTimeZone, supportedTimeZones, TIMEZONE_ACCOUNT_L
 
 /** This app's key in the resolver's `account` tier. */
 const WEB_APP = Symbol('filex-web-app');
+/** The settings dialog's handle on it — the same one the explorer hands the
+ *  dialog for its own owner (core lib/timezone accountZoneControl). */
+const zone = accountZoneControl(WEB_APP);
 
 // First paint: the account as the last session in this browser saw it. Only a
 // remembered zone is registered — with nothing remembered, "no entry" and
@@ -54,7 +56,7 @@ export function activeTimeZone(): string | undefined {
 
 /** The ACCOUNT's zone as this app knows it — `''` means "use the device". */
 export function getStoredTimeZone(): string {
-  return accountTimeZoneOf(WEB_APP) ?? '';
+  return zone.get();
 }
 
 /**
@@ -71,8 +73,7 @@ export function getStoredTimeZone(): string {
  * in the control for exactly this; that is the decision in force.
  */
 export function setStoredTimeZone(tz: string): void {
-  setAccountTimeZone(WEB_APP, tz && isValidTimeZone(tz) ? tz : '', { remember: true });
-  setViewerTimeZone('');
+  zone.set(tz);
 }
 
 /**

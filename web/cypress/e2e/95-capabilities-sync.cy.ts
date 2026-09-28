@@ -20,11 +20,12 @@ describe('capabilities', () => {
     }>('/api/files/capabilities').then((d) => {
       expect(d.external, 'capabilities.external').to.be.an('object');
       // ⚠ `mermaid` is NOT one of these. The baseline slots this build
-      // advertises are convert / drawio / onlyoffice; the old assertion named
-      // `mermaid` and only ever passed because production's `external` table
-      // still carries a row from the version that had it (see
-      // 37-external-providers for the same stale literal).
-      for (const slot of ['onlyoffice', 'drawio', 'convert']) {
+      // advertises are drawio / onlyoffice; the old assertion named `mermaid`
+      // and only ever passed because production's `external` table still
+      // carries a row from the version that had it (see 37-external-providers
+      // for the same stale literal). `convert` went with the iframe converter
+      // in 0.48 (migration 00068 deletes its row).
+      for (const slot of ['onlyoffice', 'drawio']) {
         expect(d.external, `capabilities.external.${slot}`).to.have.property(slot);
       }
       // Each slot has to carry its state, or the External page has nothing to

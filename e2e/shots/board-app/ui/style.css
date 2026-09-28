@@ -1,0 +1,100 @@
+/* filex paints its colours onto <html> as --fe-* (the SDK's connect()); the
+   fallbacks are for the page opened on its own. */
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--fe-bg, #fff);
+  color: var(--fe-text, #1f2937);
+  font-family: var(--fe-font, system-ui, sans-serif);
+  font-size: var(--fe-text-md, 14px);
+}
+main {
+  padding: 20px 24px;
+}
+.status {
+  color: var(--fe-text-muted, #6b7280);
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.count {
+  color: var(--fe-text-muted, #6b7280);
+}
+.cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.col {
+  background: var(--fe-bg-elev, #f7f8fb);
+  border: 1px solid var(--fe-border, #e5e7eb);
+  border-radius: var(--fe-radius-lg, 10px);
+  padding: 12px;
+}
+h2 {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 10px;
+  font-size: var(--fe-text-sm, 13px);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fe-text-muted, #6b7280);
+}
+.n {
+  font-weight: 500;
+}
+.cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--fe-bg, #fff);
+  border: 1px solid var(--fe-border, #e5e7eb);
+  border-radius: var(--fe-radius-md, 8px);
+  box-shadow: var(--fe-shadow-sm, 0 1px 2px rgb(0 0 0 / 6%));
+  cursor: pointer;
+}
+.card:hover:not(:disabled) {
+  border-color: var(--fe-primary, #2f6ceb);
+}
+.card:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+.card:focus-visible {
+  outline: 2px solid var(--fe-primary, #2f6ceb);
+  outline-offset: 2px;
+}
+.tag {
+  font-size: var(--fe-text-xs, 12px);
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--fe-primary-soft, #eef3ff);
+  color: var(--fe-primary-ink, #1d4ed8);
+}

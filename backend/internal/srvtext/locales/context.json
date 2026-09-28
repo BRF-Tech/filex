@@ -50,6 +50,7 @@
     "server.update.policy.manual": "The stored value of the update policy setting (FILEX_UPDATE_POLICY=manual) said the way a person reads it — filex announces a release and installs nothing. Translate the MEANING (\"announce only\"), not the key’s word \"manual\".",
     "server.mail.share.subject_file": "Subject line (a file).",
     "server.mail.share.subject_folder": "Subject line (a folder).",
+    "server.notify.word.locked": "Stands in the bell for the name of an item inside an end-to-end encrypted folder whose names are encrypted, while the reader does not have that folder unlocked — the server only has the scrambled name. Keep the lock emoji; it matches the explorer’s own label for such an item.",
     "server.notify.word.someone": "Used where a person would be named and nobody is: the {who} of an upload whose visitor typed no name — in the bell AND in the owner’s email.",
     "server.notify.word.unnamed": "Used where a file would be named and it has none: the {name} of a notification, and the {name} in a share email’s subject and fact line.",
     "server.mail.drop_invite.subject": "Subject line.",
@@ -111,6 +112,8 @@
     "policy": "the update policy's name, one of the server.update.policy.* words"
   },
   "key_vars": {
+    "server.perm.ui_new": { "ext": "a file extension with its dot, e.g. .drawio" },
+    "server.perm.ui_viewer": { "kind": "a kind of file: an extension with its dot (.drawio) or a media type (image/svg+xml)" },
     "server.notify.app_updated.title": { "version": "the app's new version, e.g. 1.2.0 (not a filex version)" },
     "server.notify.app_updated.body": { "from": "the app's previous version, e.g. 1.1.0 (not a path)" },
     "server.notify.app_update_available.title": { "version": "the app's new version, e.g. 1.2.0 (not a filex version)" },

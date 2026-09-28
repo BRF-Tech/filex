@@ -60,7 +60,7 @@ watch(
         input: {
           id: j.id,
           kind: 'upload' as const,
-          name: j.file.name,
+          name: j.displayName ?? j.file.name,
           percent: saving(j.status) ? null : j.totalBytes > 0 || j.status === 'done' ? j.percent : null,
           message: saving(j.status) ? t('upload.saving') : null,
           status: mapStatus(j.status),

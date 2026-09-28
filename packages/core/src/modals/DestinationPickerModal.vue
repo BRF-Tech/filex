@@ -37,7 +37,8 @@
  * `pick` emits an adapter-qualified wire path — exactly what `api.copy` and
  * `api.moveAsync` take.
  */
-import { computed, ref, watch } from 'vue';
+import { computed, inject, ref, watch } from 'vue';
+import { E2E_NAME_VIEW } from '../composables/useE2eNames';
 import Modal from './Modal.vue';
 import { useLocale } from '../composables/useLocale';
 import type { FileApi, ManagerResponse } from '../composables/useFileApi';
@@ -122,11 +123,20 @@ watch(
   { immediate: true },
 );
 
+/* wiring:e2 names — folders inside an encrypted folder are offered under
+ * their plaintext names (the explorer's one name view), and the key file and
+ * long-name sidecars are never offered at all. */
+const e2eNameView = inject(E2E_NAME_VIEW, null);
+
 async function load(path: string): Promise<ManagerResponse | undefined> {
   const hit = cache.get(path);
   if (hit) return hit;
   try {
-    const resp = await props.api.index(path);
+    let resp = await props.api.index(path);
+    if (e2eNameView) {
+      const root = typeof resp.e2e_root === 'string' && resp.e2e_root ? resp.e2e_root : null;
+      resp = { ...resp, files: await e2eNameView.decorate(resp.files ?? [], { root }) };
+    }
     cache.set(path, resp);
     return resp;
   } catch {
@@ -158,7 +168,9 @@ async function goTo(path: string): Promise<void> {
 }
 
 const parent = computed(() => parentOfWire(at.value, multiDrive.value));
-const crumbs = computed(() => crumbsOfWire(at.value));
+const crumbs = computed(() =>
+  crumbsOfWire(at.value).map((c) => ({ ...c, label: e2eNameView?.segmentLabel(c.path) ?? c.label })),
+);
 
 /** Why the CURRENT folder cannot be chosen, or null when it can. */
 const hereBlocked = computed(() => blockedReason(at.value, props.moving));

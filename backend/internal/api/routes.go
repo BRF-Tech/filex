@@ -33,12 +33,15 @@ import (
 	"github.com/brf-tech/filex/backend/internal/dav"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/e2e/fxewatch"
+	"github.com/brf-tech/filex/backend/internal/e2e/keyfilewatch"
 	"github.com/brf-tech/filex/backend/internal/external"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/filecache"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/newdoc"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/ops"
@@ -51,6 +54,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/replica"
 	"github.com/brf-tech/filex/backend/internal/s3api"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/secheaders"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/staging"
@@ -270,6 +274,23 @@ func BuildRouter(d *Deps) http.Handler {
 
 	r.Use(LoggerAt(d.Cfg.BasePath))
 	r.Use(Recoverer)
+	// FILEX_APP_UI_ORIGIN: apps' interfaces on an origin of their own. That
+	// host answers the interface route (and /healthz) and nothing else —
+	// never the SPA, the API or a share — and every other host refuses the
+	// interface route. docs/APP-PLUGINS.md → An origin of their own.
+	if d.Cfg.AppUIOrigin != "" {
+		r.Use(appUIHostSplit(d.Cfg.AppUIOrigin, d.Cfg.BasePath))
+	}
+	// The browser-facing headers every answer carries, whatever proxy is (or
+	// is not) in front: nosniff, the referrer policy, and on filex's own pages
+	// who may frame them (FILEX_FRAME_ANCESTORS). Above the base-path
+	// middleware, so its own refusals carry them too. See internal/secheaders.
+	//
+	// frame-src (the same pages): what they may show in a frame — filex, the
+	// editors configured under External services (read live, like the
+	// explorer reads them) and, later, the app-interface origin. It is the
+	// wall around an app interface's own navigation (internal/secheaders).
+	r.Use(secheaders.Middleware(d.Cfg.FrameAncestors, secheaders.WithOwnFrames(pageOwnFrames(d)), secheaders.WithFrameSources(pageFrameSources(d))))
 	// A sub-path deployment (https://example.com/filex/, FILEX_BASE_PATH):
 	// the base comes off here, so every route below, and every middleware
 	// that reads the path (APINoStore, the demo guard, confine), sees the paths
@@ -312,6 +333,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// path checks at `begin`; before this, everything below the staging
 	// threshold had no ceiling at all.
 	mh.Quota = d.Quota
+	mh.AppDocs = d.AppPlugins
 	// The lazy catalogue (sync_mode lazy, docs/LAZY-CATALOGUE.md): a listing
 	// asks whether the catalogue vouches for the folder, and on a lazy storage
 	// tells it the folder was opened.
@@ -453,6 +475,7 @@ func BuildRouter(d *Deps) http.Handler {
 	oh := handlers.NewOps(d.Ops, d.Store)
 	oh.AttachACL(d.ACL)
 	apH := handlers.NewAppPlugins(d.AppPlugins, d.Store, d.ACL, d.Ops, d.StorageResolver, d.Index, d.Thumbs)
+	apH.Quota = d.Quota
 	// A plugin job runs on the queue with no browser in scope, so the origin
 	// of the link it mints comes from the DATA (the share's storage), not from
 	// the process-wide public URL — which in a multi-tenant install is the
@@ -510,6 +533,10 @@ func BuildRouter(d *Deps) http.Handler {
 	th.AttachACL(d.ACL)
 	th.AttachSigner(thumbSigner)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
+	if d.AppPlugins != nil {
+		reg := d.AppPlugins
+		ch.AppDocs = func() []newdoc.Type { return handlers.AppNewDocTypes(reg) }
+	}
 	ch.Archive = archiveEngine
 	// What the explorer and the admin's Trash page may ask to run on the queue
 	// (queued=1), and only what is wired: the manager renames on it, the trash
@@ -674,6 +701,19 @@ func BuildRouter(d *Deps) http.Handler {
 	versionsH := handlers.NewVersions(d.Store, d.Versions)
 	versionsH.AttachSearchIndex(d.Index)
 	versionsH.AttachACL(d.ACL)
+	// wiring:e2 fxe watch — every rewrite of a single encrypted file (`.fxe`)
+	// is audited by the server itself (e2e.fxe_header_rewritten), whatever
+	// surface wrote it; a changed password or recovery slot deletes the older
+	// versions that still open the file with the old secret. Installed every
+	// time, nil-or-not: the observer list is process-wide.
+	{
+		watch := &fxewatch.Watch{Audit: d.Store}
+		if d.Versions != nil {
+			watch.Versions = d.Versions
+			watch.Resolver = d.Versions.Resolver
+		}
+		writehook.ObserveWrites("e2e.fxe-header", watch.OnWritten)
+	}
 	grantsH := handlers.NewGrants(d.Store, d.ACL)
 	grantsH.AttachInvite(d.Share, d.Mailer, d.Cfg.PublicURL)
 	grantsH.AttachTenants(tenants)
@@ -738,6 +778,25 @@ func BuildRouter(d *Deps) http.Handler {
 	// browser's drag-out, `"mode":"file"`) redeems here too, and is re-judged
 	// as its owner at the redeem — see handlers/download_link.go.
 	r.Get("/z/{ticket}", ah.DownloadArchive)
+
+	// An app's own interface (internal/wasmplugin uiserve.go): the approved
+	// package's files, credential-free and cookieless by design — what makes
+	// running them safe is the sandboxing policy every answer carries, built
+	// from the app's grant, not who asked. Outside every auth chain and the
+	// SPA fallback. docs/APP-PLUGINS-API.md → An app's own interface.
+	if d.AppPlugins != nil {
+		uiOrigin := appUIOrigin(d.Cfg.BasePath)
+		if d.Cfg.AppUIOrigin != "" {
+			// An origin of their own: the policy names it, and the rows the
+			// explorer reads carry absolute addresses on it.
+			fixed := d.Cfg.AppUIOrigin + strings.TrimRight(d.Cfg.BasePath, "/")
+			uiOrigin = func(*http.Request) (string, bool) { return fixed, true }
+			d.AppPlugins.SetUIOrigin(fixed)
+		}
+		ui := d.AppPlugins.UIHandler(uiOrigin)
+		r.Get("/_appui/*", ui.ServeHTTP)
+		r.Head("/_appui/*", ui.ServeHTTP)
+	}
 
 	// ────── onlyoffice public endpoints (HMAC/JWT signed) ──────
 	r.Get("/api/files/onlyoffice/fetch", ooh.Fetch)
@@ -911,8 +970,26 @@ func BuildRouter(d *Deps) http.Handler {
 	// single editing session (writehook.OnFileSaved). nil falls back to the
 	// immediate scan, never to no scan.
 	writehook.ConfigureSaveScan(d.AVScanAfterSave)
+	// wiring:e2 keyfile — every rewrite of an encrypted folder's key file is
+	// audited by the server itself, and a changed password or recovery slot
+	// deletes the key file's old versions (they wrap the folder key under the
+	// old secret). Set explicitly, nil-or-not: process-wide state must not be
+	// inherited from another router built in the same process.
+	{
+		watch := &keyfilewatch.Watch{Audit: d.Store}
+		if d.Versions != nil {
+			watch.Versions = d.Versions
+			watch.Resolver = d.Versions.Resolver
+		}
+		writehook.ConfigureAfterWrite(watch.OnWritten)
+	}
 	wsTickets := realtime.NewTicketStore()
 	wsh := handlers.NewWS(d.Store, d.ACL, hub, wsTickets, d.Cfg.PublicURL)
+	// An approved app version (an upgrade, a roll-back) reaches every open
+	// explorer, so an interface open on the old one offers to reload.
+	if d.AppPlugins != nil {
+		d.AppPlugins.SetUpgradeListener(hub.AppUpdated)
+	}
 	wsh.AttachPublicURLConfigured(d.Cfg.PublicURLSet)
 	wsh.AttachTenants(tenants)
 	// A ticketed upgrade authenticates after every middleware has run, so the
@@ -1124,6 +1201,10 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Post("/actions/{plugin}/{action}/run", apH.Run)
 				r.Get("/views/{plugin}/{view}", apH.View)
 				r.Post("/views/{plugin}/{view}/event", apH.ViewEvent)
+				// An app's own interface (handlers/app_ui.go): its saves, and
+				// its module.
+				r.Put("/ui/{plugin}/{view}/save", apH.UISave)
+				r.Post("/ui/{plugin}/{view}/call", apH.UICall)
 			})
 
 			// SFC's per-verb async endpoints — translate to ops.Submit.
@@ -1169,6 +1250,18 @@ func BuildRouter(d *Deps) http.Handler {
 
 			// Plain-text save target for the SFC's code/markdown editor.
 			r.Post("/save-text", saveTextH.Save)
+
+			// Drafts (issue #71): a new document until its first save —
+			// handlers/drafts.go, docs/API.md → Drafts. `count` is declared
+			// before `{key}` so chi cannot route the literal into the key.
+			r.Route("/drafts", func(r chi.Router) {
+				r.Get("/", mh.ListDrafts)
+				r.Post("/", mh.CreateDraft)
+				r.Get("/count", mh.CountDrafts)
+				r.Get("/{key}", mh.GetDraft)
+				r.Post("/{key}/save", mh.SaveDraft)
+				r.Delete("/{key}", mh.DiscardDraft)
+			})
 
 			// Per-file/per-folder permissions panel (RBAC). Owner/admin only —
 			// enforced inside the handler, not the route.
@@ -1232,8 +1325,38 @@ func BuildRouter(d *Deps) http.Handler {
 			// "no such route".
 			e2eH := handlers.NewE2E(d.Store, d.E2EEscrow)
 			e2eH.AttachACL(d.ACL)
+			{
+				// Only what is wired: a nil service must not become a non-nil
+				// interface holding a nil pointer.
+				var (
+					cv  handlers.E2ECleanupVersions
+					ct  handlers.E2ECleanupTrash
+					cth handlers.E2ECleanupThumbs
+					ci  handlers.E2ECleanupIndex
+				)
+				if d.Versions != nil {
+					cv = d.Versions
+				}
+				if d.Trash != nil {
+					ct = d.Trash
+				}
+				if d.Thumbs != nil {
+					cth = d.Thumbs
+				}
+				if d.Index != nil {
+					ci = d.Index
+				}
+				e2eH.AttachCleanup(cv, ct, cth, ci)
+			}
 			r.Post("/e2e/escrow/challenge", e2eH.EscrowChallenge)
 			r.Post("/e2e/escrow/used", e2eH.EscrowUsed)
+			// A folder password was changed in the browser: audit row + the
+			// folder owner's notification (e2e.password_changed).
+			r.Post("/e2e/password-changed", e2eH.PasswordChanged)
+			// wiring:e2 convert — after a folder is encrypted in place: drop the
+			// plaintext filex still holds (thumbnails, extracted content, and —
+			// the owner's choice — versions and trash entries).
+			r.Post("/e2e/cleanup", e2eH.Cleanup)
 
 			// Quota — current user's usage + limit.
 			r.Get("/quota/me", quotaH.Me)
@@ -1314,6 +1437,7 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Route("/plugins", func(r chi.Router) {
 				r.Get("/", pluginsH.List)
 				r.Post("/", pluginsH.Install)
+				r.Post("/updates/check", pluginsH.CheckUpdates)
 				r.Get("/{id}", pluginsH.Get)
 				r.Patch("/{id}", pluginsH.Patch)
 				r.Post("/{id}/restart", pluginsH.Restart)
@@ -1338,6 +1462,7 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Get("/{id}", apAdm.Get)
 				r.Patch("/{id}", apAdm.Patch)
 				r.Post("/{id}/upgrade", apAdm.Upgrade)
+				r.Post("/{id}/rollback", apAdm.Rollback)
 				r.Delete("/{id}", apAdm.Delete)
 				r.Get("/{id}/settings", apAdm.GetSettings)
 				r.Put("/{id}/settings", apAdm.PutSettings)
@@ -1573,8 +1698,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// RequireScope gates verbs (read/write/delete/mcp). A token grants only
 	// the scopes its list names — an empty list grants nothing (v0.43.0;
 	// apitoken.ParseIssued, migration 00054).
-	convertURL := func(ctx context.Context) string { return d.External.URL(ctx, external.Convert) }
-	aiH := handlers.NewAI(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL, convertURL)
+	aiH := handlers.NewAI(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL)
 	aiH.AttachTenants(tenants)
 	// An agent-written file must be searchable at once, not when the next
 	// storage sync walks the folder. Nil index is a no-op.
@@ -1604,7 +1728,7 @@ func BuildRouter(d *Deps) http.Handler {
 		PublicURLSet:       d.Cfg.PublicURLSet,
 		AuthLive:           d.AuthLive,
 	})
-	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL, convertURL)
+	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL)
 	aiMCP.AttachTenants(tenants)
 	aiMCP.AttachACL(d.ACL)
 	aiMCP.AttachThumbs(d.Thumbs)
@@ -2125,7 +2249,6 @@ func envManagedExternal(cfg config.Config) map[string]bool {
 	return map[string]bool{
 		external.OnlyOffice: cfg.ExternalServices.OnlyOffice.URL != "",
 		external.Drawio:     cfg.ExternalServices.Drawio.URL != "",
-		external.Convert:    cfg.ExternalServices.Convert.URL != "",
 	}
 }
 
@@ -2143,4 +2266,114 @@ func metricsSupertenantOnly(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// pageFrameSources is what filex's own pages may frame besides filex itself:
+// the external editors that are switched on (draw.io, ONLYOFFICE, the
+// converter). A relative address is filex itself, already 'self'.
+func pageFrameSources(d *Deps) func(*http.Request) []string {
+	return func(r *http.Request) []string {
+		var out []string
+		for _, name := range []string{external.Drawio, external.OnlyOffice} {
+			// Get, not URL: URL answers a switched-off row's address too.
+			if s := d.External.Get(r.Context(), name); s.Enabled {
+				out = append(out, s.URL)
+			}
+		}
+		// Interfaces on an origin of their own are framed from there.
+		if d.Cfg.AppUIOrigin != "" {
+			out = append(out, d.Cfg.AppUIOrigin)
+		}
+		return out
+	}
+}
+
+// pageOwnFrames is what a filex page may show of filex ITSELF in a frame, by
+// path (security review UI-11): the app interfaces (`/_appui/`, unless they
+// have an origin of their own) and the download frame an archive starts in
+// (`/z/`). Named for the host the page was asked on and, when the operator
+// set one, the public URL's host too — behind a proxy that does not pass the
+// Host on, that is the one the browser used.
+func pageOwnFrames(d *Deps) func(*http.Request) []string {
+	base := strings.TrimRight(d.Cfg.BasePath, "/")
+	public := ""
+	if d.Cfg.PublicURLSet {
+		if u, err := url.Parse(d.Cfg.PublicURL); err == nil && plainHostPort(strings.ToLower(u.Host)) {
+			public = strings.ToLower(u.Host)
+		}
+	}
+	return func(r *http.Request) []string {
+		var out []string
+		for _, host := range []string{strings.ToLower(r.Host), public} {
+			if host == "" || !plainHostPort(host) {
+				continue
+			}
+			if d.Cfg.AppUIOrigin == "" {
+				out = append(out, host+base+"/_appui/")
+			}
+			out = append(out, host+base+"/z/")
+		}
+		return out
+	}
+}
+
+// appUIOrigin is the origin (with the base path) a browser reached the
+// interface route at — what an interface's policy names as its own package
+// (`<P>`, never 'self': WebKit reads 'self' as the sandboxed frame's opaque
+// origin). The Host is the one filex answers on (tenants are told apart by it
+// too); a Host that is not a plain host[:port] is not served.
+func appUIOrigin(basePath string) func(*http.Request) (string, bool) {
+	return func(r *http.Request) (string, bool) {
+		host := strings.ToLower(r.Host)
+		if !plainHostPort(host) {
+			return "", false
+		}
+		scheme := "http"
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			scheme = "https"
+		}
+		return scheme + "://" + host + strings.TrimRight(basePath, "/"), true
+	}
+}
+
+// appUIHostSplit keeps the interface origin (FILEX_APP_UI_ORIGIN) and
+// filex's own apart: on the interface host only the interface route (and
+// /healthz, for a probe) answers; on any other host the interface route is
+// a 404. The origin was validated by config.Load.
+func appUIHostSplit(origin, basePath string) func(http.Handler) http.Handler {
+	host := ""
+	if u, err := url.Parse(origin); err == nil {
+		host = strings.ToLower(u.Host)
+	}
+	base := strings.TrimRight(basePath, "/")
+	prefix := base + "/_appui/"
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			onUIHost := host != "" && strings.EqualFold(r.Host, host)
+			isUI := strings.HasPrefix(r.URL.Path, prefix)
+			probe := r.URL.Path == "/healthz" || r.URL.Path == base+"/healthz"
+			if onUIHost != isUI && !(onUIHost && probe) {
+				http.NotFound(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// plainHostPort accepts a DNS name or an IP (IPv6 in brackets), with an
+// optional port — nothing that could end a policy directive.
+func plainHostPort(h string) bool {
+	if h == "" || len(h) > 255 {
+		return false
+	}
+	for i := 0; i < len(h); i++ {
+		c := h[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '.', c == '-', c == ':', c == '[', c == ']':
+		default:
+			return false
+		}
+	}
+	return true
 }

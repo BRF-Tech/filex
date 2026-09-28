@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/thumb"
@@ -90,6 +91,10 @@ type metaRow struct {
 	// client used to build `/api/files/thumb/<id>` for EVERY file on these
 	// rows and got `404 "not ready"` for each one it could not have.
 	ThumbURL string `json:"thumb_url,omitempty"`
+	// E2eRoot is the end-to-end encrypted folder the node sits in, as a wire
+	// path — absent for every other node. The client needs it to name a row
+	// whose name is encrypted (see e2eRoots).
+	E2eRoot string `json:"e2e_root,omitempty"`
 }
 
 // rows turns the store's node rows into the wire shape: storage NAME,
@@ -113,8 +118,14 @@ func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
 	}
 	user := auth.UserFrom(ctx)
 	sets := map[int64]*acl.Set{}
+	roots := newE2eRoots(h.Store)
 	for _, n := range nodes {
 		if n == nil {
+			continue
+		}
+		// An encrypted folder's key file is bookkeeping, hidden from every
+		// listing; it is not "recent", "starred" or tagged either.
+		if n.Name == e2e.MarkerName {
 			continue
 		}
 		// ⚠ Recent, Starred and every tag view come through here, and each
@@ -138,6 +149,7 @@ func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
 		if st != nil {
 			n.Storage = st.Name
 			row.ReadOnly = st.ReadOnly
+			row.E2eRoot = roots.of(ctx, n.StorageID, st.Name, n.Path)
 			if h.ACL != nil {
 				set, ok := sets[n.StorageID]
 				if !ok {

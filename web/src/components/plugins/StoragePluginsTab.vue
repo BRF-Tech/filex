@@ -7,6 +7,14 @@
  * the ordinary storage picker as `plugin:<driver>` with the config form the
  * plugin itself describes, and behaves like any other storage.
  *
+ * Updates (plugin/updates.go): a binary plugin may name an UPDATE SOURCE — a
+ * GitHub repository or the address of a filex-storage.json. filex checks it
+ * daily ("Check for updates" asks now) and the row says when a newer version
+ * for this server's platform is there. ⚠⚠ Nothing updates itself: "Review
+ * update" shows the version jump, the build's SHA-256 and the notes, and only
+ * the administrator's Upgrade installs it — held to that hash, then the
+ * ordinary upgrade with its roll-back.
+ *
  * ⚠ Instance-wide, not per-tenant: a plugin is a program filex runs (or a
  * service it hands storage credentials to). In multi-tenant mode the server
  * answers 403 to anyone but the platform operator, and this page shows that
@@ -17,6 +25,7 @@ import { useI18n } from 'vue-i18n';
 import {
   ArrowUpFromLine,
   Blocks,
+  CloudDownload,
   Plus,
   RefreshCcw,
   RotateCcw,
@@ -57,9 +66,24 @@ const forbidden = ref(false);
 const disabledMsg = ref('');
 const requiresSignature = ref(false);
 const conformanceMode = ref<ConformanceMode>('enforce');
+const updatesCheckedAt = ref<string | null>(null);
 
 const showForm = ref(false);
-const source = ref<'file' | 'url' | 'remote'>('file');
+const source = ref<'file' | 'url' | 'feed' | 'remote'>('file');
+/** Where newer versions are published (optional for a file or URL install). */
+const formSource = ref('');
+const checking = ref(false);
+
+/** "Review update": the plugin whose source has a newer version. */
+const reviewOf = ref<Plugin | null>(null);
+const reviewing = ref(false);
+const reviewFailure = ref('');
+const reviewRestored = ref<Plugin | null>(null);
+
+/** "Update source…": the plugin whose source is being named. */
+const sourceOf = ref<Plugin | null>(null);
+const sourceValue = ref('');
+const sourceSaving = ref(false);
 const formName = ref('');
 const formFile = ref<File | null>(null);
 const formUrl = ref('');
@@ -89,6 +113,7 @@ async function load() {
     pluginDir.value = res.dir;
     requiresSignature.value = res.requires_signature;
     conformanceMode.value = res.conformance_mode;
+    updatesCheckedAt.value = res.updates_checked_at;
   } catch (e: unknown) {
     // The two "not a bug" answers get their own screens: a tenant admin is
     // told whose surface this is, and an operator who turned the subsystem
@@ -117,6 +142,7 @@ function openCreate() {
   formAddress.value = '';
   formToken.value = '';
   formSignature.value = '';
+  formSource.value = '';
   showForm.value = true;
 }
 
@@ -143,14 +169,17 @@ async function save() {
   }
   saving.value = true;
   try {
+    const src = formSource.value.trim();
     if (source.value === 'file') {
       if (!formFile.value) {
         toast.error(t('plugins.errFile'));
         return;
       }
-      await PluginsApi.upload(name, formFile.value, formSignature.value.trim());
+      await PluginsApi.upload(name, formFile.value, formSignature.value.trim(), src);
     } else if (source.value === 'url') {
-      await PluginsApi.fromUrl(name, formUrl.value.trim(), formSha.value.trim(), formSignature.value.trim());
+      await PluginsApi.fromUrl(name, formUrl.value.trim(), formSha.value.trim(), formSignature.value.trim(), src);
+    } else if (source.value === 'feed') {
+      await PluginsApi.fromSource(name, src);
     } else {
       await PluginsApi.remote(name, formAddress.value.trim(), formToken.value);
     }
@@ -248,6 +277,94 @@ async function doUpgrade() {
     await load();
   } finally {
     upgrading.value = false;
+  }
+}
+
+// ── Updates: the source says, the administrator decides ──────────────────
+
+/** "Check for updates": every source, now. The server installs nothing. */
+async function checkUpdates() {
+  checking.value = true;
+  try {
+    const res = await PluginsApi.checkUpdates();
+    items.value = res.plugins;
+    const waiting = res.report.available.length;
+    if (waiting) toast.success(t('plugins.updates.checked', { waiting }));
+    if (res.report.failed.length) toast.warn(t('plugins.updates.failed'));
+    if (!waiting && !res.report.failed.length) toast.success(t('plugins.updates.none'));
+    await load();
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.generic')));
+  } finally {
+    checking.value = false;
+  }
+}
+
+/** What the row says about the plugin's source, in the reader's words. */
+function updateLine(p: Plugin): { tone: 'sky' | 'zinc' | 'rose'; badge?: string; text: string } | null {
+  const u = p.update;
+  if (!p.source || !u) return null;
+  switch (u.status) {
+    case 'available':
+      return { tone: 'sky', badge: t('plugins.update.available'), text: `${p.version || '?'} → ${u.version}` };
+    case 'incompatible':
+      return { tone: 'zinc', text: t('plugins.update.incompatible', { version: u.version, requires: u.requires }) };
+    case 'check_failed':
+      return { tone: 'rose', badge: t('plugins.update.checkFailed'), text: u.error ?? '' };
+    default:
+      return { tone: 'zinc', text: t('plugins.update.upToDate') };
+  }
+}
+
+function openReview(p: Plugin) {
+  reviewOf.value = p;
+  reviewFailure.value = '';
+  reviewRestored.value = null;
+}
+
+/** The administrator's approval: the build, held to the feed's hash. */
+async function approveUpdate() {
+  const p = reviewOf.value;
+  if (!p) return;
+  reviewing.value = true;
+  reviewFailure.value = '';
+  try {
+    const updated = await PluginsApi.upgradeFromSource(p.id);
+    Object.assign(p, updated);
+    toast.success(t('plugins.upgrade.done', { name: p.name }));
+    reviewOf.value = null;
+    await load();
+  } catch (e: unknown) {
+    reviewFailure.value = extractError(e, t('errors.installFailed'));
+    reviewRestored.value = rolledBackPlugin(e);
+    await load();
+  } finally {
+    reviewing.value = false;
+  }
+}
+
+function openSource(p: Plugin) {
+  sourceOf.value = p;
+  sourceValue.value = p.source ?? '';
+}
+
+async function saveSource() {
+  const p = sourceOf.value;
+  if (!p) return;
+  sourceSaving.value = true;
+  try {
+    const updated = await PluginsApi.setSource(p.id, sourceValue.value.trim());
+    Object.assign(p, updated);
+    toast.success(
+      updated.source
+        ? t('plugins.sourceForm.saved', { name: p.name, source: updated.source })
+        : t('plugins.sourceForm.cleared', { name: p.name }),
+    );
+    sourceOf.value = null;
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.updateFailed')));
+  } finally {
+    sourceSaving.value = false;
   }
 }
 
@@ -425,9 +542,21 @@ function rowActions(row: Plugin): ContextAction[] {
       hidden: !row.conformance,
     },
     {
+      key: 'review',
+      label: t('plugins.actions.reviewUpdate'),
+      icon: 'refresh',
+      hidden: row.kind !== 'binary' || row.update?.status !== 'available',
+    },
+    {
       key: 'upgrade',
       label: t('plugins.upgrade.action'),
       icon: 'upload',
+      hidden: row.kind !== 'binary',
+    },
+    {
+      key: 'source',
+      label: t('plugins.actions.setSource'),
+      icon: 'link',
       hidden: row.kind !== 'binary',
     },
     {
@@ -443,6 +572,8 @@ function rowActions(row: Plugin): ContextAction[] {
 function onRowAction(key: string, row: Plugin) {
   if (key === 'report') reportOf.value = row;
   else if (key === 'upgrade') openUpgrade(row);
+  else if (key === 'review') openReview(row);
+  else if (key === 'source') openSource(row);
   else if (key === 'restart') void restart(row);
   else if (key === 'delete') void remove(row);
 }
@@ -459,6 +590,17 @@ function onRowAction(key: string, row: Plugin) {
         <Button variant="outline" size="sm" :loading="loading" @click="load">
           <RefreshCcw class="h-4 w-4" />
           {{ t('common.refresh') }}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          :loading="checking"
+          :title="updatesCheckedAt ? formatDate(updatesCheckedAt, locale) : undefined"
+          data-testid="plugins-check-updates"
+          @click="checkUpdates"
+        >
+          <CloudDownload class="h-4 w-4" />
+          {{ t('plugins.checkUpdates') }}
         </Button>
         <Button variant="primary" size="sm" @click="openCreate">
           <Plus class="h-4 w-4" />
@@ -523,6 +665,10 @@ function onRowAction(key: string, row: Plugin) {
             <span class="tbl-sub">
               {{ row.kind === 'remote' ? row.address : row.binary }}
               <template v-if="row.version"> · v{{ row.version }}</template>
+            </span>
+            <span v-if="updateLine(row)" class="tbl-sub" :data-testid="`plugin-update-${row.name}`">
+              <Badge v-if="updateLine(row)?.badge" :tone="updateLine(row)!.tone" size="xs">{{ updateLine(row)!.badge }}</Badge>
+              {{ updateLine(row)!.text }}
             </span>
           </div>
         </template>
@@ -629,7 +775,7 @@ function onRowAction(key: string, row: Plugin) {
       <form class="space-y-4" @submit.prevent="save">
         <div class="flex gap-2">
           <Button
-            v-for="s in (['file', 'url', 'remote'] as const)"
+            v-for="s in (['file', 'url', 'feed', 'remote'] as const)"
             :key="s"
             type="button"
             size="sm"
@@ -663,13 +809,23 @@ function onRowAction(key: string, row: Plugin) {
           <p class="-mt-2 text-xs text-zinc-500">{{ t('plugins.shaHint') }}</p>
         </template>
 
+        <template v-else-if="source === 'feed'">
+          <Input v-model="formSource" :label="t('plugins.fields.source')" placeholder="acme/filex-myfs" data-testid="plugin-feed" />
+          <p class="-mt-2 text-xs text-zinc-500">{{ t('plugins.sourceHint') }}</p>
+        </template>
+
         <template v-else>
           <Input v-model="formAddress" :label="t('plugins.fields.address')" placeholder="http://myfs-plugin:8080" />
           <Input v-model="formToken" :label="t('plugins.fields.token')" type="password" />
           <p class="-mt-2 text-xs text-zinc-500">{{ t('plugins.remoteHint') }}</p>
         </template>
 
-        <template v-if="requiresSignature && source !== 'remote'">
+        <template v-if="source === 'file' || source === 'url'">
+          <Input v-model="formSource" :label="t('plugins.fields.source')" placeholder="acme/filex-myfs" data-testid="plugin-source-field" />
+          <p class="-mt-2 text-xs text-zinc-500">{{ t('plugins.sourceHint') }}</p>
+        </template>
+
+        <template v-if="requiresSignature && (source === 'file' || source === 'url')">
           <Input v-model="formSignature" :label="t('plugins.signature.label')" data-testid="plugin-signature" />
           <p class="-mt-2 text-xs text-zinc-500">{{ t('plugins.signature.required') }}</p>
         </template>
@@ -747,6 +903,70 @@ function onRowAction(key: string, row: Plugin) {
           <Button type="submit" size="sm" variant="primary" :loading="upgrading" data-testid="plugin-upgrade-submit">
             <ArrowUpFromLine class="h-4 w-4" />
             {{ t('plugins.upgrade.action') }}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+
+    <!-- Review update: what the source has, and nothing moves until Upgrade. -->
+    <Modal
+      :model-value="!!reviewOf"
+      :title="reviewOf ? t('plugins.review.title', { name: reviewOf.name }) : ''"
+      @update:model-value="reviewOf = null"
+    >
+      <div v-if="reviewOf?.update" class="space-y-3 text-sm" data-testid="plugin-review">
+        <p class="font-medium" data-testid="plugin-review-jump">
+          {{ t('plugins.review.jump', { from: reviewOf.version || '?', to: reviewOf.update.version }) }}
+        </p>
+        <dl class="grid grid-cols-1 gap-y-1 text-xs">
+          <dt class="text-zinc-500">{{ t('plugins.review.sha', { platform: reviewOf.update.platform }) }}</dt>
+          <dd class="break-all font-mono" data-testid="plugin-review-sha">{{ reviewOf.update.sha256 }}</dd>
+          <dt class="text-zinc-500">{{ t('plugins.fields.source') }}</dt>
+          <dd class="break-all">{{ reviewOf.source }}</dd>
+        </dl>
+        <div v-if="reviewOf.update.notes" data-testid="plugin-review-notes">
+          <h4 class="text-xs font-semibold text-zinc-600 dark:text-zinc-300">{{ t('plugins.review.notes') }}</h4>
+          <!-- Plain text, as the source wrote it: never rendered as markup. -->
+          <p class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs text-zinc-600 dark:text-zinc-400">{{ reviewOf.update.notes }}</p>
+        </div>
+        <p class="text-xs text-zinc-500">{{ t('plugins.review.how') }}</p>
+        <div
+          v-if="reviewFailure"
+          class="space-y-1 rounded-lg bg-rose-50 p-3 text-xs text-rose-900 dark:bg-rose-950/40 dark:text-rose-200"
+          data-testid="plugin-review-failed"
+        >
+          <p class="whitespace-pre-wrap break-words">{{ reviewFailure }}</p>
+          <p v-if="reviewRestored">
+            {{
+              t('plugins.upgrade.restored', {
+                state: t(`plugins.state.${reviewRestored.state}`),
+                binary: reviewRestored.binary || '—',
+              })
+            }}
+          </p>
+        </div>
+        <div class="flex justify-end gap-2">
+          <Button type="button" size="sm" variant="ghost" @click="reviewOf = null">{{ t('common.cancel') }}</Button>
+          <Button type="button" size="sm" variant="primary" :loading="reviewing" data-testid="plugin-review-install" @click="approveUpdate">
+            <ArrowUpFromLine class="h-4 w-4" />
+            {{ t('plugins.upgrade.action') }}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+
+    <Modal
+      :model-value="!!sourceOf"
+      :title="sourceOf ? t('plugins.sourceForm.title', { name: sourceOf.name }) : ''"
+      @update:model-value="sourceOf = null"
+    >
+      <form v-if="sourceOf" class="space-y-3" @submit.prevent="saveSource">
+        <Input v-model="sourceValue" :label="t('plugins.fields.source')" placeholder="acme/filex-myfs" data-testid="plugin-source-input" />
+        <p class="-mt-1 text-xs text-zinc-500">{{ t('plugins.sourceHint') }} {{ t('plugins.sourceForm.clear') }}</p>
+        <div class="flex justify-end gap-2">
+          <Button type="button" size="sm" variant="ghost" @click="sourceOf = null">{{ t('common.cancel') }}</Button>
+          <Button type="submit" size="sm" variant="primary" :loading="sourceSaving" data-testid="plugin-source-save">
+            {{ t('common.save') }}
           </Button>
         </div>
       </form>

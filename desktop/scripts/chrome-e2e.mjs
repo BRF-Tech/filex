@@ -227,21 +227,62 @@ check('the shipped CSS scopes its scrollbar rules to .fe',
 // menu below", Toolbar.vue) and `.fe-toolbar__theme` stopped existing — this
 // suite then spent 30s waiting for it and died with a locator timeout, which
 // reads as "the theme gallery is broken" rather than "the door moved".
+// ⚠ And since 2026-09-27 the avatar is the person's OWN settings: its "User
+// settings" opens the web app's settings dialog in this window
+// (config.account.settings), whose Preferences → Appearance carries
+// day / night / automatic — and the avatar no longer repeats the Theme row
+// (one door each, exactly as on the web page). A narrow window without the
+// avatar still has the "⋯" and the explorer's own theme gallery.
+//
+// ⚠ The dialog is MODAL (a native <dialog>, in the top layer): while it is
+// open the window's own title bar is under its backdrop. So each pick opens
+// it, picks, and closes it again — the way a person would, and the only way
+// the close-button hover below measures the window rather than the backdrop.
 await ensureNoTour();
-await win.locator('[data-testid="drive-more"]').first().click();
-await sleep(500);
-await win.evaluate(() => {
-  const visible = (e) => e.getClientRects().length > 0 && !e.closest('[aria-hidden="true"]');
-  [...document.querySelectorAll('.fe-ctx__item, [role="menuitem"], button, li')]
-    .filter(visible)
-    .find((x) => /^(Tema|Theme)$/i.test((x.textContent ?? '').trim()))
-    ?.click();
-});
-await win.waitForSelector('.fe-thememode', { timeout: 10_000 }).catch(() => {});
-const opts = win.locator('.fe-thememode__opt');
-check('the theme gallery offers a day/night/automatic switch', (await opts.count()) === 3);
-check('exactly one of the three reads as active',
-  (await win.locator('.fe-thememode__opt.is-active').count()) === 1);
+const viaDialog = (await win.locator('[data-testid="explore-account"]').count()) > 0;
+const OPT = viaDialog
+  ? { day: '[data-testid="user-settings-theme-light"]', night: '[data-testid="user-settings-theme-dark"]', auto: '[data-testid="user-settings-theme-auto"]' }
+  : { day: '.fe-thememode__opt >> nth=0', night: '.fe-thememode__opt >> nth=1', auto: '.fe-thememode__opt >> nth=2' };
+const dialog = win.locator('[data-testid="user-settings-dialog"]');
+async function openModes() {
+  if (viaDialog) {
+    await win.locator('[data-testid="explore-account"]').first().click();
+    await win.locator('[data-testid="explore-user-settings"]').click();
+    await dialog.waitFor({ state: 'visible', timeout: 10_000 });
+    await dialog.locator('[data-testid="user-settings-tab-preferences"]').click();
+    await win.waitForSelector('[data-testid="user-settings-appearance"]', { timeout: 10_000 }).catch(() => {});
+    return;
+  }
+  await win.locator('[data-testid="drive-more"]').first().click();
+  await sleep(500);
+  await win.evaluate(() => {
+    const visible = (e) => e.getClientRects().length > 0 && !e.closest('[aria-hidden="true"]');
+    [...document.querySelectorAll('.fe-ctx__item, [role="menuitem"], button, li')]
+      .filter(visible)
+      .find((x) => /^(Tema|Theme)$/i.test((x.textContent ?? '').trim()))
+      ?.click();
+  });
+  await win.waitForSelector('.fe-thememode', { timeout: 10_000 }).catch(() => {});
+}
+async function closeModes() {
+  if (viaDialog) {
+    await dialog.locator('[data-testid="user-settings-close"]').click();
+    await dialog.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+  }
+}
+/** Opens the switch, picks one, closes it. */
+async function pickMode(which) {
+  await openModes();
+  await win.locator(OPT[which]).first().click();
+  await sleep(300);
+  await closeModes();
+}
+await openModes();
+const optSel = viaDialog ? '[data-testid^="user-settings-theme-"]' : '.fe-thememode__opt';
+const activeSel = viaDialog ? '[data-testid^="user-settings-theme-"][aria-pressed="true"]' : '.fe-thememode__opt.is-active';
+check(`the ${viaDialog ? 'settings dialog' : 'theme gallery'} offers a day/night/automatic switch`, (await win.locator(optSel).count()) === 3);
+check('exactly one of the three reads as active', (await win.locator(activeSel).count()) === 1);
+await closeModes();
 
 /** Reads what the explorer actually resolved to, not what we asked for — and
  *  what the SHELL around it did about it.
@@ -290,7 +331,7 @@ const closeHover = async () => {
   return r;
 };
 
-await opts.nth(1).click(); // Night
+await pickMode('night');
 await sleep(400);
 if (process.platform !== 'darwin') {
   const c = await closeHover();
@@ -306,7 +347,7 @@ check('…and the APP CHROME goes dark with it, not just the file list',
 check('…including the colour-scheme the window\u2019s own form controls follow',
   m.shellScheme === 'dark', m.shellScheme);
 
-await opts.nth(0).click(); // Day
+await pickMode('day');
 await sleep(400);
 if (process.platform !== 'darwin') {
   const c = await closeHover();
@@ -319,7 +360,7 @@ check('…and the choice is remembered', m.stored === 'light', String(m.stored))
 check('…and the chrome comes back with it', m.shellDark === false && m.shellBg === m.bg,
   `shellDark=${m.shellDark} shellBg=${m.shellBg} explorerBg=${m.bg}`);
 
-await opts.nth(2).click(); // Automatic
+await pickMode('auto');
 await sleep(300);
 m = await mode();
 check('Automatic pins neither variant and defers to the system',

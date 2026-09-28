@@ -1,0 +1,74 @@
+{
+  "manifest_version": 1,
+  "name": "board",
+  "version": "1.0.0",
+  "label": {
+    "en": "Board"
+  },
+  "description": {
+    "en": "Opens a .board file as columns of cards. An example app for filex's screenshots; it is not published."
+  },
+  "languages": [
+    "en"
+  ],
+  "permissions": [
+    "files:read",
+    "files:write"
+  ],
+  "permission_reasons": {
+    "files:read": {
+      "en": "To read the board you open."
+    },
+    "files:write": {
+      "en": "To save the board when you move a card."
+    },
+    "ui": {
+      "en": "The board is drawn by the app’s own page."
+    },
+    "ui-viewer:.board": {
+      "en": "So that a .board file opens as a board."
+    },
+    "ui-new:.board": {
+      "en": "So that New document can start a board."
+    }
+  },
+  "ui": {
+    "bundle": {
+      "url": "ui.zip"
+    },
+    "external": [
+      {
+        "url": "https://fonts.example.net/inter/",
+        "as": "font",
+        "reason": {
+          "en": "The Inter typeface"
+        }
+      }
+    ]
+  },
+  "views": [
+    {
+      "id": "board",
+      "placement": "viewer",
+      "ui": "index.html",
+      "applies": {
+        "ext": [
+          "board"
+        ]
+      },
+      "label": {
+        "en": "Board"
+      }
+    }
+  ],
+  "new_documents": [
+    {
+      "ext": "board",
+      "label": {
+        "en": "Board"
+      },
+      "view": "board",
+      "template": "blank.json"
+    }
+  ]
+}

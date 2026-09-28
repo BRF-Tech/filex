@@ -169,13 +169,16 @@ export interface AppPluginCompat {
 /**
  * What the last update check found for one app (wasmplugin.UpdateInfo).
  *
+ * ⚠⚠ Nothing updates itself (filex 0.48, owner's rule): the check only says
+ * what it found, and an administrator's "Review update" installs it.
+ *
  * `status`: `current` (nothing newer this filex can run) · `available` (a
- * newer version waits for the administrator — automatic updates are off) ·
- * `needs_approval` (it asks for more: `added`, `adds_module`) ·
- * `incompatible` (only newer versions that need a newer filex: `version`,
- * `requires`) · `failed` (the automatic update was tried and undone:
- * `refusal`) · `check_failed` (the source could not be read: `refusal`).
- * `auto` is the last automatic update and survives later checks.
+ * newer version waits for the administrator) · `needs_approval` (it asks for
+ * more: `added`, `adds_module`) · `incompatible` (only newer versions that
+ * need a newer filex: `version`, `requires`) · `check_failed` (the source
+ * could not be read: `refusal`) · `failed` (only on a row filex 0.47 wrote:
+ * its automatic update was tried and undone). `notes` are the source's
+ * release notes for `version`, plain text.
  */
 export interface AppPluginUpdate {
   checked_at?: string;
@@ -187,13 +190,75 @@ export interface AppPluginUpdate {
   adds_module?: boolean;
   /** The refusal, in the shape an install answers (read it with `refusalOf`). */
   refusal?: Record<string, unknown>;
-  auto?: { from: string; to: string; at: string };
+  /** The source's notes for `version` (a GitHub release's body), plain text. */
+  notes?: string;
+}
+
+/** The version an approval replaced, kept to go back to (wasmplugin.PreviousVersion). */
+export interface AppPluginPrevious {
+  version: string;
+  replaced_at: string;
+  /** That version has an interface of its own. */
+  ui?: boolean;
+}
+
+/** One address outside an interface's package, as the review shows it. */
+export interface AppPluginUIExternal {
+  url: string;
+  as: 'style' | 'font' | 'img' | 'media' | string;
+  /** `mirror`: filex serves its own checked copy · `live`: the reader's browser fetches it. */
+  mode: 'mirror' | 'live' | string;
+  sha256?: string;
+  bytes?: number;
+  reason?: PluginText;
+  path?: string;
+}
+
+/** An app's own interface (wasmplugin.UIInfo). */
+export interface AppPluginUI {
+  sha256: string;
+  files: number;
+  bytes: number;
+  unpacked: number;
+  /** Script-policy exceptions it asks for (`ui:eval`, `ui:wasm-eval`). */
+  csp?: string[];
+  external?: AppPluginUIExternal[];
+}
+
+/** How an upgrade's interface files differ (wasmplugin.UIFileDiff). Lists are cut at 200. */
+export interface AppPluginUIFileDiff {
+  added?: string[];
+  removed?: string[];
+  changed?: string[];
+  added_count: number;
+  removed_count: number;
+  changed_count: number;
+}
+
+/** An upgrade's review (wasmplugin.DryRunUpgrade). */
+export interface AppPluginUpgradeReview {
+  from: string;
+  /** Permissions it adds to the grant — what is being approved. */
+  added?: string[];
+  removed?: string[];
+  adds_module?: boolean;
+  module_from?: string;
+  module_to?: string;
+  ui_from?: string;
+  ui_to?: string;
+  ui_files?: AppPluginUIFileDiff;
+  filex_from?: string;
+  filex_to?: string;
+  signed_from?: boolean;
+  signed_to?: boolean;
+  notes?: string;
 }
 
 /** `POST /admin/app-plugins/updates/check` — one check, as it went. */
 export interface AppPluginUpdateReport {
   checked_at: string;
   checked: number;
+  /** Always empty since filex 0.48 (nothing updates itself); kept on the wire. */
   updated: string[];
   available: string[];
   needs_approval: string[];
@@ -244,8 +309,12 @@ export interface AppPlugin {
    * `ok: false` on an installed app is a warning — it keeps running.
    */
   compat?: AppPluginCompat;
-  /** Newer versions that ask for nothing more are installed by themselves. */
-  auto_update?: boolean;
+  /** It has a module (false: an interface-only app or a language pack). */
+  engine?: boolean;
+  /** Its own interface, when it has one. */
+  ui?: AppPluginUI;
+  /** The version the last approval replaced, kept to go back to. */
+  previous?: AppPluginPrevious;
   /** Where newer versions are looked for; absent = nowhere (an uploaded app). */
   update_source?: 'github' | 'url' | string;
   /** What the last update check found; absent before the first. */
@@ -382,7 +451,11 @@ export interface AppPluginDryRun {
    * the grant (what is being approved) and drops from it, and whether a
    * language pack now brings a module. Absent on an install.
    */
-  upgrade?: { from: string; added?: string[]; removed?: string[]; adds_module?: boolean };
+  upgrade?: AppPluginUpgradeReview;
+  /** It has a module. */
+  engine?: boolean;
+  /** Its own interface: the "Interface" group of the review. */
+  ui?: AppPluginUI;
 }
 
 /**
@@ -431,7 +504,7 @@ export type AppPluginInstallSource =
   | { kind: 'github'; repo: string; ref?: string }
   // ⚠ `wasm` / `url` absent = a language pack, which has no module (the
   // server decides from the manifest and refuses the wrong combination).
-  | { kind: 'upload'; wasm?: File | null; manifest: File; signature?: string }
+  | { kind: 'upload'; wasm?: File | null; manifest: File; signature?: string; ui?: File | null }
   | { kind: 'url'; url?: string; manifest_url: string; sha256?: string };
 
 /** Error codes the install endpoints answer with (400/409). */
@@ -513,6 +586,7 @@ function installPayload(
     const form = new FormData();
     if (source.wasm) form.append('wasm', source.wasm);
     form.append('manifest', source.manifest);
+    if (source.ui) form.append('ui', source.ui);
     if (source.signature) form.append('signature', source.signature);
     form.append('grant', JSON.stringify({ permissions }));
     return { body: form };
@@ -598,9 +672,12 @@ export const AppPluginsApi = {
     return { ...listOf(data), report: data.report };
   },
 
-  /** Switch automatic updates for one app. */
-  async setAutoUpdate(id: number, on: boolean): Promise<AppPlugin> {
-    const { data } = await api.patch<AppPlugin>(`${BASE}/${id}`, { auto_update: on });
+  /**
+   * Back to the version the last approval replaced (`previous`): no new
+   * approval — that version's grant was approved when it was installed.
+   */
+  async rollback(id: number): Promise<AppPlugin> {
+    const { data } = await api.post<AppPlugin>(`${BASE}/${id}/rollback`, {}, { timeout: INSTALL_TIMEOUT_MS });
     return data;
   },
 

@@ -5,8 +5,7 @@
 //
 // ⚠ Under the base path the app is served at (FILEX_BASE_PATH), like every
 // address this app builds for the browser: `/filex/s/<token>`, not `/s/…`.
-import { appBase } from '@brftech/filex-core';
-import { shareHref } from './notificationTarget';
+import { appBase, shareHref } from '@brftech/filex-core';
 
 export function fallbackShareUrl(token: string): string {
   const path = shareHref(token, appBase());

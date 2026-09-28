@@ -49,7 +49,7 @@ const REQUIRED: Record<string, Record<string, string>> = {
   published: {
     'GitHub Release': '0.44.0/0.44.1 shipped without the desktop packages',
     'ghcr:': 'v0.43.0 had no images',
-    'npm:': 'the three packages',
+    'npm:': 'every package under packages/ (0.48 added filex-app-ui, which filex-core depends on)',
   },
   deployed: {
     'update': 'lesson #69: stable.json three releases behind',
@@ -104,6 +104,17 @@ describe("this repository's release plan", () => {
     for (const title of gate.mustPass) {
       expect(inGate.some((s) => s.includes(title)), `"${title}" is in no file the export gate runs`).toBe(true);
     }
+  });
+
+  // v0.48.0: the fixture gate's echo.wasm was overwritten by the Go test
+  // gate's own rsync of the Windows checkout, whose copy was older than the
+  // echo app's main.go; every app-plugin test refused.
+  it('builds the wasm fixture in the Go test gate itself, before go test', () => {
+    const gate = p.pretag.find((g: { name: string }) => g.name === 'go: vet + test') as { script: string };
+    expect(gate, 'the pretag chain has no "go: vet + test" gate').toBeTruthy();
+    const fixture = gate.script.indexOf('build-wasm-fixture.sh');
+    expect(fixture, gate.script).toBeGreaterThanOrEqual(0);
+    expect(gate.script.indexOf('go test')).toBeGreaterThan(fixture);
   });
 
   it('signs with the maintainer key and keeps only the contact addresses public', () => {

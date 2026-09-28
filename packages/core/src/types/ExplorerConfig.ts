@@ -19,6 +19,7 @@
 
 import type { UiProfile } from '../lib/uiProfile';
 import type { GlobalSearchHit, GlobalSearchScope } from '../composables/useFileApi';
+import type { AccountAction, AccountPerson } from '../lib/accountMenu';
 
 export type { UiProfile };
 
@@ -91,9 +92,13 @@ export interface EndpointMap {
   trashList: string | null;
   trashRestore: string | null;
   trashPurge: string | null;
+  /* An operator's hard delete of one version (`{id}`). */
+  versionPurge: string | null;
   /* wiring:e2 */
   e2eEscrowChallenge: string | null;
   e2eEscrowUsed: string | null;
+  e2ePasswordChanged: string | null;
+  e2eCleanup: string | null;
   /* App plugins (docs/APP-PLUGINS-API.md). Templates carry `{plugin}`,
    * `{action}`, `{view}` and `{id}` placeholders, filled at call time. */
   pluginActions: string | null;
@@ -102,6 +107,9 @@ export interface EndpointMap {
   pluginViewEvent: string | null;
   /** `?plugin=<name>&q=` — the people-picker's user lookup (M2). */
   pluginUsers: string | null;
+  /** v4 — an app's own interface: its module and its saves. */
+  pluginUICall: string | null;
+  pluginUISave: string | null;
   /** `POST` cancel of a queued/running ops row — `{id}` placeholder. */
   opsCancel: string | null;
 }
@@ -163,6 +171,9 @@ export interface ExplorerConfig {
   pluginView?: string;
   pluginViewEvent?: string;
   pluginUsers?: string;
+  /** An app's own interface: its module (`{plugin}`/`{view}`) and its saves. */
+  pluginUICall?: string;
+  pluginUISave?: string;
 
   /**
    * App plugins (file-menu rows drawn from WebAssembly plugins).
@@ -173,6 +184,13 @@ export interface ExplorerConfig {
    * the capabilities answer is missing (a host that knows its backend).
    */
   plugins?: boolean;
+
+  /**
+   * v4 — the signed-in person's display name, as an app's own interface may
+   * know it (`session.user.name`; never an e-mail or a token). Absent: the
+   * interface is told nothing about who is looking.
+   */
+  userName?: string;
 
   /**
    * Where this host serves the SPA, for an app plugin's `page` view
@@ -241,12 +259,20 @@ export interface ExplorerConfig {
    *  (default `/api/admin/trash/{id}`); `?queued=1` makes it a job of the
    *  operations queue. Only an operator is let through. */
   trashPurge?: string;
+  /** Delete one version for good — `DELETE`, `{id}` in the template (default
+   *  `/api/admin/versions/{id}`): its row and its stored bytes. Only an
+   *  operator is let through. */
+  versionPurge?: string;
 
   /* wiring:e2 */
   /** E2E escrow proof-of-possession — `POST { path } → { id, challenge }`. */
   e2eEscrowChallenge?: string;
   /** E2E escrow use report — `POST { path, id, nonce }`. */
   e2eEscrowUsed?: string;
+  /** E2E folder password changed — `POST { path, via, rekey }`. */
+  e2ePasswordChanged?: string;
+  /** wiring:e2 convert — drop the plaintext filex holds after a folder is encrypted in place. */
+  e2eCleanup?: string;
 
   /**
    * Public share base URL.
@@ -346,9 +372,6 @@ export interface ExplorerConfig {
 
   /** Drawio iframe base. */
   drawioBase?: string;
-
-  /** Universal converter (p2r3/convert fork) iframe base, e.g. `https://fm.example.com/convert`. */
-  convertBase?: string;
 
   /**
    * Drawio embed URL (full URL to the embed endpoint). Defaults to
@@ -856,6 +879,95 @@ export interface ExplorerConfig {
    * palette is exactly what it was: this account's hits, no badges.
    */
   accountSearch?: AccountSearchHook;
+
+  /**
+   * The notification bell in the explorer's OWN header — the web app's bell,
+   * drawn by the explorer for a host that cannot fill the `header-actions`
+   * slot (2026-09-27, the desktop app: it raised an OS notification for every
+   * row and had nowhere inside the window to read one, mark it read or follow
+   * it to what it was about).
+   *
+   * ⚠⚠ The SAME components the web draws (NotificationBell, NotificationRow,
+   * NotificationsPanel, UnreadBadge) over the SAME feed logic
+   * (useNotificationFeed) — the explorer only supplies the transport (its own
+   * credential against `/api/notifications`) and the landing: a click opens
+   * the folder in THIS explorer with the row selected, the Trash view, an
+   * app's home view, or a share page in a new window.
+   *
+   * ⚠ Why a config field and not the slot: a `<filex-explorer>` host cannot
+   * fill any slot (see `brand`). A Vue host that fills `header-actions` with
+   * its own bell (the web app) must NOT set this as well — it would draw two.
+   *
+   * Absent (the web app, every embed): nothing new renders and nothing is
+   * fetched.
+   */
+  notifications?: {
+    /**
+     * Ask the server every 15 s (NOTIFY_POLL_MS). Default true. `false` for a
+     * host that already polls the bell and hands the count over through
+     * `onUnread` — the desktop app's main process does, for its OS
+     * notifications and dock badge, and a second loop would be a second
+     * request every 15 s for a number it already has.
+     */
+    poll?: boolean;
+    /** Register for counts the host learned itself. Called once, at mount;
+     *  the host keeps ONE subscriber and overwrites it on remount. */
+    onUnread?: (cb: (count: number) => void) => void;
+    /** Told after this explorer marked a row (or all rows) read — so a host
+     *  badge (the dock, the tray) does not wait for its next poll. */
+    onRead?: () => void;
+    /** The administrators' console for notifications — drawn as the bell's
+     *  smaller second door only when given (so only to an administrator). */
+    manage?: { href: string; open: () => void };
+  };
+
+  /**
+   * The account menu (the avatar) in the explorer's OWN header, for the same
+   * kind of host as `notifications` — the same component the web draws
+   * (AccountMenu), with the host's rows.
+   *
+   * ⚠ The explorer's "⋯" settings rows FOLD INTO it, exactly as they do on
+   * the web (owner, 2026-09-13: *"`...` bölgesini admin dropdown'ının içine
+   * alacağız"* — one menu in that corner, not two). The order is
+   * lib/accountMenu's: `actions`, then the explorer's rows minus `omit`, then
+   * `tail`. A row of the explorer's runs through the explorer's own handler.
+   */
+  account?: {
+    /**
+     * The person's own settings — the admin app's user settings dialog
+     * (UserSettingsDialog), opened IN this explorer from a "User settings" row
+     * the explorer puts first. It talks to the account's own endpoints with
+     * this explorer's credential. Rows only some surfaces have (language,
+     * start page, one click or two, desktop-app downloads, browser
+     * notifications) are not drawn here. With it, the "⋯" rows whose control
+     * it carries (theme, compact view, time zone) leave the menu, as they do
+     * on the web.
+     */
+    settings?: boolean;
+    /** Rows above the explorer's — this account's own doors (the admin
+     *  console). A function so the host can decide per person (an
+     *  administrator gets one more). */
+    actions: AccountAction[] | ((person: AccountPerson | null) => AccountAction[]);
+    /**
+     * Rows below the explorer's — where the web page puts Sign out.
+     *
+     * ⚠ The desktop app gives NONE, and that is a decision, not an omission
+     * (owner, 2026-09-27): the avatar holds the person's INTERFACE settings,
+     * and signing an account out of the app is an APP setting, done in the
+     * app's own Settings → Accounts. There is deliberately no separate
+     * `signOut` switch: the row exists only if a host puts it here, so
+     * "no sign out" is simply no tail.
+     */
+    tail?: AccountAction[] | ((person: AccountPerson | null) => AccountAction[]);
+    /** The explorer's "⋯" rows this host already has another door for. */
+    omit?: string[];
+    /** One of the HOST's rows was chosen. */
+    select: (key: string, person: AccountPerson | null) => void;
+    /** Who is signed in. Absent → the explorer asks `/api/auth/me` with its
+     *  own credential (the one request it already makes for the account's
+     *  time zone). */
+    person?: AccountPerson | null;
+  };
 }
 
 /** One signed-in account, as the palette's group badge draws it. */

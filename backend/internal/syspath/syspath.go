@@ -37,6 +37,7 @@ import (
 	"errors"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -67,6 +68,18 @@ const (
 	// edit is silently never written back. So the server serves this folder
 	// to whoever asks for it by exact path and offers it to nobody.
 	OpenWith = ".filex-open"
+	// Drafts is where a new document lives until its first save (issue #71):
+	// `.filex-drafts/<user id>/<draft key>/<name>`, at the root of the storage
+	// the person chose, with the folder and name it is meant for kept in the
+	// `drafts` table. "Save" moves it there; "Discard" moves it to the trash.
+	//
+	// ⚠⚠ Sealed, and one person's. Nobody lists, searches, shares or mounts it
+	// (it is Hidden and InDir like every name here), the scanner does not walk
+	// it (Sealed), and the ONE shape anybody is served is a draft file of their
+	// OWN (IsDraftOf): SealedFor lets its owner's editor read it, RefusedBy
+	// lets its owner's editor save it, and acl.Set gives everybody else — an
+	// administrator included — no access to it at all.
+	Drafts = ".filex-drafts"
 )
 
 // KeepMarker is the zero-byte file filex writes into a folder it creates, so a
@@ -77,7 +90,7 @@ const KeepMarker = ".keepdir"
 
 // dirs is the closed set, in the order web/tests/lib/internalPaths.test.ts
 // expects to read it. Keep the declaration on one line — that test parses it.
-var dirs = []string{Trash, Versions, Thumbs, OpenWith}
+var dirs = []string{Trash, Versions, Thumbs, OpenWith, Drafts}
 
 // Dirs returns the internal directory names. A copy: callers cannot edit the
 // set by appending to what they were handed.
@@ -90,7 +103,7 @@ func Dirs() []string {
 // IsDirName reports whether one path segment names an internal directory.
 func IsDirName(name string) bool {
 	switch strings.TrimSpace(name) {
-	case Trash, Versions, Thumbs, OpenWith:
+	case Trash, Versions, Thumbs, OpenWith, Drafts:
 		return true
 	}
 	return false
@@ -160,14 +173,77 @@ func Hidden(rel string) bool {
 //
 // ⚠ `.filex-open` is deliberately not sealed — see OpenWith for the desktop
 // clients that would lose edits silently if it were.
+//
+// The drafts area IS sealed: nothing asks for it by path but its owner's
+// editor, and SealedFor is the one exception that lets that editor through.
 func Sealed(rel string) bool {
 	for _, seg := range segments(rel) {
 		switch seg {
-		case Trash, Versions, Thumbs:
+		case Trash, Versions, Thumbs, Drafts:
 			return true
 		}
 	}
 	return false
+}
+
+// ── the drafts area (issue #71) ─────────────────────────────────────────
+
+// draftKey is the `<draft key>` folder a draft sits in: lowercase hex, what
+// NewDraftKey mints. Anything else in that place is not a draft.
+var draftKey = regexp.MustCompile(`^[0-9a-f]{8,32}$`)
+
+// DraftDir is the folder one draft is written in, storage-relative, no
+// leading slash: `.filex-drafts/<person>/<key>`.
+func DraftDir(person int64, key string) string {
+	return Drafts + "/" + strconv.FormatInt(person, 10) + "/" + key
+}
+
+// DraftOwner reports whose drafts area rel lies in: `.filex-drafts/<id>/…`
+// (the id's own folder included). ok is false for anything outside the area,
+// for the area's root, and for a second segment that is not a person's id.
+// Anchored at the storage root, like InTrash: drafts are only ever written
+// there.
+func DraftOwner(rel string) (int64, bool) {
+	segs := segments(rel)
+	if len(segs) < 2 || segs[0] != Drafts {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(segs[1], 10, 64)
+	if err != nil || id <= 0 || strconv.FormatInt(id, 10) != segs[1] {
+		return 0, false
+	}
+	return id, true
+}
+
+// InDrafts reports whether rel is the drafts area or lies inside it (at the
+// storage root).
+func InDrafts(rel string) bool {
+	segs := segments(rel)
+	return len(segs) > 0 && segs[0] == Drafts
+}
+
+// IsDraftOf reports whether rel is exactly one draft FILE of person's:
+// `.filex-drafts/<person>/<key>/<name>`, where the key is a key NewDraftKey
+// could have minted and the name is not one of filex's own. The one shape the
+// owner's editor is served (SealedFor) and may save (RefusedBy); a folder of
+// the area, a second level under a draft, another person's draft are not.
+func IsDraftOf(rel string, person int64) bool {
+	if person <= 0 {
+		return false
+	}
+	segs := segments(rel)
+	if len(segs) != 4 || segs[0] != Drafts || segs[1] != strconv.FormatInt(person, 10) {
+		return false
+	}
+	return draftKey.MatchString(segs[2]) && !IsName(segs[3])
+}
+
+// SealedFor is Sealed as asked by one person: the drafts area stays sealed
+// except for that person's own draft files, which their editor reads by path
+// (preview, download, the document server's config). person 0 — no person —
+// is Sealed.
+func SealedFor(rel string, person int64) bool {
+	return Sealed(rel) && !IsDraftOf(rel, person)
 }
 
 // openWithSession is the `<session>-` prefix the desktop puts IN FRONT of the
@@ -265,7 +341,24 @@ const (
 	// able to remove it, and a sync tool copying one must be able to write
 	// it, or the folder can never be emptied or mirrored.
 	Mounted
+	// OwnDraft is a person acting on a draft of their OWN (issue #71): their
+	// editor saving its content in place (the text editor, the document
+	// server's callback, an app committing a new version of it) and the trash
+	// bringing a discarded one back. Only RefusedBy can let it through — it
+	// needs to know whose draft it is and who is asking; to Refused (which
+	// knows neither) it is Change.
+	OwnDraft
 )
+
+// RefusedBy is Refused asked on behalf of a person: identical, except that
+// OwnDraft lets exactly that person's own draft files through (IsDraftOf).
+// person 0 is nobody, and nobody owns a draft.
+func RefusedBy(v Verb, rel string, person int64) bool {
+	if v == OwnDraft && IsDraftOf(rel, person) {
+		return false
+	}
+	return Refused(v, rel)
+}
 
 // Refused reports whether a person-facing mutation must be refused because
 // rel names filex's own machinery: anything Hidden, except the one shape the

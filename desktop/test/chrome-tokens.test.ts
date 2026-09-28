@@ -60,7 +60,7 @@ const ALLOWED: { value: string; why: string }[] = [
     value: 'rgba(17, 24, 39, .55)',
     why:
       "the dialog backdrop — the SAME literal the product's own user-settings " +
-      'dialog uses (web/src/components/UserSettingsModal.vue, .fx-us-dialog::backdrop). ' +
+      'dialog uses (packages/core/src/components/UserSettingsDialog.vue, its Modal backdrop). ' +
       'A scrim sits outside the palette on purpose: it has to darken every ' +
       'theme by the same amount, and one derived from --fe-text would vanish ' +
       'on the dark variants.',

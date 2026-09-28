@@ -232,9 +232,11 @@ func TestShareCreate_PageLessObeysTheOrdinaryRules(t *testing.T) {
 	require.ErrorAs(t, err, &he)
 	assert.Equal(t, "permission_denied", he.Code)
 
-	// A page still may (that check is older than this path and unchanged).
+	// A page may not either: its document is what the page's state and the
+	// visitor's job hang on, so it is a file the job was handed too —
+	// TestShareCreate_APageLinkAnchors…
 	_, err = shareCreate(t, s, map[string]any{"page_id": "signer", "path": "gizli/payroll.txt"})
-	require.NoError(t, err)
+	assert.Equal(t, errPathNotHanded, err)
 
 	// ⭐ Expiry ceiling: the administrator's share.max_ttl_days wins over the
 	// plugin's ask, exactly as it does over a person's.

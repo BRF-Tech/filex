@@ -21,8 +21,8 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 
-import UnreadBadge from '@/components/UnreadBadge.vue';
-import { unreadBadgeCount, unreadBadgeLabel, UNREAD_BADGE_MAX } from '@/lib/unreadBadge';
+import UnreadBadge from '@brftech/filex-core/src/components/UnreadBadge.vue';
+import { unreadBadgeCount, unreadBadgeLabel, UNREAD_BADGE_MAX } from '@brftech/filex-core/src/lib/unreadBadge';
 
 const SRC = (rel: string) => readFileSync(path.resolve(__dirname, '../../src', rel), 'utf8');
 
@@ -89,8 +89,8 @@ describe('one badge, every surface', () => {
   // helper is right: what matters is that no surface has its own copy of
   // `> 99 ? '99+'`, because the copy is what drifts.
   const surfaces = [
-    'components/NotificationBell.vue',
-    'components/NotificationsPanel.vue',
+    '../../packages/core/src/components/NotificationBell.vue',
+    '../../packages/core/src/components/NotificationsPanel.vue',
     '../../desktop/src/main.ts',
   ];
 
@@ -102,8 +102,8 @@ describe('one badge, every surface', () => {
   });
 
   it('every surface that draws a count reaches for the shared thing', () => {
-    expect(SRC('components/NotificationBell.vue')).toMatch(/UnreadBadge/);
-    expect(SRC('components/NotificationsPanel.vue')).toMatch(/UnreadBadge/);
+    expect(SRC('../../packages/core/src/components/NotificationBell.vue')).toMatch(/UnreadBadge/);
+    expect(SRC('../../packages/core/src/components/NotificationsPanel.vue')).toMatch(/UnreadBadge/);
     // The desktop has no DOM to put a component in; it takes the same rule
     // from the same module for its dock badge and tray tooltip.
     expect(SRC('../../desktop/src/main.ts')).toMatch(/unreadBadgeLabel|unreadBadgeCount/);

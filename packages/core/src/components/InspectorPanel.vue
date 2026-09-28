@@ -187,6 +187,15 @@ const { t, formatSize, formatNodeSize, nodeSizeHint, formatDate: formatDateOf, n
 );
 
 // ── selection shape ──────────────────────────────────────────────────
+/* wiring:e2 names — the path as the person reads it: plaintext inside an
+ * encrypted-names folder. The copy button still copies the wire path, the
+ * one every tool and API call understands. */
+function shownPath(n: FileNode): string {
+  if (typeof n.e2e_display_dir !== 'string' || typeof n.e2e_stored !== 'string') return n.path;
+  const i = n.path.indexOf('://');
+  const prefix = i === -1 ? '' : n.path.slice(0, i + 3);
+  return `${prefix}${n.e2e_display_dir ? `${n.e2e_display_dir}/` : ''}${n.basename}`;
+}
 const single = computed<FileNode | null>(() =>
   props.nodes.length === 1 ? props.nodes[0] : null,
 );
@@ -840,7 +849,7 @@ watch(
             <div class="fe-inspector__row">
               <dt>{{ t('inspector.path') }}</dt>
               <dd class="fe-inspector__pathcell">
-                <span class="fe-inspector__path" :title="single.path"><bdi>{{ single.path }}</bdi></span>
+                <span class="fe-inspector__path" :title="single.path"><bdi>{{ shownPath(single) }}</bdi></span>
                 <button
                   type="button"
                   class="fe-inspector__copy"
@@ -954,6 +963,7 @@ watch(
           :api="api"
           :view="v"
           :path="single.path"
+          :node="single"
           :locale="locale"
           :theme="theme"
           :storages="storages"

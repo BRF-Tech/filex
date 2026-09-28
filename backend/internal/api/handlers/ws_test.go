@@ -465,3 +465,20 @@ func TestWSUnauthorized(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	}
 }
+
+// An open explorer hears that an app's approved version changed, whatever
+// folder it is in — the frame AppFrame turns into "reload".
+func TestWSAppUpdatedReachesAnOpenSocket(t *testing.T) {
+	url, hub, _ := newWSFixture(t, &model.User{ID: 4, DisplayName: "Ece"})
+	ctx := context.Background()
+	conn, _, err := websocket.Dial(ctx, url, nil)
+	require.NoError(t, err)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	wsSend(t, conn, map[string]any{"type": "ping"})
+	wsReadType(t, conn, "pong")
+
+	hub.AppUpdated("drawio", "1.1.0")
+	m := wsReadType(t, conn, "app.updated")
+	require.Equal(t, "drawio", m["app"])
+	require.Equal(t, "1.1.0", m["version"])
+}

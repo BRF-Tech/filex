@@ -46,16 +46,11 @@ import (
 type aiOps struct {
 	store     db.Store
 	resolver  func(int64) (storage.Driver, error)
-	share     *share.Service // optional — nil disables file_share/unshare
-	publicURL string         // base for /s/<token> links
-	// convertURL resolves the external converter's URL AT CALL TIME. It is a
-	// function and not a string on purpose: the value lives in the
-	// `external_services` table and an operator may set it from the admin UI
-	// while the process runs (issue #17). Nil = never configured.
-	convertURL func(context.Context) string
-	acl        *acl.Resolver   // RBAC — nil disables per-user grant enforcement
-	thumbs     *thumb.Pipeline // optional — nil skips thumbnail dispatch (manager-upload parity)
-	origin     string          // writehook origin stamp — "ai" by default, "sharex" for the ShareX wrapper
+	share     *share.Service  // optional — nil disables file_share/unshare
+	publicURL string          // base for /s/<token> links
+	acl       *acl.Resolver   // RBAC — nil disables per-user grant enforcement
+	thumbs    *thumb.Pipeline // optional — nil skips thumbnail dispatch (manager-upload parity)
+	origin    string          // writehook origin stamp — "ai" by default, "sharex" for the ShareX wrapper
 	// staged, when wired, takes writes above the chunk threshold into filex's
 	// staging area and lets the ops worker move them to the driver. nil keeps
 	// the synchronous write, so an instance without staging is unaffected.
@@ -133,10 +128,10 @@ func (a *aiOps) allow(ctx context.Context, s *model.Storage, rel string, need ac
 	return set.Effective(rel) >= need
 }
 
-func newAIOps(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string, convertURL func(context.Context) string) *aiOps {
+func newAIOps(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string) *aiOps {
 	return &aiOps{
 		store: store, resolver: resolver, share: shareSvc, publicURL: publicURL,
-		convertURL: convertURL, origin: writehook.OriginAI,
+		origin:  writehook.OriginAI,
 		tenants: tenanturl.New(store, publicURL, false),
 	}
 }
@@ -307,8 +302,7 @@ type aiRootInfo struct {
 	Confined bool     `json:"confined"`
 	Root     string   `json:"root,omitempty"` // qualified adapter://rel
 	Adapter  string   `json:"adapter,omitempty"`
-	Storages []string `json:"storages"`          // addressable adapter names
-	Convert  string   `json:"convert,omitempty"` // external converter URL (empty = unavailable)
+	Storages []string `json:"storages"` // addressable adapter names
 	Hint     string   `json:"hint"`
 }
 
@@ -340,19 +334,9 @@ func (a *aiOps) RootInfo(ctx context.Context) aiRootInfo {
 		}
 		info.Hint = "Full access. Address files as \"<adapter>://<path>\" using a storage listed above; an empty path uses the first storage (" + first + ")."
 	}
-	// Conversion is NOT a server-side MCP operation — it runs in an external
-	// converter. Surface the URL (when configured) so the agent points the user
-	// there instead of trying a non-existent file_convert tool.
-	convertURL := ""
-	if a.convertURL != nil {
-		convertURL = a.convertURL(ctx)
-	}
-	if convertURL != "" {
-		info.Convert = convertURL
-		info.Hint += " File conversion is not a server-side MCP operation: it runs in the external converter at " + convertURL + " (use the filex UI's Convert action)."
-	} else {
-		info.Hint += " File conversion is not a server-side MCP operation; it runs in an external converter (admin → External services / Dış servisler) — none is configured here."
-	}
+	// Conversion is NOT a server-side MCP operation: it is the Convert app's
+	// file-menu action (the iframe converter is gone since 0.48).
+	info.Hint += " File conversion is not a server-side MCP operation: it is the Convert app's action in the filex UI (right-click a file → Convert…), when an administrator has installed it."
 	return info
 }
 

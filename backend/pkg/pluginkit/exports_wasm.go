@@ -6,7 +6,7 @@ import (
 	pdk "github.com/extism/go-pdk"
 )
 
-// The six exports filex calls. Each reads the call's JSON from Extism's
+// The exports filex calls. Each reads the call's JSON from Extism's
 // input buffer, dispatches, and writes JSON back; an error becomes the
 // guest error message filex shows the user (code plugin_error).
 
@@ -24,6 +24,11 @@ func exportPageEvent() int32 { return finish(dispatchView(pdk.Input(), true)) }
 
 //go:wasmexport tick
 func exportTick() int32 { return finish(dispatchTick(pdk.Input())) }
+
+// The app's own interface calling its module (`engine.call`).
+//
+//go:wasmexport ui_call
+func exportUICall() int32 { return finish(dispatchUICall(pdk.Input())) }
 
 // Reserved: nothing calls this yet, and the `events:<name>` permission that
 // would gate it is refused at install until something does.

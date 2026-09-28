@@ -1,63 +1,28 @@
 /**
- * The SPA's half of `lib/notificationText.ts` — the same renderer, handed this
- * app's current language and its switch-label catalogue.
+ * Core's `useNotificationText`, handed this app's language and its settings
+ * dialog's name for each kind of event (`userSettings.notifications.events.*`).
  *
- * ⚠ A composable rather than a helper the two surfaces each write, because the
- * two surfaces are the bell list and the browser notification and they are
- * describing the SAME row. If one of them assembled `locale` or the fallback
- * label slightly differently, a person would read one sentence in the bell and
- * a different one in the toast that told them to look at the bell.
+ * ⚠ Not a second renderer: the composable and the phrasebook are
+ * `@brftech/filex-core`'s (moved there with the bell on 2026-09-27). The bell's
+ * own rows get the same two things from core directly — the language as a prop,
+ * the labels through `NOTIFICATION_EVENT_LABEL`, which main.ts provides — so the
+ * browser toast (useNotificationWatcher) and the admin page, the two readers of
+ * this file, say what the bell says.
  */
-import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { foreignText, localeStrings, localesVersion } from '@brftech/filex-core';
-
-import {
-  renderNotification,
-  type NotificationLike,
-  type NotificationText,
-  type NotifyLocale,
-} from '@/lib/notificationText';
-import { userEventKey } from '@/lib/webhookEvents';
+import { useNotificationText as useCoreNotificationText, userEventKey } from '@brftech/filex-core';
 
 export function useNotificationText() {
   const { t, te, locale } = useI18n();
-
-  /**
-   * The installed language pack's `server.notify.*` strings for the language
-   * on screen — the phrases in a language filex does not ship (or a pack's
-   * overlay of one it does). Re-read when a pack arrives or leaves
-   * (`localesVersion`), and filtered ONCE here: `localeStrings` copies the
-   * whole ~3 000-key table, and a bell renders a row per notification.
-   */
-  const packNotify = computed(() => {
-    void localesVersion.value;
-    const all = localeStrings(locale.value);
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(all)) if (k.startsWith('server.notify.')) out[k] = v;
-    return Object.keys(out).length ? out : undefined;
-  });
-
-  /** Render one row in the language this app is currently showing. */
-  function notificationText(row: NotificationLike): NotificationText {
-    const lang: NotifyLocale = locale.value === 'tr' ? 'tr' : 'en';
-    // ⚠ `te()` first: vue-i18n's `t()` returns the KEY itself for a missing
-    // entry, so passing it blind would hand the renderer
-    // "userSettings.notifications.events.foo_bar" as a human-readable label —
-    // a worse string than the raw event id it is supposed to be rescuing.
-    const key = userEventKey(row.event);
-    return renderNotification(row, lang, {
-      fallbackLabel: te(key) ? t(key) : undefined,
-      strings: packNotify.value,
-      lang: locale.value,
-      // ⚠⚠ The reader's direction. A notification is composed out of a
-      // phrase and a ROW, never through vue-i18n, so the panel's
-      // post-translation hook never sees it — and nearly every body is
-      // machine text (a path, a reason, an app's own words). Both surfaces
-      // this composable serves get it, because they describe one row.
-      foreign: (text: string) => foreignText(String(locale.value), text),
-    });
-  }
-
-  return { notificationText };
+  // ⚠ `te()` first: vue-i18n's `t()` returns the KEY itself for a missing
+  // entry, so passing it blind would hand the renderer
+  // "userSettings.notifications.events.foo_bar" as a human-readable label —
+  // a worse string than the raw event id it is supposed to be rescuing.
+  return useCoreNotificationText(
+    () => String(locale.value),
+    (event) => {
+      const key = userEventKey(event);
+      return te(key) ? t(key) : undefined;
+    },
+  );
 }

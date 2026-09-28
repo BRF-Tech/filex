@@ -218,7 +218,49 @@ export function iconTile(family: IconFamily): string {
 
 /** Convenience: node → tile markup in one call. */
 export function fileIconTile(node: Parameters<typeof iconFamilyFor>[0]): string {
+  /* wiring:e2 fxe — a single encrypted file: the padlock is its tile. */
+  if (isEncryptedFile(node)) return encryptedFileTile();
   return iconTile(iconFamilyFor(node));
+}
+
+/* wiring:e2 fxe ---------------------------------------------------------
+ * A single encrypted file (`.fxe`, docs/E2E-ENCRYPTION.md → "Single encrypted
+ * files") is a state of a file, like the encrypted folder is a state of a
+ * folder: it keeps the sheet-with-fold of every document and carries the
+ * padlock cut out of it. Not an IconFamily, for the same reason as the folder
+ * (lib/fileFilters filters by family).
+ */
+
+/** True for a row that is a single encrypted file. */
+export function isEncryptedFile(node: { type?: string; extension?: string | null; basename?: string | null }): boolean {
+  if (node.type === 'dir') return false;
+  if ((node.extension || '').toLowerCase() === 'fxe') return true;
+  return typeof node.basename === 'string' && node.basename.toLowerCase().endsWith('.fxe') && node.basename.length > 4;
+}
+
+const LOCKED_FILE =
+  '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="' +
+  /* the sheet, with its fold */
+  'M6.5 3h7L18.5 8v11.5a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 19.5v-15A1.5 1.5 0 0 1 6.5 3z' +
+  /* the shackle */
+  'M9.7 12.2a2.3 2.3 0 0 1 4.6 0h-1.05a1.25 1.25 0 0 0-2.5 0z' +
+  /* the body */
+  'M9.2 12.2h5.6a1 1 0 0 1 1 1v3.6a1 1 0 0 1-1 1H9.2a1 1 0 0 1-1-1v-3.6a1 1 0 0 1 1-1z' +
+  '"/>';
+
+let LOCKED_FILE_TILE = '';
+
+/** Tile markup for a single encrypted file. */
+export function encryptedFileTile(): string {
+  if (!LOCKED_FILE_TILE) {
+    LOCKED_FILE_TILE =
+      '<span class="fe-ftile fe-ftile--unknown fe-ftile--file-locked">' +
+      '<svg class="fe-ficon fe-ficon--file-locked" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+      `${LOCKED_FILE}</svg></span>`;
+  }
+  return LOCKED_FILE_TILE;
 }
 
 /* ======================================================================
@@ -407,6 +449,7 @@ export function typeLabelKey(node: {
 }): string | null {
   if (node.type === 'dir') return 'node.folder';
   const ext = (node.extension || '').trim().toLowerCase();
+  if (ext === 'fxe') return 'e2e.fxe.type'; /* wiring:e2 fxe */
   const own = EXT_TYPE_KEYS[ext];
   if (own) return own;
   return FAMILY_TYPE_KEYS[iconFamilyFor(node)] ?? null;

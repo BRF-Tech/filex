@@ -317,7 +317,14 @@ function tsObjectLiteral(src, name, file) {
 /** The server table of a checkout: the server's catalogue and the notification phrases. */
 function loadServerTable(src) {
   const out = JSON.parse(fs.readFileSync(path.join(src, 'backend', 'internal', 'srvtext', 'locales', 'en.json'), 'utf8'));
-  const file = path.join(src, 'web', 'src', 'lib', 'notificationText.ts');
+  // ⚠ The phrases moved from web/src/lib to packages/core/src/lib on
+  // 2026-09-27 (the desktop app draws the same bell). A checkout older than
+  // that still has them in web/, and this file validates against whichever
+  // checkout it is pointed at — so the new home first, then the old one.
+  const file = [
+    path.join(src, 'packages', 'core', 'src', 'lib', 'notificationText.ts'),
+    path.join(src, 'web', 'src', 'lib', 'notificationText.ts'),
+  ].find((f) => fs.existsSync(f)) ?? path.join(src, 'packages', 'core', 'src', 'lib', 'notificationText.ts');
   const ts = fs.readFileSync(file, 'utf8');
   /* ⚠ MUST match scripts/lib/i18n-catalogue.mjs (loadNotifyTables): a value
      that is one bare `{placeholder}` is not exported — there is no word in it
@@ -335,6 +342,7 @@ function loadServerTable(src) {
     say(`server.notify.${event}.title`, p.title);
     say(`server.notify.${event}.body`, p.body);
     for (const [f, v] of Object.entries(p.one ?? {})) say(`server.notify.${event}.${f}_one`, v);
+    for (const [f, v] of Object.entries(p.file ?? {})) say(`server.notify.${event}.${f}_file`, v);
   }
   return out;
 }

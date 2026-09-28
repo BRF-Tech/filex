@@ -27,6 +27,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
 // Level is an ordered capability: None < Viewer < Editor < Owner.
@@ -221,6 +222,17 @@ func (s *Set) EffectiveIgnoringLocks(rel string) Level {
 
 // effective is Effective before the lock cap.
 func (s *Set) effective(rel string) Level {
+	// A drafts area is ONE person's (issue #71, syspath.Drafts): its owner
+	// edits their own drafts, and nobody else — an administrator included,
+	// which is why this comes before the admin short-circuit — reaches it by
+	// any grant, role or storage setting. A draft is somebody's unfinished
+	// document, not a file of the storage; the area's root is nobody's.
+	if syspath.InDrafts(rel) {
+		if owner, ok := syspath.DraftOwner(rel); ok && owner == s.user.ID {
+			return capLevel(LevelEditor, s.ceiling)
+		}
+		return LevelNone
+	}
 	if s.user.IsAdmin() {
 		return LevelOwner
 	}

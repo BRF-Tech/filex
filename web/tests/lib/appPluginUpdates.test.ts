@@ -12,7 +12,7 @@ import { createI18n } from 'vue-i18n';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 import type { AppPlugin } from '@/api/appPlugins';
-import { AUTO_UPDATED_SHOWN_MS, updateRank, updateView } from '@/lib/appPluginUpdates';
+import { updateRank, updateView } from '@/lib/appPluginUpdates';
 
 const WIRE = path.resolve(__dirname, '../../../backend/internal/api/handlers/testdata/wire');
 const check = JSON.parse(readFileSync(path.join(WIRE, 'app-plugin-update-check.json'), 'utf8'));
@@ -23,38 +23,41 @@ function tOf(locale: 'en' | 'tr') {
   return i18n.global.t as unknown as (k: string, v?: Record<string, unknown>) => string;
 }
 
-/** The moment the fixture's last check ran — "now" for the week-long badge. */
-const CHECKED = Date.parse('2026-09-26T09:30:00Z');
-
 describe('updateView', () => {
   it('a newer version that asks for more: needs approval, the jump and what it adds, reviewable', () => {
-    const v = updateView(sign, tOf('en'), 'en', CHECKED);
+    const v = updateView(sign, tOf('en'), 'en');
     expect(v.badges.map((b) => b.label)).toEqual([en.appPlugins.update.needsApproval]);
     expect(v.badges[0].tone).toBe('amber');
     expect(v.lines).toEqual(['1.2.0 → 1.3.0 · new: mail:send']);
     expect(v.reviewable).toBe(true);
 
-    const trv = updateView(sign, tOf('tr'), 'tr', CHECKED);
+    const trv = updateView(sign, tOf('tr'), 'tr');
     expect(trv.badges[0].label).toBe('Onay bekliyor');
     expect(trv.lines[0]).toContain('yeni: mail:send');
   });
 
-  it('an app outside its own range for this filex is marked — and still says what its updates did', () => {
-    const v = updateView(pack, tOf('en'), 'en', CHECKED);
+  it('an app outside its own range for this filex is marked — and still says what waits, and what is kept', () => {
+    const v = updateView(pack, tOf('en'), 'en');
     expect(v.badges.map((b) => [b.label, b.tone])).toEqual([
       [en.appPlugins.compat.bad, 'rose'],
-      [en.appPlugins.update.updated, 'emerald'],
+      [en.appPlugins.update.available, 'sky'],
     ]);
-    expect(v.lines[0]).toBe('Works with filex >=0.45.0 <0.47.0; this is 0.47.0. It keeps running.');
-    expect(v.lines[1]).toMatch(/^from 0\.9\.0, /);
-    expect(v.reviewable).toBe(false);
+    expect(v.lines).toEqual([
+      'Works with filex >=0.45.0 <0.47.0; this is 0.47.0. It keeps running.',
+      '1.0.0 → 1.1.0',
+      'Version 0.9.0 is kept to go back to',
+    ]);
+    expect(v.reviewable).toBe(true);
     expect(updateRank(pack)).toBeLessThan(updateRank(sign));
+    expect(updateView(pack, tOf('tr'), 'tr').lines[2]).toBe('0.9.0 sürümü geri dönmek için saklanıyor');
   });
 
-  it('"Updated automatically" is a week-long note, not a label for ever', () => {
-    const later = updateView(pack, tOf('en'), 'en', CHECKED + AUTO_UPDATED_SHOWN_MS + 1000);
-    expect(later.badges.map((b) => b.label)).not.toContain(en.appPlugins.update.updated);
-    expect(later.lines).toContain(en.appPlugins.update.upToDate);
+  it('⚠⚠ nothing updates itself: no "updated automatically", no switch said to be off', () => {
+    const old = { ...pack, auto_update: false, update: { status: 'current', auto: { from: '0.9.0', to: '1.0.0', at: '2026-09-26T09:30:00Z' } } } as unknown as AppPlugin;
+    const v = updateView(old, tOf('en'), 'en');
+    expect(v.badges.map((b) => b.tone)).not.toContain('emerald');
+    expect(v.lines.join(' ')).not.toMatch(/automatic/i);
+    expect(v.lines).toContain(en.appPlugins.update.upToDate);
   });
 
   it('an app with no source says so, and is never offered an update', () => {
@@ -70,7 +73,7 @@ describe('updateView', () => {
     expect(updateView(old, tOf('en'), 'en').lines).toEqual([en.appPlugins.update.noManifestAddress]);
   });
 
-  it('a failed automatic update says the refusal in the reader’s words, not the server’s English', () => {
+  it('a failed automatic update (a row filex 0.47 wrote) says the refusal in the reader’s words', () => {
     const failed = {
       ...sign,
       update: {
@@ -105,11 +108,11 @@ describe('updateView', () => {
     expect(v.reviewable).toBe(false);
   });
 
-  it('a version that only waits because automatic updates are off is offered', () => {
-    const waiting = { ...sign, auto_update: false, update: { status: 'available', version: '1.2.1' } } as AppPlugin;
+  it('a newer version that asks for nothing more still waits for the administrator, and is offered', () => {
+    const waiting = { ...sign, update: { status: 'available', version: '1.2.1' } } as AppPlugin;
     const v = updateView(waiting, tOf('en'), 'en');
     expect(v.badges.map((b) => [b.label, b.tone])).toEqual([[en.appPlugins.update.available, 'sky']]);
-    expect(v.lines, 'and it says why it waits').toEqual(['1.2.0 → 1.2.1', en.appPlugins.update.autoOff]);
+    expect(v.lines).toEqual(['1.2.0 → 1.2.1']);
     expect(v.reviewable).toBe(true);
   });
 });

@@ -78,6 +78,10 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.StorageOrderSQL = &db.StorageOrderSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Who put a row in the trash (00061), written once in internal/db.
 	s.NodeDeletedBySQL = &db.NodeDeletedBySQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// Drafts (00064), written once in internal/db.
+	s.DraftSQL = &db.DraftSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// Rows deleted where they stood (issue #74), written once in internal/db.
+	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	return s
 }
 
@@ -95,6 +99,10 @@ type Store struct {
 	*db.StorageOrderSQL
 	// SetNodeDeletedBy (internal/db node_deleted_by_sql.go).
 	*db.NodeDeletedBySQL
+	// The drafts methods (internal/db drafts_sql.go).
+	*db.DraftSQL
+	// ListVanishedNodeIDs, CountChildRows (internal/db vanished_sql.go).
+	*db.VanishedSQL
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
@@ -905,7 +913,7 @@ func (s *Store) StorageStats(ctx context.Context, storageID int64) (int64, int64
 	)
 	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM nodes
-		   WHERE storage_id=$1 AND type='file' AND deleted_at IS NULL`,
+		   WHERE storage_id=$1 AND type='file' AND deleted_at IS NULL AND `+db.NotInDraftsSQL("path"),
 		storageID,
 	).Scan(&count, &size)
 	if err != nil {
@@ -4478,12 +4486,12 @@ func pgScanNodeComment(rs interface {
 
 // ─────────────────── Storage plugins (migration 00029) ───────────────────
 
-const pluginCols = `id, name, kind, binary_path, sha256, address, token_sealed, enabled, version, driver, last_error, created_at, updated_at`
+const pluginCols = `id, name, kind, binary_path, sha256, address, token_sealed, enabled, version, driver, last_error, source, update_json, created_at, updated_at`
 
 func scanPlugin(r rowScanner) (*model.Plugin, error) {
 	p := &model.Plugin{}
 	if err := r.Scan(&p.ID, &p.Name, &p.Kind, &p.Binary, &p.SHA256, &p.Address, &p.TokenSealed,
-		&p.Enabled, &p.Version, &p.Driver, &p.LastError, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.Enabled, &p.Version, &p.Driver, &p.LastError, &p.Source, &p.UpdateJSON, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -4492,9 +4500,9 @@ func scanPlugin(r rowScanner) (*model.Plugin, error) {
 func (s *Store) CreatePlugin(ctx context.Context, p *model.Plugin) (*model.Plugin, error) {
 	var id int64
 	err := s.conn(ctx).QueryRowContext(ctx,
-		`INSERT INTO plugins (name, kind, binary_path, sha256, address, token_sealed, enabled, version, driver, last_error)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-		p.Name, p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError).Scan(&id)
+		`INSERT INTO plugins (name, kind, binary_path, sha256, address, token_sealed, enabled, version, driver, last_error, source, update_json)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+		p.Name, p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError, p.Source, p.UpdateJSON).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
@@ -4528,9 +4536,9 @@ func (s *Store) ListPlugins(ctx context.Context) ([]*model.Plugin, error) {
 
 func (s *Store) UpdatePlugin(ctx context.Context, p *model.Plugin) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
-		`UPDATE plugins SET kind=$1, binary_path=$2, sha256=$3, address=$4, token_sealed=$5, enabled=$6, version=$7, driver=$8, last_error=$9, updated_at=NOW()
-		 WHERE id=$10`,
-		p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError, p.ID)
+		`UPDATE plugins SET kind=$1, binary_path=$2, sha256=$3, address=$4, token_sealed=$5, enabled=$6, version=$7, driver=$8, last_error=$9, source=$10, update_json=$11, updated_at=NOW()
+		 WHERE id=$12`,
+		p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError, p.Source, p.UpdateJSON, p.ID)
 	return err
 }
 
@@ -4559,13 +4567,13 @@ func nullTime(t time.Time) any {
 // PostgreSQL spelling of drivers/sqlite/app_plugins.go: $n placeholders,
 // RETURNING id, plain key (not reserved here).
 
-const appPluginCols = `id, name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error, manifest_url, auto_update, update_json, created_at, updated_at`
+const appPluginCols = `id, name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error, manifest_url, auto_update, update_json, ui_sha256, signature, created_at, updated_at`
 
 func scanAppPlugin(r rowScanner) (*model.AppPlugin, error) {
 	p := &model.AppPlugin{}
 	if err := r.Scan(&p.ID, &p.Name, &p.Version, &p.LabelJSON, &p.ManifestJSON, &p.WasmPath, &p.SHA256,
 		&p.Source, &p.SourceURL, &p.Signed, &p.PermissionsJSON, &p.Enabled, &p.LastError,
-		&p.ManifestURL, &p.AutoUpdate, &p.UpdateJSON, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.ManifestURL, &p.AutoUpdate, &p.UpdateJSON, &p.UISHA256, &p.Signature, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -4574,11 +4582,11 @@ func scanAppPlugin(r rowScanner) (*model.AppPlugin, error) {
 func (s *Store) CreateAppPlugin(ctx context.Context, p *model.AppPlugin) (*model.AppPlugin, error) {
 	var id int64
 	err := s.conn(ctx).QueryRowContext(ctx,
-		`INSERT INTO app_plugins (name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error, manifest_url, auto_update, update_json)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+		`INSERT INTO app_plugins (name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error, manifest_url, auto_update, update_json, ui_sha256, signature)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
 		p.Name, p.Version, orJSON(p.LabelJSON, "{}"), orJSON(p.ManifestJSON, "{}"), p.WasmPath, p.SHA256,
 		p.Source, p.SourceURL, p.Signed, orJSON(p.PermissionsJSON, "[]"), p.Enabled, p.LastError,
-		p.ManifestURL, p.AutoUpdate, p.UpdateJSON).Scan(&id)
+		p.ManifestURL, p.AutoUpdate, p.UpdateJSON, p.UISHA256, p.Signature).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
@@ -4613,10 +4621,10 @@ func (s *Store) ListAppPlugins(ctx context.Context) ([]*model.AppPlugin, error) 
 func (s *Store) UpdateAppPlugin(ctx context.Context, p *model.AppPlugin) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE app_plugins SET version=$1, label_json=$2, manifest_json=$3, wasm_path=$4, sha256=$5, source=$6, source_url=$7, signed=$8, permissions_json=$9, enabled=$10, last_error=$11,
-		 manifest_url=$12, auto_update=$13, update_json=$14, updated_at=CURRENT_TIMESTAMP
-		 WHERE id=$15`,
+		 manifest_url=$12, auto_update=$13, update_json=$14, ui_sha256=$15, signature=$16, updated_at=CURRENT_TIMESTAMP
+		 WHERE id=$17`,
 		p.Version, orJSON(p.LabelJSON, "{}"), orJSON(p.ManifestJSON, "{}"), p.WasmPath, p.SHA256, p.Source, p.SourceURL,
-		p.Signed, orJSON(p.PermissionsJSON, "[]"), p.Enabled, p.LastError, p.ManifestURL, p.AutoUpdate, p.UpdateJSON, p.ID)
+		p.Signed, orJSON(p.PermissionsJSON, "[]"), p.Enabled, p.LastError, p.ManifestURL, p.AutoUpdate, p.UpdateJSON, p.UISHA256, p.Signature, p.ID)
 	return err
 }
 
@@ -4627,6 +4635,7 @@ func (s *Store) DeleteAppPlugin(ctx context.Context, id int64) error {
 	}
 	defer tx.Rollback()
 	for _, q := range []string{
+		`DELETE FROM app_plugin_versions WHERE plugin_id=$1`,
 		`DELETE FROM app_plugin_schedule WHERE plugin_id=$1`,
 		`DELETE FROM app_plugin_jobs WHERE plugin_id=$1`,
 		`DELETE FROM app_plugin_state WHERE plugin_id=$1`,
@@ -5190,4 +5199,57 @@ func orJSONPG(v, def string) string {
 		return def
 	}
 	return v
+}
+
+// App plugin versions (migration 00066) — see wasmplugin/versions.go.
+
+const appPluginVersionCols = `id, plugin_id, version, manifest_json, wasm_path, sha256, ui_sha256, permissions_json, source, source_url, manifest_url, signed, signature, dir, replaced_by, replaced_at`
+
+func scanAppPluginVersion(r rowScanner) (*model.AppPluginVersion, error) {
+	v := &model.AppPluginVersion{}
+	var by sql.NullInt64
+	if err := r.Scan(&v.ID, &v.PluginID, &v.Version, &v.ManifestJSON, &v.WasmPath, &v.SHA256, &v.UISHA256, &v.PermissionsJSON,
+		&v.Source, &v.SourceURL, &v.ManifestURL, &v.Signed, &v.Signature, &v.Dir, &by, &v.ReplacedAt); err != nil {
+		return nil, err
+	}
+	if by.Valid {
+		id := by.Int64
+		v.ReplacedBy = &id
+	}
+	return v, nil
+}
+
+func (s *Store) CreateAppPluginVersion(ctx context.Context, v *model.AppPluginVersion) (*model.AppPluginVersion, error) {
+	var id int64
+	err := s.conn(ctx).QueryRowContext(ctx,
+		`INSERT INTO app_plugin_versions (plugin_id, version, manifest_json, wasm_path, sha256, ui_sha256, permissions_json, source, source_url, manifest_url, signed, signature, dir, replaced_by)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+		v.PluginID, v.Version, orJSON(v.ManifestJSON, "{}"), v.WasmPath, v.SHA256, v.UISHA256, orJSON(v.PermissionsJSON, "[]"),
+		v.Source, v.SourceURL, v.ManifestURL, v.Signed, v.Signature, v.Dir, v.ReplacedBy).Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+	return scanAppPluginVersion(s.conn(ctx).QueryRowContext(ctx, `SELECT `+appPluginVersionCols+` FROM app_plugin_versions WHERE id=$1`, id))
+}
+
+func (s *Store) ListAppPluginVersions(ctx context.Context, pluginID int64) ([]*model.AppPluginVersion, error) {
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+appPluginVersionCols+` FROM app_plugin_versions WHERE plugin_id=$1 ORDER BY id DESC`, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.AppPluginVersion{}
+	for rows.Next() {
+		v, err := scanAppPluginVersion(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteAppPluginVersion(ctx context.Context, id int64) error {
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM app_plugin_versions WHERE id=$1`, id)
+	return err
 }

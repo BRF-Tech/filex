@@ -42,6 +42,13 @@ export interface PresenceMessage {
   users: PresenceUser[];
 }
 
+/** An app's approved version changed (instance-wide, not about any folder). */
+export interface AppUpdatedMessage {
+  type: 'app.updated';
+  app: string;
+  version: string;
+}
+
 export interface WsTicket {
   ticket: string;
   ws_url: string;
@@ -50,6 +57,7 @@ export interface WsTicket {
 export interface RealtimeHandlers {
   onChange?: (msg: ChangeMessage) => void;
   onPresence?: (msg: PresenceMessage) => void;
+  onAppUpdated?: (msg: AppUpdatedMessage) => void;
   onStatus?: (connected: boolean) => void;
   /** Fires true when the live socket is unavailable (consumer should poll),
    *  false when a live socket is (re)established. */
@@ -151,6 +159,10 @@ export class RealtimeClient {
       const m = msg as { type?: string };
       if (m?.type === 'change') this.opts.handlers.onChange?.(msg as ChangeMessage);
       else if (m?.type === 'presence') this.opts.handlers.onPresence?.(msg as PresenceMessage);
+      else if (m?.type === 'app.updated') {
+        const a = msg as Partial<AppUpdatedMessage>;
+        if (typeof a.app === 'string' && typeof a.version === 'string') this.opts.handlers.onAppUpdated?.(a as AppUpdatedMessage);
+      }
       // pong / error frames are intentionally ignored by the UI.
     };
 

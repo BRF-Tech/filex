@@ -27,7 +27,7 @@ hero:
 features:
   - icon: ✍️
     title: Apps — things to do with a file
-    details: A second kind of plugin — a sandboxed WebAssembly app that adds actions to the file menu, screens filex draws for it, and public pages for people with no account — installed from a GitHub address through a review of every permission it asks for, and able to do exactly that and nothing else. Apps keep themselves up to date from where they came from, and a new version that asks for more waits for your review. Two ship alongside filex as public repositories — e-Signature, which sends a document round for signature and seals the finished file with the installation's own seal, and Convert. Write your own in stock Go, against a test kit.
+    details: A second kind of plugin — a sandboxed WebAssembly module, an interface of its own that filex runs in a sandboxed frame, or both — adding actions to the file menu, screens and public pages for people with no account. Installed from a GitHub address through a review of every permission it asks for, with exactly that grant; the review also says plainly what a browser cannot promise about an interface. Apps say when their source has a newer version, nothing is installed until an administrator has reviewed what it changes, and the previous version is one click away. Two ship alongside filex as public repositories — e-Signature, which sends a document round for signature and seals the finished file with the installation's own seal, and Convert. Write your own in stock Go, against a test kit.
     link: /APP-PLUGINS
     linkText: Apps docs
   - icon: 🌍
@@ -102,7 +102,7 @@ features:
     linkText: CLI docs
   - icon: 🧭
     title: Navigation people already know
-    details: 'A left panel led by one "+ New" menu — upload files, a new folder, a new document, a file request; the destinations Home, My files, Shared with me, Recent, Starred and Trash; your tags, each one opening the files carrying it; and the storages you can reach — a storage somebody granted you simply appears there, one click, no mount instructions. It is also where "How to connect" and your own API keys live, so an embedded copy of the explorer can hand a user the credential WebDAV or FTPS asks for — unless the embed is proxied with one shared app token, in which case the surfaces that belong to a single person are left out. Collapse it to an icon rail from the top bar when you want the width back. Everything around it is one shell, drawn by every embed with no string passed — one search field in the header with its palette shortcut, a Type/People/Modified/Size filter row, Folders and Files as sections, and Details/Activity in the info panel — and uiProfile ''simple'' reduces it for people who want a file drive rather than a file manager.'
+    details: 'A left panel led by one "+ New" menu — upload files, a new folder, a new document, a file request; the destinations Home, My files, Shared with me, Recent, Starred, Drafts (a new document waits there, visible to nobody else, until you save it where it belongs) and Trash; your tags, each one opening the files carrying it; and the storages you can reach — a storage somebody granted you simply appears there, one click, no mount instructions. It is also where "How to connect" and your own API keys live, so an embedded copy of the explorer can hand a user the credential WebDAV or FTPS asks for — unless the embed is proxied with one shared app token, in which case the surfaces that belong to a single person are left out. Collapse it to an icon rail from the top bar when you want the width back. Everything around it is one shell, drawn by every embed with no string passed — one search field in the header with its palette shortcut, a Type/People/Modified/Size filter row, Folders and Files as sections, and Details/Activity in the info panel — and uiProfile ''simple'' reduces it for people who want a file drive rather than a file manager.'
     link: /INTEGRATION
     linkText: Turning it on
   - icon: 🧩
@@ -122,7 +122,7 @@ features:
     linkText: RBAC docs
   - icon: 🔐
     title: End-to-end encrypted folders
-    details: "Encrypted in the browser with WebCrypto: the server stores ciphertext and never receives a key. Each folder gets a recovery key, shown once, so a forgotten password is not automatically lost data — and an operator can optionally hold an escrow key, with the limits stated rather than implied."
+    details: "Encrypted in the browser with WebCrypto: the server stores ciphertext and never receives a key. A folder encrypts its contents, or its contents and its names; a folder you already have, or a single file, is encrypted where it is. Each gets a recovery key, shown once, so a forgotten password is not automatically lost data — and an operator can optionally hold an escrow key, with the limits stated rather than implied."
     link: /E2E-ENCRYPTION
     linkText: How it works
   - icon: 🏢

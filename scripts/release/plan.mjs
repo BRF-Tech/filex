@@ -35,6 +35,8 @@ function goToolchain() {
 function goGate(name, dirOf, script) {
   return {
     name,
+    // The shell it runs, readable by the plan's own test.
+    script,
     cmd: (c) => {
       const dir = dirOf(c);
       const t = goToolchain();
@@ -68,6 +70,19 @@ const WORKFLOW_GUARDS = [
   'leaves a submission still in certification alone, and never fails the release',
   'keeps the Store package check soft on the runner; the local release run is the strict one',
 ];
+
+/** The npm names of the public packages under packages/ (release.yml publishes them all). */
+function npmPackages(repo) {
+  const dir = path.join(repo, 'packages');
+  return fs
+    .readdirSync(dir)
+    .map((d) => path.join(dir, d, 'package.json'))
+    .filter((f) => fs.existsSync(f))
+    .map((f) => JSON.parse(fs.readFileSync(f, 'utf8')))
+    .filter((pkg) => !pkg.private)
+    .map((pkg) => pkg.name)
+    .sort();
+}
 
 export default function plan({ repo, version, tag }) {
   const exportDir = path.resolve(process.env.FILEX_EXPORT_DIR ?? path.join(repo, '..', 'filex-export'));
@@ -146,7 +161,14 @@ export default function plan({ repo, version, tag }) {
       { name: 'the binary serves the UI just built, byte for byte', cmd: ['node', 'scripts/check-embed.mjs', '--binary', bin] },
       // Without the fixture the app-plugin Go tests skip in silence.
       goGate('go: echo.wasm fixture', (c) => c.repo, 'bash scripts/build-wasm-fixture.sh'),
-      goGate('go: vet + test', (c) => path.join(c.repo, 'backend'), 'go vet ./... && go test ./...'),
+      // ⚠ The fixture AGAIN, in this gate's own mirror. Each Go gate rsyncs
+      // its module with --delete, so the Windows checkout's gitignored
+      // echo.wasm - as old as whoever last built it there - came back over the
+      // one the gate above had just built. After a change to the echo app's
+      // main.go it is older than main.go, and every app-plugin test refuses to
+      // run on it (the v0.48.0 pretag: 50-odd "echo.wasm is older than
+      // main.go" failures). Building it here is a no-op when it is current.
+      goGate('go: vet + test', (c) => path.join(c.repo, 'backend'), 'bash ../scripts/build-wasm-fixture.sh >/dev/null && go vet ./... && go test ./...'),
       // A migration that only works on sqlite bricks the first boot after an
       // upgrade for everyone else; the parity tests SKIP without a DSN.
       { name: 'go: migrations on sqlite, postgres AND mysql', cmd: ['node', 'scripts/release/gates/engines.mjs'] },
@@ -299,8 +321,11 @@ export default function plan({ repo, version, tag }) {
       },
       { name: `ghcr: filex:${tag} and filex:slim-${tag}`, sh: `docker manifest inspect ghcr.io/brf-tech/filex:${tag} >/dev/null && docker manifest inspect ghcr.io/brf-tech/filex:slim-${tag} >/dev/null` },
       {
-        name: `npm: the three packages at ${version}`,
-        sh: ['@brftech/filex-core', '@brftech/filex', '@brftech/filex-react'].map((p) => `test "$(npm view ${p}@${version} version)" = ${shq(version)}`).join(' && '),
+        // Every package under packages/ — what release.yml publishes
+        // (`pnpm publish --filter='./packages/*'`). A written list missed
+        // @brftech/filex-app-ui (0.48), which filex-core depends on.
+        name: `npm: every package under packages/ at ${version} (${npmPackages(repo).join(', ')})`,
+        sh: npmPackages(repo).map((p) => `test "$(npm view ${p}@${version} version)" = ${shq(version)}`).join(' && '),
       },
     ],
 

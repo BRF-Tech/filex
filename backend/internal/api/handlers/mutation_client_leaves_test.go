@@ -331,7 +331,7 @@ func TestTrashPurge_AFolderIsPurgedWholeWhenTheClientLeavesHalfWay(t *testing.T)
 // call's context. An agent that gives up on a slow call is a client leaving.
 
 func (r *leavingRig) ai() *handlers.AI {
-	return handlers.NewAI(r.store, r.resolve, nil, "", nil)
+	return handlers.NewAI(r.store, r.resolve, nil, "")
 }
 
 func TestAIMove_AFolderIsMovedWholeWhenTheAgentLeavesHalfWay(t *testing.T) {

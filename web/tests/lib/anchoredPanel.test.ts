@@ -1,8 +1,8 @@
 // Where a teleported header dropdown goes — one rule for the avatar menu and
-// the notification bell (web/src/lib/anchoredPanel.ts).
+// the notification bell (packages/core/src/lib/anchoredPanel.ts).
 import { describe, expect, it } from 'vitest';
 
-import { anchorUnderEndEdge, refElement } from '@/lib/anchoredPanel';
+import { anchorUnderEndEdge, refElement } from '@brftech/filex-core/src/lib/anchoredPanel';
 
 describe('anchorUnderEndEdge', () => {
   it('hangs 6px under the button, flush with its right edge', () => {

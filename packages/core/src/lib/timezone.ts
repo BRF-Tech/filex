@@ -464,6 +464,27 @@ export function accountTimeZoneOf(owner: symbol): string | null {
 }
 
 /** The account zone remembered in this browser by the last session. */
+/**
+ * The settings dialog's handle on ONE owner's account zone: read it, and set it
+ * the way a person's own pick is set — remembered for the next first paint,
+ * and clearing this browser's VIEWER pick, which outranks the account and
+ * would otherwise make the control visibly do nothing (the viewer tier is what
+ * an embed's "⋯ → Time zone" writes). `''` = this device's zone.
+ *
+ * ⚠ One function for both hosts of the dialog: the admin app passes its own
+ * owner (web/src/lib/timezone.ts), the explorer passes the owner it registered
+ * the account's zone under (useExplorerTimeZone) — the desktop app's dialog.
+ */
+export function accountZoneControl(owner: symbol): { get: () => string; set: (tz: string) => void } {
+  return {
+    get: () => accountTimeZoneOf(owner) ?? '',
+    set: (tz: string) => {
+      setAccountTimeZone(owner, tz && isValidTimeZone(tz) ? tz : '', { remember: true });
+      setViewerTimeZone('');
+    },
+  };
+}
+
 export function rememberedAccountTimeZone(): string {
   return hasWindow ? readValid(TIMEZONE_ACCOUNT_LS_KEY) : '';
 }

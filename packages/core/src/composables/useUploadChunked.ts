@@ -43,6 +43,8 @@ import { networkFailure, requestFailure, wordsIn } from '../lib/errorWords';
 import { noteRequestFailed, noteRequestSucceeded } from '../lib/connection';
 import { resolveLocale } from '../locales/resolve';
 import { newId } from '../lib/uid';
+/* wiring:e2 stream — bytes made as they are sent (lib/uploadSource). */
+import type { UploadSource } from '../lib/uploadSource';
 import {
   clearResume,
   defaultResumeStorage,
@@ -57,6 +59,9 @@ import {
 export interface UploadJob {
   id: string; // local uuid
   file: File;
+  /** What to call the file on screen when it is not `file.name` — an upload
+   *  into an encrypted-names folder carries its ciphertext name in `file`. */
+  displayName?: string;
   path: string;
   /** Server-side staged upload id, once `begin` has answered. */
   uploadId?: string;
@@ -86,7 +91,15 @@ export interface UploadJob {
 
 export interface UploadOptions {
   path: string;
+  /** The file — or, with `source`, only its identity (name, type). */
   file: File;
+  /**
+   * wiring:e2 stream — where the bytes come from when they are MADE as they
+   * are sent (a file encrypted in the browser): `source.size` is the upload's
+   * size and `file` only names it. Such an upload is not bookmarked for a
+   * resume after a reload — its bytes are gone with the tab.
+   */
+  source?: UploadSource;
   chunkSize?: number;
   onProgress?: (job: UploadJob) => void;
   onDone?: (job: UploadJob, result: UploadResult) => void;
@@ -220,12 +233,16 @@ export function useUploadChunked(
 
   async function uploadFile(opts: UploadOptions): Promise<UploadResult> {
     const key = uploadFingerprint(opts.path, opts.file);
+    /* wiring:e2 stream */
+    const src = opts.source ?? null;
+    const total = src ? src.size : opts.file.size;
+    const bookmarks = src ? null : storage;
 
     const job: UploadJob = {
       id: newId(),
       file: opts.file,
       path: opts.path,
-      totalBytes: opts.file.size,
+      totalBytes: total,
       uploadedBytes: 0,
       percent: 0,
       status: 'initializing',
@@ -237,6 +254,7 @@ export function useUploadChunked(
     job.cancel = () => {
       cancelled = true;
       inFlight?.abort();
+      src?.cancel?.();
     };
 
     /** Acknowledged bytes; the in-flight chunk is added on top for display. */
@@ -262,22 +280,22 @@ export function useUploadChunked(
       let chunkSize = opts.chunkSize ?? DEFAULT_CHUNK;
 
       // ── resume, or begin ────────────────────────────────────────────────
-      const bookmark = loadResume(storage, key);
+      const bookmark = loadResume(bookmarks, key);
       if (bookmark) {
         try {
           const st = await status(bookmark.uploadId);
-          if (resumableState(st.state) && (st.total_size ?? 0) === opts.file.size) {
+          if (resumableState(st.state) && (st.total_size ?? 0) === total) {
             uploadId = bookmark.uploadId;
             chunkSize = st.chunk_size ?? st.chunkSize ?? bookmark.chunkSize;
             acked = st.offset ?? 0;
             job.resumedFrom = acked;
           } else {
-            clearResume(storage, key);
+            clearResume(bookmarks, key);
           }
         } catch {
           // Swept, aborted, or belongs to someone else now. Not a failure —
           // `begin` below decides what happens next.
-          clearResume(storage, key);
+          clearResume(bookmarks, key);
         }
       }
 
@@ -290,7 +308,7 @@ export function useUploadChunked(
             body: JSON.stringify({
               path: opts.path,
               name: opts.file.name,
-              size: opts.file.size,
+              size: total,
               mime: opts.file.type || 'application/octet-stream',
               // Asked for, not imposed: the server clamps this to its own
               // limits and its answer is what the loop below uses.
@@ -317,11 +335,11 @@ export function useUploadChunked(
       job.status = 'uploading';
       // Bookmarked BEFORE the first chunk: a tab closed between `begin` and the
       // first PUT would otherwise leave a staging directory nobody can name.
-      saveResume(storage, key, {
+      saveResume(bookmarks, key, {
         uploadId,
         path: opts.path,
         name: opts.file.name,
-        size: opts.file.size,
+        size: total,
         lastModified: opts.file.lastModified,
         chunkSize,
         offset: acked,
@@ -330,10 +348,10 @@ export function useUploadChunked(
 
       // ── chunks ──────────────────────────────────────────────────────────
       const MAX_ATTEMPTS = 4;
-      while (acked < opts.file.size) {
+      while (acked < total) {
         if (cancelled) throw new DOMException('Aborted by user', 'AbortError');
-        const end = Math.min(acked + chunkSize, opts.file.size);
-        const blob = opts.file.slice(acked, end);
+        const end = Math.min(acked + chunkSize, total);
+        const blob = src ? await src.read(acked, end) : opts.file.slice(acked, end);
 
         let next = -1;
         let lastErr: Error | null = null;
@@ -360,7 +378,7 @@ export function useUploadChunked(
             }
           }
           try {
-            next = await putChunk(uploadId, blob, acked, end, opts.file.size);
+            next = await putChunk(uploadId, blob, acked, end, total);
             break;
           } catch (err) {
             const e = err instanceof Error ? err : new Error(String(err));
@@ -382,11 +400,11 @@ export function useUploadChunked(
         }
         acked = next;
         report();
-        saveResume(storage, key, {
+        saveResume(bookmarks, key, {
           uploadId,
           path: opts.path,
           name: opts.file.name,
-          size: opts.file.size,
+          size: total,
           lastModified: opts.file.lastModified,
           chunkSize,
           offset: acked,
@@ -404,7 +422,7 @@ export function useUploadChunked(
       );
       // Committed: the node is listed and the bytes are filex's problem now,
       // so the bookmark has nothing left to recover.
-      clearResume(storage, key);
+      clearResume(bookmarks, key);
       job.opId = result?.op_id;
       job.nodeId = result?.node_id;
 
@@ -424,13 +442,19 @@ export function useUploadChunked(
       job.status = asError.name === 'AbortError' ? 'aborted' : 'error';
       job.error = asError.message;
       report();
+      // A sourced upload stops producing — except when the server simply has
+      // no staged path: nothing was read yet, and the caller may send the
+      // same bytes the other way.
+      if (!isStagedUnsupported(asError)) src?.cancel?.();
 
       // A user-cancelled upload is meant to be gone; a failed one is meant to
       // be resumable. So only the abort releases the server's staging — an
       // error keeps both the staging directory and the bookmark, which is what
       // makes the retry cost nothing.
-      if (job.uploadId && job.status === 'aborted') {
-        clearResume(storage, key);
+      // wiring:e2 stream — a sourced upload cannot be resumed (its bytes are
+      // gone), so its staging is released whatever ended it.
+      if (job.uploadId && (job.status === 'aborted' || src)) {
+        clearResume(bookmarks, key);
         try {
           await api.jsonFetch(`${stagedBase()}/${encodeURIComponent(job.uploadId)}`, {
             method: 'DELETE',

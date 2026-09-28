@@ -114,13 +114,6 @@ drawio:
   enabled: false
   url: ""                 # https://draw.example.com (self-host jgraph/drawio)
 
-# Universal file converter (p2r3/convert fork, in-browser WASM). Run the
-# ghcr.io/brf-tech/converter-filex image and point url at it (served under
-# /convert). See docs/CONVERT-INTEGRATION.md.
-convert:
-  enabled: false
-  url: ""                 # https://files.example.com/convert
-
 # Mermaid diagrams render in the browser with no service — always available.
 
 # ── Bundled MinIO (S3-compatible storage) ───────────────────────────────

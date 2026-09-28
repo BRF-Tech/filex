@@ -11,9 +11,12 @@
  * Updates (wasmplugin/updates.go): "Check for updates" asks every app's
  * source now (the daily check does it by itself); the Version cell says what
  * the last check found — and when the installed version is outside its own
- * `filex` range for this server; the row's menu switches its automatic
- * updates and "Review update" opens the wizard on the newer version the
- * source has.
+ * `filex` range for this server; "Review update" opens the wizard on the
+ * newer version the source has, and "Back to <version>" puts the version the
+ * last approval replaced back (wasmplugin/versions.go).
+ *
+ * ⚠⚠ Nothing updates itself (filex 0.48, owner's rule): every newer version
+ * waits for an administrator here, and everybody uses the version approved.
  *
  * ⚠ In the Version cell, not in columns of their own: two more columns
  * (Updates 240 px, Auto-update 130 px) squeezed every other column at 958 px
@@ -150,8 +153,8 @@ function onUpgraded(p: AppPlugin) {
 }
 
 /**
- * "Check for updates": every app's source, now. What may be applied is
- * installed by the server; the answer is the list redrawn and what moved.
+ * "Check for updates": every app's source, now. The server installs nothing;
+ * the answer is the list redrawn and what waits for an approval.
  */
 async function checkUpdates() {
   checking.value = true;
@@ -161,18 +164,12 @@ async function checkUpdates() {
     runtime.value = res.runtime;
     const r = res.report;
     const waiting = (r?.available?.length ?? 0) + (r?.needs_approval?.length ?? 0);
-    const updated = r?.updated?.length ?? 0;
     const failed = r?.failed?.length ?? 0;
-    if (updated || waiting) toast.success(t('appPlugins.updates.checked', { updated, waiting }));
-    // What could not be read or installed is said on its own, and the row
-    // says why — never folded into "0 updated" as if nothing had happened.
+    if (waiting) toast.success(t('appPlugins.updates.checked', { waiting }));
+    // What could not be read is said on its own, and the row says why —
+    // never folded into "all up to date" as if nothing had happened.
     if (failed) toast.warn(t('appPlugins.updates.failed', { count: failed }, failed));
-    if (!updated && !waiting && !failed) toast.success(t('appPlugins.updates.none'));
-    if (updated) {
-      // An updated pack may bring new strings; an updated app new menu rows.
-      invalidatePluginActions();
-      void loadOfferedLocales();
-    }
+    if (!waiting && !failed) toast.success(t('appPlugins.updates.none'));
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
   } finally {
@@ -180,10 +177,20 @@ async function checkUpdates() {
   }
 }
 
-async function setAutoUpdate(p: AppPlugin, on: boolean) {
+/**
+ * "Back to <version>": the version the last approval replaced, for everybody,
+ * without a new approval (its grant was approved when it was installed). The
+ * version it replaces is kept in turn.
+ */
+async function rollback(p: AppPlugin) {
+  const prev = p.previous;
+  if (!prev) return;
+  if (!window.confirm(t('appPlugins.rollbackConfirm', { name: labelFor(p), version: prev.version, current: p.version }))) return;
   busyId.value = p.id;
   try {
-    Object.assign(p, await AppPluginsApi.setAutoUpdate(p.id, on));
+    const back = await AppPluginsApi.rollback(p.id);
+    toast.success(t('appPlugins.rolledBack', { name: labelFor(p), version: back.version }));
+    await reload();
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.updateFailed')));
     await load();
@@ -282,14 +289,13 @@ function rowActions(row: AppPlugin): ContextAction[] {
   const review: ContextAction[] = updates.value.get(row.id)?.reviewable
     ? [{ key: 'update', label: t('appPlugins.actions.reviewUpdate'), icon: 'refresh' }]
     : [];
-  // The per-app switch, as a verb with two faces (an app with no source has
-  // nothing to follow, so no switch).
-  const auto: ContextAction[] = row.update_source
+  // The version the last approval replaced, when one is kept.
+  const back: ContextAction[] = row.previous
     ? [
         {
-          key: 'auto-update',
-          label: row.auto_update ? t('appPlugins.actions.autoUpdateOff') : t('appPlugins.actions.autoUpdateOn'),
-          icon: 'refresh',
+          key: 'rollback',
+          label: t('appPlugins.actions.rollback', { version: row.previous.version }),
+          icon: 'restore',
           disabled: busyId.value === row.id,
         },
       ]
@@ -297,7 +303,7 @@ function rowActions(row: AppPlugin): ContextAction[] {
   return [
     { key: 'details', label: t('appPlugins.actions.details'), icon: 'details' },
     ...review,
-    ...auto,
+    ...back,
     { key: 'upgrade', label: t('appPlugins.actions.upgrade'), icon: 'upload' },
     {
       key: 'remove',
@@ -314,7 +320,7 @@ function onRowAction(key: string, row: AppPlugin) {
   if (key === 'details') void router.push({ name: 'plugins.app', params: { name: row.name } });
   else if (key === 'upgrade') upgradeOf.value = row;
   else if (key === 'update') updateOf.value = row;
-  else if (key === 'auto-update') void setAutoUpdate(row, !row.auto_update);
+  else if (key === 'rollback') void rollback(row);
   else if (key === 'remove') void remove(row);
 }
 </script>

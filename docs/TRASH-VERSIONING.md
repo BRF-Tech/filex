@@ -10,7 +10,7 @@ Both features live entirely **inside the storage backend** you already mounted
 hidden `.versions/` prefix on the same disk/bucket. There is no separate trash
 server or version store to provision.
 
-- [Trash](#trash) — [how it works](#how-trash-works) · [retention & purge](#retention--purge) · [endpoints](#trash-endpoints) · [failure modes](#trash--failure-modes--troubleshooting)
+- [Trash](#trash) — [how it works](#how-trash-works) · [what it holds](#what-the-trash-holds) · [retention & purge](#retention--purge) · [endpoints](#trash-endpoints) · [failure modes](#trash--failure-modes--troubleshooting)
 - [Versioning](#versioning) — [how it works](#how-versioning-works) · [retention](#version-retention) · [what triggers a snapshot](#what-triggers-a-snapshot) · [endpoints](#versioning-endpoints) · [restoring is a write](#restoring-is-a-write) · [failure modes](#versioning--failure-modes--troubleshooting)
 - [See also](#see-also)
 
@@ -67,6 +67,22 @@ replaced it and for how an install that already took the damage repairs itself.
 >   it is refused with **403 `RESERVED_NAME`**. ⚠ Before 0.43 the file
 >   manager's `delete` hard-deleted it for any editor, which bypassed exactly
 >   that rule.
+
+### What the trash holds
+
+The trash holds what was **deleted in filex**: its bytes wait in
+`.filex-trash/`, and a restore puts them back. A file or folder deleted
+**outside filex** — in a shell, by another program on the disk, in the bucket —
+is not in the trash: there is nothing of it there to restore. The next scan
+that finds it gone removes it from the catalogue instead (see
+[STORAGE.md → Sync](STORAGE.md#sync)).
+
+> ⚠ Up to 0.47 the scan put such an item in the trash **where it stood**, and
+> the trash listed it with a Restore that could bring nothing back (issue #74).
+> From 0.48 those entries are no longer listed, and a restore of one by id
+> answers **404** `trash entry not found`; the next full scan of the storage
+> removes them from the catalogue, as do the nightly retention purge and
+> **Empty trash**. Nothing on the storage is touched.
 
 ### Every delete surface uses the same trash
 
@@ -137,8 +153,9 @@ column ("You" for your own deletes), the admin's Trash page by name.
   by the scanner, not by this delete.
 - **Nobody recorded.** An item shows a dash in two cases, and the hover text
   says so:
-  - nobody in filex deleted it: the scanner found it gone from the storage,
-    or the virus scan quarantined it;
+  - nobody in filex deleted it: the virus scan quarantined it (up to 0.47,
+    also an item the scanner found gone from the storage — see
+    [what the trash holds](#what-the-trash-holds));
   - it was deleted before this was kept.
 
   The two cannot be told apart, so neither is called "System".
@@ -150,6 +167,21 @@ column ("You" for your own deletes), the admin's Trash page by name.
 The listing resolves the names in one lookup per page, as the file listing
 does for owners. Nothing is backfilled: there is no honest way to know who
 deleted an item before the column existed.
+
+### Discarded drafts
+
+A [draft](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save) (a new
+document not saved yet) that its owner discards — *Discard* when closing it, or
+*Delete* in Drafts — goes to the trash like any other file, and the usual
+retention deletes it.
+
+- **Only its owner sees it there.** Drafts are private, and so is a discarded
+  one: the trash listing leaves it out for everybody else, administrators
+  included.
+- **"Deleted from" reads Drafts.** The entry carries `draft: true`, and its
+  `path` is just its name — never the hidden `.filex-drafts/…` folder it lived in.
+- **Restore puts it back in Drafts**, still meant for the folder it was
+  created for.
 
 ### Retention & purge
 
@@ -164,7 +196,7 @@ retention window and, for each one:
 
 1. deletes the backing storage object under `.filex-trash/` (**best‑effort** —
    if the driver delete fails, the run logs a warning and still continues).
-   A row the storage sync soft‑deleted **where it stood** (it found the file
+   A row soft‑deleted **where it stood** (a scan up to 0.47 found the file
    gone) has no bytes of its own, so only the row goes: whatever stands at its
    path now arrived later and is left alone. ⚠ The purge used to delete that
    path anyway, which destroyed a file that had come back under the old name —
@@ -196,7 +228,7 @@ logged; the next run tries again).
 
 | Method & path | Body / query | Notes |
 |---|---|---|
-| `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, **`ttl_days`** (days remaining before purge, floored at 0), and who deleted it: **`deleted_by_id`**, **`deleted_by_name`**, and **`deleted_by_self`** (`true` when it was the caller). The three are absent when nobody is recorded (see *Who deleted it* below). `total` counts the entries **the caller may see**, and `offset`/`limit` page through those — up to v0.46.0 a member whose trash was interleaved with entries they may not see was told `total` = the length of the filtered first page, and could not reach the rest. `limit` above 500 is read as 50. |
+| `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, **`ttl_days`** (days remaining before purge, floored at 0), and who deleted it: **`deleted_by_id`**, **`deleted_by_name`**, and **`deleted_by_self`** (`true` when it was the caller). The three are absent when nobody is recorded (see *Who deleted it* below). **`draft: true`** marks one of the caller's own [discarded drafts](#discarded-drafts), whose `path` is then just its name; nobody else is shown it. `total` counts the entries **the caller may see**, and `offset`/`limit` page through those — up to v0.46.0 a member whose trash was interleaved with entries they may not see was told `total` = the length of the filtered first page, and could not reach the rest. `limit` above 500 is read as 50. |
 | `POST /api/files/manager/restore` | `{ "node_id": 123 }` | Moves the file back to its original path and re‑attaches the row. Returns **409** `{ "code": "EXISTS", "name", "path" }` when something already holds that path; nothing moves and the entry stays in the trash. |
 | `POST /api/files/manager/restore?queued=1` | `{ "node_ids": [123, 124] }` | The same checks for every entry, and one refusal refuses the batch. What they allow is queued, one job per storage: **202** `{ "ops": [{ "kind": "restore", … }] }`, followed with `GET /api/files/ops`. An entry whose place is taken fails on its own, and the job's `error` says so; the others come back. Offered when `capabilities.queued` lists `restore`; the explorer's Restore uses it then. At most **1000** entries per request: more answer **400** `{ "code": "TOO_MANY", "max": 1000 }`. |
 
@@ -431,8 +463,11 @@ stays restorable from there.
 
 A snapshot is taken **only when** there is something to lose: the path already
 holds a catalogued **file**. A brand‑new file, a directory, and filex's own
-internal trees (`.versions/`, `.thumbs/`, `.filex-trash/`, `.keepdir` markers)
-cost one indexed lookup and nothing else.
+internal trees (`.versions/`, `.thumbs/`, `.filex-trash/`, `.filex-drafts/`,
+`.keepdir` markers) cost one indexed lookup and nothing else. So a draft,
+which the editor saves into every few seconds, collects no version history;
+once it is saved into its folder, its later saves are versioned like any
+other file's.
 
 > ⚠ **This used to be untrue, and the untrue version was written down.** Until
 > the pre‑write guard landed, the only wired trigger really was the text‑editor
@@ -467,7 +502,8 @@ non‑default state is visible without reading the config.
 - **Extension whitelist:** only text/code types round‑trip here — `txt`, `md`,
   `json`, `jsonc`, `yaml`/`yml`, `toml`, `ini`, `env`, `csv`, `xml`, `svg`,
   `html`, CSS/SCSS/LESS, JS/TS/JSX/Vue/Svelte, and common source languages
-  (`go`, `py`, `php`, `rb`, `rs`, `java`, `c`/`cpp`/`h`, `sh`, `sql`, …), plus
+  (`go`, `py`, `php`, `rb`, `rs`, `java`, `c`/`cpp`/`h`, `sh`, `sql`, …), draw.io
+  diagrams (`drawio`, `dio` — their XML, saved by the draw.io viewer), plus
   special filenames like `Dockerfile`, `Makefile`, `.gitignore`,
   `.editorconfig`. Anything else returns **415 `extension not allowed for
   save-text`** — binary/office formats have dedicated edit channels (e.g.

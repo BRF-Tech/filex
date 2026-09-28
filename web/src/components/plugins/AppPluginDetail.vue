@@ -616,6 +616,12 @@ function onLockAction(key: string, row: AppPluginLock) {
             <dd class="font-mono">{{ detail.name }}</dd>
             <dt class="text-zinc-500">{{ t('appPlugins.fields.version') }}</dt>
             <dd>{{ detail.version }}</dd>
+            <template v-if="detail.previous">
+              <dt class="text-zinc-500">{{ t('appPlugins.detail.previous') }}</dt>
+              <dd data-testid="app-plugin-previous">
+                {{ t('appPlugins.detail.previousText', { version: detail.previous.version, when: formatDate(detail.previous.replaced_at, locale) }) }}
+              </dd>
+            </template>
             <dt class="text-zinc-500">{{ t('appPlugins.detail.source') }}</dt>
             <dd class="break-all">
               {{ sourceLabel(detail.source) }}
@@ -625,6 +631,10 @@ function onLockAction(key: string, row: AppPluginLock) {
             <dd>{{ detail.signed ? t('appPlugins.detail.signed') : t('appPlugins.detail.unsigned') }}</dd>
             <dt class="text-zinc-500">{{ t('appPlugins.detail.sha256') }}</dt>
             <dd class="break-all font-mono sm:col-span-3">{{ detail.sha256 || '—' }}</dd>
+            <template v-if="detail.ui">
+              <dt class="text-zinc-500">{{ t('appPlugins.wizard.uiGroup.sha256') }}</dt>
+              <dd class="break-all font-mono sm:col-span-3" data-testid="app-plugin-ui-sha256">{{ detail.ui.sha256 }}</dd>
+            </template>
             <dt class="text-zinc-500">{{ t('appPlugins.detail.installed') }}</dt>
             <dd>{{ formatDate(detail.created_at, locale) }}</dd>
             <dt class="text-zinc-500">{{ t('appPlugins.detail.updated') }}</dt>

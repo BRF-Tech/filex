@@ -313,7 +313,7 @@ type TicketUpload struct {
 // thumbnailing, write-hook and DB-cache behaviour.
 func NewTicketUpload(store db.Store, resolver func(int64) (storage.Driver, error), tickets *uploadTicketStore) *TicketUpload {
 	return &TicketUpload{
-		ops:     newAIOps(store, resolver, nil, "", nil),
+		ops:     newAIOps(store, resolver, nil, ""),
 		tickets: tickets,
 		limiter: newIPLimiter(120, time.Hour),
 	}

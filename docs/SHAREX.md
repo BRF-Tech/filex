@@ -88,7 +88,8 @@ that link.
 - The **`?inline=1`** suffix makes the file render **in the browser**
   (`Content-Disposition: inline`) instead of forcing a download — so pasted
   screenshots and text snippets just *show*. (Drop the suffix, or use the
-  Share/Permissions dialog, if you'd rather force a download.)
+  Share/Permissions dialog, if you'd rather force a download.) An HTML or
+  SVG file renders sandboxed, without scripts.
 - Uploads land in a **`sharex/` folder** at the token's root by default. Each
   capture is stored under a random‑prefixed filename, so every upload gets its
   own fresh link — a same‑named capture never overwrites or repoints an earlier

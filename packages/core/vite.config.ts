@@ -51,6 +51,14 @@ export default defineConfig({
     rollupOptions: {
       external: [
         'vue',
+        // The bell's popover and the account menu (NotificationBell,
+        // AccountMenu) — a DEPENDENCY of this package, kept out of its bundle
+        // so the admin SPA, which imports it too, does not carry two copies.
+        // The web-component build bundles it once (packages/webcomponent).
+        '@headlessui/vue',
+        // The user settings dialog's rail glyphs (UserSettingsDialog) — the
+        // admin app's own icon set, kept external for the same reason.
+        'lucide-vue-next',
         // Optional peers — the editor + preview path lazy-imports these
         // at runtime; the consumer either installs them or the feature
         // gracefully degrades. See FileExplorer + PreviewModal sources
@@ -75,6 +83,8 @@ export default defineConfig({
       output: {
         globals: {
           vue: 'Vue',
+          '@headlessui/vue': 'HeadlessUIVue',
+          'lucide-vue-next': 'LucideVueNext',
           'monaco-editor': 'monaco',
           'highlight.js': 'hljs',
           'markdown-it': 'markdownit',

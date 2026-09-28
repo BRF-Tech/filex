@@ -31,7 +31,7 @@ import {
   drawsAsVideo,
   type FilePreview,
 } from '../lib/filePreview'; /* gorunum:v1-preview */
-import { byFoldersFirst, parentDirOf } from '../lib/listing'; /* gorunum:v1 */
+import { byFoldersFirst, displayParentDirOf } from '../lib/listing'; /* gorunum:v1 */
 import {
   groupByDate,
   groupingActive,
@@ -649,10 +649,10 @@ function snippetTitle(snippet: string): string {
                Location cell (tablo:t1). The dash read as a stray character under
                the filename in search results. -->
           <div
-            v-if="showParentPath && parentDirOf(n.path)"
+            v-if="showParentPath && displayParentDirOf(n)"
             class="fe-grid__parent"
-            :title="parentDirOf(n.path)"
-          ><bdi>{{ parentDirOf(n.path) }}</bdi></div>
+            :title="displayParentDirOf(n)"
+          ><bdi>{{ displayParentDirOf(n) }}</bdi></div>
           <!-- bul:s3 — content snippet («» → <mark> via TEXT segments, no innerHTML) -->
           <div v-if="cardSnippet(n)" class="fe-grid__snippet" :title="snippetTitle(cardSnippet(n))">
             <template v-for="(seg, si) in snippetSegments(cardSnippet(n))" :key="si">

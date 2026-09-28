@@ -20,6 +20,11 @@ are the server's own binaries, offered through one host function under one
 permission each, with the arguments checked so they can only name the files
 the app was handed.
 
+An app may also bring — or be nothing but — **its own interface**: HTML,
+CSS and JavaScript filex serves from the app's approved package and runs in a
+sandboxed frame whose policy allows it no connection, no storage and no
+cookie, talking to filex over one checked channel ([An app's own interface](#an-apps-own-interface)).
+
 ```
 Admin → Plugins → Apps → Install an app      Explorer: right-click a file
    ┌─────────────────────────┐                ┌────────────────────────────────┐
@@ -51,9 +56,8 @@ or use them as the starting point for your own.
 | **e-Signature** | [`BRF-Tech/filex-sign`](https://github.com/BRF-Tech/filex-sign) | **Sign…**, **Request signatures…**, **Sign / Fill** and **Verify** on PDFs (and office documents, converted first); a **Signatures** home screen; a **Signatures** section in a document's details. In English, Turkish, Spanish, German and French. The worked example on this page: [Signing documents, end to end](#signing-documents-end-to-end). |
 | **Convert** | [`BRF-Tech/filex-convert`](https://github.com/BRF-Tech/filex-convert) | **Convert…** on any file or selection: images, video, audio, documents, e-books, archives, data, subtitles and fonts. See [Converting files](#converting-files). |
 
-The Convert app is not the older, optional [converter side-car](CONVERT-INTEGRATION.md),
-which is a separate service filex calls over HTTP; the two can be used side by
-side.
+Since 0.48 the Convert app is how filex converts files: the older iframe
+converter (a p2r3/convert side-car behind `FILEX_CONVERT_URL`) was removed.
 
 ## Install one
 
@@ -68,8 +72,9 @@ side.
 
 There is no marketplace. An app is a public repository whose root holds
 `filex-app.json`; that address is how it is found, shared and updated —
-installed from a repository or an address, an app **follows it** and moves to
-newer versions by itself ([Updates](#updates)).
+installed from a repository or an address, an app **follows it**: filex says
+when a newer version is there, and an administrator approves it
+([Updates](#updates)). Nothing updates itself.
 
 ### From GitHub, step by step
 
@@ -87,7 +92,7 @@ newer versions by itself ([Updates](#updates)).
 5. The wizard ends on *"The app is installed and running."* The app's rows are
    in the file menu from the next time it is opened.
 
-![The install wizard stopped at the permission review](screenshots/v0.47.0/apps/apps-install-review-1440.png)
+![The install wizard stopped at the permission review](screenshots/v0.48.0/apps/apps-install-review-1440.png)
 
 ### The permission review
 
@@ -149,13 +154,13 @@ check found ([Updates](#updates)) — state (*Running*, *Off*, *Refused* or
 *Failed*, with the reason), a **Wakes hourly** badge for an app granted
 `schedule`, how many permissions it holds, an **Enabled** switch, and the
 row's one **Actions** menu: **Details**, **Review update** (when there is
-one), **Turn off / Turn on automatic updates** (an app with a source),
-**Upgrade**, **Remove**. A banner above the table says whether apps are on
+one), **Back to *version*** (when the version the last approval replaced is
+kept), **Upgrade**, **Remove**. A banner above the table says whether apps are on
 here, which engines this host has, whether signatures are required, and when
 the apps' sources were last checked for updates; **Check for updates** beside
 **Refresh** asks them now.
 
-![The Apps tab, a language pack among the apps](screenshots/v0.47.0/langpack/apps-list-1440.png)
+![The Apps tab, a language pack among the apps](screenshots/v0.48.0/langpack/apps-list-1440.png)
 
 A **language pack** (below) sits in the same list and is read the same way —
 its row says what it is, and, per language, how much of THIS filex it
@@ -171,10 +176,9 @@ translates.
   review when the new version asks for more. **Review update** is the upgrade
   to the newer version the app's own source has — no source to type in, the
   wizard opens on its review ([Updates](#updates)).
-- **Turn off / Turn on automatic updates** — whether a newer version that
-  asks for nothing new is installed by itself; the Version cell says *Automatic
-  updates are off* while it is. Not offered for an app installed from a file:
-  there is nothing to ask.
+- **Back to *version*** — puts back the version the last approval replaced
+  ([Going back](#going-back)), for everybody, after asking; the version it
+  replaces is kept in its turn, so you can go forward the same way.
 - **Remove** deletes the module, its settings, its action overrides, **its
   per-file state (every request it had open), its locks (so every lock it held
   is lifted), its queued work and its schedule**. The links it opened stay in
@@ -184,10 +188,11 @@ translates.
 **Details** opens the app's own page — `/admin/plugins/apps/<name>`, one
 section per card, **Back** returns to the Apps tab:
 
-![An installed app's details](screenshots/v0.47.0/apps/apps-detail-1440.png)
+![An installed app's details](screenshots/v0.48.0/apps/apps-detail-1440.png)
 
-- **The facts** — name, version, source (for a GitHub install,
-  `https://github.com/<repo>@<tag>`), signed or unsigned, SHA-256, when it was
+- **The facts** — name, version, the version kept to go back to, source (for
+  a GitHub install, `https://github.com/<repo>@<tag>`), signed or unsigned,
+  SHA-256 (and the interface's, for an app that has one), when it was
   installed and updated, and what it was allowed to do — in the sentences the
   install review showed, the permission's key only as a tooltip.
 - **Settings** — the form the manifest declares (`settings[]`, the same field
@@ -237,68 +242,94 @@ section per card, **Back** returns to the Apps tab:
 An app installed from a GitHub repository or an address **follows it**. Once
 a day — and whenever you press **Check for updates** on the Apps tab — filex
 asks each app's source whether there is a newer version this filex can run,
-and installs it by itself when it asks for nothing you have not already
-approved.
+and **tells you**.
+
+⚠⚠ **Nothing updates itself** — not an app with a module, not an app with its
+own interface, not a language pack, not a storage plugin. A newer version
+waits for an administrator to approve it, and everybody then uses the version
+approved. (filex 0.47 installed a newer version by itself when it asked for
+no new permission. 0.48 removed that: an app's interface is code that runs in
+every person's browser, and "it asks for nothing new" says nothing about what
+new code does with what it already has. The administrator who approved a
+version decides the next one.)
 
 | Installed from | Where filex looks for a newer version |
 |---|---|
-| a GitHub repository at a **release tag** (`v0.1.1` — how apps with a module are released) | the repository's **releases**: the newest one that is neither a draft nor a pre-release, whose `filex-app.json` at that tag names the same app and whose [`filex` range](PLUGIN-KIT.md#which-filex-it-works-with) lets this filex in. A release that needs a newer filex is stepped over to the newest one that does not (up to five are read per check) |
+| a GitHub repository at a **release tag** (`v0.1.1` — how apps with a module are released) | the repository's **releases**: the newest one that is neither a draft nor a pre-release, whose `filex-app.json` at that tag names the same app and whose [`filex` range](PLUGIN-KIT.md#which-filex-it-works-with) lets this filex in. A release that needs a newer filex is stepped over to the newest one that does not (up to five are read per check). The release's notes come with it, for the review |
 | a GitHub repository at a **branch** (`main` — how language packs are published) | that branch's `filex-app.json`, when its `version` is higher |
 | an **address** | the manifest's address again; the module from the new manifest's `wasm.url` when that is a full address, else from the address it was installed from |
 | **uploaded files** | nowhere — the row says *Installed from a file: there is no source to check for updates* |
 
 "Newer" is a higher [semantic version](https://semver.org) in the manifest's
-`version`; a pre-release (`1.2.0-rc.1`) is never taken. Every newer version is
-fetched and checked exactly as an install is — HTTPS only, the size caps, the
-SHA-256 its manifest pins, the signature on an instance that requires one,
-the module's own description of itself — and installed through the same
-upgrade: the old files are kept until the new module has proven itself, and
-put back when it does not.
+`version`; a pre-release (`1.2.0-rc.1`) is never taken.
 
-### What is installed without asking
+### Approving a newer version
 
-Each app's automatic updates are **on** by default; **Actions → Turn off
-automatic updates** switches them off for that app.
+A row with a newer version says **Update available** — or **Needs approval**
+when it asks for a new permission, or when a language pack now brings a
+module (code that runs where nothing did). **Actions → Review update** opens
+the review of that version, fetched from the app's own source, and it says
+what the version changes:
 
-- **A newer version that asks for the same permissions — or fewer — is
-  installed by itself.** The permissions are what you approved about an app:
-  every host function is held to them, so a version inside the same grant can
-  do nothing you did not already allow. That is every version of a language
-  pack (no module, no permissions) and most versions of an app.
-- **A version that asks for a new permission is never installed by itself.**
-  Its row says **Needs approval** and what it adds; **Actions → Review update**
-  opens the review of that version — the version jump, the new permission
-  marked **New** — and **Upgrade** installs it once you have ticked the box.
-- **A language pack that becomes an app with a module** — code that runs
-  where nothing did — waits for approval the same way, whatever permissions it
-  asks for.
-- With automatic updates off, a newer version is only announced (**Update
-  available**) and waits for **Review update**. An app installed from an
-  address whose SHA-256 you typed yourself starts with it off: you pinned
-  those exact bytes.
-- On an instance that only accepts signed apps (`FILEX_PLUGIN_TRUSTED_KEYS`),
-  nothing is installed by itself — a repository carries no detached
-  signature. Newer versions are announced; upload the signed module to
-  upgrade.
+- the version jump, the permissions it adds (marked **New** in the list) and
+  the ones it drops;
+- the module, by its SHA-256 before and after, and whether the version
+  brings one where there was none;
+- the interface: added, dropped or changed, by its SHA-256, and which of its
+  files were added, removed and changed (a list you can open);
+- the filex range and the signature, when they change;
+- the source's own **release notes**, shown as plain text.
 
-An app that is switched off is updated too, and stays off.
+**Upgrade** installs it for everybody once you have ticked the box. Every
+newer version is fetched and checked exactly as an install is — HTTPS only,
+the size caps, the SHA-256 its manifest pins, the signature on an instance
+that requires one, the module's own description of itself — and installed
+through the same upgrade: the old files are kept until the new module has
+proven itself, and put back when it does not.
+
+On an instance that only accepts signed apps (`FILEX_PLUGIN_TRUSTED_KEYS`) a
+repository carries no detached signature: upload the signed module to
+upgrade.
+
+An app that is switched off can be upgraded too, and stays off.
+
+### Going back
+
+The version an approval replaced is **kept** — its module, manifest,
+interface and mirrored files, and the permissions it ran under — one version
+per app, under `<FILEX_APP_PLUGINS_DIR>/_versions/`. **Actions → Back to
+*version*** puts it back for everybody, after asking. It does not ask you to
+approve its permissions again: they were approved when that version was
+installed. The version it replaces is kept in its turn, so going forward
+again is the same action.
+
+A kept version is held to the hashes recorded when it was replaced: files
+that changed on disk since are refused, and the running version stays.
+Removing the app removes what it kept. A browser tab that is still open on
+the replaced interface keeps loading its files until it is reloaded — the
+address carries the interface's hash, so an approval never swaps files under
+an open page.
 
 ### What you are told
 
 - **The Version cell**, under the version: *Update available* (and the
-  jump, `1.0.0 → 1.0.1`),
-  *Needs approval* (and what it adds), *Updated automatically* (for a week,
-  with the version it came from), *Update failed* (the version that was tried
-  and undone — the old one keeps running; the reason on hover), *Could not
-  check* (and why), a newer version that needs a newer filex, *Up to date*, or
-  *Not checked yet*.
-- **The bell**, administrators only: an app that moved (*"Spanish language
-  pack updated to 0.1.4"*), and — once per version, not every day — one that
-  waits for you or could not be installed. A source that could not be read is
+  jump, `1.0.0 → 1.0.1`), *Needs approval* (and what it adds), *Could not
+  check* (and why), a newer version that needs a newer filex, *Up to date*,
+  or *Not checked yet* — and, when one is kept, *Version 0.9.0 is kept to go
+  back to*. (A row filex 0.47 wrote may still say *Update failed*: the
+  version its automatic update tried and undid.)
+- **The bell**, administrators only: once per version, not every day, a
+  newer one that waits for you; and every approved change — *"Spanish
+  language pack is now 0.1.4"*, or back. A source that could not be read is
   not rung: an air-gapped server would hear it every day. The list says it.
-- **The app's Log**: every check and every update. **The Audit log**:
-  `app_plugin.update` for every automatic update (by nobody, with `from`,
-  `to`, `automatic` and the source).
+- **The people using the app**: an interface that is open when a version is
+  approved says so above itself, with **Reload** (which asks about unsaved
+  changes first); the first time someone opens the app after an approval, it
+  says *"… was updated to 1.3.0"* — once per person.
+- **The app's Log**: every check, every upgrade and every return. **The
+  Audit log**: `app_plugin.upgrade` and `app_plugin.rollback`, each naming
+  the administrator, with `from`, `to`, the permissions added and dropped,
+  and the interface's hashes when they changed.
 
 ### Which filex an app works with
 
@@ -457,6 +488,166 @@ database — is [APP-PLUGINS-API.md → The scheduled wake-up](APP-PLUGINS-API.m
 
 ---
 
+## An app's own interface
+
+Besides the screens filex draws for it, an app may bring **its own
+interface** — HTML, CSS and JavaScript its author wrote: a diagram editor, a
+text editor for a format of its own, a viewer. There are still exactly two
+kinds of plugin, storage plugins and apps; an app is a module, an interface,
+or both:
+
+| The app has | Example |
+|---|---|
+| a module (the WebAssembly engine) | Convert, e-Signature |
+| an interface | a diagram editor: everything happens in the browser, there is nothing for a module to do |
+| both | an editor that asks its module for the heavy part |
+
+filex serves the interface from the app's own package and runs it in a
+**sandboxed frame**:
+
+- **The package is what you approved.** The interface is a zip pinned by its
+  SHA-256 in the manifest (or checked at upload), read once at install and
+  never unpacked: every file the browser gets is looked up in the zip's own
+  index. A file the package does not hold does not exist.
+- **The frame is given no connection, no storage and no cookie.** The frame is an
+  opaque origin (`sandbox="allow-scripts"`, never `allow-same-origin`), and
+  every page of the interface is served with a policy filex builds from the
+  app's grant — `connect-src 'none'`, scripts only from the package, no frame
+  of its own, no form, no plug-in. The interface cannot read filex's session,
+  cannot call filex's API, cannot see the page around it.
+- **Everything else goes through filex.** The interface talks to filex over a
+  message channel filex set up with that one frame, and filex decides every
+  call: it reads only the files the interface was opened with, saves only over
+  those (a new version, or the draft it is), and only when the app holds
+  `files:read` / `files:write` and the person may write the file. The server
+  checks every save again.
+
+⚠ **What a sandbox cannot promise.** Browsers cannot entirely stop a page
+from sending data out: WebRTC connections ignore a page's content policy.
+filex closes what can be closed — Chrome honours a `Connection-Allowlist`
+filex sends, in Firefox a script filex runs before the app's own removes
+WebRTC — but on a page that embeds the explorer without a content policy of
+its own, and in browsers that do not know these measures, an interface that
+wants to send what it can see may find a way. **Trust an app with an
+interface as far as you trust its author with the files you open in it.**
+The install review says this in so many words; it never says the app "cannot
+reach the network".
+
+**Decided on purpose** (from the security review of this feature):
+
+- **Any page may frame an interface** (`frame-ancestors *`). The explorer is
+  embedded in other sites (the web component, the desktop app), and filex
+  cannot list them. A page that frames an interface directly, without filex,
+  gets nothing from it: the interface holds no session, no storage and no
+  file of the person's — everything it has comes from the page that answered
+  its hello, and that page is then the one it talks to.
+- **An interface's address is built from the host it was asked on**, not from
+  `FILEX_PUBLIC_URL`: the same filex answers on a LAN address, a tenant's
+  host and its public name, and the page and its interface must be on the
+  same one. The page is revalidated at every opening and varies on `Host`,
+  so no cache hands one host's answer to another.
+
+### What the review shows
+
+On top of the permission list, an app with an interface gets an
+**Interface** group:
+
+- **Has its own interface**, the package's SHA-256, its size and how many
+  files it holds, and whether the app also has a module.
+- **Every address outside the package** the interface loads, one line each,
+  with the author's reason:
+  - **Mirrored** (green) — *filex downloads this file once and serves it
+    itself; browsers never ask this address.* The file is pinned by its
+    SHA-256 at install; a download that does not match is refused. Not a
+    permission.
+  - **Live, read only** (yellow) — *your browser loads files from this
+    address. Its owner sees who uses the app and when, and the interface can
+    add data from the file you opened to those requests (in the address). If
+    the address belongs to the app's author, that means the data can reach
+    the author.* A live address is a permission (`ui-net:…`) you grant like
+    any other; only styles, fonts, images and audio or video can be live.
+    Scripts are never loaded from outside the package, and an interface is
+    never allowed to exchange data with an address — an app that needs data
+    asks its module, whose `http:<host>` permission you approve and whose
+    requests go through the server.
+  - **Script-policy exceptions** — `ui:eval` (code the interface builds while
+    it runs) and `ui:wasm-eval` (WebAssembly compiled in the page), each a
+    permission. They open no channel; they make a mistake inside the
+    interface easier to exploit.
+  - **Saves files to your computer** — `ui:download`: the interface may hand
+    you a file to keep (an export); filex does it, each time on your click in
+    the interface or your yes.
+  - **Reads its own package** — `ui:package-fetch`: the interface loads its
+    own files while it runs (an editor's shape libraries and translations). This
+    version's files and nothing else; it reaches no other app, not filex, not
+    the network.
+- The honest note about WebRTC, always.
+
+An upgrade that adds an address, changes one, or adds an exception is a new
+permission and stops at the review like any other.
+
+### What a person sees
+
+- **A file type the app opens.** An app whose interface is a *viewer*
+  (a Markdown editor for `.md`, say) opens those files: double-click, **Open** and
+  **Preview** show it in the preview's place, under the same bar; **Open
+  with** *the app* in the file menu picks it explicitly when several apps open the
+  type. **Open in new tab** opens it in the same app, in a tab of its own.
+  Saving writes a new version of the file (with versioning on, the
+  previous one is kept); a new document made with **New document** is a
+  draft until its first **Save** ([Drafts](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save))
+  and the app writes into the draft without knowing it.
+- **New files of the app's kind.** An app may add rows to **New document**
+  (draw.io: *draw.io diagram*): under **Apps**, in the app's own words. The
+  file is made from the app's template (or empty) and opens in the app — a
+  draft until its first save. The review lists each kind (*Adds a new
+  .drawio file to the New menu*).
+- **Unsaved changes.** An interface says when it holds changes it has not
+  saved; closing it then asks **Save and close**, **Close without saving** or
+  **Keep editing**, and the browser asks before the tab goes.
+- **Dialogs, pages, the details panel, the Apps list.** An action whose screen
+  is the app's interface opens it in a dialog or a tab; an interface can be a
+  section of a file's details, or the app's home screen under **Apps**.
+- **The look.** The interface is handed filex's colours and language and
+  follows them when they change.
+- **Its own small store.** An interface cannot keep anything in the browser;
+  what it keeps (a panel's width, a recent colour) lives with the person's
+  preferences, 16 KiB per app.
+
+| The review of an app with its own interface | Its kind of file in **New document**, under **Apps** |
+|---|---|
+| ![The install review's Interface group](screenshots/v0.48.0/apps/app-interface-review-1440.png) | ![New document offering the app's kind of file](screenshots/v0.48.0/apps/app-new-document-1440.png) |
+
+| …and the interface open on its file type, where filex's preview would be (a small example app, written for these pictures) |
+|---|
+| ![An app's own interface open as a file's viewer](screenshots/v0.48.0/apps/app-interface-viewer-1440.png) |
+
+### An origin of their own
+
+By default an interface is served from filex's own address
+(`/_appui/<app>/<package>/…`) and made a stranger to it by the sandbox: the
+frame's origin is opaque, the route asks for no credential and sets no
+cookie. `FILEX_APP_UI_ORIGIN` moves interfaces to a host of their own — a
+second wall, for an instance that wants one:
+
+- Point a second host at the same filex (the bundled
+  [`deploy/compose/Caddyfile`](../deploy/compose/Caddyfile) has the block,
+  commented) and set `FILEX_APP_UI_ORIGIN=https://that-host`. filex answers
+  **only** the interface route (and `/healthz`) there, and refuses the
+  interface route on its own host; interface addresses become absolute on
+  that host, filex's pages may frame it (`frame-src`), and each interface's
+  policy names it.
+- ⚠ Choose a host on **another registrable domain**
+  (`apps.example-usercontent.com` for `files.example.com`). A sibling
+  subdomain shares filex's site: WebKit sends a `SameSite=Lax` cookie to it,
+  and a cookie set for the parent domain (`FILEX_COOKIE_DOMAIN`) reaches it.
+  The route ignores cookies either way — the point of a separate site is that
+  it never receives one.
+- The frame stays sandboxed and the bridge unchanged: a separate origin is
+  added to the sandbox, not put in its place.
+- Not an origin, or filex's own, and filex refuses to start, saying what to
+  write.
+
 ## Signing documents, end to end
 
 This section walks through the e-Signature app
@@ -526,7 +717,7 @@ an optional reason. On an office document the first screen offers to
    purpose: what is being asked of whom is one decision, where it goes is
    the next. Every signer needs at least one signature box.
 
-   ![Defining the boxes](screenshots/v0.47.0/signing/sign-define-1440.png)
+   ![Defining the boxes](screenshots/v0.48.0/signing/sign-define-1440.png)
 
 4. **Place them** — the document, and the boxes that still need a place.
    Choose one, then tap the page where it goes, or drag to size it as you
@@ -534,7 +725,7 @@ an optional reason. On an office document the first screen offers to
    again, copied to another page or deleted. The step cannot be left while a
    box has nowhere to go.
 
-   ![Placing the boxes on the document](screenshots/v0.47.0/signing/sign-place-1440.png)
+   ![Placing the boxes on the document](screenshots/v0.48.0/signing/sign-place-1440.png)
 
 5. **Time** — *How long do they have?* How many days the links are valid
    (14 by default, at most 90 — both pulled down to the instance's maximum
@@ -605,7 +796,7 @@ during which even the right PIN is refused.
 
 | The partner's link, behind its PIN | …and what it opens: only their own boxes |
 |---|---|
-| ![The outside signer's PIN gate](screenshots/v0.47.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](screenshots/v0.47.0/signing/sign-outside-fill-1440.png) |
+| ![The outside signer's PIN gate](screenshots/v0.48.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](screenshots/v0.48.0/signing/sign-outside-fill-1440.png) |
 
 Both kinds of signer then walk the same three steps:
 
@@ -635,7 +826,7 @@ fingerprint, and the certificate files to keep.
   file), and the audit trail saved. These controls are offered to anybody who
   may edit the document, not only to the requester.
 
-  ![The document frozen, its Signatures panel open](screenshots/v0.47.0/signing/sign-status-1440.png)
+  ![The document frozen, its Signatures panel open](screenshots/v0.48.0/signing/sign-status-1440.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* — and,
@@ -646,7 +837,7 @@ fingerprint, and the certificate files to keep.
   asked for, only the requester's own links listed, and every read written to
   filex's audit trail.
 
-  ![The Signatures screen's PINs section](screenshots/v0.47.0/signing/sign-pins-1440.png)
+  ![The Signatures screen's PINs section](screenshots/v0.48.0/signing/sign-pins-1440.png)
 - **The bell** tells the requester when an outside signer opened the
   document, when somebody signed or refused, and when everything is done.
 
@@ -810,7 +1001,7 @@ short wizard in a dialog, with only the steps that have something to ask:
 4. **Review** — what will happen, including the route the conversion takes,
    then **Convert**.
 
-![The converter's wizard](screenshots/v0.47.0/apps/convert-wizard-1440.png)
+![The converter's wizard](screenshots/v0.48.0/apps/convert-wizard-1440.png)
 
 The result lands **beside the input**, as `<name>.<new extension>` (pages and
 frames as `<name>-1.png`, `<name>-2.png`, …); a taken name gets a suffix, and
@@ -927,6 +1118,10 @@ release, so this is a development-instance matter.
 | Limit | Default | Why |
 |---|---|---|
 | Module size | 64 MiB | a Go module is 3–25 MB; larger is a mistake |
+| Interface bundle | 128 MiB zipped (`FILEX_APP_PLUGIN_MAX_UI_MB`), 512 MiB unzipped, 20 000 files, 64 MiB a file (8 MiB an HTML page) | draw.io's whole editor is about 60 MB zipped; the rest is a zip bomb |
+| Mirrored external files | 32 MiB a file, 128 MiB an app, 32 addresses | a font or a stylesheet, fetched once at install through the same guarded client as the module |
+| An interface's save | 512 MiB (`FILEX_APP_PLUGIN_MAX_OUTPUT_MB`) | the same ceiling as a job's output |
+| An interface's call to its module | 4 MiB answer, the screen's time limit | a larger answer is a file |
 | Memory per call | 64 MiB, at most 256 MiB (manifest `limits.memory_pages`) | the sandbox's ceiling; a runaway app is torn down, filex is not |
 | Screen call | 15 s, at most 60 s | a screen must answer while a person waits |
 | Action job | 5 min, at most 15 min | conversions and signatures; longer is a job that should be smaller |
@@ -958,6 +1153,7 @@ admin surface refuses installs regardless.
 | `FILEX_APP_PLUGIN_MAX_INPUT_MB` | `256` | Per-file input ceiling for a job |
 | `FILEX_APP_PLUGIN_MAX_OUTPUT_MB` | `512` | Per-file output ceiling for a job |
 | `FILEX_APP_PLUGIN_MAX_WASM_MB` | `64` | Largest module an install accepts |
+| `FILEX_APP_PLUGIN_MAX_UI_MB` | `128` | Largest interface bundle (zipped) an install accepts |
 | `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every app's source for a newer version and installs the ones that ask for nothing new ([Updates](#updates)). `0` = no request leaves the server for it; **Check for updates** still works. Off on a demo regardless |
 | `FILEX_PLUGIN_TRUSTED_KEYS` | — | Shared with storage plugins: set it and every module must carry a detached ed25519 signature over its sha256 |
 | `FILEX_SECRET_KEY` | — | Seals secret settings, the signing authority's key and share PINs; without it secret settings and signing answer *unavailable*, and a PIN cannot be read back later. The public-link unlock cookie falls back to a per-process key: it works, but a restart signs visitors out and two instances behind one address do not share it |
@@ -973,6 +1169,9 @@ changes.
 <data-dir>/app-plugins/
   <name>/plugin.wasm       the module, sha256-checked at every load
   <name>/filex-app.json    the manifest as installed (the approved grant is in the database)
+  <name>/ui.zip            the app's own interface, as installed — never unpacked,
+                           sha256-checked at every load, served from its own index
+  <name>/ui-ext/<sha256>   the external files the interface mirrors
   cache/                   compiled modules (safe to delete; rebuilt on next load)
   spool/                   per-call working files (emptied on boot)
   public/<share id>/       the copies an app's public link exposes
@@ -980,6 +1179,8 @@ changes.
                            kept across upgrades, removed with the app
   <name>.prev/             the previous version while an upgrade swaps it in;
                            put back at start if the process stopped mid-swap
+  _versions/<name>/<id>/   the version the last approval replaced, kept to go
+                           back to (one per app; removed with the app)
 ```
 
 Tables: `app_plugins`, `app_plugin_settings`, `app_plugin_overrides`,
@@ -989,10 +1190,14 @@ its hash so an app can find its own documents again), `app_plugin_jobs`,
 (every authority, retired ones included). An app's public links are rows in
 **`shares`**, carrying `plugin_id`, `page_id`, `subject` and the app's own
 record — there is no separate page table any more. `app_plugins` also keeps
-each app's automatic-update switch (`auto_update`), the manifest address of a URL install and
-what the last update check found. Audit entries:
+the manifest address of a URL install, the signature it was installed with,
+the interface bundle's SHA-256 and what the last update check found;
+`app_plugin_versions` keeps the version the last approval replaced (the
+`auto_update` column filex 0.47 used is no longer read). Audit entries:
 `app_plugin.action_run`, `app_plugin.page_job`, `app_plugin.unlock`,
-`app_plugin.update` (an automatic update),
+`app_plugin.upgrade` and `app_plugin.rollback` (an administrator's approved
+change, by whom), `app_plugin.update` (an automatic update, written only by
+filex 0.47), `app_plugin.ui_save` (an interface saved a file),
 `app_plugin.signing_ca_import`, `share.pin_revealed` for every PIN read back,
 and `share.pin_locked` for a PIN gate that shut (the row carries the token's
 hash, never the token).
@@ -1005,12 +1210,13 @@ panel can explain):
 
 | Route | Purpose |
 |---|---|
-| `GET /` | `{runtime: {enabled, arch_ok, disabled_reason, requires_signature, engines, filex_version, compat_enforced, update_check, updates_checked_at}, plugins: [...]}` — a row carries `compat`, `auto_update`, `update_source` and `update` (what the last check found) |
-| `POST /` | install — multipart `wasm` + `manifest` (+ `signature`, `grant` JSON), or JSON `{github_repo, ref, permissions}`, or JSON `{url, manifest_url, sha256, permissions}`; `?dry_run=1` answers the permission review without installing |
+| `GET /` | `{runtime: {enabled, arch_ok, disabled_reason, requires_signature, engines, filex_version, compat_enforced, update_check, updates_checked_at}, plugins: [...]}` — a row carries `compat`, `update_source`, `update` (what the last check found, with the release's `notes`), `previous` (the version kept to go back to), `engine` and `ui` |
+| `POST /` | install — multipart `wasm` + `manifest` (+ `ui`, `signature`, `grant` JSON), or JSON `{github_repo, ref, permissions}`, or JSON `{url, manifest_url, sha256, permissions}`; `?dry_run=1` answers the permission review without installing |
 | `GET /{id}` | row + manifest + granted permissions + settings (secrets masked) + overrides + the schedule |
-| `PATCH /{id}` | `{enabled}` and/or `{auto_update}` |
-| `POST /{id}/upgrade` | same bodies as install, or `{from_source: true, permissions}` — the newer version the app's own source has, found and fetched as the update check does; `409 permissions_changed` with the missing list until granted, `409 up_to_date` when the source has nothing newer. The dry run's `upgrade` says the jump and how the grant changes |
-| `POST /updates/check` | ask every app's source now and install what may be installed; answers `{report: {checked_at, checked, updated, available, needs_approval, failed}, runtime, plugins}`. A check already running is waited for |
+| `PATCH /{id}` | `{enabled}`. `{auto_update}` answers `400`: nothing updates itself |
+| `POST /{id}/upgrade` | same bodies as install, or `{from_source: true, permissions}` — the newer version the app's own source has, found and fetched as the update check does; `409 permissions_changed` with the missing list until granted, `409 up_to_date` when the source has nothing newer. The dry run's `upgrade` says the jump, how the grant changes, the module's and the interface's hashes, the interface files added, removed and changed, the filex range, the signature and the release notes |
+| `POST /{id}/rollback` | back to the version the last approval replaced, under the permissions it ran under — no new approval; `404` when none is kept |
+| `POST /updates/check` | ask every app's source now — it installs nothing; answers `{report: {checked_at, checked, updated, available, needs_approval, failed}, runtime, plugins}` (`updated` is always empty since 0.48). A check already running is waited for |
 | `DELETE /{id}` | remove everything |
 | `GET/PUT /{id}/settings` | `{values}`; `***` on PUT keeps a secret |
 | `GET/PUT /{id}/overrides` | `{actions: [{id, enabled, admin_only, applies}]}` — menu actions only (hidden ones are neither listed nor stored); `applies: null` = manifest; `applies` is the whole rule both ways (engine-gated extensions included), stored as the change against the manifest |
@@ -1038,7 +1244,7 @@ and [The public surface](BACKEND.md#the-public-surface) for the shapes.
 ## Writing one
 
 [PLUGIN-KIT.md](PLUGIN-KIT.md) — [the manifest](PLUGIN-KIT.md#the-manifest-filex-appjson),
-[the six exports](PLUGIN-KIT.md#the-six-exports), every host function with its
+[the exports](PLUGIN-KIT.md#the-exports), every host function with its
 permission, the screen catalogue, [public links end to end](PLUGIN-KIT.md#public-links-end-to-end),
 and [a test kit](PLUGIN-KIT.md#testing-with-plugintest) that runs before
 `plugin.wasm` exists — all in stock Go. The two apps above are complete,

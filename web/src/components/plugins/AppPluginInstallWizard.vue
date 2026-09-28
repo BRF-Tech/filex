@@ -22,6 +22,19 @@
  * newer version exactly as the update check does (`from_source`) and the
  * dialog opens on its review.
  *
+ * An app with its OWN INTERFACE (`review.ui`) gets an "Interface" group: the
+ * package's hash, size and files, every address outside the package with its
+ * risk colour (green: filex mirrors it and serves its own copy; amber: the
+ * reader's browser fetches it live), and — always — the honest note that a
+ * browser cannot fully stop an interface from sending data out (WebRTC).
+ * ⚠⚠ Never "it cannot reach the network": that is not true in Firefox.
+ *
+ * An upgrade's review says, besides the grant: the module and interface
+ * hashes from → to, which interface files were added, removed and changed,
+ * the filex range and the signature from → to, and the source's release
+ * notes (plain text). Nothing updates itself (filex 0.48): this review is
+ * where every newer version is approved.
+ *
  * ⚠ An app whose `filex` range leaves this server out is said at the review
  * (`review.compat.ok === false`) and cannot be installed from it; the server
  * refuses it too (`incompatible`).
@@ -48,6 +61,7 @@ import {
 } from '@/api/appPlugins';
 import { extractError } from '@/api/client';
 import { refusalSentence } from '@/lib/appPluginRefusal';
+import { formatBytes } from '@/lib/format';
 import { pluginLabelOf, type PluginText } from '@brftech/filex-core';
 
 import Button from '@/components/ui/Button.vue';
@@ -88,6 +102,7 @@ const repo = ref('');
 const gitRef = ref('');
 const wasmFile = ref<File | null>(null);
 const manifestFile = ref<File | null>(null);
+const uiFile = ref<File | null>(null);
 const signature = ref('');
 const url = ref('');
 const manifestUrl = ref('');
@@ -124,6 +139,7 @@ function reset() {
   gitRef.value = '';
   wasmFile.value = null;
   manifestFile.value = null;
+  uiFile.value = null;
   signature.value = '';
   url.value = '';
   manifestUrl.value = '';
@@ -164,6 +180,9 @@ function onWasm(e: Event) {
 function onManifest(e: Event) {
   manifestFile.value = (e.target as HTMLInputElement).files?.[0] ?? null;
 }
+function onUI(e: Event) {
+  uiFile.value = (e.target as HTMLInputElement).files?.[0] ?? null;
+}
 
 /** The body for the chosen source, or the message saying what is missing. */
 function buildSource(): AppPluginInstallSource | string {
@@ -179,7 +198,13 @@ function buildSource(): AppPluginInstallSource | string {
   // deciding it here would be a second copy of that rule.
   if (source.value === 'file') {
     if (!manifestFile.value) return t('appPlugins.wizard.errFiles');
-    return { kind: 'upload', wasm: wasmFile.value, manifest: manifestFile.value, signature: signature.value.trim() || undefined };
+    return {
+      kind: 'upload',
+      wasm: wasmFile.value,
+      manifest: manifestFile.value,
+      ui: uiFile.value,
+      signature: signature.value.trim() || undefined,
+    };
   }
   const u = url.value.trim();
   const m = manifestUrl.value.trim();
@@ -241,8 +266,17 @@ async function upgradeInstead() {
   await toReview();
 }
 
-/** The permissions the wizard grants: exactly the manifest's list. */
-const grant = computed<string[]>(() => review.value?.manifest.permissions ?? []);
+/**
+ * The permissions the wizard grants: exactly the ones the review lists — the
+ * manifest's, plus those filex DERIVES from what the app brings (`ui`,
+ * `ui:eval`, `ui-net:…` for an interface). ⚠ Not `manifest.permissions`:
+ * measured 2026-09-27 against a built server, an app with an interface was
+ * refused `permissions_incomplete` (missing `ui`) because the grant was the
+ * manifest's list alone.
+ */
+const grant = computed<string[]>(() =>
+  review.value ? review.value.permissions.map((p) => p.id) : [],
+);
 
 /**
  * Reason for one permission, in the reader's language: the dry run's words,
@@ -308,6 +342,73 @@ async function install() {
 }
 
 const manifest = computed(() => review.value?.manifest ?? null);
+
+/** The interface's addresses outside its package, mirrored first. */
+const externals = computed(() =>
+  [...(review.value?.ui?.external ?? [])].sort((a, b) => Number(a.mode === 'live') - Number(b.mode === 'live')),
+);
+
+/** A size as a person reads it. */
+function sizeOf(n: number | undefined): string {
+  return formatBytes(n ?? 0, locale.value);
+}
+
+/** A hash short enough to compare by eye. */
+function short(h: string | undefined): string {
+  return h ? h.slice(0, 12) : '—';
+}
+
+/** The upgrade's module line: changed, the same, gone — or nothing (neither has one). */
+const moduleLine = computed<string>(() => {
+  const u = review.value?.upgrade;
+  if (!u) return '';
+  if (u.module_from && u.module_to) {
+    return u.module_from === u.module_to
+      ? t('appPlugins.wizard.diff.moduleSame')
+      : t('appPlugins.wizard.diff.moduleChanged', { from: short(u.module_from), to: short(u.module_to) });
+  }
+  if (u.module_from && !u.module_to) return t('appPlugins.wizard.diff.moduleRemoved');
+  // A module that arrives is said by `adds_module` (a pack) or the hash above.
+  return '';
+});
+
+/** The upgrade's interface line. */
+const uiLine = computed<string>(() => {
+  const u = review.value?.upgrade;
+  if (!u || (!u.ui_from && !u.ui_to)) return '';
+  if (!u.ui_from) return t('appPlugins.wizard.diff.uiAdded');
+  if (!u.ui_to) return t('appPlugins.wizard.diff.uiRemoved');
+  if (u.ui_from === u.ui_to) return t('appPlugins.wizard.diff.uiSame');
+  return t('appPlugins.wizard.diff.uiChanged', { from: short(u.ui_from), to: short(u.ui_to) });
+});
+
+/** The file lists, each with how many it left out. */
+const fileGroups = computed(() => {
+  const f = review.value?.upgrade?.ui_files;
+  if (!f) return [];
+  const groups: { key: string; names: string[]; count: number }[] = [
+    { key: 'filesAdded', names: f.added ?? [], count: f.added_count },
+    { key: 'filesRemoved', names: f.removed ?? [], count: f.removed_count },
+    { key: 'filesChanged', names: f.changed ?? [], count: f.changed_count },
+  ];
+  return groups.filter((g) => g.count > 0).map((g) => ({ ...g, more: g.count - g.names.length }));
+});
+
+/** The range line, when the range changed. */
+const rangeLine = computed<string>(() => {
+  const u = review.value?.upgrade;
+  if (!u || (u.filex_from ?? '') === (u.filex_to ?? '')) return '';
+  const any = t('appPlugins.wizard.diff.anyFilex');
+  return t('appPlugins.wizard.diff.filex', { from: u.filex_from || any, to: u.filex_to || any });
+});
+
+/** The signature line, when it changed. */
+const signedLine = computed<string>(() => {
+  const u = review.value?.upgrade;
+  if (!u || !!u.signed_from === !!u.signed_to) return '';
+  const word = (v: boolean | undefined) => t(v ? 'appPlugins.wizard.diff.isSigned' : 'appPlugins.wizard.diff.isUnsigned');
+  return t('appPlugins.wizard.diff.signed', { from: word(u.signed_from), to: word(u.signed_to) });
+});
 const manifestLabel = computed(() => pluginLabelOf(manifest.value?.label, locale.value) || manifest.value?.name || '');
 const manifestDescription = computed(() => pluginLabelOf(manifest.value?.description, locale.value));
 </script>
@@ -377,6 +478,14 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
             data-testid="app-plugin-manifest"
             @change="onManifest"
           />
+          <label class="block text-sm font-medium text-zinc-800 dark:text-zinc-100">{{ t('appPlugins.wizard.ui') }}</label>
+          <input
+            type="file"
+            accept=".zip,application/zip"
+            class="block w-full text-sm text-zinc-600 file:me-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-1.5 file:text-sm dark:text-zinc-300 dark:file:bg-zinc-800"
+            data-testid="app-plugin-ui"
+            @change="onUI"
+          />
           <Input v-model="signature" :label="t('appPlugins.wizard.signature')" :required="requiresSignature" monospace data-testid="app-plugin-signature" />
           <p class="-mt-2 text-xs text-zinc-500">
             {{ requiresSignature ? t('appPlugins.wizard.signatureRequired') : t('appPlugins.wizard.signatureHint') }}
@@ -430,7 +539,7 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
               <dt class="text-zinc-500">{{ t('appPlugins.wizard.facts.manifestSha256') }}</dt>
               <dd class="break-all font-mono sm:col-span-2">{{ review.manifest_sha256 || '—' }}</dd>
             </template>
-            <template v-else>
+            <template v-else-if="review.engine !== false">
               <dt class="text-zinc-500">{{ t('appPlugins.wizard.facts.sha256') }}</dt>
               <dd class="break-all font-mono sm:col-span-2">{{ review.wasm_sha256 || '—' }}</dd>
             </template>
@@ -465,6 +574,92 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
             class="text-zinc-600 dark:text-zinc-400"
           >
             {{ t('appPlugins.wizard.samePermissions') }}
+          </p>
+          <p v-if="moduleLine" class="font-mono text-xs text-zinc-600 dark:text-zinc-400" data-testid="app-plugin-upgrade-module-hash">
+            {{ moduleLine }}
+          </p>
+          <p v-if="uiLine" class="font-mono text-xs text-zinc-600 dark:text-zinc-400" data-testid="app-plugin-upgrade-ui">
+            {{ uiLine }}
+          </p>
+          <details v-if="fileGroups.length" class="text-xs" data-testid="app-plugin-upgrade-files">
+            <summary class="cursor-pointer text-zinc-600 dark:text-zinc-400">
+              {{
+                t('appPlugins.wizard.diff.files', {
+                  added: review.upgrade.ui_files?.added_count ?? 0,
+                  removed: review.upgrade.ui_files?.removed_count ?? 0,
+                  changed: review.upgrade.ui_files?.changed_count ?? 0,
+                })
+              }}
+            </summary>
+            <div v-for="g in fileGroups" :key="g.key" class="mt-1">
+              <!-- One line on purpose: a line break between the spans would be condensed away. -->
+              <span class="font-medium">{{ t(`appPlugins.wizard.diff.${g.key}`) }}:</span> <span class="break-all font-mono">{{ g.names.join(', ') }}</span><template v-if="g.more > 0"> <span class="text-zinc-500">{{ t('appPlugins.wizard.diff.filesMore', { count: g.more }) }}</span></template>
+            </div>
+          </details>
+          <p v-if="rangeLine" class="text-xs text-zinc-600 dark:text-zinc-400" data-testid="app-plugin-upgrade-range">{{ rangeLine }}</p>
+          <p v-if="signedLine" class="text-xs text-amber-800 dark:text-amber-200" data-testid="app-plugin-upgrade-signed">{{ signedLine }}</p>
+          <div v-if="review.upgrade.notes" class="text-xs" data-testid="app-plugin-upgrade-notes">
+            <h4 class="font-semibold text-zinc-600 dark:text-zinc-300">{{ t('appPlugins.wizard.diff.notes') }}</h4>
+            <!-- Plain text, as the source wrote it: never rendered as markup. -->
+            <p class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words text-zinc-600 dark:text-zinc-400">{{ review.upgrade.notes }}</p>
+          </div>
+        </div>
+
+        <!-- The app's own interface: what runs in every reader's browser. -->
+        <div
+          v-if="review.ui"
+          class="space-y-2 rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800"
+          data-testid="app-plugin-ui-group"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="text-sm font-semibold">{{ t('appPlugins.wizard.uiGroup.title') }}</h3>
+            <Badge tone="brand" size="xs">{{ t('appPlugins.wizard.uiGroup.badge') }}</Badge>
+          </div>
+          <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
+            <dt class="text-zinc-500">{{ t('appPlugins.wizard.uiGroup.sha256') }}</dt>
+            <dd class="break-all font-mono sm:col-span-2" data-testid="app-plugin-ui-sha256">{{ review.ui.sha256 }}</dd>
+            <dt class="text-zinc-500">{{ t('appPlugins.wizard.uiGroup.files') }}</dt>
+            <dd class="sm:col-span-2">{{ review.ui.files }}</dd>
+            <dt class="text-zinc-500">{{ t('appPlugins.wizard.uiGroup.size') }}</dt>
+            <dd class="sm:col-span-2">{{ sizeOf(review.ui.bytes) }} ({{ sizeOf(review.ui.unpacked) }})</dd>
+          </dl>
+          <p v-if="review.engine === false" class="text-xs text-zinc-600 dark:text-zinc-400" data-testid="app-plugin-ui-no-engine">
+            {{ t('appPlugins.wizard.uiGroup.noEngine') }}
+          </p>
+          <div v-if="externals.length">
+            <h4 class="text-xs font-semibold text-zinc-600 dark:text-zinc-300">{{ t('appPlugins.wizard.uiGroup.external') }}</h4>
+            <ul class="mt-1 space-y-2" data-testid="app-plugin-ui-external">
+              <li
+                v-for="x in externals"
+                :key="`${x.as}:${x.url}`"
+                class="rounded-lg border p-2 text-xs"
+                :class="
+                  x.mode === 'live'
+                    ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200'
+                "
+                :data-testid="`app-plugin-ui-external-${x.mode}`"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <Badge :tone="x.mode === 'live' ? 'amber' : 'emerald'" size="xs">
+                    {{ x.mode === 'live' ? t('appPlugins.wizard.uiGroup.live') : t('appPlugins.wizard.uiGroup.mirror') }}
+                  </Badge>
+                  <span>{{ t(`appPlugins.wizard.uiGroup.as.${x.as}`) }}</span>
+                  <span class="break-all font-mono">{{ x.url }}</span>
+                </div>
+                <p v-if="pluginLabelOf(x.reason, locale)" class="mt-1">{{ pluginLabelOf(x.reason, locale) }}</p>
+                <p class="mt-1 opacity-80">
+                  {{ x.mode === 'live' ? t('appPlugins.wizard.uiGroup.liveText') : t('appPlugins.wizard.uiGroup.mirrorText') }}
+                </p>
+              </li>
+            </ul>
+          </div>
+          <!-- ⚠⚠ Always shown, and never "it cannot reach the network". -->
+          <p
+            class="rounded-lg border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+            data-testid="app-plugin-ui-honest"
+          >
+            {{ t('appPlugins.wizard.uiGroup.honest') }}
           </p>
         </div>
 

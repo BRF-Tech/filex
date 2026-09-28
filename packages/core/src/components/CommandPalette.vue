@@ -286,6 +286,12 @@ function scheduleEverywhere(q: string) {
 
 /** Parent-path crumb for a hit row (storage label when the hit carries one). */
 function hitCrumb(h: GlobalSearchHit): string {
+  /* wiring:e2 names — a hit inside an encrypted folder carries its plaintext
+     parent (the explorer's name view); the stored path would print ciphertext. */
+  if (typeof h.e2e_display_dir === 'string') {
+    const drive = (typeof h.storage === 'string' && h.storage) || '';
+    return [drive, h.e2e_display_dir].filter(Boolean).join('/') || '/';
+  }
   const rel = String(h.path ?? '').replace(/^\/+|\/+$/g, '');
   const slash = rel.lastIndexOf('/');
   const parent = slash === -1 ? '' : rel.slice(0, slash);

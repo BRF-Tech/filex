@@ -579,8 +579,10 @@ export function useLocale(
    *     listings inside .trash/ would otherwise show timestamps. Strip
    *     that prefix so the user sees the original basename.
    */
-  function nodeDisplayName(node: { basename: string }): string {
+  function nodeDisplayName(node: { basename: string; fxe_name?: string }): string {
     if (node.basename === '.trash') return t('node.trash');
+    /* wiring:e2 fxe — a single encrypted file opened in this tab. */
+    if (typeof node.fxe_name === 'string' && node.fxe_name) return node.fxe_name;
     const m = node.basename.match(/^\d{8}-\d{6}-[A-Za-z0-9]+__(.+)$/);
     if (m) return m[1];
     return node.basename;

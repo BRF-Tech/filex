@@ -114,6 +114,13 @@ type E2E struct {
 	Escrow *e2e.EscrowKey // nil when escrow is disabled for this installation
 
 	challenges *escrowChallenges
+
+	// wiring:e2 convert — what POST /api/files/e2e/cleanup removes from
+	// (e2e_convert.go). Each may be nil.
+	cleanVersions E2ECleanupVersions
+	cleanTrash    E2ECleanupTrash
+	cleanThumbs   E2ECleanupThumbs
+	cleanIndex    E2ECleanupIndex
 }
 
 // NewE2E constructs the handler. escrow may be nil.
@@ -181,7 +188,7 @@ func (h *E2E) resolveDir(w http.ResponseWriter, r *http.Request, wire string) (*
 }
 
 // EscrowChallenge mints a proof-of-possession challenge for an encrypted
-// folder.
+// folder, or for a single encrypted file (`.fxe`, its own root).
 //
 //	POST /api/files/e2e/escrow/challenge {path} → {id, challenge}
 //
@@ -201,9 +208,9 @@ func (h *E2E) EscrowChallenge(w http.ResponseWriter, r *http.Request) {
 	if st == nil {
 		return
 	}
-	root, ok := e2e.FindRoot(r.Context(), h.Store, st.ID, rel)
+	root, _, ok := h.encryptedSubject(r.Context(), st.ID, rel)
 	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not an encrypted folder"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": notEncrypted(rel)})
 		return
 	}
 	nonce := make([]byte, escrowNonceLen)
@@ -235,7 +242,8 @@ func (h *E2E) EscrowChallenge(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// EscrowUsed redeems the challenge and notifies the folder's owner.
+// EscrowUsed redeems the challenge and notifies the owner of the folder (or
+// of the single encrypted file) that was opened.
 //
 //	POST /api/files/e2e/escrow/used {path, id, nonce} → {ok, notified}
 //
@@ -273,10 +281,11 @@ func (h *E2E) EscrowUsed(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "challenge was issued for another storage"})
 		return
 	}
-	// The challenge names the encrypted ROOT it was minted for. Re-derive the
-	// root of the path being reported and require them to match, so a
-	// challenge taken for one folder cannot be spent announcing another.
-	root, ok := e2e.FindRoot(r.Context(), h.Store, st.ID, rel)
+	// The challenge names the encrypted ROOT it was minted for — a folder, or
+	// a single encrypted file, which is its own root. Re-derive the root of
+	// the path being reported and require them to match, so a challenge taken
+	// for one cannot be spent announcing another.
+	root, file, ok := h.encryptedSubject(r.Context(), st.ID, rel)
 	if !ok || root != ch.rel {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "challenge was issued for another folder"})
 		return
@@ -303,6 +312,15 @@ func (h *E2E) EscrowUsed(w http.ResponseWriter, r *http.Request) {
 			"folder":     root,
 		},
 	}
+	if file {
+		// wiring:e2 fxe — the same event for a single encrypted file: it is
+		// the file that was opened, and the notification points at it.
+		ev.Title = "Encrypted file opened with the escrow key"
+		ev.Target = notify.FileTarget(root)
+		delete(ev.Meta, "folder")
+		ev.Meta["file"] = root
+		ev.Meta["kind"] = "file"
+	}
 	if actor != nil {
 		ev.Meta["actor_email"] = actor.Email
 	}
@@ -319,8 +337,31 @@ func (h *E2E) EscrowUsed(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "notified": ownerID != nil})
 }
 
-// folderOwner returns the recorded owner of the encrypted folder's own node,
-// or nil when there is none.
+// encryptedSubject names what an escrow or password request is about: the
+// single encrypted file (`.fxe`) rel names, or else the encrypted folder rel
+// sits in (e2e.FindRoot). file reports which; ok=false when it is neither.
+//
+// The file is looked at first: a `.fxe` inside an encrypted folder carries
+// its own key slots, and a request naming it is about it, not the folder.
+func (h *E2E) encryptedSubject(ctx context.Context, storageID int64, rel string) (root string, file, ok bool) {
+	if e2e.FileAt(ctx, h.Store, storageID, rel) {
+		return strings.Trim(path.Clean("/"+rel), "/"), true, true
+	}
+	root, ok = e2e.FindRoot(ctx, h.Store, storageID, rel)
+	return root, false, ok
+}
+
+// notEncrypted is the refusal for a path that is neither: worded for what the
+// caller named.
+func notEncrypted(rel string) string {
+	if e2e.LooksEncryptedFile(path.Base(rel)) {
+		return "not an encrypted file"
+	}
+	return "not an encrypted folder"
+}
+
+// folderOwner returns the recorded owner of the encrypted folder's own node
+// (or of the single encrypted file), or nil when there is none.
 func (h *E2E) folderOwner(r *http.Request, storageID int64, rel string) *int64 {
 	if h.Store == nil || rel == "" {
 		return nil

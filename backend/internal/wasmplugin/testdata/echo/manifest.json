@@ -315,6 +315,14 @@
         "en": "Picks",
         "tr": "Seçilenler"
       }
+    },
+    {
+      "id": "stall",
+      "placement": "modal",
+      "label": {
+        "en": "Stall",
+        "tr": "Bekle"
+      }
     }
   ],
   "public_pages": [

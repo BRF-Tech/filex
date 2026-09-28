@@ -3,10 +3,17 @@
 // Admin surface for storage plugins (internal/plugin, docs/PLUGINS.md):
 //
 //	GET    /api/admin/plugins              — every plugin with its live state
-//	POST   /api/admin/plugins              — install: multipart {name, file} | JSON {name,url,sha256} | JSON {name,kind:"remote",address,token}
+//	POST   /api/admin/plugins              — install: multipart {name, file[, source]} | JSON {name,url,sha256[,source]} | JSON {name,source} | JSON {name,kind:"remote",address,token}
 //	GET    /api/admin/plugins/{id}
-//	PATCH  /api/admin/plugins/{id}         — {"enabled": bool}
+//	PATCH  /api/admin/plugins/{id}         — {"enabled"?: bool, "source"?: string}
 //	POST   /api/admin/plugins/{id}/restart
+//	POST   /api/admin/plugins/{id}/upgrade — multipart {file} | JSON {"from_source": true}
+//	POST   /api/admin/plugins/updates/check — read every source now; installs nothing
+//
+// ⚠⚠ Nothing updates itself (plugin/updates.go): a binary plugin that names a
+// source is checked daily and its row says when a newer version is there;
+// the administrator's {"from_source": true} upgrade installs it.
+//
 //	DELETE /api/admin/plugins/{id}
 //
 // ⚠ Instance-wide, never tenant-scoped: a plugin is a PROCESS filex runs (or a
@@ -16,6 +23,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -82,7 +90,33 @@ func (h *Plugins) List(w http.ResponseWriter, r *http.Request) {
 		// `conformance` report, and one name meaning two things is how a
 		// surface ends up reading the wrong one.
 		"conformance_mode": h.Manager.ConformanceMode(),
+		"update_check":     h.Manager.BackgroundUpdates(),
+		"updates_checked_at": func() any {
+			if t := h.Manager.LastUpdateCheck(r.Context()); !t.IsZero() {
+				return t
+			}
+			return nil
+		}(),
 	})
+}
+
+// CheckUpdates reads every binary plugin's source now and answers the list
+// redrawn with the report. It installs nothing.
+func (h *Plugins) CheckUpdates(w http.ResponseWriter, r *http.Request) {
+	if !h.gate(w, r) {
+		return
+	}
+	rep, err := h.Manager.CheckUpdates(context.WithoutCancel(r.Context()))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	list, err := h.Manager.List(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"report": rep, "plugins": list})
 }
 
 func (h *Plugins) Get(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +146,10 @@ type pluginInstallReq struct {
 	// Signature is a detached ed25519 signature over the binary's sha256.
 	// Required only when the instance configures trusted keys.
 	Signature string `json:"signature"`
+	// Source is where newer versions are published (plugin/updates.go):
+	// alone, the plugin is installed from it; beside a url or a file, it is
+	// only kept for the daily check.
+	Source string `json:"source"`
 }
 
 // Install accepts three shapes; the Content-Type decides which.
@@ -140,6 +178,9 @@ func (h *Plugins) Install(w http.ResponseWriter, r *http.Request) {
 		}
 		defer f.Close()
 		st, err := h.Manager.InstallBinary(r.Context(), name, hdr.Filename, f, r.FormValue("signature"))
+		if err == nil && strings.TrimSpace(r.FormValue("source")) != "" {
+			st, err = h.Manager.SetSource(r.Context(), st.ID, r.FormValue("source"))
+		}
 		if err != nil {
 			writeJSON(w, installStatus(err), map[string]string{"error": err.Error()})
 			return
@@ -162,8 +203,13 @@ func (h *Plugins) Install(w http.ResponseWriter, r *http.Request) {
 		st, err = h.Manager.InstallRemote(r.Context(), req.Name, strings.TrimSpace(req.Address), req.Token)
 	case req.URL != "":
 		st, err = h.Manager.InstallFromURL(r.Context(), req.Name, strings.TrimSpace(req.URL), req.SHA256, req.Signature)
+		if err == nil && strings.TrimSpace(req.Source) != "" {
+			st, err = h.Manager.SetSource(r.Context(), st.ID, req.Source)
+		}
+	case strings.TrimSpace(req.Source) != "":
+		st, err = h.Manager.InstallFromSource(r.Context(), req.Name, req.Source)
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send a multipart file, or {url, sha256}, or {kind:\"remote\", address, token}"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send a multipart file, or {url, sha256}, or {source}, or {kind:\"remote\", address, token}"})
 		return
 	}
 	if err != nil {
@@ -207,6 +253,24 @@ func (h *Plugins) Upgrade(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		// The administrator's approval of the newer version the plugin's
+		// source has (plugin/updates.go).
+		var req struct {
+			FromSource bool `json:"from_source"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !req.FromSource {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send a multipart file, or {\"from_source\": true}"})
+			return
+		}
+		st, err := h.Manager.UpgradeFromSource(context.WithoutCancel(r.Context()), id)
+		if err != nil {
+			writeJSON(w, installStatus(err), map[string]any{"error": err.Error(), "plugin": st})
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
+		return
+	}
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad multipart: " + err.Error()})
 		return
@@ -242,16 +306,25 @@ func (h *Plugins) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Enabled *bool `json:"enabled"`
+		Enabled *bool   `json:"enabled"`
+		Source  *string `json:"source"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {\"enabled\": true|false}"})
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.Enabled == nil && req.Source == nil) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {\"enabled\": true|false} and/or {\"source\": \"owner/name\"}"})
 		return
 	}
-	st, err := h.Manager.SetEnabled(r.Context(), id, *req.Enabled)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
-		return
+	var st *plugin.Status
+	if req.Source != nil {
+		if st, err = h.Manager.SetSource(r.Context(), id, *req.Source); err != nil {
+			writeJSON(w, installStatus(err), map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if req.Enabled != nil {
+		if st, err = h.Manager.SetEnabled(r.Context(), id, *req.Enabled); err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, st)
 }

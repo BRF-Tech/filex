@@ -15,7 +15,7 @@ import {
   sameRowPath,
   shareHref,
   type NotificationTarget,
-} from '@/lib/notificationTarget';
+} from '@brftech/filex-core/src/lib/notificationTarget';
 
 describe('resolveNotificationTarget', () => {
   it('sends a file to its FOLDER, with the file as the row to select', () => {

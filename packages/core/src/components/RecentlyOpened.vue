@@ -3,7 +3,9 @@
  * RecentlyOpened — drop-down/sidebar tray of the user's recently-opened
  * files. Backed by `GET /api/files/manager/recent?limit=20`.
  */
-import { ref, onMounted, watch } from 'vue';
+import { inject, ref, onMounted, watch } from 'vue';
+import { E2E_NAME_VIEW } from '../composables/useE2eNames';
+import type { FileNode } from '../types/FileNode';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import { localeTag, useLocale } from '../composables/useLocale';
 
@@ -53,6 +55,32 @@ const emit = defineEmits<{
 
 const items = ref<RecentNode[]>([]);
 const loading = ref(false);
+/* wiring:e2 names — a file opened inside an encrypted folder is named by the
+ * explorer's name view: plaintext while its folder is unlocked, "🔒 Encrypted
+ * item" while it is not. The row itself (and what is emitted) is untouched. */
+const e2eNameView = inject(E2E_NAME_VIEW, null);
+const shownNames = ref<Record<number, string>>({});
+async function nameRows(rows: RecentNode[]) {
+  if (!e2eNameView) return;
+  const nodes = rows.map((r) => ({
+    id: r.id,
+    type: r.type === 'dir' ? 'dir' : 'file',
+    path:
+      typeof r.storage === 'string' && r.storage
+        ? `${r.storage}://${String(r.path).replace(/^\/+/, '')}`
+        : String(r.path),
+    basename: r.name,
+    ...(typeof r.e2e_root === 'string' && r.e2e_root ? { e2e_root: r.e2e_root } : {}),
+  })) as unknown as FileNode[];
+  const named = await e2eNameView.decorate(nodes);
+  const keep = new Set(named.map((n) => n.id));
+  const map: Record<number, string> = {};
+  for (const n of named) if (typeof n.id === 'number' && n.e2e_stored) map[n.id] = n.basename;
+  shownNames.value = map;
+  // The key file and long-name sidecars are bookkeeping, never "recent".
+  if (keep.size !== rows.length) items.value = rows.filter((r) => keep.has(r.id));
+}
+if (e2eNameView) watch(e2eNameView.version, () => void nameRows(items.value));
 
 async function load() {
   loading.value = true;
@@ -75,6 +103,7 @@ async function load() {
           : Array.isArray(body)
             ? body
             : [];
+      await nameRows(items.value);
     }
   } catch (err) {
     emit('error', err instanceof Error ? err.message : String(err));
@@ -133,7 +162,7 @@ watch(() => props.refreshKey, load);
           @click="emit('open', n)"
           @contextmenu.prevent="emit('context', n, $event)"
         >
-          <span class="filex-recent-name"><bdi>{{ n.name }}</bdi></span>
+          <span class="filex-recent-name"><bdi>{{ shownNames[n.id] ?? n.name }}</bdi></span>
           <span class="filex-recent-meta">{{ fmtTime(n.last_opened) }}</span>
         </button>
       </li>

@@ -216,8 +216,41 @@ const FilexExplorerWrapper = defineCustomElement({
     'upload-progress',
     'selection-change',
   ],
-  setup(props, { emit }) {
+  setup(props, { emit, expose }) {
     injectStylesOnce();
+
+    /**
+     * The explorer's own methods, on the ELEMENT.
+     *
+     * ⚠⚠ A custom element exposes what ITS setup exposes — this wrapper's —
+     * never the inner FileExplorer's. So `el.openAppTarget`, which the desktop
+     * app called on a clicked notification that asked for an app screen, was
+     * `undefined` on every element ever mounted, the call guarded itself out
+     * and the app screen silently never opened (measured 2026-09-27 while the
+     * desktop was given its bell). Each method is forwarded here, and waits
+     * for the explorer if it is not rendered yet (no `apiBase` so far).
+     */
+    interface ExplorerMethods {
+      reload?: () => unknown;
+      openAppTarget?: (p: Record<string, unknown>) => Promise<boolean>;
+      revealNotification?: (dest: unknown) => Promise<boolean>;
+    }
+    const inner = ref<ExplorerMethods | null>(null);
+    const ready = (): Promise<ExplorerMethods> =>
+      inner.value
+        ? Promise.resolve(inner.value)
+        : new Promise<ExplorerMethods>((resolve) => {
+            const stop = watch(inner, (v) => {
+              if (!v) return;
+              stop();
+              resolve(v);
+            });
+          });
+    expose({
+      reload: async () => (await ready()).reload?.(),
+      openAppTarget: async (p: Record<string, unknown>) => (await ready()).openAppTarget?.(p) ?? false,
+      revealNotification: async (dest: unknown) => (await ready()).revealNotification?.(dest) ?? false,
+    });
 
     // Reactive config — recomputed when any input attribute or the
     // `config` JS property changes.
@@ -276,6 +309,7 @@ const FilexExplorerWrapper = defineCustomElement({
       !isMountable(merged.value)
         ? null
         : h(FileExplorer as never, {
+            ref: inner,
             config: merged.value,
             onShareCreated: (p: unknown) => emit('share-created', p),
             onFileOpened: (f: unknown) => emit('file-opened', f),

@@ -8,7 +8,7 @@ import type { WebhookTarget } from '@/api/types';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import { formatDate, formatRelative } from '@/lib/format';
-import { WEBHOOK_EVENTS, eventOffReason, webhookEventKey } from '@/lib/webhookEvents';
+import { WEBHOOK_EVENTS, eventOffReason, webhookEventKey } from '@brftech/filex-core';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 
 import Button from '@/components/ui/Button.vue';

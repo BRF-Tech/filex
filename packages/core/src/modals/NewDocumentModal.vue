@@ -60,6 +60,16 @@
  * extension (office documents, diagrams — `ext_required`) still keeps it: the
  * dialog says "will be created as report.docx" instead of locking the field.
  * The rules are lib/newDocName; this file wires them.
+ *
+ * ## It makes a DRAFT (issue #71)
+ *
+ * On a server that keeps drafts for this person (`drafts`, from
+ * `capabilities.drafts`) Create no longer writes the file where it was asked
+ * for: it writes a draft — the same bytes, in the person's own drafts area of
+ * that storage — and the editor opens on it. Nothing appears in the folder
+ * until the draft is saved; a person who changes their mind leaves nothing
+ * behind. At the draft limit Create is refused and the dialog says so, with
+ * the way to Drafts; it never falls back to creating the file instead.
  */
 import { computed, nextTick, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
@@ -70,7 +80,9 @@ import { iconTile, iconFamilyFor, typeLabelFor } from '../lib/fileIcons';
 import { crumbsOfWire, permAllowsWrite, splitWire } from '../lib/destinationTree';
 import Modal from './Modal.vue';
 import DestinationPickerModal from './DestinationPickerModal.vue';
+import { draftLimitOf, isDraftLimit } from '../lib/drafts';
 import { inlineKeyStep } from '../lib/direction';
+import { labelOf } from '../lib/pluginLabel';
 import {
   docNameProblem,
   extLocked,
@@ -102,17 +114,27 @@ const props = defineProps<{
   /** Could this person set a missing service up (`capabilities.caller_admin`)?
    *  Adds WHERE to the line that says which families are missing. */
   canConfigure?: boolean;
+  /** Make a DRAFT rather than the file (issue #71): the server keeps drafts
+   *  for this person (`capabilities.drafts`). Absent: the file is created. */
+  drafts?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'created', file: NewFileResponse): void;
   (e: 'error', payload: { message: string }): void;
+  /** Drafts: the person asked to see their drafts (from the limit message). */
+  (e: 'open-drafts'): void;
 }>();
 
 const { t, dir } = useLocale(() => props.locale);
 
 /* ================================================================== types */
+
+/** A row's identity: its key (an app's row), else its extension. */
+function keyOf(ty: NewDocType): string {
+  return ty.key || ty.ext;
+}
 
 function satisfied(ty: NewDocType): boolean {
   if (ty.requires === 'onlyoffice') return !!props.onlyOfficeReady;
@@ -122,11 +144,16 @@ function satisfied(ty: NewDocType): boolean {
 
 const offered = computed(() => (props.types ?? []).filter(satisfied));
 
-/** Services that are holding a type back, so the dialog can say which. */
+/** Services that are holding a type back, so the dialog can say which.
+ *  A kind an app's row makes anyway (draw.io's app for `.drawio`) is not
+ *  missing: saying "Diagrams need draw.io" beside the app's own .drawio row
+ *  would contradict the row. */
 const withheld = computed(() => {
+  const madeByApps = new Set(offered.value.filter((ty) => ty.app).map((ty) => ty.ext));
   const out: string[] = [];
   for (const ty of props.types ?? []) {
-    if (!satisfied(ty) && ty.requires && !out.includes(ty.requires)) out.push(ty.requires);
+    if (satisfied(ty) || !ty.requires || ty.requires === 'app' || madeByApps.has(ty.ext)) continue;
+    if (!out.includes(ty.requires)) out.push(ty.requires);
   }
   return out;
 });
@@ -163,15 +190,17 @@ const groups = computed(() => {
 });
 
 const selected = ref<string>('');
-const selectedType = computed(() => offered.value.find((ty) => ty.ext === selected.value) ?? null);
+const selectedType = computed(() => offered.value.find((ty) => keyOf(ty) === selected.value) ?? null);
 
 /**
  * The words for a type come from `typeLabelFor` — the same table the listing's
  * Type column reads. A second table here would be a second answer to "what is
  * a .csv", and the two would disagree the first week somebody edited one.
  */
-function labelFor(ext: string): string {
-  return typeLabelFor({ type: 'file', extension: ext }, t);
+function labelFor(ty: NewDocType): string {
+  // An app's row is said in the app's own words (its manifest's label).
+  if (ty.app) return labelOf(ty.app.label, props.locale) || ty.ext;
+  return typeLabelFor({ type: 'file', extension: ty.ext }, t);
 }
 function tileFor(ext: string): string {
   return iconTile(iconFamilyFor({ type: 'file', extension: ext, basename: 'x.' + ext }));
@@ -222,6 +251,9 @@ const nameTouched = ref(false);
 const collision = ref(false);
 const busy = ref(false);
 const failure = ref<string | null>(null);
+/** Drafts: the person already keeps as many drafts as the server allows —
+ *  the number, for the sentence. Null: not refused for that. */
+const draftLimitHit = ref<number | null>(null);
 
 /** The name the server will write: what the collision check and the
  *  "will be created as" line quote. */
@@ -323,11 +355,12 @@ watch(
     if (!isOpen) return;
     dirCache.clear();
     failure.value = null;
+    draftLimitHit.value = null;
     collision.value = false;
     nameTouched.value = false;
     busy.value = false;
     name.value = '';
-    selected.value = offered.value[0]?.ext ?? '';
+    selected.value = offered.value[0] ? keyOf(offered.value[0]) : '';
     dest.value = defaultDestination();
     destChecked.value = false;
     destWritable.value = true;
@@ -344,8 +377,8 @@ watch(
 // retypeDocName) — and an untouched suggestion is re-asked against the
 // destination (Untitled.md may be free where Untitled.docx is not).
 watch(selected, (next, prev) => {
-  const nextType = offered.value.find((ty) => ty.ext === next);
-  const prevType = offered.value.find((ty) => ty.ext === prev) ?? null;
+  const nextType = offered.value.find((ty) => keyOf(ty) === next);
+  const prevType = offered.value.find((ty) => keyOf(ty) === prev) ?? null;
   if (nextType && name.value) name.value = retypeDocName(name.value, prevType, nextType);
   void refreshDestination({ suggest: true });
 });
@@ -359,14 +392,14 @@ watch(dest, () => {
 
 /* ================================================================== actions */
 
-function pick(ext: string) {
-  selected.value = ext;
+function pick(key: string) {
+  selected.value = key;
 }
 
 /** Roving focus across the tiles — a radiogroup is expected to move on arrows. */
-function onTileKey(e: KeyboardEvent, ext: string) {
-  const list = offered.value.map((ty) => ty.ext);
-  const i = list.indexOf(ext);
+function onTileKey(e: KeyboardEvent, key: string) {
+  const list = offered.value.map(keyOf);
+  const i = list.indexOf(key);
   let next = -1;
   // ⚠ RTL: ← / → move the way they point — in a right-to-left grid the next
   // tile is to the LEFT (lib/direction).
@@ -378,7 +411,7 @@ function onTileKey(e: KeyboardEvent, ext: string) {
   e.preventDefault();
   selected.value = list[next];
   void nextTick(() => {
-    const el = document.querySelector<HTMLElement>(`[data-newdoc-ext="${list[next]}"]`);
+    const el = document.querySelector<HTMLElement>(`[data-newdoc-key="${list[next]}"]`);
     el?.focus();
   });
 }
@@ -454,16 +487,26 @@ async function create() {
   if (!canCreate.value || !selectedType.value) return;
   busy.value = true;
   failure.value = null;
+  draftLimitHit.value = null;
   try {
     // exactName: the field IS the file name (#56). The server still adds the
     // extension a type's editor needs, which extHint has already said.
-    const res = await props.api.newFile(dest.value, name.value.trim(), selectedType.value.ext, {
-      exactName: true,
-    });
-    emit('created', res);
+    const ty = selectedType.value;
+    const res = props.drafts
+      ? await props.api.drafts.create(dest.value, name.value.trim(), keyOf(ty), { exactName: true })
+      : await props.api.newFile(dest.value, name.value.trim(), keyOf(ty), {
+          exactName: true,
+        });
+    // An app's row opens in the app's view it names, whatever else opens
+    // that extension.
+    emit('created', ty.app ? { ...res, app: { plugin: ty.app.plugin, view: ty.app.view } } : res);
   } catch (e) {
     const err = e as Error & { status?: number };
-    if (err.status === 409) {
+    if (isDraftLimit(err)) {
+      // ⚠ Said here, where it was pressed, with the way to Drafts — and
+      // nothing else is created in its place (the owner's rule, issue #71).
+      draftLimitHit.value = draftLimitOf(err) ?? 0;
+    } else if (err.status === 409) {
       // The server refused for the reason the dialog warns about. Say it in
       // the same place rather than throwing a toast over the form.
       collision.value = true;
@@ -506,21 +549,22 @@ async function create() {
             <div class="fe-newdoc__grid">
               <button
                 v-for="ty in g.types"
-                :key="ty.ext"
+                :key="keyOf(ty)"
                 type="button"
                 role="radio"
                 class="fe-newdoc__type"
-                :class="{ 'is-selected': selected === ty.ext }"
-                :aria-checked="selected === ty.ext"
-                :tabindex="selected === ty.ext ? 0 : -1"
+                :class="{ 'is-selected': selected === keyOf(ty) }"
+                :aria-checked="selected === keyOf(ty)"
+                :tabindex="selected === keyOf(ty) ? 0 : -1"
                 :data-newdoc-ext="ty.ext"
-                :data-testid="`newdoc-type-${ty.ext}`"
-                @click="pick(ty.ext)"
-                @keydown="onTileKey($event, ty.ext)"
+                :data-newdoc-key="keyOf(ty)"
+                :data-testid="`newdoc-type-${keyOf(ty)}`"
+                @click="pick(keyOf(ty))"
+                @keydown="onTileKey($event, keyOf(ty))"
               >
                 <span class="fe-newdoc__tile" aria-hidden="true" v-html="tileFor(ty.ext)"></span>
                 <span class="fe-newdoc__ext">.{{ ty.ext }}</span>
-                <span class="fe-newdoc__kind">{{ labelFor(ty.ext) }}</span>
+                <span class="fe-newdoc__kind">{{ labelFor(ty) }}</span>
               </button>
             </div>
           </section>
@@ -599,6 +643,17 @@ async function create() {
           </p>
         </div>
 
+        <p v-if="drafts && !draftLimitHit" class="fe-newdoc__hint" data-testid="newdoc-draft-hint">
+          {{ t('newdoc.hint.draft') }}
+        </p>
+        <div v-if="draftLimitHit !== null" class="fe-newdoc__limit" role="alert" data-testid="newdoc-draft-limit">
+          <p class="fe-form__error">
+            {{ draftLimitHit ? t('newdoc.err.draft_limit', { limit: draftLimitHit }) : t('newdoc.err.draft_limit_any') }}
+          </p>
+          <button type="button" class="fe-btn fe-btn--sm" data-testid="newdoc-open-drafts" @click="emit('open-drafts')">
+            {{ t('newdoc.open_drafts') }}
+          </button>
+        </div>
         <p v-if="failure" class="fe-form__error" data-testid="newdoc-failure">{{ failure }}</p>
       </template>
     </div>

@@ -79,7 +79,10 @@ creator and an administrator can read it back — see
 - **A file** streams as a download through filex. (An S3 storage with
   `disable_presign: false` answers with a redirect to a presigned bucket URL
   instead — off by default since v0.42.2, see [STORAGE.md](STORAGE.md#s3--s3-compatible).)
-  `?inline=1` renders inline.
+  `?inline=1` renders inline. A picture, a PDF, sound, video and plain text
+  render as themselves; HTML, SVG, XML and any unrecognised kind render
+  sandboxed, with no scripts (`Content-Security-Policy: sandbox`) — the same
+  rule as the explorer's preview and a shared folder's entries.
 - **A folder** streams **every file under it as a ZIP** (internal folders like
   `.filex-trash` are skipped).
 - **PIN‑protected** links show a PIN form first; a correct PIN unlocks the

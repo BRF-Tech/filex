@@ -114,6 +114,20 @@ func Configure(av func(ctx context.Context, n *model.Node), s notify.Service) {
 	sink = s
 }
 
+// AfterWriteFunc observes a finished file write (replaced: a file was there
+// before). It cannot refuse anything — the bytes have landed.
+type AfterWriteFunc func(ctx context.Context, storageID int64, node *model.Node, origin string, replaced bool)
+
+// afterWrite stays nil until ConfigureAfterWrite wires it. Today it is the
+// E2E key-file watch (keyfilewatch.Watch): the server's own audit row for a
+// rewritten `.filex-e2e.json`, and the deletion of the key file's old
+// versions when a key slot changed.
+var afterWrite AfterWriteFunc
+
+// ConfigureAfterWrite installs the process-wide after-write observer. Call
+// once at boot; nil disables it.
+func ConfigureAfterWrite(f AfterWriteFunc) { afterWrite = f }
+
 // ConfigureSaveScan installs the debounced scan sink OnFileSaved uses. Call
 // once at boot, beside Configure. nil is legal and means "no debounced sink":
 // OnFileSaved then falls back to the immediate one, because a missing sink
@@ -198,6 +212,8 @@ func EmitWritten(ctx context.Context, storageID int64, node *model.Node, origin 
 	if node == nil || node.Type == model.NodeTypeDirectory {
 		return
 	}
+	notifyObservers(ctx, storageID, node, origin, kind == Replaced)
+
 	emit(ctx, notify.Event{
 		Event:  kind.Event(),
 		Body:   node.Path,
@@ -205,6 +221,9 @@ func EmitWritten(ctx context.Context, storageID int64, node *model.Node, origin 
 		Node:   &notify.NodeRef{StorageID: storageID, Path: node.Path, Name: node.Name, Size: node.Size},
 		Target: notify.FileTarget(node.Path),
 	})
+	if afterWrite != nil {
+		afterWrite(ctx, storageID, node, origin, kind == Replaced)
+	}
 }
 
 // OnUploadFailed emits one `file.upload_failed` event: the bytes did NOT

@@ -80,11 +80,12 @@ const (
 	// it has), `version` (the version found or reached) and, per event,
 	// `from`, `added`, `error`.
 	//
-	// EventAppUpdated: an app moved to a newer version by itself.
+	// EventAppUpdated: an administrator's approved change of an app's
+	// version — an upgrade, or going back (meta `rollback`). Since 0.48
+	// nothing updates itself (wasmplugin/versions.go afterUpgrade).
 	EventAppUpdated EventType = "app_updated"
-	// EventAppUpdateAvailable: a newer version waits for the administrator —
-	// automatic updates are off for the app, or the instance only runs signed
-	// apps. Once per version.
+	// EventAppUpdateAvailable: a newer version waits for the administrator.
+	// Once per version.
 	EventAppUpdateAvailable EventType = "app_update_available"
 	// EventAppUpdateNeedsApproval: a newer version asks for permissions the
 	// app was not granted (meta `added`), or a language pack now brings a
@@ -92,8 +93,14 @@ const (
 	// reviews it. Once per version.
 	EventAppUpdateNeedsApproval EventType = "app_update_needs_approval"
 	// EventAppUpdateFailed: an automatic update was tried and undone — the
-	// app runs the version it had (meta `error`). Once per version.
+	// app runs the version it had (meta `error`). Written only by filex 0.47,
+	// which updated apps by itself; kept so its rows still read.
 	EventAppUpdateFailed EventType = "app_update_failed"
+	// EventPluginUpdateAvailable: a binary STORAGE plugin's source has a
+	// newer version for this platform (plugin/updates.go). Meta `plugin`,
+	// `version`. Once per version; nothing is installed until an
+	// administrator reviews it.
+	EventPluginUpdateAvailable EventType = "plugin_update_available"
 )
 
 // operatorEvents are the alarms above: things only an administrator can act on
@@ -119,6 +126,7 @@ var operatorEvents = []EventType{
 	EventPrimaryReadFail, EventQuotaNearFull, EventQuotaFull, EventQueueStuck, EventAuthFailSpike,
 	EventDiskFull, EventUpdateAvailable, EventUpdateApplied,
 	EventAppUpdated, EventAppUpdateAvailable, EventAppUpdateNeedsApproval, EventAppUpdateFailed,
+	EventPluginUpdateAvailable,
 }
 
 // Canonical file/share events (webhook v2 — "Bağlan" (Connect) wave). Emitted
@@ -135,7 +143,7 @@ var operatorEvents = []EventType{
 //     block (that is how "e2e.escrow_used" existed for a release without
 //     ever reaching the UI);
 //   - web/tests/webhooks/eventCatalog.test.ts parses this file and fails
-//     when web/src/lib/webhookEvents.ts drifts from it, or when an event is
+//     when packages/core/src/lib/webhookEvents.ts drifts from it, or when an event is
 //     missing an operator-readable label in en.json or tr.json.
 //
 // The older underscore-named alerts above (replica_fail, disk_full, …) are
@@ -193,6 +201,15 @@ const (
 	// event that is not a constant here is invisible to everything that reads
 	// this block. catalog_test.go now refuses that shape.
 	EventE2EEscrowUsed EventType = "e2e.escrow_used"
+	// EventE2EPasswordChanged fires when an encrypted folder's password was
+	// changed — or reset with its recovery key — in the web UI, which
+	// announces it after writing the new key file (the change happens in the
+	// browser; the server sees no password). It goes to the folder's OWNER,
+	// who may not be the person who changed it: a change you did not make is
+	// how you learn somebody else holds your password or recovery key. Meta
+	// carries {storage, folder, via: "password"|"recovery_key", rekey} and,
+	// when the caller was signed in, actor_email.
+	EventE2EPasswordChanged EventType = "e2e.password_changed"
 	// EventPluginNotice is an app plugin (internal/wasmplugin) speaking to
 	// people through the notify_send host function: a signature request, a
 	// finished conversion, anything the plugin's author phrased. The row's

@@ -194,7 +194,7 @@ each target additionally persists its own last delivery — final HTTP status
 **Canonical events** filex emits itself:
 
 ⚠ Read the **Emitted** column before you build an alert on one of these. Seven
-of the sixteen operational alert ids below are declared in
+of the seventeen operational alert ids below are declared in
 `internal/notify/event.go` and **no code emits them** — the id is accepted by a
 webhook target's allow-list, the target saves, and the event never arrives. A
 subscription that can never fire looks exactly like a subsystem that never has
@@ -214,10 +214,11 @@ a problem, which is the worst way to learn your monitoring was never wired.
 | `disk_full` | critical | **no** ⚠ | The host disk is out of space. |
 | `update_available` | info | yes | A newer release was published. Fires **once** per release — the announcement is persisted, so a restart loop cannot turn it into a stream. |
 | `update_applied` | info | **no** ⚠ | A self-upgrade replaced the binary. |
-| `app_updated` | info | yes | An installed app moved to a newer version by itself ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). Meta: `plugin`, `plugin_label_<lang>`, `version`, `from`. |
-| `app_update_available` | info | yes | A newer version of an app waits for the administrator — its automatic updates are off, or the instance only runs signed apps. **Once** per version. |
+| `app_updated` | info | yes | An administrator approved another version of an app — an upgrade, or going back (meta `rollback`) ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). Nothing updates itself since 0.48. Meta: `plugin`, `plugin_label_<lang>`, `version`, `from`. |
+| `app_update_available` | info | yes | A newer version of an app waits for an administrator's review. **Once** per version. |
 | `app_update_needs_approval` | warning | yes | A newer version of an app asks for permissions it was not granted (meta `added`), or a language pack now brings a module (`adds_module`). **Once** per version. |
-| `app_update_failed` | warning | yes | An automatic app update was tried and undone; the version it had keeps running. **Once** per version. |
+| `app_update_failed` | warning | 0.47 only | An automatic app update was tried and undone; the version it had kept running. Only filex 0.47, which updated apps by itself, wrote it; the id stays so its rows still read. |
+| `plugin_update_available` | info | yes | A storage plugin's update source has a newer version for this server's platform; nothing is installed until an administrator reviews it ([PLUGINS.md → Updates from a source](PLUGINS.md#updates-from-a-source)). Meta: `plugin`, `version`. **Once** per version. |
 
 **File and share events** (webhook v2) — the subscribable catalogue, every one
 of them tickable on a target in **Admin → Webhooks**:
@@ -236,7 +237,8 @@ of them tickable on a target in **Admin → Webhooks**:
 | `share.created` | A public share link was created. |
 | `drop.received` | A file arrived through a public "request files" link. |
 | `comment.added` | Somebody commented on a file or folder. `meta` carries `comment_id` and the first 200 characters of the body. |
-| `e2e.escrow_used` | An encrypted folder was opened with the operator's **escrow key** instead of its owner's passphrase — not the recovery key, which the owner holds. `meta` carries `escrow_kid`, `storage`, `folder` and, when the caller was signed in, `actor_email`. |
+| `e2e.escrow_used` | An encrypted folder — or a single encrypted file (`.fxe`) — was opened with the operator's **escrow key** instead of its owner's passphrase — not the recovery key, which the owner holds. `meta` carries `escrow_kid`, `storage`, `folder` (for a file: `file` and `kind: "file"` instead) and, when the caller was signed in, `actor_email`. |
+| `e2e.password_changed` | An encrypted folder's password was changed — or reset with its **recovery key** (`meta.via = "recovery_key"`, severity `warning`) — in the web UI, which announces it once the new key file is written ([E2E-ENCRYPTION.md](E2E-ENCRYPTION.md#changing-the-password)). Sent to the folder's **owner**, who may not be the person who changed it. `meta` carries `storage`, `folder`, `via`, `rekey` (the folder key was replaced too) and, when the caller was signed in, `actor_email`. A single encrypted file's password change is the same event, with `file` and `kind: "file"` in place of `folder`, sent to the file's owner. |
 | `plugin.notice` | An installed app plugin (see `APP-PLUGINS.md`) sent a message through its `notify_send` host function — a signature request, a finished job. Title/body are the plugin's English wording; `meta` carries `plugin` (the app's install id), `plugin_label_<lang>` (its name as people know it — what a reader prints in front of the message, never the id), `title_<lang>`/`body_<lang>` — one of each per language the app wrote it in (`_en`/`_tr` always, at most 16 more; the reader's own language is used, then its base language, then English), `job` for a queued action, and up to eight small facts the plugin added. The app may address one person instead of the instance feed, and may attach a target: the file plus, optionally, the app screen to open on it (`target.open = {plugin, action|view}`), so a click lands in the signing screen rather than on the notifications page. |
 
 The six **write** events (`file.uploaded`, `file.updated`, `file.upload_failed`,
@@ -245,6 +247,16 @@ gate, so every one of them carries `meta.origin` — which surface wrote it:
 `manager`, `ai`, `sharex`, `dav`, `ops`, `s3`, `sftp`, `ftp`, `nfs`,
 `onlyoffice`. The other events are emitted by their own subsystems and carry
 their own `meta` instead, as listed above.
+
+**Inside an end-to-end encrypted folder** every event about an item in it
+also carries `meta.e2e_root` — the encrypted folder, as `<storage>://<path>`
+([E2E-ENCRYPTION.md](E2E-ENCRYPTION.md#encryption-levels)). At level 2 the
+item's name and path are ciphertext (the server has nothing else), so the bell
+and the desktop app never print them: they show the real name where the
+reader's explorer has that folder unlocked, and **🔒 Encrypted item**
+otherwise. A webhook receives the ciphertext names and the mark, and should do
+the same. The encrypted folder's own events (`e2e.*`) are about the folder
+itself, whose name is not encrypted, and carry no mark.
 
 ⚠ `onlyoffice` is its own origin rather than `manager`, and the distinction is
 load-bearing for a subscriber: the bytes are assembled and posted by the
@@ -337,7 +349,8 @@ otherwise hit:
 | `archive.extracted` | `dir` — the extraction destination | Opens the folder containing the extracted members. |
 | `drop.received` | `dir` — the drop folder | A drop can carry several files, so there is no single row to select. |
 | `comment.added` | `file` **or** `dir` | Read from the node row's type — a comment can hang on a folder. |
-| `e2e.escrow_used` | `dir` — the encrypted folder | |
+| `e2e.escrow_used` | `dir` — the encrypted folder; `file` — a single encrypted file | |
+| `e2e.password_changed` | `dir` — the encrypted folder; `file` — a single encrypted file | |
 | `share.created` | `share` — the token | The event is "a link now exists"; the link is the thing. |
 | `admin_test` · `webhook_test` | `none` | |
 | `update_available` · `update_applied` | `none` | Not about a file. |
@@ -348,8 +361,9 @@ otherwise hit:
 ### filex's own directories
 
 filex keeps machinery inside every storage — the bin (`.filex-trash`), version
-history (`.versions`), legacy thumbnails (`.thumbs`) and the desktop app's
-"open with filex" working copies (`.filex-open`), one list in
+history (`.versions`), legacy thumbnails (`.thumbs`), the desktop app's
+"open with filex" working copies (`.filex-open`) and people's unsaved new
+documents (`.filex-drafts`), one list in
 `backend/internal/syspath`. Every write, move and delete there goes through the
 same post-write gate as a person's own files, so one rule decides what reaches
 a person, applied in `notify.Service.Send` (the door every event goes through)
@@ -373,17 +387,22 @@ addressed to the Trash view. The bell's copy of a row also drops
 
 One resolver, three surfaces. The bell row, the browser notification and the
 desktop app's native notification all route through
-`web/src/lib/notificationTarget.ts` — the desktop **main process imports that
+`packages/core/src/lib/notificationTarget.ts` — the desktop **main process imports that
 same file** — so the three cannot disagree about where a click lands.
 
 | `kind` | Web (admin/drive SPA) | Desktop app |
 |---|---|---|
-| `file` | `/{base}explore?select=<storage>://<path>#<storage>/<folder>` — the folder opens and the row is **selected**; with `open`, `&app=…&appAction=`/`&appView=…` as well, and the app's screen opens on that row | remounts the explorer at the folder and selects the row |
-| `dir` | `/{base}explore#<storage>/<folder>` | remounts the explorer at the folder |
-| `trash` | `/{base}explore?select=<storage>://<path>#.trash` — the Trash view, the item selected | remounts the explorer on the Trash view and selects the item |
-| `app` | `/{base}app/<plugin>/<view>?section=<section>` — the app's home page, in the same tab | brings the app window to the front (it has no app home pages) |
+| `file` | `/{base}explore?select=<storage>://<path>#<storage>/<folder>` — the folder opens and the row is **selected**; with `open`, `&app=…&appAction=`/`&appView=…` as well, and the app's screen opens on that row | the explorer opens the folder **in place** and selects the row; with `open`, the app's screen opens on it |
+| `dir` | `/{base}explore#<storage>/<folder>` | the explorer opens the folder in place |
+| `trash` | `/{base}explore?select=<storage>://<path>#.trash` — the Trash view, the item selected | the explorer opens the Trash view and selects the item |
+| `app` | `/{base}app/<plugin>/<view>?section=<section>` — the app's home page, in the same tab | the explorer opens the app's home view |
 | `share` | the public `/s/<token>` page | opened in the **system browser** — a public page is not something to load into a window holding a bearer token |
-| `none` | **nowhere — the row is not clickable** | brings the app window to the front |
+| `none` | **nowhere — the row is not clickable** | the bell's row is not clickable; a native notification brings the window to the front |
+
+On the desktop both the bell's row and a clicked native notification land
+through the SAME code: the explorer's `revealNotification(dest)` (packages/core
+`FileExplorer.vue`, exposed on `<filex-explorer>`), which navigates the explorer
+it is called on rather than re-mounting it.
 
 ⚠⚠ `none` used to go to the notifications page. That page is the one the
 reader was most likely already looking at, and it is admin-gated — so for
@@ -457,16 +476,22 @@ event's [target](#click-target).
 
 ### Desktop app
 
-The desktop window is the explorer and has no bell in it, so the app polls the
-same endpoint and raises a **native OS notification** instead. A click brings
-the window to the front and opens the target; a share opens in the system
-browser. **App settings → Notifications** turns it off.
+The desktop window draws the **web app's bell** in its top bar (since
+2026-09-27; the explorer's `config.notifications` — the same NotificationBell,
+NotificationsPanel and feed the web uses, moved into `packages/core`), and the
+main process polls the same endpoint to raise a **native OS notification** for
+each new row — also with the window closed and the app in the tray. Clicking
+either one lands in the window (see *Where a click goes*); a share opens in the
+system browser. A clicked native notification that goes somewhere is **marked
+read** on the way, as the web's browser notification is. **App settings →
+Notifications** turns the native ones off; the bell stays.
 
-The unread count goes on the app's own icon instead of on a bell: the dock /
-taskbar badge where the platform draws one (macOS and Linux desktops that
-support it; Windows has no such badge), and the tray icon's tooltip
-(`filex — 12`). See rule 3 below for why the badge and the tooltip round
-differently past 99.
+The main process's poll is the only one: it hands the unread count to the
+window's bell (`notify:unread`), and the bell tells it when it marked something
+read, so the badge moves at once. The count also goes on the app's own icon:
+the dock / taskbar badge where the platform draws one (macOS; Windows and Linux
+have no such badge), and the tray icon's tooltip (`filex — 12`). See rule 3
+below for why the badge and the tooltip round differently past 99.
 
 It never double-notifies: the browser channel refuses to fire inside the
 Electron shell, so one event produces one notification on that machine.

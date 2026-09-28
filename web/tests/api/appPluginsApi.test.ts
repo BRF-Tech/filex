@@ -102,6 +102,16 @@ describe('AppPluginsApi', () => {
     expect(body.get('manifest')).toBe(manifest);
     expect(body.get('signature')).toBe('sig');
     expect(JSON.parse(String(body.get('grant')))).toEqual({ permissions: ['files:read', 'net:tsa'] });
+    expect(body.has('ui'), 'no interface, no part').toBe(false);
+  });
+
+  it('install an interface-only app from files: the `ui` part, no module', async () => {
+    const manifest = new File(['{}'], 'filex-app.json');
+    const ui = new File([new Uint8Array([80, 75, 3, 4])], 'ui.zip');
+    await AppPluginsApi.install({ kind: 'upload', manifest, ui }, ['files:read', 'ui']);
+    const body = calls[0].body as FormData;
+    expect(body.get('ui')).toBe(ui);
+    expect(body.has('wasm')).toBe(false);
   });
 
   // ⚠⚠ The server compiles the module before it answers; a 20 MB module took
@@ -276,16 +286,17 @@ describe('AppPluginsApi — updates', () => {
     calls.length = 0;
   });
 
-  it('checkUpdates: POST /admin/app-plugins/updates/check, waiting for the installs it may run', async () => {
+  it('checkUpdates: POST /admin/app-plugins/updates/check, waiting for every source', async () => {
     await AppPluginsApi.checkUpdates();
     expect(calls[0]).toMatchObject({ method: 'post', url: '/admin/app-plugins/updates/check', body: {} });
     expect((calls[0].cfg as { timeout?: number }).timeout).toBe(UPDATE_CHECK_TIMEOUT_MS);
     expect(UPDATE_CHECK_TIMEOUT_MS).toBeGreaterThan(INSTALL_TIMEOUT_MS);
   });
 
-  it('setAutoUpdate: PATCH the one switch, nothing else', async () => {
-    await AppPluginsApi.setAutoUpdate(7, false);
-    expect(calls[0]).toEqual({ method: 'patch', url: '/admin/app-plugins/7', body: { auto_update: false } });
+  it('rollback: POST the row route, waiting like an install (it compiles the kept module)', async () => {
+    await AppPluginsApi.rollback(7);
+    expect(calls[0]).toMatchObject({ method: 'post', url: '/admin/app-plugins/7/rollback', body: {}, cfg: { timeout: INSTALL_TIMEOUT_MS } });
+    expect('setAutoUpdate' in AppPluginsApi, 'nothing updates itself: no switch to send').toBe(false);
   });
 
   it('an upgrade from the app’s own source sends `from_source`, not a source', async () => {

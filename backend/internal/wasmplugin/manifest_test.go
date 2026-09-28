@@ -135,7 +135,7 @@ func TestParseManifest_PagePlacementAndStateKeys(t *testing.T) {
 	_, err = ParseManifest([]byte(`{"manifest_version":1,"name":"x","version":"1","label":{"en":"x"},"permissions":[],
 	  "views":[{"id":"v","label":{"en":"v"},"placement":"popup"}]}`))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "modal, page, inspector or home")
+	assert.Contains(t, err.Error(), "modal, page, inspector, home or viewer")
 }
 
 func TestParseManifest_LanguagesAndConditions(t *testing.T) {

@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/netguard"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
 
@@ -112,6 +113,73 @@ func (r *Registry) LookupUsers(ctx context.Context, q string) ([]UserRow, error)
 	return out, nil
 }
 
+// ── Whose directory a call may read ─────────────────────────────────────
+//
+// ⚠⚠ On a multi-tenant instance the directory is per tenant ("users of other
+// realms are invisible", tenantstore.ListUsers), and the store only narrows a
+// listing when the context CARRIES a tenant scope — a context without one
+// reads every tenant. Apps are installed for the whole instance, so every
+// call has to carry the scope of somebody. Three kinds of call have no person
+// of their own: a public page (a visitor), the hourly wake-up and the work it
+// schedules.
+//
+// The rule now: a call speaks for a PERSON — the one who started it, or, on a
+// public page, the one who sent the link — and reads that person's tenant.
+// A call with no person reads nobody (tenant.DenyAll, the fail-closed scope
+// the tenant package prescribes). A single-tenant instance wires no user
+// scope and is untouched.
+
+// person is who this call acts for: the person who started it, or on a public
+// page the person who created the link. nil for the host's own calls.
+func (s *Scope) person(ctx context.Context) *model.User {
+	if s.actor != nil && s.actor.ID > 0 {
+		return s.actor
+	}
+	if s.page != nil && s.page.CreatedBy != nil {
+		if u, err := s.reg.opts.Store.GetUser(ctx, *s.page.CreatedBy); err == nil && u != nil {
+			return u
+		}
+	}
+	return nil
+}
+
+// directoryScope is ctx carrying the tenant whose people this call may name.
+func (s *Scope) directoryScope(ctx context.Context) context.Context {
+	if s.reg.userScope == nil {
+		return ctx
+	}
+	if u := s.person(ctx); u != nil {
+		return s.reg.userScope(ctx, u)
+	}
+	return tenant.WithScope(ctx, tenant.DenyAll)
+}
+
+// mayAddress answers whether this call may send a notice to u. On a
+// multi-tenant instance the recipient must be able to reach the storage the
+// call is about (their tenant links it), or — for a call about no storage —
+// belong to the tenant of the person the call speaks for.
+func (s *Scope) mayAddress(ctx context.Context, u *model.User) bool {
+	if s.reg.userScope == nil {
+		return true
+	}
+	theirs, ok := tenant.FromContext(s.reg.userScope(ctx, u))
+	if !ok || theirs == nil {
+		return false
+	}
+	if s.storageID > 0 {
+		return theirs.CanAccessStorage(s.storageID)
+	}
+	p := s.person(ctx)
+	if p == nil {
+		return false
+	}
+	mine, ok := tenant.FromContext(s.reg.userScope(ctx, p))
+	if !ok || mine == nil || mine.ProviderID == 0 {
+		return false
+	}
+	return mine.IsSupertenant || theirs.ProviderID == mine.ProviderID
+}
+
 func hfUsersLookup(ctx context.Context, s *Scope, in json.RawMessage) (any, error) {
 	var req struct {
 		Q string `json:"q"`
@@ -119,9 +187,7 @@ func hfUsersLookup(ctx context.Context, s *Scope, in json.RawMessage) (any, erro
 	if err := json.Unmarshal(in, &req); err != nil {
 		return nil, hostErr(wire.ErrInvalid, "bad json")
 	}
-	if s.reg.userScope != nil && s.actor != nil && s.actor.ID > 0 {
-		ctx = s.reg.userScope(ctx, s.actor)
-	}
+	ctx = s.directoryScope(ctx)
 	rows, err := s.reg.LookupUsers(ctx, req.Q)
 	if err != nil {
 		return nil, hostErr(wire.ErrUnavailable, "directory: "+err.Error())
@@ -139,7 +205,7 @@ const maxNoticeLangs = 16
 // noticeMeta is the language-dependent part of an app's notice: the app's
 // name, the title and the body, once PER LANGUAGE the app wrote them in —
 // `plugin_label_<lang>`, `title_<lang>`, `body_<lang>`. The bell, the browser
-// toast and the desktop pick the reader's own (web/src/lib/notificationText.ts
+// toast and the desktop pick the reader's own (packages/core/src/lib/notificationText.ts
 // → noticeText), falling back to the base language and then English.
 //
 // ⚠⚠ EVERY language, not English and Turkish. It kept exactly those two, so
@@ -249,7 +315,9 @@ func hfNotifySend(ctx context.Context, s *Scope, in json.RawMessage) (any, error
 	)
 	if req.ToUserID > 0 {
 		u, err := s.reg.opts.Store.GetUser(ctx, req.ToUserID)
-		if err != nil || u == nil {
+		// The same answer for "nobody" and "somebody in another tenant": an
+		// app must not learn which ids exist beyond its caller's tenant.
+		if err != nil || u == nil || !s.mayAddress(ctx, u) {
 			return nil, hostErr(wire.ErrNotFound, "to_user_id: no such user")
 		}
 		id := u.ID
@@ -268,7 +336,7 @@ func hfNotifySend(ctx context.Context, s *Scope, in json.RawMessage) (any, error
 		req.Target = nil
 	}
 	if req.Target != nil {
-		rel, err := s.targetRel(req.Target.Ref, req.Target.Path)
+		rel, err := s.targetRel(ctx, req.Target.Ref, req.Target.Path)
 		if err != nil {
 			return nil, err
 		}

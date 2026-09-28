@@ -88,14 +88,6 @@ func TestAdvisories_DoesNotFireOnWorkingSetups(t *testing.T) {
 			publicURL:  "http://localhost:5212", set: false,
 		},
 		{
-			// A container name is perfectly correct for the converter: only
-			// filex ever calls it, never a browser.
-			name:       "container name on a server-only service",
-			svc:        external.Convert,
-			serviceURL: "http://convert:8080",
-			publicURL:  "https://files.example.com", set: true,
-		},
-		{
 			name:       "drawio on a real name",
 			svc:        external.Drawio,
 			serviceURL: "https://draw.example.com",

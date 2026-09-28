@@ -65,6 +65,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
@@ -167,9 +168,13 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The text editor never opens anything among filex's own (the desktop's
-	// working copies are office documents, saved by the document editor).
+	// working copies are office documents, saved by the document editor) —
+	// except a draft of the caller's OWN (issue #71): a new text document is
+	// written there until its first save, and this is how its content
+	// arrives (syspath.OwnDraft; anybody else's draft is refused here and has
+	// no ACL level either).
 	// …and a document an app has frozen is not saved over (writegate).
-	if gate(w, r, h.ACL, storageID, writegate.Writes(rel)) {
+	if gate(w, r, h.ACL, storageID, writegate.Writes(rel).As(syspath.OwnDraft).By(currentUserID(r.Context()))) {
 		return
 	}
 	// RBAC: editing file content needs ≥editor.
@@ -369,7 +374,8 @@ func isTextualMime(m string) bool {
 // isTextSafePath returns true for extensions that round-trip cleanly as
 // UTF-8 plain text — JSON, YAML, code, markdown, config files. Binary
 // formats (images, archives, office docs) are rejected; they have
-// dedicated edit channels (OnlyOffice / drawio / explicit upload).
+// dedicated edit channels (OnlyOffice / explicit upload). A draw.io diagram
+// is XML and is saved here by the draw.io viewer.
 func isTextSafePath(rel string) bool {
 	ext := strings.ToLower(strings.TrimPrefix(path.Ext(rel), "."))
 	switch ext {
@@ -381,7 +387,11 @@ func isTextSafePath(rel string) bool {
 		"php", "py", "rb", "rs", "go", "java", "kt", "swift",
 		"cpp", "c", "h", "hpp", "cs", "dart",
 		"sh", "bash", "zsh", "sql", "lua", "pl", "r",
-		"dockerfile", "gradle", "gitignore", "editorconfig":
+		"dockerfile", "gradle", "gitignore", "editorconfig",
+		// A draw.io diagram is XML, and the draw.io viewer saves it here.
+		// Without these, a new diagram (catalogued as
+		// application/vnd.jgraph.mxfile) could be opened and never saved.
+		"drawio", "dio":
 		return true
 	}
 	// Files with no extension OR special filenames.

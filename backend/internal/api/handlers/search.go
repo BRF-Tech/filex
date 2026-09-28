@@ -189,6 +189,9 @@ type searchResult struct {
 	// so a raw `owner_id` it cannot compare against anything is a number, not
 	// an owner. Omitted when false, exactly like the listing's key.
 	OwnerSelf bool `json:"owner_self,omitempty"`
+	// E2eRoot is the end-to-end encrypted folder the hit sits in (a wire
+	// path); absent otherwise. See e2eRoots.
+	E2eRoot string `json:"e2e_root,omitempty"`
 }
 
 // describeHits fills in the two things a raw node row cannot say about
@@ -473,6 +476,10 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	// to drop — and so a dropped row can never leak the name of whoever owns
 	// it.
 	h.describeHits(r.Context(), results)
+	roots := newE2eRoots(h.Store)
+	for i := range results {
+		results[i].E2eRoot = roots.of(r.Context(), results[i].StorageID, results[i].Storage, results[i].Path)
+	}
 	// `truncated`: more rows matched than came back — the index filled its
 	// page, or the fallback filled its window or had more than `limit` left
 	// after ranking. Rows the tenant or RBAC filters then dropped do not make

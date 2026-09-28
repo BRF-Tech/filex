@@ -1,13 +1,20 @@
 # End-to-end encrypted folders
 
-A folder in filex can be made **end-to-end encrypted**: its files are encrypted
-and decrypted in the browser with WebCrypto, and **no password or key is ever
-sent to the server**. The server stores opaque blobs it cannot read and does not
-participate in the crypto at all.
+A folder in filex can be made **end-to-end encrypted**: its files — and, at
+[level 2](#encryption-levels), their names — are encrypted and decrypted in the
+browser with WebCrypto, and **no password or key is ever sent to the server**.
+The server stores opaque blobs it cannot read and does not participate in the
+crypto at all.
 
 This page is the reference for that feature — the threat model, the key
 hierarchy, the on-disk formats, which parts of filex stop working inside such a
 folder, and the ways you can still end up with plaintext on the server.
+
+**Format revision:** folder marker **v2** for level 1 (contents only, the
+default) and **v3** for level 2 (contents and names, v0.48); encrypted file
+header **v1** for files up to 200 MB, **v2** (a [STREAM](#streaming-content-stream)
+body) for larger ones; single encrypted file (`.fxe`) **v1**. See
+[format versions](#format-versions).
 
 > ⚠ **Recovery is limited and deliberate.** A folder created from v0.31 on has
 > a **user recovery key**, shown once at creation and never stored by filex.
@@ -16,13 +23,20 @@ folder, and the ways you can still end up with plaintext on the server.
 > add one; see [Folders created before v0.31](#folders-created-before-v031).
 
 - [Threat model](#threat-model) — [what it protects](#what-it-protects) · [what it does not hide](#what-it-does-not-hide)
-- [Key management](#key-management) — [folder marker](#folder-marker--filex-e2ejson) · [file format](#file-format--filexe2e-magic)
+- [Key management](#key-management) — [folder marker](#folder-marker--filex-e2ejson) · [file format](#file-format--filexe2e-magic) · [format versions](#format-versions)
+- [Encryption levels and names](#encryption-levels-and-names) — [levels](#encryption-levels) · [scheme](#the-scheme) · [folder ids](#folder-ids) · [why](#why-these-choices) · [long names](#long-names-and-their-sidecar) · [marker v3](#the-marker-v3-and-required-features) · [changing the level](#changing-the-level) · [what the server still sees](#what-the-server-still-sees)
+- [Streaming content (STREAM)](#streaming-content-stream) — files over 200 MB, and every `.fxe`
+- [Single encrypted files (`.fxe`)](#single-encrypted-files-fxe) — [inside an encrypted folder](#a-fxe-inside-an-encrypted-folder) · [what the server already saw](#what-the-server-already-saw-of-the-original) · [layout](#the-fxe-layout)
+- [Downloading a decrypted copy](#downloading-a-decrypted-copy) — [where it is saved](#where-a-decrypted-download-goes)
+- [Encrypting a folder you already have](#encrypting-a-folder-you-already-have) — [what the server already saw](#what-the-server-already-saw)
+- [Changing the password](#changing-the-password) — [a folder with its own key](#a-folder-with-its-own-key-v031-and-later) · [re-keying](#re-keying-a-folder-from-before-v031-or-on-purpose) · [after a recovery-key unlock](#after-a-recovery-key-unlock) · [who is told](#who-is-told) · [what it does not undo](#what-a-password-change-does-not-undo)
 - [Recovery](#recovery) — [user recovery key](#the-user-recovery-key) · [key escrow](#key-escrow-optional-operator-recovery) · [adopting escrow later](#adopting-escrow-on-an-installation-that-already-exists) · [offering an existing folder a slot](#offering-an-existing-folder-an-escrow-slot) · [what escrow cannot do](#what-escrow-can-and-cannot-do) · [before v0.31](#folders-created-before-v031)
 - [Feature trade-offs](#feature-trade-offs)
 - [Ways plaintext still reaches the server](#ways-plaintext-still-reaches-the-server)
-- [Using it](#using-it)
+- [Using it](#using-it) — [taking a folder out: `filex decrypt`](#taking-a-folder-out-filex-decrypt)
 - [What the server knows](#what-the-server-knows)
 - [Not implemented](#not-implemented)
+- [Format reference](#format-reference) — every parameter, for anything that reads or writes these folders
 - [See also](#see-also)
 
 ---
@@ -31,9 +45,11 @@ folder, and the ways you can still end up with plaintext on the server.
 
 ### What it protects
 
-The **contents** of the files inside the folder. An attacker holding the server
-disk, the S3 bucket, a database backup, a stolen host, or a legal seizure order
-gets ciphertext. So does filex itself. Encryption and decryption happen only in
+The **contents** of the files inside the folder, and — at
+[level 2](#encryption-levels), contents and names — the **names** of its files
+and folders. An attacker holding the server disk, the S3 bucket, a
+database backup, a stolen host, or a legal seizure order gets ciphertext. So
+does filex itself. Encryption and decryption happen only in
 the browser; the server sees a blob that starts with the `filexe2e` magic and
 nothing else.
 
@@ -61,9 +77,11 @@ These are deliberate, and they are all still true today:
 
 | Leak | Why | Status |
 |------|-----|--------|
-| **File and folder names** | Names are not encrypted | The server, listings and name search all see them |
-| File sizes (approximate) | Ciphertext ≈ plaintext + 97-byte header + 16-byte tag | Visible |
-| Folder structure / file count | The tree is not encrypted | Visible |
+| **File and folder names** | Encrypted at [level 2](#encryption-levels) (contents and names). At level 1 (contents only, the default) names stay readable, so WebDAV, the CLI and desktop sync keep working with them | Hidden / visible, per folder. The strip above an unlocked folder says which level it is at |
+| The encrypted folder's **own** name | It lives in a folder that is not encrypted | Visible — name it neutrally |
+| Name length | A stored name is as long as its name, plus a fixed overhead ([the scheme](#the-scheme)) | Roughly how long each name is. Equal names in **different** folders are two different stored names ([folder ids](#folder-ids)) |
+| File sizes (approximate) | Ciphertext ≈ plaintext + 97-byte header + 16-byte tag (+ 16 bytes per MiB for a [STREAM](#streaming-content-stream) file) | Visible |
+| Folder structure / file count | The tree is not encrypted | Visible. Hiding it is the vault level — designed, not built ([roadmap](E2E-ROADMAP.md#3-the-vault-level)) |
 | Access times / audit trail | Normal audit logging continues | Visible |
 | Keys in the memory of an open tab | The key lives in RAM for the session | XSS and malicious extensions are the host's problem |
 | The JavaScript the server serves you | A hostile server can serve hostile JS | Inherent to browser-based E2E |
@@ -83,7 +101,10 @@ user recovery key ─HKDF-SHA256(16B salt)────────────�
 escrow private key ─RSA-OAEP-256────────────────────────────────┘   (folder master key)
                                                                     │
 per-file random 32B DEK (AES-256-GCM) encrypts the content one-shot │
-DEK ◀── wrapped with the FMK via AES-GCM, stored in the file header ┘
+DEK ◀── wrapped with the FMK via AES-GCM, stored in the file header ┤
+                                                                    │
+64B name key (AES-256-SIV) encrypts every name ◀── wrapped with the ┘
+FMK via AES-GCM, stored in the marker (`names.key`, v3 only)
 ```
 
 Every file's key (its **DEK**) is wrapped by one key, the **folder master key**
@@ -101,8 +122,9 @@ what it was in v1.
   created. It is what wraps every file's DEK, and the only thing the marker's
   key slots hand back. Never derived from anything, never leaves memory.
 - **DEK (file key)** — a fresh `crypto.getRandomValues(32)` per file. The
-  content is encrypted one-shot under the DEK; the DEK is then wrapped with the
-  **FMK** and embedded in that file's own header.
+  content is encrypted under the DEK — one-shot up to 200 MB, as a
+  [STREAM](#streaming-content-stream) above that; the DEK is then wrapped with
+  the **FMK** and embedded in that file's own header.
 - **Password verification** — the marker's `verify` field is a fixed string
   (`filex-e2e-verify-v1`) encrypted under the KEK. A wrong password fails the
   GCM tag check and produces a "wrong password" error locally. **No verification
@@ -133,12 +155,13 @@ and from search results**, but is readable by path through the preview endpoint
 
 | Field | Meaning |
 |---|---|
-| `v` | Marker schema. `1` = pre-v0.31, no slots. `2` = the shape above. **Both are read; only `2` is written.** The *file header* version is unrelated and still `1`. |
+| `v` | Marker schema. `1` = pre-v0.31, no slots. `2` = the shape above. `3` = the shape above plus [required features](#the-marker-v3-and-required-features) (`req`, `names`), written for a folder with encrypted names. **All three are read; `2` and `3` are written.** The *file header* version is unrelated and still `1`. |
 | `salt` / `iter` / `verify` | The password slot, unchanged since v1. `verify` is still what a wrong password fails against. |
 | `fmk` | `"wrapped"` — the FMK is random and lives in `fmk_pw`. `"kek"` — the FMK *is* the password-derived KEK, which is how a v1 folder is upgraded in place without rewriting files. |
 | `fmk_pw` | Present only when `fmk` is `"wrapped"`. |
 | `rk` | The user recovery key slot. Absent means the folder has no recovery key. |
 | `esc` | The escrow slot, and the only authority on which escrow key opens this folder. **Absent means no escrow key opens it**, and no configuration change adds one — including [adopting escrow](#adopting-escrow-on-an-installation-that-already-exists) afterwards. The folder's **owner** can add one with the password ([offering an existing folder a slot](#offering-an-existing-folder-an-escrow-slot)); nobody else can. `kid` names *which* escrow key: a folder restored from another installation carries that installation's `kid` and does not open with yours. |
+| `rekey` | v3 with `req: [..., "rekey"]` only: a [re-key](#re-keying-a-folder-from-before-v031-or-on-purpose) in progress. `{from, pending: true}` — `from` is the PREVIOUS folder key sealed under the current one, so the files not re-wrapped yet stay readable. Removed when the re-key finishes. |
 | `esc_declined` | The owner was offered an escrow slot and declined, at this timestamp. Purely a record of an answer: it holds no key material, changes nothing about the folder, and its only effect is that filex stops asking. Cleared if they later accept. |
 
 Nothing in the marker is secret: every slot is the same 32 bytes sealed under a
@@ -149,12 +172,16 @@ useless without a password or key. New folders are always created with at least
 
 ⚠ An older filex (≤ v0.30.1) does not understand a `v: 2` marker and will report
 the key file as unreadable. The **files** are unaffected — see
-[before v0.31](#folders-created-before-v031).
+[before v0.31](#folders-created-before-v031). filex ≤ v0.47 does not understand
+`v: 3` either, and that one is deliberate — see
+[marker v3](#the-marker-v3-and-required-features).
 
 ### File format — `filexe2e` magic
 
-Each encrypted file keeps its original name. The content is a fixed 97-byte
-header followed by the ciphertext:
+The content of each encrypted file is a fixed 97-byte header followed by the
+ciphertext. (Its name is either the original or, at
+[level 2](#encryption-levels), the encrypted one; the content format is the
+same in both.)
 
 | Offset | Length | Field |
 |--------|--------|-------|
@@ -166,6 +193,29 @@ header followed by the ciphertext:
 | 81 | 16 | Reserved (zeros; kept free for future chunked encryption) |
 | 97 | n+16 | Ciphertext — `AES-GCM(DEK, dataIV, content)` (+16B tag) |
 
+A file **over 200 MB** is written with header version `0x02` instead: the
+same header up to offset 69, then the parameters of a
+[STREAM](#streaming-content-stream) body in place of the one-shot IV:
+
+| Offset | Length | Field |
+|--------|--------|-------|
+| 0 | 8 | Magic: ASCII `filexe2e` |
+| 8 | 1 | Version: `0x02` |
+| 9 | 12 | `wrapIV` — GCM IV of the DEK wrap |
+| 21 | 48 | `wrappedDEK` — `AES-GCM(FMK, wrapIV, rawDEK)`, exactly as in `0x01` |
+| 69 | 7 | STREAM nonce prefix |
+| 76 | 1 | Chunk size, as log2 — writers use `20` (1 MiB) |
+| 77 | 20 | Zeros (readers ignore them) |
+| 97 | … | STREAM chunks: each `AES-GCM(DEK, nonce(i), chunk i)` with its tag |
+
+Files up to 200 MB keep `0x01`, so every filex since the feature shipped reads
+them. ⚠ **filex 0.47 and older refuse a `0x02` file** ("unsupported version
+2"): they open the folder and every smaller file in it, and that one file does
+not preview or download there. Because the wrapped DEK sits at the same
+offsets, a [re-key](#re-keying-a-folder-from-before-v031-or-on-purpose)
+re-wraps both versions the same way — for a large file only its first 97
+bytes are rewritten, and the body is re-sent unread.
+
 The server **only recognises the magic prefix** — that is enough to skip
 thumbnailing, content indexing and document conversion. It can never decrypt.
 
@@ -176,6 +226,766 @@ touched, and a file written by v0.31 into a v1 folder is still readable by
 v0.30.1. Both directions are covered by the round-trip tests in
 `web/tests/lib/e2ecrypto.test.ts`, which encrypt with a frozen copy of the
 v0.30.1 module and decrypt with the current one.
+
+### Format versions
+
+| Written by | Marker | File header | Names | Opens in |
+|---|---|---|---|---|
+| ≤ v0.30.1 | `v: 1` | `0x01` | plaintext | every version |
+| v0.31 – v0.47, and v0.48+ at level 1 (contents only, the default) | `v: 2` | `0x01` | plaintext | v0.31 and later |
+| v0.48+ at level 2 (contents and names), created so or raised from level 1 | `v: 3`, `req: ["names"]` | `0x01` | encrypted | v0.48 and later — older versions refuse it |
+| v0.48+, while a [re-key](#re-keying-a-folder-from-before-v031-or-on-purpose) is re-wrapping file keys | `v: 3`, `req` includes `"rekey"` | `0x01` | either | v0.48 and later; back to `v: 2` (or `v: 3` with `["names"]`) when it finishes |
+| v0.48+, a file over 200 MB | any of the above | `0x02` ([STREAM](#streaming-content-stream)) | either | the folder opens where its marker does; the `0x02` file itself only in v0.48 and later |
+| v0.48+, a [single encrypted file](#single-encrypted-files-fxe) | — (its own header) | `.fxe` v1 | its own name, or a hidden one | v0.48 and later |
+| v0.48+, while an existing folder is being [encrypted in place](#encrypting-a-folder-you-already-have) | `v: 3`, `req` includes `"conv"` | `0x01` (and plaintext not reached yet) | either | v0.48 and later; back to `v: 2` (or `v: 3` with `["names"]`) when it finishes |
+
+Each row is measured, not assumed: `web/tests/lib/e2ecrypto.test.ts` and
+`web/tests/lib/e2enames.test.ts` create folders with frozen copies of the
+v0.30.1 and v0.47.0 modules and open them with the current one, and check that
+the v0.47.0 module refuses a v3 folder. `filex decrypt` reads all of them
+(`backend/internal/e2edecrypt`, fixtures made by those same frozen modules, a
+folder whose password was changed and one stopped half-way through a re-key).
+
+---
+
+## Encryption levels and names
+
+### Encryption levels
+
+An encrypted folder has an **encryption level**. It is a property of the
+folder — chosen when the folder is encrypted, shown in the strip above it
+while it is unlocked, and changed only in its **Encryption settings…** — never
+a separate area or a "vault" tab: an encrypted folder is a folder.
+
+| Level | What is encrypted | Marker | What opens it |
+|---|---|---|---|
+| **1 · Contents only** — the default | File contents. File and folder names stay readable to the server | v2 | Every filex since 0.31. WebDAV, the CLI and desktop sync see the names |
+| **2 · Contents and names** | Contents, and every file and folder name inside | v3, `req: ["names"]` | filex 0.48 and later. WebDAV, the CLI and desktop sync see scrambled names |
+| 3 · Vault | Also the shape of the tree: counts, sizes, structure | — | Designed, not built ([roadmap](E2E-ROADMAP.md#3-the-vault-level)). It is not offered anywhere until it works |
+
+Level 1 is the default because it keeps everything that works with names
+working and costs nothing; level 2 is a deliberate choice, made in the create
+dialog or later in the folder's settings
+([changing the level](#changing-the-level)). filex never proposes a level on
+its own — nothing pops up when a folder is unlocked.
+
+What the server stores for `Rapor.docx`, `Sözleşmeler/2024/fatura.pdf` and
+`Sözleşmeler/2025/fatura.pdf` in a level-2 folder (the names from the test
+vectors):
+
+```
+Kasa/.filex-e2e.json
+Kasa/cnCYVvOrMoH0uQKjxUUeYr9h7KREShFsI3Y                                    Rapor.docx
+Kasa/CiGQLHEtou8eDKjFPpDgRJ_zFRPkQ-q1qiCsooM.U1LSU6ksO0TVNYdn3zrSjQ         Sözleşmeler
+     …/3CrigLfZFj7AiDYEJc75B0yMh-0.tuHCIFXASs0gVy89UmZ3qw                      2024
+       …/fP62qxZKj2mZgO-PRyG2JQxSPFMUsjFKWTg                                   fatura.pdf
+     …/uwsuoWoSm-xxHzsW-GAmfYbYotc._Q1qzwokmLrubnICPiPmXQ                      2025
+       …/ZePsvzp4GmR0QflV8NqFheAlaSeCd1q7g84                                   fatura.pdf
+```
+
+The two `fatura.pdf` are two different stored names: each is sealed for the
+folder it is in ([folder ids](#folder-ids)). A folder's stored name ends in
+`.` and its id. The folder's own name (`Kasa`) is not encrypted — see
+[folder names and depth](#folder-names-and-depth).
+
+### The scheme
+
+| Part | Choice |
+|---|---|
+| Key | A random 64-byte **name key**, minted when names are turned on and stored in the marker sealed under the FMK (`names.key`) |
+| Cipher | **AES-SIV** (RFC 5297) with AES-256: AES-CMAC S2V for the synthetic IV, AES-CTR for the name. Associated data: the **id of the folder the name is in** ([folder ids](#folder-ids)) |
+| Input | The name normalised to Unicode **NFC**, as UTF-8, 1–255 bytes; no `/`, `\`, control character, `.` or `..` |
+| Encoding | **base64url** without padding — `[A-Za-z0-9_-]`. A file is stored as `S`; a folder as `S.D`, `D` being its 22-character id |
+| Long names | When `S` (plus `.D` for a folder) is longer than **220** characters the item is stored as `<H>.fxl` (a file) or `<H>.fxl.<D>` (a folder), `H` = base64url(SHA-256(S)), with `S` in a sibling **sidecar** `<H>.fxl.name` |
+
+Implementation: `packages/core/src/lib/aessiv.ts` and `lib/e2enames.ts` in the
+browser, `backend/internal/e2edecrypt` for [`filex decrypt`](CLI.md#filex-decrypt--an-encrypted-folder-offline).
+Both are pinned to RFC 5297 appendix A.1 and to test vectors produced by an
+independent implementation (Python `cryptography`'s `AESSIV`,
+`backend/internal/e2edecrypt/testdata/gen_name_vectors.py`), so a mistake the
+two of them share still fails.
+
+### Folder ids
+
+Every folder inside a level-2 folder has a 16-byte **folder id**, and a name
+is sealed with the id of the folder it is in as AES-SIV associated data. The
+same name in two folders is two different stored names, so the server cannot
+tell that `2024/fatura.pdf` and `2025/fatura.pdf` share a name. This is
+Cryptomator's rule (the parent directory's id as associated data).
+
+**Where an id lives.**
+
+- The encrypted root's id is random and is kept in the marker
+  (`names.root_id`).
+- Every other folder carries its id **in its own stored name**: `S.D`. A folder
+  made in the browser gets a random id when it is made.
+- A folder whose name was never encrypted — made over WebDAV, or not reached
+  yet by a [level change](#changing-the-level) — has the id it *will* carry:
+  `SIV-V(name, AD = [parent id, "filex-e2e-dir-id"])`, the synthetic IV, a
+  keyed function of its parent's id and its name. What is inside it can be
+  sealed under that id before it is renamed, and an interrupted change
+  computes the same ids again.
+- From then on the id is whatever the stored name says. Renaming or moving a
+  folder re-seals its own name and keeps `D`; **nothing inside it is touched**.
+
+**Why in the name.** Cryptomator keeps a directory's id in a `dir.c9r` file,
+gocryptfs its IV in `gocryptfs.diriv`, and a server could keep it as metadata.
+filex puts it in the folder's name because then:
+
+- a path still decrypts one segment at a time — each segment's id is in the
+  segment before it, the root's in the marker — so a breadcrumb, a Recent,
+  Starred or tag row, a search hit and a trash entry are named from their path
+  alone, with no request per folder and no walk of the tree;
+- a move stays one atomic operation: the id travels with the folder;
+- nothing extra is stored, fetched, backed up or can fall out of step — no id
+  file to lose, no server table to migrate, and the server still holds no
+  crypto state. The id is not a secret (it is associated data; the name key is
+  what protects the names).
+
+**What it changes.**
+
+- Moving or copying an item **to another folder** re-seals its name for that
+  folder. The explorer does it as one step of the queue: the server moves (or
+  copies) the item straight onto its new stored name (`POST /api/files/move`
+  or `/copy` with `name`), so nothing can stop between the move and the
+  rename.
+- An item moved **outside filex** — a WebDAV client, desktop sync — keeps a
+  name sealed for the folder it came from. A file then shows its stored name
+  as if it were a readable one, a folder "🔒 Unreadable name"; what is inside a
+  moved folder still reads, because the folder kept its id. **Encryption
+  settings → Fix names** repairs both: it knows every folder id, finds the one
+  the name opens under, and re-seals it for where the item is now.
+  `filex decrypt` recovers such names the same way, and says so.
+- A **copy** of a folder keeps its id, like everything inside it: the server
+  made the copy and knows the two are related, and a name later added to both
+  under the same spelling is stored the same way in both.
+
+### Why these choices
+
+**A wrapped name key, not one derived from the FMK.** In the browser the FMK
+is a non-extractable WebCrypto key — for a folder upgraded from v1 it *is* the
+password-derived key — so there are no raw bytes to feed a KDF without
+breaking that invariant. A random key sealed under the FMK (AES-GCM, like
+every other slot) is reached by whatever reaches the FMK: the password, the
+recovery key, the escrow key. There is no new recovery path and no new secret
+to lose.
+
+**Deterministic within a folder (AES-SIV), not randomised (AES-GCM with a
+random nonce).**
+
+- With a random nonce the same name encrypts differently every time, and the
+  server can no longer keep "one name per folder": two uploads of `a.txt`
+  become two files, an overwrite no longer replaces (and version history is
+  keyed on the path), a rename cannot refuse a taken name, and a resumable
+  upload cannot find its session again. Each of those is the server comparing
+  names *inside one folder*; with SIV that comparison keeps working on
+  ciphertext, and the folder id keeps it from working *across* folders.
+- SIV is deterministic *authenticated* encryption: any change to a stored name
+  fails the 128-bit tag. That tag is also what makes a name that was *never*
+  encrypted recognisable — it passes by chance with probability 2⁻¹²⁸ — which
+  is what makes a level change resumable and lets a name written over WebDAV
+  be shown for what it is.
+- It costs 16 bytes per name; GCM would cost 28 (nonce and tag).
+
+**base64url, not base32.** Measured against the places a stored name has to
+live:
+
+- S3 keys and ext4 are case-sensitive. NTFS and APFS are case-*insensitive but
+  case-preserving*: a base64url name comes back exactly as written. What they
+  do allow is two names that differ only in case colliding. For two SIV
+  outputs that is about 0.028 per character, about 10⁻³⁵ for a pair of the
+  shortest possible names (23 characters) and less for every longer one.
+- Length is the real budget (see the 220-character threshold below): base64url costs
+  4/3 characters per byte, base32 8/5. Against the 220-character threshold
+  that is the difference between names of up to 149 and up to 121 bytes
+  before shortening.
+- The alphabet has no `.`, `/`, `\`, space, `:` or any other character Windows
+  reserves, and no stored name can be a DOS device name (`CON`, `NUL`, …):
+  those are shorter than 23 characters. The one dot a folder's name has is
+  never last, and never at the start.
+- Cryptomator (vault format 7 and later) and gocryptfs use base64url. rclone
+  crypt defaults to base32 because some of its remotes fold case. No filex
+  storage folds case; if one ever does, that is what `names.enc` is for.
+
+**220, not 255.** A local file system allows 255 bytes per name. filex's trash
+renames an item to `<unix>-<hex6>__<name>`, about 20 more characters, and a
+sync client may add a conflict suffix; 220 leaves room for both, and is the
+threshold Cryptomator uses. A file name of up to **149 bytes** of UTF-8 is
+stored inline — 149 ASCII characters, fewer with `ş`, `ğ` or any other letter
+that takes two bytes — and a folder name of up to **131** (its `.D` takes 23
+characters). Longer names take a sidecar.
+
+**NFC.** macOS hands names over in NFD, Windows and Linux in NFC. `İzmir`
+typed on either has to be one name, not two.
+
+### Long names and their sidecar
+
+A long name's item is stored as `<H>.fxl` (a folder: `<H>.fxl.<D>`, the id
+kept), and its sidecar `<H>.fxl.name` sits next to it, holding the full
+encoded name. `H` is the SHA-256 of that content, so a sidecar belongs to
+exactly one name: a swapped or truncated one is detected, never trusted. The
+rules:
+
+- the sidecar is written **before** the item (upload, new folder, rename,
+  move, copy), so an item is never listed without it. A move or copy to
+  another folder writes the sidecar of the name sealed for the destination;
+- a delete leaves the sidecar behind. A sidecar is a pure function of its name
+  — writing the same name again writes the same file — and a restored item
+  needs it where it was;
+- every view hides sidecars. An item whose sidecar is missing is shown as
+  "🔒 Unreadable name"; its content still decrypts.
+
+This is gocryptfs's `gocryptfs.longname.*` scheme. Sidecars left behind by
+deleted items are hidden and harmless; nothing cleans them up yet.
+
+### Folder names and depth
+
+Folder names are encrypted exactly like file names, followed by the folder's
+id, and a subfolder's children are sealed under that id. **The encrypted
+folder's own name is not**: it lives in a folder that is not encrypted, and it
+is how you find it. Give it a name that says nothing.
+
+Every level of a path costs its stored name plus a separator. On S3 a whole
+key is limited to **1024 bytes**: with typical 20-character folder names (48
+stored characters plus the 23 of the id) that is about 14 levels, with names
+at the inline limit (220) it is four. On Windows, a tool that is not long-path aware stops at 260
+characters for a full path, which matters for a ciphertext copy taken out
+with desktop sync or a zip. filex does not refuse anything here itself; the
+storage's own error is shown.
+
+### The marker: v3 and required features
+
+A folder with encrypted names has a v3 marker — the v2 fields plus:
+
+```json
+{
+  "v": 3,
+  "req": ["names"],
+  "names": {
+    "alg": "AES-SIV-512",
+    "enc": "b64url",
+    "long": 220,
+    "key": "<base64: 12B IV || AES-GCM(FMK, 64-byte name key)>",
+    "root_id": "<base64url, 16 random bytes>",
+    "pending": true
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `req` | **Required features.** A client must understand every entry or refuse the folder — the rule ext4 uses for incompatible features. Today: `names` (level 2), `rekey` (a re-key under way), `conv` (an in-place conversion under way); the vault level would be the next ([roadmap](E2E-ROADMAP.md#3-the-vault-level)). |
+| `names.alg` / `enc` / `long` | The recipe, fixed when names were turned on. |
+| `names.key` | The name key, sealed under the FMK. |
+| `names.root_id` | The encrypted root's [folder id](#folder-ids) — the associated data of every name directly inside the root. |
+| `names.pending` | A change from level 1 to level 2 started and has not finished: some entries may still carry their plaintext names. Absent on a folder that was created at level 2. |
+
+⚠ **An older filex refuses these folders, on purpose.** filex 0.31–0.47 reads
+markers v1 and v2 only; to it a v3 marker is an unreadable key file, so it
+does not open the folder at all. That refusal is the point: a client that
+opened it would show ciphertext as names and upload files under their
+*plaintext* names next to them. A folder whose names are not encrypted keeps
+its v2 marker, so every filex since 0.31 still opens it.
+
+(A development build of 0.48 wrote level-2 names without folder ids and
+without `root_id`. It was never released; its folders do not open.) A later filex that
+meets a `req` entry it does not know says which feature it is missing instead
+of opening the folder.
+
+### Changing the level
+
+A level-1 folder moves to level 2 from its **Encryption settings…** (in the
+strip above the unlocked folder) → **Change level…**. The dialog says what
+changes — WebDAV, the command line and desktop sync will see scrambled names,
+and filex 0.47 and older will refuse the folder — and goes on only after you
+tick that you understand. Nothing offers it otherwise: unlocking a folder
+never pops up a proposal.
+
+It then:
+
+1. writes the marker **first** — v3, a fresh name key and root id,
+   `pending: true`;
+2. walks the folder once to learn every [folder id](#folder-ids), then renames
+   every entry whose name does not decrypt where it is to its encrypted name,
+   the deepest folders first (a long name's sidecar first). **No file's
+   content is touched.** A folder's contents are sealed under its id before
+   the folder itself is renamed, and a folder renamed as a job of the queue is
+   renamed after everything inside it;
+3. clears `pending` when nothing was left over.
+
+It is **resumable** because telling the two kinds of name apart is exact: an
+interrupted pass leaves a folder whose marker already says its names are
+encrypted, every renamed entry decrypts, every entry it had not reached is
+recognisably plaintext, and the ids come out the same. A strip above the
+folder says the change has not finished and offers **Continue**, which runs
+the same pass again. An entry that cannot be renamed — no permission, or a
+name a disk cannot hold — is counted and left as it is; the pass does not
+stop for it.
+
+The same pass fixes names later — **Encryption settings → Fix N names**,
+shown when there is something to fix: a file written into the folder over
+WebDAV or by the CLI (it keeps its plaintext name, and is shown with it), and
+an item moved in from another folder outside filex ([folder ids](#folder-ids)).
+It renames; it does not encrypt the content of such a file
+([below](#ways-plaintext-still-reaches-the-server)).
+
+filex does not offer the way back from level 2 to level 1.
+
+### What the server still sees
+
+In a folder with encrypted names the server, and anyone holding its disk or
+its backups, still sees:
+
+- that the folder exists, its own name, and that it is encrypted;
+- how many entries each subfolder has, which of them are folders, and the
+  shape of the tree;
+- each file's size (ciphertext ≈ plaintext + 113 bytes) and its timestamps;
+- which entries have long names — they come with a sidecar — and roughly how
+  long every name is;
+- that a folder and its server-side copy are related (a copy keeps the
+  folder's id, above). Equal names in unrelated folders are **not** visible;
+- anything written into the folder by a surface that does not encrypt
+  ([below](#ways-plaintext-still-reaches-the-server)).
+
+Hiding the count, the sizes and the structure as well is the **vault**
+level. It is designed, not built: [roadmap](E2E-ROADMAP.md#3-the-vault-level).
+
+### Prior art
+
+- **Cryptomator**, vault format 8 — AES-SIV names with the parent directory's
+  ID as associated data (kept in a `dir.c9r` file; filex keeps it in the
+  folder's name), base64url, names longer than 220 characters shortened to a
+  `<hash>.c9s` directory holding the full name.
+  <https://docs.cryptomator.org/en/latest/security/architecture/>
+- **gocryptfs** — EME wide-block names with a per-directory IV
+  (`gocryptfs.diriv`), base64url, `gocryptfs.longname.<hash>` plus a `.name`
+  sidecar for long names, and `-deterministic-names` to drop the IV.
+  <https://nuetzlich.net/gocryptfs/forward_mode_crypto/>
+- **rclone crypt** — EME names encrypted segment by segment with no
+  per-directory tweak, base32 by default so case-insensitive remotes work.
+  <https://rclone.org/crypt/>
+- **RFC 5297** — Synthetic Initialization Vector (SIV) Authenticated
+  Encryption Using AES. <https://www.rfc-editor.org/rfc/rfc5297>
+
+---
+
+## Streaming content (STREAM)
+
+A browser tab cannot encrypt a 4 GB video as one AES-GCM message: GCM needs the
+whole message in memory, on both ends. Every file over 200 MB in an encrypted
+folder, and every [single encrypted file](#single-encrypted-files-fxe), is
+therefore cut into chunks and encrypted with **STREAM** (Hoang, Reyhanitabar,
+Rogaway, Vizár — *Online Authenticated-Encryption and its Nonce-Reuse
+Misuse-Resistance*, CRYPTO 2015), the construction Tink's streaming AEAD and
+age use:
+
+```
+plaintext  = P0 ‖ P1 ‖ … ‖ Pn-1     each 1 MiB, the last 1 byte … 1 MiB
+                                      (empty only when the whole file is)
+nonce(i)   = prefix (7 random bytes) ‖ i (uint32, big-endian) ‖ last (1 byte)
+chunk(i)   = AES-256-GCM(DEK, nonce(i), Pi)   — ciphertext ‖ 16-byte tag
+```
+
+`last` is `1` for the final chunk and `0` for every other. The counter binds
+each chunk to its place, so **reordered** chunks fail; the flag binds the end,
+so a body **cut at a chunk boundary** ends on a chunk sealed as "not last" and
+fails, and a chunk **appended** after the real last one turns that one into
+"not last" and fails. A flipped bit anywhere fails its chunk's tag.
+
+- **Nothing held.** Encrypting and decrypting are streams in the browser
+  (`TransformStream`) and in `filex decrypt`: memory stays at a few chunks
+  whatever the file's size. An upload is sent as it is encrypted, in the staged
+  protocol's chunks; a download is decrypted as it arrives.
+- ⚠ **A streaming reader hands out a chunk before it has seen the next one.**
+  So nothing a decryption produces is treated as the file until the last chunk
+  verified: `filex decrypt` writes into a temporary file it renames at the end,
+  the browser's save stream is aborted (the half-written file discarded) on an
+  error, and a zip is never finished around a file that failed.
+- The size of a STREAM body follows from the plaintext's:
+  `size + 16 × max(1, ⌈size ÷ 1 MiB⌉)`.
+- Readers accept chunk sizes from 2¹⁰ to 2²⁴ bytes; writers always use 2²⁰.
+  (The test fixtures use 2¹⁰, so a few kilobytes span many chunks — the chunk
+  size is recorded in every header, so nothing has to guess it.)
+
+Implementation: `packages/core/src/lib/e2estream.ts`,
+`backend/internal/e2edecrypt/stream.go`. Both are pinned to vectors an
+independent implementation wrote (Python `cryptography`,
+`backend/internal/e2edecrypt/testdata/gen_stream_vectors.py`).
+
+---
+
+## Single encrypted files (`.fxe`)
+
+Any file can be encrypted **on its own**, without an encrypted folder around
+it: right-click it and choose **Encrypt with E2EE…**. The result is one
+self-contained file, `<name>.fxe`, that carries its own password slot and
+recovery key — so it can be moved, shared, backed up or taken off the server
+and still opened, in any filex or offline with
+[`filex decrypt`](CLI.md#a-single-encrypted-file-fxe).
+
+- **Encrypt** — password twice (at least 8 characters), and an
+  acknowledgement. The plaintext is streamed from the server, encrypted in the
+  browser and uploaded as it is encrypted; **only once the upload committed**
+  is the original moved to the trash. The recovery key is shown once
+  afterwards, exactly as for a new folder. When the installation has
+  [key escrow](#key-escrow-optional-operator-recovery), the dialog says before
+  anything happens that its operator holds a key, and the file gets an escrow
+  slot.
+- **Delete the original for good** (administrators only, off by default): once
+  the encrypted copy is saved, every version the original kept (its row and
+  its stored bytes) is deleted, then the original goes to the trash and that
+  trash entry is purged — so no plaintext of it stays on this server. Backups
+  and copies made before are not reached, and there is no undo. When the file
+  is someone else's, or nobody's on record, the dialog names its owner and asks
+  for a second, separate confirmation before anything happens.
+- **Hide the file name too** (off by default): the file is stored as
+  `encrypted-<8 hex digits>.fxe`, which says neither what it is called nor what
+  type it is. The real name is sealed inside the header; the explorer shows it
+  once the file has been opened in the tab.
+- **Open** (double-click, Enter, Preview, Space) asks for the password — or
+  the recovery key — checks it **in the browser**, decrypts, and hands the
+  normal viewers a blob. The key stays in the tab's memory until the tab
+  closes; it is never stored. A decrypted preview offers no save, no
+  OnlyOffice, no new tab and no share link: each would send the plaintext back
+  to the server. On an installation with key escrow, a file sealed to its
+  escrow key also opens with the operator's **escrow key** — the same door, and
+  the same rule, as a folder's: the browser proves it holds the private key
+  and the server notifies the file's **owner** before anything is decrypted; if
+  that announcement fails, the file is not opened.
+- **Download** saves the plaintext under its **original** name
+  ([where it is saved](#where-a-decrypted-download-goes)); **Download
+  encrypted file** gives the `.fxe` as it is.
+- **Change password…** — the current password or the recovery key, and a new
+  one. Only the header changes: a new salt, verify blob and password slot; the
+  recovery key and any escrow slot keep working, and the body is re-sent byte
+  for byte. The change is [announced](#who-is-told) like a folder's — the
+  audit log and the file's owner are told — and the server records every
+  rewrite of a `.fxe` itself, and deletes the versions that hold the file's
+  current key under the old password. ⚠ A backup, or a copy someone
+  downloaded, still opens with the **old** password.
+- **Remove encryption…** — says first that the plaintext goes back to the
+  server; then decrypts, uploads the plaintext under the original name (as
+  `name (2).ext` if that is taken), and moves the `.fxe` to the trash.
+
+Not offered inside an encrypted folder (the folder encrypts its files
+already), and a `.fxe` is never encrypted twice.
+
+### A `.fxe` inside an encrypted folder
+
+A `.fxe` can still be put into an encrypted folder — uploaded, moved or copied
+there. It is then **one of the folder's files**, like any other: its bytes are
+encrypted again under the folder key on the way in, and at
+[level 2](#encryption-levels) its name in the folder is sealed for that folder
+([folder ids](#folder-ids)) and re-sealed on a rename or a move, like every
+name there. Downloading it, zipping the folder or taking the folder apart with
+`filex decrypt` gives back the `.fxe` byte for byte, still under its own
+password; its single-file verbs are not offered inside the folder.
+
+⚠ **Decision: the name sealed in a `.fxe` header is bound to no folder.** The
+header carries the file's original name encrypted under the file's own key,
+with no folder id as associated data — unlike a level-2 folder name, which is
+bound to the folder it sits in. A `.fxe` exists to be self-contained: moved,
+shared, backed up or taken off the server and still opened, by any filex or by
+`filex decrypt`, wherever it lands. Binding its name to a folder would make
+every move outside that folder a file whose name no longer opens. What a
+folder id buys a folder — two equal names in different folders look different
+on the server — the `.fxe`'s name does not need: it is inside a header only
+its key opens, never on the server as a name. Inside a level-2 folder the two
+layers stack: the folder's sealed name for the entry (bound to the folder),
+and the file's own sealed name in its header (bound to nothing).
+
+### What the server already saw of the original
+
+A file that is encrypted *now* was stored in the clear until now, and
+encrypting a copy of it cannot reach backwards. The dialog says so before
+anything happens:
+
+| What | After "Encrypt" |
+|---|---|
+| The original | **In the trash**, until the trash's retention period or an administrator empties it. Deleting a trashed item for good is an administrator's action; its owner cannot purge it — an administrator can, in this dialog (**Delete the original for good**) |
+| Earlier versions of it | **Still in its version history**; only an administrator can delete versions — and **Delete the original for good** does |
+| A thumbnail made from it | **Stays on the server** until the original is deleted for good (a trashed file keeps its thumbnail so a restore is instant) |
+| Its search-index entry | **Removed** when it goes to the trash |
+| Backups, replicas, copies and downloads made before | **Still hold it** |
+| Its name | **Still visible** as `<name>.fxe`, unless the name is hidden |
+
+After that, what the server keeps is ciphertext: the `.fxe` gets no thumbnail
+(it is skipped by its name, and any file that starts with either encrypted
+magic is skipped whatever it is called), no content indexing, and OnlyOffice
+answers it `415`. Convert is not offered.
+
+### The `.fxe` layout
+
+| Offset | Length | Field |
+|--------|--------|-------|
+| 0 | 8 | Magic: ASCII `filexfxe` |
+| 8 | 1 | Version: `0x01` |
+| 9 | 4 | Header length `H`, unsigned big-endian (1 … 65 536) |
+| 13 | `H` | Header: UTF-8 JSON |
+| 13 + `H` | … | [STREAM](#streaming-content-stream) body under the file's DEK |
+
+```json
+{
+  "salt": "<base64 16B>", "iter": 600000,
+  "verify": "<sealed 'filex-e2e-verify-v1' under the KEK>",
+  "fmk": "wrapped", "fmk_pw": "<sealed file master key under the KEK>",
+  "rk":  { "salt": "<base64 16B>", "blob": "<sealed file master key under the RKEK>" },
+  "esc": { "kid": "<hex>", "alg": "RSA-OAEP-256", "blob": "<base64 RSA-OAEP(file master key)>" },
+  "dek":   "<sealed 32-byte DEK under the file master key>",
+  "name":  "<sealed original name, UTF-8 NFC, under the file master key>",
+  "chunk": 20,
+  "nonce": "<base64 7-byte STREAM nonce prefix>",
+  "size":  12345
+}
+```
+
+The key slots are **the folder marker's**, field for field: the same
+password → KEK derivation and `verify` blob, a random 32-byte master key in
+`fmk_pw`, the same recovery key and HKDF slot, the same escrow slot. The code
+that unlocks, re-keys and changes the password of a folder does it for a file
+(`lib/e2efile.ts` reads the header through a marker-shaped view). A program
+that rewrites the header keeps every field it does not understand; an unknown
+entry in `req` makes it refuse the file, naming the feature. `size` is checked
+against the body: a header that promises more or less than the body holds is
+damage. The whole header is not authenticated as one block — every secret in
+it is sealed on its own, and swapping, truncating or re-ordering anything else
+makes the unlock or the body fail.
+
+---
+
+## Downloading a decrypted copy
+
+Inside an unlocked encrypted folder, **Download** gives the plaintext:
+
+- **one file** — decrypted as it arrives and saved under its real name;
+- **a folder, or several items** — a zip made **in this tab**, with the
+  plaintext names and the decrypted content: STORE (no compression), ZIP64
+  where a size needs it, UTF-8 names, the key file and long-name sidecars left
+  out. Each file is decrypted as it is added, so the zip never sits in memory
+  where the browser can save a stream;
+- **the encrypted folder itself**, from the folder that holds it, while it is
+  unlocked in the tab — the same zip, named after the folder.
+
+**Download encrypted copy** is the server's zip of the ciphertext, as before —
+with `.filex-e2e.json` when the encrypted folder itself is selected, ready for
+[`filex decrypt`](#taking-a-folder-out-filex-decrypt). A file in the folder
+that was never encrypted (written over WebDAV) goes into the decrypted zip as
+it is, and the notice says how many there were. One damaged file stops the
+whole download, and nothing is saved.
+
+### Where a decrypted download goes
+
+The plaintext exists only in the tab, so the browser is handed it one of two
+ways:
+
+| Browser | How it is saved | Size |
+|---|---|---|
+| Chrome, Edge, Opera, the filex desktop app | **File System Access** (`showSaveFilePicker`): you pick where, and the file is written as it is decrypted. The browser writes a temporary file and moves it into place only when the stream ended cleanly | Any |
+| Firefox, Safari | **In memory**: the plaintext is gathered into a Blob and handed to the normal download | Up to **1 GiB** (1.07 GB); above that the download is refused, and said |
+
+A streaming service-worker download is not used: the web app's service worker
+is scoped to `/admin/`, and the explorer runs at `/drive/`, in the desktop
+app, and embedded in other sites' pages, where no worker of ours answers.
+
+Over the limit in Firefox or Safari, a dialog says so — for a `.fxe`, **before**
+the password is asked, since its header gives the plaintext size without any
+key; for a zip, whose size is not known up front, the moment it outgrows the
+limit, and nothing is saved. It hands over the way out: **Download encrypted
+file** (the `.fxe` as it is) or **Download encrypted folder (zip)** (the
+encrypted folder with its key file, for a file or a zip of an encrypted
+folder), and the command that decrypts it on your computer, ready to copy:
+
+```bash
+filex decrypt "Yedek arşivi 2027.bin.fxe"
+filex decrypt "Kasa.zip"
+```
+
+Chrome, Edge and the desktop app never see that dialog: they save as a
+stream, whatever the size ([`filex decrypt`](#taking-a-folder-out-filex-decrypt)).
+
+---
+
+## Encrypting a folder you already have
+
+A plain folder can be encrypted where it is: right-click it → **Encrypt with
+E2EE…**. The dialog is the one that creates an encrypted folder — a password
+twice, the [level](#encryption-levels) (level 1 by default), the
+acknowledgement — plus what encrypting now cannot reach
+([below](#what-the-server-already-saw)). Then, in the browser:
+
+1. the key file is written **first**, with the conversion under way
+   (`req: ["conv"]`, `conv.pending`; at level 2 the names are pending too). From
+   that moment the folder is an encrypted folder to the server — the transfer
+   guard refuses plaintext moves in, the thumbnailer and the content indexer
+   skip it — and its password opens it. filex 0.47 and older refuse it;
+2. every file is read, encrypted under the folder key and written back **over
+   itself**. The server keeps no version of what such a write replaces — that
+   is the plaintext being removed — and only for a write it has checked is
+   one: inside an encrypted folder whose key file says a conversion is under
+   way, plaintext replaced by ciphertext (`e2e_convert`, anything else keeps
+   its version as always). Each write is conditional on the file being the one
+   that was listed, so a file edited meanwhile is not overwritten with its
+   older self;
+3. at level 2 the [names pass](#changing-the-level) renames what is there;
+4. `conv` is dropped from the key file (a level-1 folder is back at v2), and
+   the server drops what it still holds from before (next section).
+
+It is **resumable** by the magic: a file already converted is left alone, so
+an interrupted run — a closed tab, a failed write, **Stop** — continues from
+the strip above the folder (**Continue**), and the next unlock shows it too.
+Files over the one-shot limit are counted and left as they are until the
+streamed format handles them; an encrypted folder cannot be put inside
+another, so a folder that holds one is refused before anything is written.
+
+### What the server already saw
+
+Encrypting protects the files from now on; the server has had them in the
+clear until now. What filex can reach, it removes when the conversion
+finishes (`POST /api/files/e2e/cleanup`, recorded in the audit log as
+`e2e.folder_cleanup`):
+
+| Where | Removed? |
+|---|---|
+| **Thumbnails** of the folder's files | Always — a cache |
+| **Extracted text** in the search index | Always — a cache |
+| **Older versions** of the folder's files | When chosen in the dialog (on by default) — owner or administrator only |
+| **Trash entries** deleted from the folder | When chosen in the dialog (on by default) — owner or administrator only |
+| Audit log, notifications, ops history | **No, by design** — they are the record; they name files, not contents |
+| Backups, replicas, storage snapshots, S3 object versions | **No** — outside filex |
+| Anything anyone already copied | **No** |
+
+The choice is kept in the key file (`conv.cleanup`), so a resumed run honours
+it.
+
+## Changing the password
+
+The unlocked strip above an encrypted folder has **Change password…**. Proof is
+the current password or, if it is forgotten, the recovery key. What it costs
+depends on the folder, and the dialog says which before anything happens.
+
+### A folder with its own key (v0.31 and later)
+
+Every folder created since v0.31 has a random folder key (`fmk: "wrapped"`);
+the password only wraps it. A new password therefore changes **one field of the
+key file**: a new salt, a new `verify` blob and a new `fmk_pw`, derived exactly
+as when the folder was created. Nothing else moves:
+
+- **no file is touched** — every file's key is wrapped by the folder key, which
+  did not change;
+- the **recovery key** keeps working (its slot wraps the same folder key);
+- an **escrow slot**, if the folder has one, keeps working, for the same reason;
+- **encrypted names** keep working (the name key is sealed under the folder key);
+- a v2 folder stays v2 and keeps opening in every filex since v0.31.
+
+### Re-keying: a folder from before v0.31, or on purpose
+
+A folder from before v0.31 (marker `v: 1`, or `v: 2` with `fmk: "kek"`) has no
+key of its own: its folder key **is** the key derived from its password, and
+every file's key is wrapped under it. A new password is therefore a new folder
+key, and changing it is a **re-key**:
+
+1. a fresh random folder key is made, and the key file is written **first**:
+   the new password slot, a recovery slot, the escrow slot and the name key all
+   re-sealed to the new key, and `rekey.from` — the PREVIOUS folder key, sealed
+   under the new one — with `req` gaining `"rekey"` (so filex ≤ 0.47 refuses the
+   folder while it is half-way, instead of failing file by file);
+2. every file's key is **re-wrapped**: the 48-byte wrapped key at offset 21 of
+   its header, and the IV at offset 9, are replaced, and the file is written
+   back under the same name. **The content ciphertext is not touched** — not a
+   byte after offset 97 changes;
+3. when no file is left, `rekey` is removed and the key file drops back to
+   `v: 2` (or `v: 3` with just `["names"]`).
+
+It is **resumable**. Mid-way, any way into the folder — the new password, the
+recovery key, escrow — also reaches the previous key through `rekey.from`, so
+every file opens whichever key it is under, and **Continue** in the strip runs
+the same re-wrap again (a file already under the new key is skipped). A file
+that fails is counted and left under the previous key; the folder is not
+declared done until none is.
+
+What changes for the person:
+
+- **the recovery key**: if the change was made WITH the recovery key, that key
+  keeps working (it is in hand, so it is re-sealed to the new folder key).
+  Otherwise the old recovery slot wraps the old folder key and nothing can
+  re-seal it without the key itself, so a **new recovery key** is issued and
+  shown once, like at creation, and the old one stops working;
+- **escrow**: re-sealed to the new folder key when the installation's escrow
+  key is the one the slot names. When it is not (a folder restored from another
+  installation), the re-key is **refused** rather than quietly losing the slot.
+  A password change never adds an escrow slot and never removes one.
+
+A folder with its own key can be re-keyed **on purpose**: tick **Also replace
+the folder key**. That is the answer to "the old password may be known to
+someone" (next section), and the way to revoke a leaked recovery key.
+
+### After a recovery-key unlock
+
+Opening a folder with its recovery key means its password was lost — or is
+known to someone who should not have it. So filex asks for a **new password
+straight away**: the dialog has no "current password" field (the recovery key
+in hand is the proof), and closing it **locks the folder again**. The recovery
+key stays in the tab's memory only until the new password is set. An operator's
+escrow unlock does not trigger this; escrow is not the owner's credential.
+
+### Who is told
+
+The change happens in the browser, where the password is; the server never
+sees either password and cannot tell a new key file from any other upload. So
+the web UI **announces** the change once the key file is written
+(`POST /api/files/e2e/password-changed {path, via, rekey}`), and the server
+turns that into two records:
+
+- an **audit-log** row, action `e2e.password_change`, naming the folder, who
+  changed it, `via` (`password` or `recovery_key`) and whether it re-keyed;
+- a **notification** `e2e.password_changed` to the folder's **owner** — who may
+  not be the person who changed it — a warning when it was a reset with the
+  recovery key, and subscribable on its own by a webhook
+  ([NOTIFICATIONS.md](NOTIFICATIONS.md)).
+
+⚠ Like the escrow report, this is an announcement, not a gate: a client that
+rewrites the key file some other way is not announced. The announcement needs
+write access to the folder, the same right rewriting its key file takes.
+
+What does not depend on the client: the server records **every** rewrite of a
+key file itself, whichever surface it came through (web, WebDAV, the CLI, an
+AI tool). It cannot read the slots, but it can see which of them changed, and
+it writes an audit row `e2e.key_file_rewritten` with the folder, the surface
+(`origin`), who wrote it, and `changes` — any of `password`, `recovery_key`,
+`escrow`, `level`, `rekey`, `other`. A password change made outside the web UI
+still shows up there as `password`.
+
+A **single encrypted file** is announced the same way (the same endpoint with
+the `.fxe`'s path): the audit row `e2e.password_change` names the `file`, and
+the file's owner gets *Encrypted file password changed*. And because an
+announcement is only as good as the client that makes it, the server also
+watches for itself: every rewrite of a `.fxe`, on any surface, is compared with
+the version the overwrite kept, and recorded as `e2e.fxe_header_rewritten` with
+what changed (`password`, `recovery_key`, `escrow`, `content`, `name`,
+`other`). When the password or the recovery slot changed, the versions that
+hold the file's **current** key under the **old** secret are deleted — each
+would open today's contents with the old password. A version of different
+content under a different key is history, and stays.
+
+### What a password change does not undo
+
+- **Old copies of the key file — outside the server.** A password change
+  rewrites `.filex-e2e.json`, and the server **deletes the key file's earlier
+  versions** as it sees the password (or recovery) slot change: each of them
+  would still open the folder with the old password for anyone who could
+  restore one (the audit row says how many, `versions_deleted`). A backup, a
+  replica, a synced or downloaded copy is out of its reach and still has the
+  OLD password slot — and, for a folder with its own key, that slot unwraps
+  the same folder key that opens every file today. Someone holding the old
+  password **and** such a copy can still read the folder. **Re-key** (tick
+  **Also replace the folder key**) when that matters: the current files move
+  to a new folder key that no old copy reaches.
+- **Old versions of files.** A re-key rewrites each file's header, so the
+  previous version of each file (and the trash, and backups) keeps the old
+  wrapping, which the old password — with an old key file — still opens. Delete
+  the folder's versions if that is the risk.
+- **Contents.** Nothing is re-encrypted: a DEK that leaked stays leaked. A
+  re-key changes which key wraps each DEK, not the DEKs.
 
 ---
 
@@ -208,8 +1018,11 @@ opens the folder without the password.
   else.
 - Losing it is not fatal on its own — the password still works. Losing **both**
   is fatal, and filex cannot help.
-- There is currently no way to rotate or revoke one. See
-  [Not implemented](#not-implemented).
+- A leaked recovery key is revoked by a [re-key](#re-keying-a-folder-from-before-v031-or-on-purpose):
+  change the password with **Also replace the folder key** ticked, and you get
+  a new recovery key while the old one stops opening the folder. There is no
+  cheaper way — the recovery slot wraps the folder key, and only a new folder
+  key makes an old slot worthless.
 
 ### Key escrow (optional operator recovery)
 
@@ -242,9 +1055,12 @@ filex e2e-escrow keygen --quiet            # public, then private, one per line
 Configuration, and why it cannot be changed later:
 [CONFIGURATION.md → Install-time settings](CONFIGURATION.md#install-time-settings-filex_installation_).
 
-**Using it notifies the folder's owner.** The client asks the server for a
-nonce sealed to the escrow public key, decrypts it with the private half and
-returns it; only then does the server record the event and notify. That makes
+**Using it notifies the folder's owner** — or the file's, for a
+[single encrypted file](#single-encrypted-files-fxe), which carries its own
+escrow slot and opens with the same key, through the same two requests. The
+client asks the server for a nonce sealed to the escrow public key, decrypts it
+with the private half and returns it; only then does the server record the
+event and notify. That makes
 the notification evidence rather than a claim — a `e2e.escrow_used` warning
 that anyone could POST would be worth nothing. A wrong answer is refused with
 `403` and notifies nobody.
@@ -452,7 +1268,7 @@ offer at unlock had.
 | A **v1** (pre-v0.31) marker | Those have no slots at all. Their path is the [recovery upgrade](#folders-created-before-v031), which seals an escrow slot in the same step and discloses it in the same prompt. Two offers on one unlock would be two chances to get the disclosure wrong. |
 | The owner already declined | Recorded per folder. The **Escrow key…** button is the way back. |
 
-⚠ This is the *only* way a `v: 2` folder gains an escrow slot after creation,
+⚠ This is the *only* way a `v: 2` or `v: 3` folder gains an escrow slot after creation,
 and it requires the folder password, so only its owner can do it. An operator
 can enable escrow, adopt escrow, and ask — and cannot take.
 
@@ -498,7 +1314,8 @@ read content is **off or limited** inside an encrypted folder:
 
 | Feature | Behaviour in an encrypted folder |
 |---------|----------------------------------|
-| **Name search** | **Works** — names are not encrypted (a deliberate leak, see [threat model](#what-it-does-not-hide)). The `.filex-e2e.json` marker is filtered out of results |
+| **Name search** | **Works.** With [encrypted names](#encryption-levels) (level 2) the server cannot match them, so a search started inside the folder runs **in the browser**: the explorer walks the folder (up to 2,000 subfolders) and matches the decrypted names; a locked folder shows its lock screen instead. A search started outside the folder finds nothing inside it by name. With readable names the server's name search works as before. The `.filex-e2e.json` marker and long-name sidecars are filtered out of results |
+| **Recent, Starred, tags, trash, search hits** | Rows that sit inside an encrypted folder (the server marks them with `e2e_root`) are shown by their decrypted names while the folder is unlocked, and as **🔒 Encrypted item** while it is not. Opening one takes you **into its folder** — the lock screen, or the decrypted preview — instead of handing a viewer ciphertext |
 | **Content search** | **Does not work** — the indexer skips extraction under a marked subtree and for anything starting with the magic, and indexes empty content instead. Nothing is indexed, so nothing can match |
 | **Thumbnails** | **Not generated** — the thumbnail pipeline marks files under a marked subtree `skipped`; grid, list and gallery all show a generic icon |
 | **Preview** (text, images, media, PDF) | **Works while unlocked** — the client downloads the ciphertext, decrypts it in memory and hands a blob URL to the normal viewers |
@@ -507,15 +1324,19 @@ read content is **off or limited** inside an encrypted folder:
 | **OnlyOffice** | **Off** — the document server would have to read the file. The backend's config endpoint sniffs the magic and returns **415 `file is e2e-encrypted`**, and the UI does not offer OnlyOffice at all |
 | **Convert** | **Off** — the action is hidden; ciphertext is meaningless to the converter |
 | **Share links / file requests** | **Off** — the whole **Share** entry is hidden, because a recipient would download ciphertext with no way to decrypt it. Note this also hides per-item permissions for that folder |
-| **Password change** | **Off.** The v2 marker makes it cheap in principle (re-wrap `fmk_pw`, touch no file) but no flow exists — and it would not be cheap for a folder upgraded from v1, whose FMK *is* the password-derived key. See [Not implemented](#not-implemented) |
+| **Password change** | **Works** — **Encryption settings… → Change password…**, with the current password or the recovery key. A folder with its own key rewrites only its key file; a folder from before v0.31 re-wraps every file's key, resumably. See [Changing the password](#changing-the-password) |
 | **Desktop "keep local" / folder sync pinning** | **Off** — not offered for encrypted folders or their contents |
 | **Reads over DAV / CLI / ShareX / AI (REST + MCP)** | Return the raw ciphertext (magic and all). Those surfaces have no key and cannot decrypt |
 | **Writes over DAV / CLI / AI** ⚠ | **Not encrypted.** See [below](#ways-plaintext-still-reaches-the-server) |
 | **Versioning** | **Works** — versions store ciphertext; a restored version decrypts with the same folder password |
 | **Trash / restore** | **Works** — the bytes are untouched |
 | **ClamAV** | Scans ciphertext, so it finds nothing. Harmless, but do not mistake a clean scan for a scanned file |
-| **Copy / move** | **Refused across an encryption boundary** (HTTP 409). Inside one encrypted folder it works normally, and the encrypted folder itself can be moved. See [below](#ways-plaintext-still-reaches-the-server) |
-| **Upload size** | The MVP encrypts in one shot in memory: **files over 200 MB are refused** with a warning |
+| **Copy / move** | **Refused across an encryption boundary** (HTTP 409). Inside one encrypted folder it works normally — at level 2 an item moved or copied to another folder gets its name re-sealed for that folder in the same step ([folder ids](#folder-ids)) — and the encrypted folder itself can be moved. See [below](#ways-plaintext-still-reaches-the-server). ⚠ With encrypted names, a copy or move onto a name that is **already taken** is refused (409) instead of getting a `-copy` suffix: a name the server made up could never be decrypted. Rename one of the two first |
+| **New document / Request files** | **Off** — the server would write the template (or a visitor's upload) in the clear, and name it itself |
+| **Drag out to the desktop** | **Off** for rows inside an encrypted folder — the operating system would save the ciphertext under the plaintext name. Download instead (decrypted), or drag within filex |
+| **Download a folder** | **Decrypted**, while the folder is unlocked: a zip made in the browser with the plaintext names ([Downloading a decrypted copy](#downloading-a-decrypted-copy)). **Download encrypted copy** is the server's zip of the ciphertext; zip the encrypted folder itself from its parent and the key file comes with it, for [`filex decrypt`](#taking-a-folder-out-filex-decrypt) |
+| **Upload size** | No limit of its own. Up to 200 MB a file is encrypted in one shot (`0x01`); above, as a [STREAM](#streaming-content-stream) (`0x02`), encrypted as it is uploaded. A server without the staged upload path cannot take a file over 200 MB into an encrypted folder, and says so |
+| **Single encrypted files (`.fxe`)** | No thumbnail, no content index, OnlyOffice `415`, no Convert — the same as a file in an encrypted folder. Preview and download decrypt in the browser; share links and WebDAV hand out the `.fxe` as it is |
 
 ---
 
@@ -526,9 +1347,11 @@ into the folder without going through that code path stores them **exactly as
 they arrive** — and the server cannot fix this, because it has no key.
 
 ⚠ **A file written into an encrypted folder over WebDAV, the CLI, ShareX, or the
-AI surfaces (REST / MCP) stays plaintext.** It sits in the encrypted folder,
-looks like it belongs there, and is readable by anyone with server access.
-Nothing warns you.
+AI surfaces (REST / MCP) stays plaintext** — its content *and* its name. It
+sits in the encrypted folder, looks like it belongs there, and is readable by
+anyone with server access. In a level-2 folder the explorer at least notices
+the name: it is shown as written, and **Encryption settings → Fix N names**
+renames it. Its content stays plaintext.
 
 ✅ **Copy, move and paste are no longer one of them.** They used to be the worst
 case, because filex's own UI produced it: paste, drag-and-drop and duplicate are
@@ -563,6 +1386,31 @@ content-indexed**, because the indexer skips the whole marked subtree rather
 than deciding per file. So it will not leak into the search index — but it is
 plaintext on disk.
 
+### Where names go, and what they are there
+
+With encrypted names the server never has a plaintext name to pass on, so
+everything below carries the **stored** (encrypted) name — audited, not
+assumed:
+
+| Place | What it carries |
+|---|---|
+| Search index (names and paths), node cache, path hashes, versions, trash keys | The stored name |
+| Notifications, e-mails, webhooks (`writehook` events, share and grant mails) | The stored name. A notification about an item in such a folder is marked `meta.e2e_root`, and the bell and the desktop app show **🔒 Encrypted item** — or the real name, where the reader's explorer has the folder unlocked — instead of the ciphertext. A webhook gets the stored name and the mark |
+| Audit log, activity, ops list | The stored name and path |
+| Realtime (folder changes, **presence**) | The stored name. Presence used to send the *displayed* name of the file you had selected; the explorer now sends the stored one |
+| AI / MCP tools, share links, zips, replication, storage plugins | The stored name (and the ciphertext) |
+| Access log | URL paths only (no query), i.e. stored names on DAV/S3-style URLs |
+
+The exceptions — the things that still reach the server as plaintext — are
+the encrypted folder's **own name** (it is not inside itself), and anything a
+surface that does not encrypt writes (above). Server-side features that
+*invent* a name — the `-copy` of a colliding paste, a desktop-sync conflict
+copy, a file-request drop folder, a ShareX upload, an archive extraction, a
+new document — would produce a name nobody can decrypt: the first is refused
+inside a folder with encrypted names, the web UI does not offer the others
+there, and a desktop-sync conflict copy of a ciphertext name is simply an
+entry with a readable (and meaningless) name, shown as such.
+
 ---
 
 ## Using it
@@ -575,6 +1423,10 @@ plaintext on disk.
   once** — in a dialog that will not close on ESC or a backdrop click until you
   tick that you have saved it, because there is no second showing. Encrypted
   folders **cannot be nested** — the option is not offered inside one.
+- **Level** — the create dialog lists the [levels](#encryption-levels) that
+  work, each with what it means: **1 · Contents only** (selected by default;
+  a v2 marker, opens in filex 0.31 and later) and **2 · Contents and names**
+  (a v3 marker, opens in 0.48 and later).
 - **Badge** — encrypted folders are drawn with a 🔒 in listings (the backend
   flags the directory row with `e2e: true`).
 - **Unlock without the password** — the lock screen carries a *Lost the
@@ -588,14 +1440,22 @@ plaintext on disk.
   marker from that root and checks the password against it locally. Wrong
   password → an error in the prompt. Right password → the KEK goes into the
   in-memory key ring and the listing opens.
-- **While unlocked** — a 🔒 strip appears with a **Lock** button. Locking drops
-  the KEK from memory, revokes the decrypted blob URLs, and brings the password
-  prompt back.
-- **Upload** — transparently encrypted while unlocked (file → ArrayBuffer →
-  encrypt → upload under the same name). Files over 200 MB are refused.
-- **Download and preview** — transparently decrypted: downloaded bytes are
-  decrypted and saved under the original name, and previews are handed to the
-  normal viewers as a decrypted blob URL.
+- **While unlocked** — a 🔒 strip appears with the folder's level
+  (**Contents only** / **Contents and names**), **Encryption settings…** and
+  **Lock**. The settings hold the level ([changing the
+  level](#changing-the-level)), **Change password…** and, where the
+  installation has escrow, the escrow slot. Locking drops the FMK and the name
+  key from memory, forgets every decrypted name, revokes the decrypted blob
+  URLs, and brings the password prompt back.
+- **Upload** — transparently encrypted while unlocked (file → encrypt →
+  upload under the same name, or under its encrypted name in a folder with
+  encrypted names). A file over 200 MB is encrypted as a
+  [STREAM](#streaming-content-stream) while it is uploaded. A name a disk could
+  not hold (over 255 bytes, a slash or a control character) is refused.
+- **Download and preview** — transparently decrypted: a download is decrypted
+  as it arrives and saved under the original name, a folder or a selection
+  becomes a [decrypted zip](#downloading-a-decrypted-copy), and previews are
+  handed to the normal viewers as a decrypted blob URL.
 
 ---
 
@@ -603,18 +1463,41 @@ plaintext on disk.
 
 | | |
 |---|---|
-| ![Creating an encrypted folder](screenshots/v0.47.0/e2e-recovery/create-encrypted-folder.png) | ![The recovery key, shown once](screenshots/v0.47.0/e2e-recovery/recovery-key-shown-once.png) |
+| ![Creating an encrypted folder](screenshots/v0.48.0/e2e-recovery/create-encrypted-folder.png) | ![The recovery key, shown once](screenshots/v0.48.0/e2e-recovery/recovery-key-shown-once.png) |
 | Creating the folder. The escrow notice appears only when the installation has escrow on. | The recovery key, shown once. The dialog will not close until you tick that you saved it. |
-| ![The lock screen](screenshots/v0.47.0/e2e-recovery/locked-folder.png) | ![Unlocking with a recovery key](screenshots/v0.47.0/e2e-recovery/unlock-with-recovery-key.png) |
+| ![The lock screen](screenshots/v0.48.0/e2e-recovery/locked-folder.png) | ![Unlocking with a recovery key](screenshots/v0.48.0/e2e-recovery/unlock-with-recovery-key.png) |
 | A wrong password, and the way out underneath it. | The recovery-key dialog. The **Escrow key** tab appears only when both the installation and the folder have escrow. |
-| ![The escrow tab](screenshots/v0.47.0/e2e-recovery/unlock-with-escrow-key.png) | ![The offer to a pre-v0.31 folder](screenshots/v0.47.0/e2e-recovery/legacy-folder-upgrade-offer.png) |
+| ![The escrow tab](screenshots/v0.48.0/e2e-recovery/unlock-with-escrow-key.png) | ![The offer to a pre-v0.31 folder](screenshots/v0.48.0/e2e-recovery/legacy-folder-upgrade-offer.png) |
 | Escrow says up front that the owner will be told. | A folder from before v0.31, just opened by password: the offer is visible, and it discloses the escrow consequence. |
 
 Retake them with
 `node e2e/shots/e2e-recovery.mjs --escrow-private <pkcs8-b64>` against an
 instance booted with escrow on. The same script is the end-to-end measurement
 of this feature: it creates the folder, loses the password, gets back in with
-the key, and checks the notification arrived.
+the key, and checks the notification arrived. Encrypted names are measured by
+`e2e/tests/172-e2e-names.spec.ts`, which reads what the server stored.
+
+### Taking a folder out: `filex decrypt`
+
+The web UI decrypts one file at a time. To take a whole folder out — or to
+read your files without filex running at all — download the encrypted folder
+and decrypt it on your own machine:
+
+1. In the folder that **holds** the encrypted folder, select it and choose
+   **Download**. The zip contains the ciphertext and `.filex-e2e.json` (the
+   key file travels only when the encrypted folder itself is selected; a zip
+   of a subfolder needs `--marker`).
+2. Run `filex decrypt Kasa.zip`. It asks for the folder password without
+   echoing it (`--recovery-key` asks for the recovery key instead; with
+   `--password-stdin` it reads the first line of standard input), and writes
+   `Kasa-decrypted/` with the original names.
+
+It reads every marker version, content-only and encrypted-name folders alike,
+works fully offline, and writes nothing unless everything decrypted: a wrong
+password or a damaged file stops it with no partial output. It deliberately
+does not take the escrow key — the supported escrow path announces itself to
+the folder's owner, and an offline tool could not. Reference:
+[CLI.md → filex decrypt](CLI.md#filex-decrypt--an-encrypted-folder-offline).
 
 ---
 
@@ -657,6 +1540,28 @@ pipelines stop doing pointless — and potentially leaky — work:
 9. **The install pin** (`internal/e2e/installation.go`) — records at first boot
    whether escrow is on and which key, and refuses to start if that later
    disagrees with the environment.
+10. **Which folder a row sits in** (`internal/api/handlers/e2e_rows.go`) —
+    rows that arrive outside a folder listing (Recent, Starred, tags, the
+    trash, search hits) carry `e2e_root`, so the client can decrypt their
+    names or say they are locked. The same marker-path lookup as above; the
+    root's own name is already public.
+11. **No invented names** (`internal/ops/service.go` → `uniqueCopyDest`,
+    `internal/e2e` → `LooksEncryptedName`) — a colliding copy or move of a
+    name *shaped* like an encrypted one, into a folder with a marker above it,
+    is refused instead of being given a `-copy` name nobody could decrypt. The
+    server cannot tell an encrypted name from a plaintext one that looks like
+    it, so this only ever refuses; it never reads anything.
+12. **Password changes** (`internal/api/handlers/e2e_password.go`) — records
+    the web UI's announcement of a password change in the audit log and
+    notifies the folder's owner. It receives the folder path, how the change
+    was proved (`password`/`recovery_key`) and whether it re-keyed — no key
+    material.
+13. **Single encrypted files** (`internal/e2e` → `FileMagicPrefix`,
+    `HasEncryptedPrefix`, `LooksEncryptedFile`) — the `filexfxe` magic is
+    treated like `filexe2e` wherever content is sniffed: the content indexer
+    indexes empty content, OnlyOffice answers `415`, and the thumbnail
+    pipeline skips a `.fxe` by its name before reading anything and sniffs
+    both magics in `openSource`, the one door every generator reads through.
 
 Every one of these is in the category "don't do useless work, and don't open a
 leak" — none of them can read a byte of your content.
@@ -668,23 +1573,37 @@ leak" — none of them can read a byte of your content.
 These are known gaps, not scheduled work. They are listed because each one is a
 limitation you can hit today:
 
-- **Encrypted names.** File and folder names are stored in the clear (see the
-  [threat model](#what-it-does-not-hide)).
+- **Hiding the number, the sizes and the shape of the files.** Names are
+  encrypted; the tree is not. The **vault** level that would hide it is
+  designed, not built — [roadmap](E2E-ROADMAP.md#3-the-vault-level).
+- **Encrypting a large existing folder from the command line** (`filex
+  encrypt`). An existing folder is encrypted in the browser, one file at a
+  time; the CLI twin is designed, not built —
+  [roadmap](E2E-ROADMAP.md#2-encrypting-a-folder-that-already-exists).
+- **Its owner purging the original after "Encrypt with E2EE…".** It goes to
+  the trash, and its versions stay in its history; only an administrator can
+  delete either for good — the encrypt dialog offers it to one
+  ([what the server already saw](#what-the-server-already-saw-of-the-original)).
+- **Streaming a decrypted download over 1 GB in Firefox or Safari.** They have
+  no File System Access API; the download is refused, said, and handed to
+  `filex decrypt` ([where it is saved](#where-a-decrypted-download-goes)).
+- **Cleaning up leftover long-name sidecars.** A deleted item with a long name
+  leaves its (hidden, harmless) sidecar behind.
+- **Searching a locked folder, or searching encrypted names from outside the
+  folder.** The server cannot; the browser can only once it holds the key.
+- **Encrypting names written over DAV / CLI / ShareX / AI.** They arrive in
+  the clear; the explorer flags them and can rename them, but only when
+  someone opens the folder.
 - **Sharing an encrypted folder.** There is no way to hand a recipient a link
   that also carries the key, so sharing is simply off.
-- **Files over 200 MB.** Encryption is one-shot in memory. The 16 reserved
-  header bytes exist so a chunked format could be added without breaking the
-  layout, but no chunked format exists.
-- **Changing the folder password.** The v2 marker makes it cheap for a folder
-  created since v0.31 — re-wrap `fmk_pw`, touch no file. For a folder upgraded
-  from v1 (`fmk: "kek"`) it is not cheap: the FMK *is* the password-derived key,
-  so changing the password means re-wrapping every file's DEK. Neither flow
-  exists. The only way to change a password today is to create a new encrypted
-  folder and re-upload.
-- **Rotating or revoking a recovery key.** A recovery key is minted once and
-  lives as long as the folder. There is no "show me a new one" and no way to
-  invalidate a key you think leaked, short of moving the files into a new
-  encrypted folder.
+- **A new recovery key without a new folder key.** A leaked recovery key is
+  revoked by a re-key (it issues a new one), which re-wraps every file's key.
+  There is no cheaper "show me a new one": the recovery slot wraps the folder
+  key, so only a new folder key makes the old slot worthless.
+- **Purging old file versions after a re-key.** The key file's own old
+  versions are deleted on a password change; the previous versions of the
+  files keep their old header wrapping ([what a password change does not
+  undo](#what-a-password-change-does-not-undo)); removing them is by hand.
 - **Escrow at the folder level.** Escrow is per-installation and per-folder only
   in the sense that it applies to folders created after it was enabled. A user
   cannot opt a folder out, and an operator cannot escrow one folder and not
@@ -699,6 +1618,152 @@ limitation you can hit today:
 - **Re-encrypting on move.** filex refuses a transfer across an encryption
   boundary rather than re-encrypting or decrypting the bytes, because it holds
   no key to do either with. Move the file by downloading and re-uploading it.
+
+---
+
+## Format reference
+
+Everything a program needs to read or write these folders byte-compatibly —
+`filex decrypt` (Go) and the browser (WebCrypto) are two implementations of
+exactly this, and a third (another client, the `.fxtxt` demo app) must follow
+it to the letter. Normative; where the prose above and this list disagree,
+this list is right and the prose is a bug.
+
+**Common rules**
+
+- **AES-GCM** everywhere below means AES-256-GCM with a **12-byte random IV**,
+  a **16-byte tag**, and **no associated data**. A "sealed blob" is
+  `IV ‖ ciphertext ‖ tag`, stored as **standard base64 with padding** (RFC 4648
+  §4, what `btoa` produces).
+- Random bytes come from a CSPRNG (`crypto.getRandomValues`, `crypto/rand`).
+- The key file is UTF-8 JSON. A program that rewrites it **keeps every field
+  it does not understand** and never writes a field it does not understand.
+- A program that meets a `req` entry it does not understand **refuses the
+  folder**, naming the feature. It never opens it "read-only".
+
+**Password → KEK**
+
+- PBKDF2 with HMAC-SHA-256; password = its UTF-8 bytes, unnormalised; salt =
+  `salt`, 16 random bytes (base64); iterations = `iter`, an integer. Writers use
+  **600 000** (never fewer); readers accept 1 … 100 000 000 and refuse anything
+  else. Output: 32 bytes, the **KEK**.
+- `verify` = sealed blob of the ASCII string `filex-e2e-verify-v1` under the
+  KEK. A wrong password is a tag failure here and nowhere else.
+
+**Folder master key (FMK)**
+
+- `fmk: "wrapped"` — 32 random bytes; `fmk_pw` = sealed blob of the FMK under
+  the KEK.
+- `fmk: "kek"`, and every `v: 1` marker — the FMK **is** the KEK's 32 bytes.
+
+**Recovery key**
+
+- 20 random bytes, written as **Crockford base32** (alphabet
+  `0123456789ABCDEFGHJKMNPQRSTVWXYZ`), bits taken most-significant first: 160
+  bits, exactly 32 characters, shown as 8 groups of 4 joined by `-`.
+- Parsing: upper-case; remove whitespace and `-`; map `O`→`0`, `I` and `L`→`1`;
+  exactly 32 alphabet characters or it is not a key.
+- RKEK = HKDF-SHA-256(IKM = the 20 bytes, salt = `rk.salt` (16 random bytes),
+  info = ASCII `filex-e2e-recovery-v1`, length 32). `rk.blob` = sealed blob of
+  the FMK under the RKEK.
+
+**Escrow**
+
+- RSA-OAEP with SHA-256 (MGF1 with SHA-256, no label); the public key is
+  SubjectPublicKeyInfo DER, base64 (the installation's, from
+  `/api/capabilities`); `esc.blob` = base64 of RSA-OAEP(FMK). `esc.kid` = the
+  first 8 bytes of SHA-256(SPKI DER), lower-case hex (16 characters).
+  `esc.alg` = `RSA-OAEP-256`.
+
+**Files**
+
+- Per file: a random 32-byte **DEK**. Header (97 bytes): `filexe2e` (ASCII) ‖
+  `0x01` ‖ wrapIV (12) ‖ AES-GCM(FMK, wrapIV, DEK) (48) ‖ dataIV (12) ‖ 16 zero
+  bytes. Then AES-GCM(DEK, dataIV, content) with its tag. Content up to 200 MiB
+  (one shot). A reader skips files without the magic and says so.
+- Content over 200 MiB: header `filexe2e` ‖ `0x02` ‖ wrapIV (12) ‖
+  AES-GCM(FMK, wrapIV, DEK) (48) ‖ STREAM nonce prefix (7) ‖ chunk size log2
+  (1 byte, writers `20`) ‖ 20 zero bytes (ignored by readers) = 97 bytes, then
+  the STREAM body below. Writers use `0x02` only above 200 MiB; readers accept
+  it at any size. A reader that meets another version refuses the file,
+  naming the version.
+
+**STREAM**
+
+- Key: a 32-byte DEK, AES-256-GCM. Plaintext cut into chunks of
+  2^log2 bytes; the last is 1 … 2^log2 bytes, and 0 bytes only when the whole
+  plaintext is empty (then there is exactly one chunk).
+- Nonce of chunk `i` (0-based): the 7-byte prefix ‖ `i` as uint32 big-endian ‖
+  one byte `0x01` for the last chunk, `0x00` for every other. At most 2³²
+  chunks.
+- Each chunk: AES-GCM(DEK, nonce(i), chunk) = ciphertext ‖ 16-byte tag, no
+  associated data; the body is the chunks back to back.
+- A reader knows the last chunk by the end of the input: a body that ends with
+  fewer than 16 bytes, or with a bare 16-byte chunk after a full one, is
+  refused. Readers accept log2 from 10 to 24.
+
+**Single encrypted file (`.fxe`)**
+
+- `filexfxe` (ASCII) ‖ `0x01` ‖ header length `H` (uint32 big-endian, 1 …
+  65 536) ‖ the header, UTF-8 JSON ‖ the STREAM body.
+- Header: the password slot (`salt`, `iter`, `verify`), `fmk: "wrapped"` and
+  `fmk_pw` (a random 32-byte file master key), optionally `rk` and `esc` —
+  each exactly as in a folder marker, above. Then `dek`: sealed blob of the
+  DEK under the file master key; `name`: sealed blob of the original name
+  (NFC, UTF-8; the same rules as an encrypted name) under the file master key;
+  `chunk`: the STREAM log2; `nonce`: base64 of the 7-byte prefix; `size`: the
+  plaintext length, which the body must match exactly.
+- Unknown fields are kept on rewrite; an unknown `req` entry refuses the
+  file. A reader that meets another version byte refuses the file.
+
+**Names** (feature `names`)
+
+- `names.key` = sealed blob of a random **64-byte** name key under the FMK.
+- Cipher: **AES-SIV** (RFC 5297) with the 64-byte key: the left 32 bytes key
+  S2V (AES-256-CMAC), the right 32 bytes key CTR. **Associated data: one
+  string, the 16-byte id of the folder the name is in.**
+- Folder ids: 16 bytes. The encrypted root's is `names.root_id` (base64url,
+  random). A folder's is the `D` its stored name carries. A folder whose stored
+  name carries none (a plaintext name) has
+  `SIV(name key, NFC(name), AD = [parent id, ASCII "filex-e2e-dir-id"])[0:16]`
+  — the synthetic IV. A new folder gets 16 random bytes; renaming or moving a
+  folder never changes its id.
+- Plaintext: the name normalised to **NFC**, UTF-8, 1–255 bytes, and never `.`,
+  `..`, containing `/`, `\` or a C0 control or DEL. A reader treats a decrypted
+  name that breaks these rules as unreadable.
+- Stored: `S` = **base64url, no padding** (RFC 4648 §5) of `SIV ‖ ciphertext`.
+  A file is stored as `S`, a folder as `S.D` (`D` = base64url of its id, 22
+  characters). If that is longer than `names.long` (220) characters: `H.fxl`
+  (a file) or `H.fxl.D` (a folder), `H` = base64url-no-padding(SHA-256(`S` as
+  ASCII)), and a sibling file `H.fxl.name` holding `S` (readers trim
+  surrounding whitespace and check the hash).
+- A file-shaped stored name (`S`) that does not pass the SIV tag was never
+  encrypted: show it as it is. A folder-shaped (`S.D`) or long name that does
+  not pass it is unreadable here — moved in from another folder without being
+  re-sealed, or damaged; a reader that knows the other folder ids may try
+  them.
+
+**Conversion** (feature `conv`)
+
+- `conv` = `{"pending": true, "started": <ISO time>, "cleanup": {"versions": bool, "trash": bool}}`
+  while an existing folder is being encrypted in place; files without the
+  magic are plaintext not reached yet (a reader copies them as they are, and
+  says so). Removed — and `v` back to 2 when nothing else is required — when
+  every file carries the magic.
+
+**Re-key** (feature `rekey`)
+
+- `rekey.from` = sealed blob of the previous FMK (32 bytes) under the current
+  FMK; `rekey.pending` = `true`. A reader tries the current FMK first and the
+  previous one when a DEK does not unwrap.
+
+**What to reuse, for a program that is not a folder** (a single encrypted
+document): the password → KEK derivation with its `verify` blob, the random
+FMK wrapped as `fmk_pw`, the recovery-key format and its HKDF slot, and the
+file header and content encryption. A folder's `names`, `rekey` and marker
+versioning are folder-specific; a new container gets its own magic and version
+byte rather than reusing `filexe2e` with a different meaning — which is what
+the `.fxe` above does (`filexfxe`).
 
 ---
 

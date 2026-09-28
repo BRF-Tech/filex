@@ -127,6 +127,13 @@ func (m *memSink) catalogue(ctx context.Context, storageID int64, rel string) er
 func newHarness(t *testing.T, opts func(*Options)) *harness {
 	t.Helper()
 	wasmfixture.Require(t, fixtureWasm)
+	return newBareHarness(t, opts)
+}
+
+// newBareHarness is newHarness for tests that load no module — an app that is
+// only an interface, a language pack — and so need no built fixture.
+func newBareHarness(t *testing.T, opts func(*Options)) *harness {
+	t.Helper()
 	_, store := dbtest.NewTestDB(t)
 	root := t.TempDir()
 	drv := &local.Driver{}

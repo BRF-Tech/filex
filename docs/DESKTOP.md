@@ -292,7 +292,7 @@ Two things can happen, and filex picks the right one per document:
 | The document is… | What filex does |
 |---|---|
 | inside a folder you **keep on this computer** | Opens its twin on the server directly. Nothing is copied. Saving goes to the server, and sync brings it back down to that same file — the one on your disk. |
-| anywhere else | Copies it to a hidden working folder on your account (`<storage>://.filex-open`), opens that, and **writes every save back over your original file**. When you close the window the copy is deleted. (That folder is the one place among filex's own that the server lets a person write — and only these requests: create it at the root, upload `<session>-<name>` into it, save it from the editor, delete it. See [BACKEND.md](BACKEND.md#names-filex-keeps-for-itself).) |
+| anywhere else | Copies it to a hidden working folder on your account (`<storage>://.filex-open`), opens that, and **writes every save back over your original file**. When you close the window the copy is deleted. (Among filex's own folders the server lets a person write only there — and only these requests: create it at the root, upload `<session>-<name>` into it, save it from the editor, delete it — and into their own drafts. See [BACKEND.md](BACKEND.md#names-filex-keeps-for-itself).) |
 
 In the second case a strip along the bottom of the editor window names the file
 on your disk that saves are landing on, for as long as the window is open. It is
@@ -339,6 +339,65 @@ because nothing else has claimed it.
 
 ---
 
+## Notifications and your account
+
+The top bar ends the way the web app's does: a **bell** and your **avatar**.
+They are the web app's own — the same components, drawn by the file list
+itself (`config.notifications` and `config.account` in
+[INTEGRATION.md](INTEGRATION.md)) — so the two front doors cannot drift apart.
+
+**The bell** carries the number of notifications you have not read (exact to
+99, `99+` above), opens onto the newest fifteen with *Mark all read*, and
+*View all* opens the whole list over the files: page by page, *Unread only*,
+and *Mark read* on each row. Clicking a notification **marks it read and takes
+you to what it is about, in this window** — the folder with the file selected
+(and the app's screen on it, when an app asked for one), the Trash with the
+deleted item selected, or an app's home view. A share opens its public page in
+your browser. A notification with nowhere to go is only there to be read: it
+takes no click. Administrators also get *Manage notifications*, which opens the
+server's console in the browser.
+
+It reads the same list on the server as the web app does, so a notification
+read in one is read in the other.
+
+**The native notification** (a Windows toast, macOS Notification Center, the
+Linux desktop's) still arrives for everything new — also with the window closed
+and filex in the tray. Clicking it does what clicking the row in the bell does:
+the same place opens, **and the notification is marked read**, so it does not
+sit unread in the bell afterwards. *Settings → Notifications* turns the native
+ones off; the bell stays.
+
+The app reads the bell once every 15 seconds, for the native notifications, the
+dock / taskbar badge (and the tray tooltip) and the bell in the window alike —
+the window adds no requests of its own.
+
+**The avatar** holds your settings as a person on this server — the
+interface's. The app's own settings are behind ⚙ at the bottom of the rail.
+
+| Row | What it does |
+|-----|--------------|
+| **User settings** | Opens the web app's settings dialog **in this window** — the same dialog, not a copy: *Profile* (name, e-mail, username, picture), *Preferences* (time zone, light / automatic / dark and the palette, compact file list, how an untouched folder opens, your storage), *Notifications* (the bell on or off, which events reach you) and *Security* (password, two-factor sign-in). It saves to your account on the server, so a browser shows the same choices. |
+| **Admin panel ↗** | Administrators only — the server's console, in the browser. |
+| *Shortcuts*, *Restart the tour* | The file list's own settings that are not in the dialog, which used to sit behind the **"..."** at the top right (a narrow window keeps a "..." for the folder's own verbs only). The view modes and the details panel are not here either: their switches are on screen at the end of the folder bar. |
+
+The server's version sits at the foot, as it does on the web.
+
+**Signing out is not in the avatar.** Signing an account out of *this app* is a
+setting of the app, so it is done in *Settings → Accounts*, beside every other
+account on the rail.
+
+What the avatar and its dialog do **not** repeat, because they already have a
+home in this app: the language and single-click opening (*Settings → This
+app* — the web dialog's own switches for them are left out here), running in
+the background, native notifications and starting at sign-in (*Settings → This
+app*); synced folders, the filex folder, *Pause sync*, bandwidth and hours
+(*Settings → Synced folders*); storage connections and mounting as a drive
+(*Settings*); other accounts and signing out (the rail, and *Settings →
+Accounts*). The web dialog's start page and desktop-app downloads have no
+meaning in the app and are not drawn.
+
+---
+
 ## Language
 
 *Settings → Language* — **System**, **English** or **Türkçe**. System follows
@@ -360,8 +419,9 @@ nothing reloads.
 
 There is no appearance setting in *Settings*, and that is deliberate: the theme
 and the palette are a choice about the file list, so they are set where every
-other filex front door sets them — the **"..."** menu in the file list
-(*Theme*, *Compact view*). The app's own chrome — the account rail, Settings,
+other filex front door sets them — the **avatar** at the top right, *User
+settings → Preferences → Appearance* (and *Compact file list* beside it). The
+app's own chrome — the account rail, Settings,
 the boot and sign-in screens, the dialogs — follows whatever you pick there, in
 light, dark and every palette. A second switch here would be a second answer to
 the same question.
@@ -382,6 +442,12 @@ controls never sit on top of the document's own top row (OnlyOffice's
 profile/share stays clear). On **macOS** the native traffic lights are kept
 (top-left) and no buttons are drawn. The top strip is the drag handle in every
 case.
+
+**The title bar works with a dialog open.** User settings, the share dialog,
+rename, a confirmation — every dialog and screen of the file list opens below
+the title bar, so minimise, maximise and close answer the first click, and the
+window still drags from the bar, whatever is open. (The dialogs keep Escape, a
+click outside to dismiss them, and the keyboard focus inside while open.)
 
 The filex mark and wordmark sit at the top left, in the same corner the web app
 puts them, and follow the palette with everything else. The account rail down

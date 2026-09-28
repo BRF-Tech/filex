@@ -139,10 +139,10 @@ async function get(url, init = {}) {
 // first proves an AUTHENTICATED caller can see it. If it cannot, the fixture
 // is broken and the result is `skip`, never `ok`.
 //
-// ⚠ One sentinel is not enough, which is why EXTERNAL_SENTINELS has three.
+// ⚠ One sentinel is not enough, which is why EXTERNAL_SENTINELS has more.
 // `redactExternalHosts` does two different things — it walks the `external` map
-// AND blanks three flat aliases by name — so a single seeded service exercised
-// the loop and left `drawio_url` and `convert_url` unproved. A redaction that
+// AND blanks the flat aliases by name — so a single seeded service exercised
+// the loop and left `drawio_url` unproved. A redaction that
 // dropped one alias, or a fourth service arriving with no alias entry, would
 // have passed. See handlers/capabilities.go.
 const SENTINEL_ENV = Object.fromEntries(EXTERNAL_SENTINELS.map((s) => [s.env, `https://${s.host}:9443`]));

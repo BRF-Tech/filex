@@ -275,21 +275,37 @@ loop:
     for f in db.files where storage_id=$id and path under .versions/ or .thumbs/:
       hard_delete(f)                              # catalogue only, bytes untouched
 
+    # a row an older version soft-deleted WHERE IT STOOD (path outside the
+    # trash) holds no bytes in the trash: not a trash entry, dropped (#74)
+    drop_rows(db.files where storage_id=$id and deleted and path not in .filex-trash/)
+
     # tombstone pass — a node not seen this run is a CANDIDATE, not a verdict
     if seen < 0.7 * last_ok_run.seen:       # the whole listing looks wrong
       skip the pass entirely                # (a failed/aborted run is no baseline)
     for f in db.files where storage_id=$id and seen_at < run_started:
-      if f.path is inside filex's own trees: # never, whatever else went wrong:
-        keep                                 # a trashed .versions/ folder purges
-                                             # the version history
+      if f.path is inside filex's own trees: # never, whatever else went wrong
+        keep
+      if f.path is below a folder whose listing failed:
+        keep                                 # unseen says nothing there
       if f.transfer_state != "stored":      # filex never put the bytes there
         keep
-      elif storage.Stat(f.path) is found:   # the listing missed it
-        keep
+      elif storage.Stat(f.path) is found:   # the listing missed it (folders
+        keep                                # are asked too)
       elif Stat failed for any other reason: # we could not check
         keep
       else:
-        soft_delete(f)                       # genuinely gone → trash
+        gone.add(f)
+    drop_rows(gone)                          # genuinely gone → out of the
+                                             # catalogue, NOT into the trash
+
+  drop_rows(rows):                           # deepest first
+    for f in rows + (rows deleted in place below each folder in rows):
+      if f is a folder and any row still names it as its parent:
+        keep                                 # the cascade must not take it
+      else:
+        hard_delete(f)                       # quota released; shares, versions,
+                                             # comments, tags cascade; search
+                                             # doc + thumbnail released
 
     finish_sync_run(run)                  # on a context the run's own
                                           # cancellation cannot reach: "ok",
@@ -328,9 +344,15 @@ things stand between a missing object and the trash:
    at all (permissions, timeout, 503) — "I could not check" must never read as
    "it is gone".
 
-A file genuinely deleted in the bucket still goes to trash, so deletions made
-outside filex are still reflected. `Stat` runs only for candidates that
-survive step 1, so a healthy sync costs nothing extra.
+A file genuinely deleted in the bucket still leaves filex, so deletions made
+outside filex are still reflected — but it leaves the **catalogue**, not into
+the Trash (issue #74). The Trash is where filex keeps the bytes of what was
+deleted in filex; an object deleted elsewhere has no bytes there, and up to 0.47
+its row was listed in the Trash with a Restore that could bring nothing back.
+Because dropping a row cannot be undone, folders are confirmed by `Stat` too,
+nothing below a folder whose listing failed is a candidate, and a folder row
+goes only once no row names it as its parent. `Stat` runs only for candidates
+that survive step 1, so a healthy sync costs nothing extra.
 
 ### The walk and the trash
 

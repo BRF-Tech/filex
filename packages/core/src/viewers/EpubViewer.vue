@@ -103,6 +103,9 @@ async function load(): Promise<void> {
       height: '100%',
       flow: 'paginated',
       manager: 'default',
+      // epub.js draws each chapter in a sandboxed frame; scripts in a book
+      // stay off (its default, said out loud so it cannot drift).
+      allowScriptedContent: false,
     });
     // ⚠⚠ Both of these have to be raced against a clock. epub.js resolves
     // `display()` and `loaded.navigation` from its own internal promises, and

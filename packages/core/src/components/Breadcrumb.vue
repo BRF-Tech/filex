@@ -19,7 +19,8 @@
  * The ✏ button swaps the crumbs for a free-form input; Enter
  * navigates, Escape cancels.
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { E2E_NAME_VIEW } from '../composables/useE2eNames';
 import { hasInternalDrag } from '../lib/dragOut';
 import { virtualSegmentLabel } from '../lib/listing';
 import type { LocaleCode } from '../types/ExplorerConfig';
@@ -73,6 +74,8 @@ const floorLabel = computed(() => {
 });
 
 const { t } = useLocale(() => props.locale);
+/* wiring:e2 names — provided by FileExplorer; absent when used on its own. */
+const e2eNameView = inject(E2E_NAME_VIEW, null);
 
 
 const emit = defineEmits<{
@@ -98,6 +101,9 @@ const crumbs = computed<Crumb[]>(() => {
     ? props.dirname.slice(adapterPrefix.length)
     : props.dirname;
   const parts = raw.split('/').filter(Boolean);
+  /* wiring:e2 names — a segment inside an encrypted-names folder reads as its
+     plaintext (or the locked placeholder); everything else is untouched. */
+  const e2eLabel = (wire: string) => e2eNameView?.segmentLabel(wire) ?? null;
 
   const out: Crumb[] = [];
 
@@ -120,7 +126,10 @@ const crumbs = computed<Crumb[]>(() => {
          `.tag~invoices` raw while the panel three inches away named them
          properly. One resolver, and a sentinel added to `lib/listing` reaches
          both branches on the day it lands. */
-      out.push({ label: virtualSegmentLabel(part, t) || part, adapterPath: `${adapterPrefix}${acc}` });
+      out.push({
+        label: virtualSegmentLabel(part, t) || e2eLabel(`${adapterPrefix}${acc}`) || part,
+        adapterPath: `${adapterPrefix}${acc}`,
+      });
     }
     return out;
   }
@@ -154,7 +163,7 @@ const crumbs = computed<Crumb[]>(() => {
     // which is a filename the user never typed and cannot navigate to.
     // etiket:t1 — via the shared resolver, which also knows the tag view's
     // `.tag~<name>` segment; the raw map only covers the fixed-label views.
-    const label = virtualSegmentLabel(part, t) || part;
+    const label = virtualSegmentLabel(part, t) || e2eLabel(`${adapterPrefix}${acc}`) || part;
     out.push({ label, adapterPath: `${adapterPrefix}${acc}` });
   }
   return out;

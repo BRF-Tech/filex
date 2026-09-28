@@ -27,6 +27,30 @@ import { defineConfig, devices } from '@playwright/test';
  */
 const BASE_URL = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:5212';
 
+/** Playwright device per engine this suite knows. */
+const BROWSER_DEVICES: Record<string, string> = {
+  chromium: 'Desktop Chrome',
+  firefox: 'Desktop Firefox',
+  webkit: 'Desktop Safari',
+};
+
+/**
+ * The engines E2E_BROWSERS names (comma-separated), or Chromium alone.
+ * ⚠ An engine name this suite does not know stops the run: a typo that
+ * silently fell back to Chromium would report a cross-browser pass that
+ * never happened (the rule e2e/lib/args.mjs keeps for run.mjs options).
+ */
+function selectedBrowsers(): string[] {
+  const raw = (process.env.E2E_BROWSERS ?? '').trim();
+  if (!raw) return ['chromium'];
+  const names = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  const unknown = names.filter((n) => !BROWSER_DEVICES[n]);
+  if (unknown.length) {
+    throw new Error(`E2E_BROWSERS: unknown engine(s) ${unknown.join(', ')} — known: ${Object.keys(BROWSER_DEVICES).join(', ')}`);
+  }
+  return names;
+}
+
 export default defineConfig({
   testDir: './tests',
   timeout: 30_000,
@@ -68,15 +92,14 @@ export default defineConfig({
     navigationTimeout: 15_000,
   },
 
-  projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-    // Uncomment to test cross-browser:
-    // { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
-    // { name: 'webkit',  use: { ...devices['Desktop Safari'] } },
-  ],
+  // Chromium by default. E2E_BROWSERS opts other engines in for a run —
+  // `E2E_BROWSERS=chromium,firefox,webkit node e2e/run.mjs local --grep "…"`
+  // runs every selected spec once per engine (a project each). Opt-in, never
+  // the default: the suite is calibrated on Chromium, and a spec that measures
+  // something engine-specific (the single encrypted file's save path, 173)
+  // says so itself. The engines must match this Playwright's revisions:
+  // `cd e2e && ./node_modules/.bin/playwright install firefox webkit`.
+  projects: selectedBrowsers().map((name) => ({ name, use: { ...devices[BROWSER_DEVICES[name]] } })),
 
   // Optional: spin up the docker image automatically. Disabled by default
   // because most local runs already have a server up. CI sets E2E_AUTOSTART=1.

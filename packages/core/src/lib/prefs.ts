@@ -53,12 +53,25 @@ export interface UiPrefs {
    * only ever goes one way — nothing in the product clears it.
    */
   tour?: string;
+  /**
+   * v4 — what apps' own interfaces keep for this person (`state.set` over the
+   * bridge; lib/appState): a JSON object `{app: {key: value}}`. An interface
+   * runs on an opaque origin with no storage of its own, so this is its only
+   * way to remember anything, and it follows the person like the rest.
+   */
+  appState?: string;
+  /**
+   * v4 — the app versions this person has been told about (lib/appState): a
+   * JSON object `{app: version}`. An administrator approved a new version →
+   * the next time the person opens that app, the "updated" note shows once.
+   */
+  appsSeen?: string;
 }
 
 export type PrefKey = keyof UiPrefs;
 
 /** The keys that paint the window — each has a first-paint mirror (below). */
-export type LookKey = Exclude<PrefKey, 'tour'>;
+export type LookKey = Exclude<PrefKey, 'tour' | 'appState' | 'appsSeen'>;
 
 /**
  * Every key the account document carries.
@@ -68,7 +81,7 @@ export type LookKey = Exclude<PrefKey, 'tour'>;
  * preference that is not a look (the tour) still has to be named here, or the
  * first palette change after it was stored would erase it.
  */
-export const PREF_KEYS: readonly PrefKey[] = ['theme', 'palette', 'density', 'locale', 'storageOrder', 'tour'];
+export const PREF_KEYS: readonly PrefKey[] = ['theme', 'palette', 'density', 'locale', 'storageOrder', 'tour', 'appState', 'appsSeen'];
 
 /**
  * The keys with a first-paint mirror in `localStorage` — what the window is
@@ -87,7 +100,7 @@ export const LOOK_KEYS: readonly LookKey[] = ['theme', 'palette', 'density', 'lo
  * The localStorage mirror's key per preference.
  *
  * ⚠⚠ These are the names the surfaces ALREADY read at first paint
- * (`web/src/lib/theme`, `lib/themes.THEME_LS_KEY`, `web/src/lib/density`,
+ * (`web/src/lib/theme`, `lib/themes.THEME_LS_KEY`, `lib/density`,
  * `web/src/i18n`). Inventing new ones here would have left four first-paint
  * readers looking at keys nobody writes — the preference would work, and
  * the window would flash on every load, which is the failure this module is
@@ -552,7 +565,8 @@ async function flush(): Promise<void> {
  */
 export function savePref(key: PrefKey, value: string): void {
   remote = { ...remote, [key]: value };
-  if (key !== 'tour') setLocalPref(key, value);
+  // Only a LOOK has a first-paint mirror (PREF_LS_KEYS).
+  if ((LOOK_KEYS as readonly string[]).includes(key)) setLocalPref(key as LookKey, value);
   pending = { ...pending, [key]: value };
   if (timer !== null) clearTimeout(timer);
   timer = setTimeout(() => {

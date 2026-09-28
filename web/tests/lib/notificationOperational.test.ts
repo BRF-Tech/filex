@@ -3,7 +3,7 @@
 // showed them in English. They are phrased on the reader's side now, like the
 // file events. Each row below is the shape the one emit site actually stores.
 import { describe, it, expect } from 'vitest';
-import { renderNotification } from '@/lib/notificationText';
+import { renderNotification } from '@brftech/filex-core/src/lib/notificationText';
 
 const rows = [
   {

@@ -345,8 +345,7 @@ export interface ExternalAdvisory {
 }
 
 export interface ExternalService {
-  /** `convert` is the legacy iframe converter (internal/external.Convert). */
-  id: 'onlyoffice' | 'drawio' | 'convert';
+  id: 'onlyoffice' | 'drawio';
   url: string | null;
   jwt_secret_set: boolean;
   enabled: boolean;

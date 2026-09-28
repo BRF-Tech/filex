@@ -5,11 +5,13 @@ package handlers_test
 //
 // Service.List and the restore handler both resolve that path as
 // `storage_key`, falling back to the row's own `path` when the column is
-// empty. Migration 00033 deliberately left those empty values alone, and the
-// fallback is right for one legacy shape and wrong for the other:
+// empty. Migration 00033 deliberately left those empty values alone, and there
+// are two legacy shapes:
 //
-//   - a row nothing ever renamed (the sync tombstone pass's SoftDeleteNode):
-//     `path` still points where the file lived, so it IS the original path.
+//   - a row nothing ever renamed (the sync tombstone pass's SoftDeleteNode, up
+//     to 0.47): `path` still points where the file lived. Since issue #74 it
+//     is no trash entry at all — nothing of it is in the trash — so it is
+//     neither listed nor restored, for anybody.
 //   - a row whose `path` is a `.filex-trash/<stamp>__name` key — what the walk
 //     minted for the trash's own bytes before it learned to skip the bin, and
 //     the tombstone pass then soft-deleted where it stood (see
@@ -95,9 +97,12 @@ func listTrashAsUser(t *testing.T, h *handlers.Trash, user *model.User) ([]map[s
 	return body.Entries, body.Total
 }
 
-// The shape the fallback gets RIGHT keeps working: a legacy row at its own
-// path is judged there.
-func TestTrashRestore_LegacyRowAtItsOwnPathIsStillJudgedThere(t *testing.T) {
+// A legacy row at its own path is what the sync's tombstone pass left for a
+// file deleted outside filex (issue #74): nothing of it is in the trash. It is
+// not offered, and a restore of it by id is "not found" — even for an editor
+// on the folder it came from, who used to be handed a row for a file that is
+// not there.
+func TestTrashRestore_ARowDeletedWhereItStoodIsNotATrashEntry(t *testing.T) {
 	store, st, h := newOriginalPathFixture(t)
 	row := legacyTrashRow(t, store, st, "/Ekip/notlar.md")
 
@@ -106,18 +111,16 @@ func TestTrashRestore_LegacyRowAtItsOwnPathIsStillJudgedThere(t *testing.T) {
 	grant(t, store, st, viewer, "Ekip", model.GrantViewer, true)
 	grant(t, store, st, editor, "Ekip", model.GrantEditor, true)
 
-	entries, _ := listTrashAsUser(t, h, viewer)
-	require.Len(t, entries, 1, "a viewer on the folder the file came from still sees it")
-	assert.Equal(t, "/Ekip/notlar.md", entries[0]["path"])
-
-	assert.Equal(t, http.StatusForbidden, restoreAsUser(t, h, viewer, row.ID).Code,
-		"a viewer on the folder the file came from may not write it back")
-
-	rec := restoreAsUser(t, h, editor, row.ID)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	for _, u := range []*model.User{viewer, editor} {
+		entries, total := listTrashAsUser(t, h, u)
+		assert.Empty(t, entries, "%s is offered a trash entry with nothing in the trash", u.Email)
+		assert.Zero(t, total)
+		rec := restoreAsUser(t, h, u, row.ID)
+		assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	}
 	back, err := store.GetNode(context.Background(), row.ID)
 	require.NoError(t, err)
-	assert.Nil(t, back.DeletedAt, "the editor's restore did not take")
+	assert.NotNil(t, back.DeletedAt, "a restore brought back a row for a file that is not there")
 }
 
 // binnedLegacy is the row this file is about: `path` inside the trash,

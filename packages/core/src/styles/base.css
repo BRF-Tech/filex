@@ -1041,9 +1041,36 @@ filex-explorer {
 
 /* ---------- Modal ---------- */
 
+/* ⚠⚠ `--fe-overlay-top` — where every window-sized layer the explorer draws
+ * BEGINS. A host that keeps a strip of its own at the top of the window sets
+ * it to that strip's height; nothing else does, and it is 0 everywhere else.
+ *
+ * The desktop app is that host: its window is frameless, so its title bar
+ * (minimise, maximise, close, and the strip the OS drags the window by) is
+ * page content. A dialog's backdrop drawn over it took those clicks — the
+ * first click on "minimise" closed the dialog instead — and the owner's rule
+ * (2026-09-27) is that the title bar works ALWAYS. So the layers stop short
+ * of it rather than out-number it in z-index: a stacking order can always be
+ * beaten by the next layer somebody writes at 10000, a layer that does not
+ * reach the strip cannot.
+ *
+ * Every layer that covers the window (this backdrop — i.e. every dialog built
+ * on Modal, the user settings dialog included — the share dialog's scrim,
+ * the connections overlay, the notifications screen, the column menu's click
+ * catcher) starts at it; web/tests/api/overlayTop.test.ts holds the list, and
+ * names the two that do not and why. */
 .fe-modal__backdrop {
   position: fixed;
-  inset: 0;
+  inset: var(--fe-overlay-top, 0px) 0 0;
+  /* `.fe` (this element's other class) says height:100%; with a top of its
+     own that would run the backdrop past the bottom of the window. It also
+     draws a 1px border with a radius — on a scrim that is a light hairline
+     round the whole window while any dialog is open (measured on the web
+     page the day the user settings dialog moved onto this frame; the
+     full-bleed variant below had already dropped it for the same reason). */
+  height: auto;
+  border: 0;
+  border-radius: 0;
   z-index: 70;
   display: flex;
   align-items: center;
@@ -1056,7 +1083,7 @@ filex-explorer {
   border-radius: var(--fe-radius);
   box-shadow: var(--fe-shadow);
   width: 100%;
-  max-height: calc(100vh - 32px);
+  max-height: calc(100vh - 32px - var(--fe-overlay-top, 0px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1064,7 +1091,22 @@ filex-explorer {
 .fe-modal__card--sm { max-width: 420px; }
 .fe-modal__card--md { max-width: 560px; }
 .fe-modal__card--lg { max-width: 800px; }
-.fe-modal__card--xl { max-width: 1080px; height: calc(100vh - 64px); }
+.fe-modal__card--xl { max-width: 1080px; height: calc(100vh - 64px - var(--fe-overlay-top, 0px)); }
+/* bare — the slot draws the whole card (Modal `bare`: the user settings
+   dialog, with its own head, rail and size). The frame is only the dialog. */
+.fe-modal__card--bare {
+  width: auto;
+  max-width: none;
+  max-height: none;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+.fe-modal__card--bare > .fe-modal__body {
+  padding: 0;
+  overflow: visible;
+}
 
 /* Recently-opened tray — anchored modal that drops down from the
  * toolbar. Re-uses fe-modal__backdrop, just pins the panel to the top. */
@@ -1193,8 +1235,8 @@ filex-explorer {
 .fe-modal__card--chromeless {
   max-width: none;
   width: 100vw;
-  height: 100vh;
-  max-height: 100vh;
+  height: calc(100vh - var(--fe-overlay-top, 0px));
+  max-height: calc(100vh - var(--fe-overlay-top, 0px));
   border-radius: 0;
   box-shadow: none;
 }
@@ -1276,98 +1318,6 @@ filex-explorer {
   display: flex;
   gap: 8px;
   margin-inline-start: auto;
-}
-
-/* ConvertModal.vue — the converter's body, drawn in the explorer's Modal (it
-   had a backdrop, a card and a × of its own, and a `<style>` block). */
-.filex-cv {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-}
-.filex-cv__note {
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 12.5px;
-  line-height: 1.45;
-  background: var(--fe-bg-elev);
-  color: var(--fe-text-muted);
-  border: 1px solid var(--fe-border);
-}
-.filex-cv__msg {
-  padding: 20px 12px;
-  text-align: center;
-  color: var(--fe-text-muted);
-}
-.filex-cv__ok {
-  color: var(--fe-ok);
-}
-.filex-cv__ok .fe-icon {
-  display: inline-flex;
-  vertical-align: -0.2em;
-}
-.filex-cv__src {
-  margin: 0;
-  font-size: 13px;
-  color: var(--fe-text-muted);
-}
-.filex-cv__search {
-  padding: 8px 10px;
-  border: 1px solid var(--fe-border);
-  border-radius: 8px;
-  background: var(--fe-bg-elev);
-  color: inherit;
-  font-size: 13px;
-}
-.filex-cv__list {
-  max-height: 45vh;
-  overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 8px;
-}
-.filex-cv__fmt {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-items: flex-start;
-  padding: 8px 10px;
-  cursor: pointer;
-  text-align: start;
-  border: 1px solid var(--fe-border);
-  border-radius: 8px;
-  background: var(--fe-bg-elev);
-  color: inherit;
-}
-.filex-cv__fmt:disabled {
-  cursor: default;
-}
-.filex-cv__fmt small {
-  color: var(--fe-text-muted);
-  font-size: 11px;
-}
-.filex-cv__fmt.is-sel {
-  border-color: var(--fe-primary);
-  background: var(--fe-primary-soft);
-}
-.filex-cv__empty {
-  grid-column: 1 / -1;
-  text-align: center;
-  color: var(--fe-text-muted);
-  padding: 16px;
-}
-.filex-cv__err {
-  color: var(--fe-danger);
-  font-size: 13px;
-}
-.filex-cv__frame {
-  position: absolute;
-  width: 0;
-  height: 0;
-  border: 0;
-  inset-inline-start: -9999px;
 }
 
 .fe-modal-enter-active,
@@ -4299,6 +4249,19 @@ filex-explorer {
   padding: 2px 10px;
   font-size: 12px;
 }
+/* wiring:e2 names — "names encrypted" / "names readable": the fact people
+   ask about, in the strip rather than behind a dialog. */
+.fe-e2e-strip__names {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--fe-border);
+  border-radius: 999px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.fe-e2e-upgrade__progress {
+  font-variant-numeric: tabular-nums;
+}
 
 /* Lock screen: a passphrase form on top of the fe-state language. */
 .fe-e2e-lock__form {
@@ -4312,12 +4275,121 @@ filex-explorer {
   flex: 1;
   min-width: 0;
 }
+/* The split pane's lock screen: the same screen, narrower. */
+.fe-e2e-lock--compact .fe-state__hint {
+  max-width: 34ch;
+}
+.fe-e2e-lock--compact .fe-e2e-lock__form {
+  flex-wrap: wrap;
+}
 
 /* Encrypted-folder creation modal. */
+.fe-e2e-names {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fe-e2e-names__hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--fe-text-muted);
+}
+/* wiring:e2 — the level picker (E2eLevelPicker): one card per level. */
+.fe-e2e-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.fe-e2e-levels legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+.fe-e2e-level {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  cursor: pointer;
+}
+.fe-e2e-level--on {
+  border-color: var(--fe-primary);
+  background: var(--fe-primary-soft);
+}
+.fe-e2e-level input {
+  margin-top: 3px;
+  flex: none;
+}
+.fe-e2e-level__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.fe-e2e-level__name {
+  font-weight: 600;
+}
+.fe-e2e-level__hint {
+  font-size: 12.5px;
+  color: var(--fe-text-muted);
+}
+/* wiring:e2 — the folder's encryption settings (E2eSettingsModal). */
+.fe-e2e-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.fe-e2e-settings__section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.fe-e2e-settings__section + .fe-e2e-settings__section {
+  border-top: 1px solid var(--fe-border);
+  padding-top: 12px;
+}
+.fe-e2e-settings__head {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.fe-e2e-settings__value {
+  margin: 0;
+}
+.fe-e2e-settings__hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--fe-text-muted);
+}
+.fe-e2e-settings__row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
 .fe-e2e-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+/* wiring:e2 convert — what the server already has, in the dialog. */
+.fe-e2e-convert-past {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+.fe-e2e-convert-past p {
+  margin: 0;
 }
 .fe-e2e-warn {
   border: 1px solid var(--fe-danger);
@@ -4364,6 +4436,58 @@ filex-explorer {
 .fe-e2e-optlink:hover {
   text-decoration: underline;
 }
+
+/* --- wiring:e2 fxe — "what the server has already seen", in the dialog
+   that encrypts a single file: a note, not a warning — it is a fact about
+   the past, not a risk being taken. */
+.fe-e2e-seen {
+  border: 1px solid var(--fe-border);
+  border-inline-start: 3px solid var(--fe-text-muted);
+  border-radius: var(--fe-radius-sm);
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+.fe-e2e-seen strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--fe-text);
+}
+.fe-e2e-seen p {
+  margin: 0 0 4px;
+  color: var(--fe-text-muted);
+}
+.fe-e2e-seen ul {
+  margin: 0;
+  padding-inline-start: 18px;
+  color: var(--fe-text-muted);
+}
+.fe-e2e-seen li + li {
+  margin-top: 2px;
+}
+/* The too-big dialog (E2eTooBigModal): the steps and the command to copy. */
+.fe-e2e-big__steps {
+  margin: 0;
+  padding-inline-start: 20px;
+  list-style: decimal;
+  display: grid;
+  gap: 8px;
+}
+.fe-e2e-big__cmd {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.fe-e2e-big__cmd code {
+  padding: 4px 8px;
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-hover);
+  font-family: var(--fe-font-mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+/* --- /wiring:e2 fxe */
 
 /* --- wiring:e2 recovery ---------------------------------------------
    Unscoped and fe-prefixed on purpose: a scoped <style> in an SFC does not
@@ -4914,6 +5038,35 @@ filex-explorer {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Drafts (issue #71): the row's count. A count, not an alarm — the quiet
+   primary tint the listing's badges wear, pushed to the row's end. */
+.fe-sidenav__count {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fe-primary) 14%, transparent);
+  color: var(--fe-primary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+/* On the collapsed rail there is no row end: the count sits on the icon's
+   corner. */
+.fe-sidenav--rail .fe-sidenav__item {
+  position: relative;
+}
+.fe-sidenav__count--rail {
+  position: absolute;
+  top: 1px;
+  inset-inline-end: 4px;
+  min-width: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 16px;
+}
 .fe-sidenav__section {
   margin-top: 10px;
 }
@@ -5277,7 +5430,7 @@ filex-explorer {
    to z-[120] for the same reason and this has to clear it. */
 .fe-overlay {
   position: fixed;
-  inset: 0;
+  inset: var(--fe-overlay-top, 0px) 0 0; /* the host's own strip stays reachable — see .fe-modal__backdrop */
   z-index: 130;
   display: flex;
   align-items: flex-start;
@@ -5288,7 +5441,7 @@ filex-explorer {
 }
 .fe-overlay__card {
   width: min(880px, 100%);
-  max-height: calc(100vh - 64px);
+  max-height: calc(100vh - 64px - var(--fe-overlay-top, 0px));
   overflow: auto;
   padding: 18px;
   border-radius: var(--fe-radius-lg);
@@ -6902,6 +7055,154 @@ filex-explorer {
   color: var(--fe-text);
 }
 
+/* ---- Drafts (issue #71) ----
+   The bar a draft's editor carries, under the viewer's own bar (or alone, on
+   the standalone tab): a pill that says DRAFT, where it will be saved, and
+   the Save that puts it there. Quiet: a tint of the primary colour, never a
+   warning's — nothing is wrong with a draft. */
+.fe-draftbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fe-gap-sm) var(--fe-gap);
+  padding: var(--fe-gap-sm) var(--fe-gap);
+  background: color-mix(in srgb, var(--fe-primary) 7%, var(--fe-bg-elev));
+  border-bottom: 1px solid var(--fe-border);
+  color: var(--fe-text);
+  font-size: 13px;
+  min-width: 0;
+}
+.fe-draftbar__pill {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--fe-primary);
+  color: var(--fe-text-on-primary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.fe-draftbar__text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fe-draftbar__text > bdi {
+  font-weight: 600;
+}
+.fe-draftbar__target {
+  color: var(--fe-text-muted);
+}
+.fe-draftbar__error {
+  color: var(--fe-danger);
+  overflow-wrap: anywhere;
+}
+.fe-draftbar__gap {
+  flex: 1 1 auto;
+}
+.fe-draftbar--saved {
+  background: color-mix(in srgb, var(--fe-ok) 10%, var(--fe-bg-elev));
+}
+.fe-draftbar__done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fe-text);
+}
+.fe-draftbar__done .fe-icon {
+  color: var(--fe-ok);
+}
+
+/* The two questions a draft asks (DraftCloseModal, DraftConflictModal). */
+.fe-draftq__body {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+.fe-draftq__hint {
+  margin: 0;
+  color: var(--fe-text-muted);
+  font-size: 12.5px;
+}
+.fe-draftq__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  width: 100%;
+}
+.fe-draftq__gap {
+  flex: 1 1 auto;
+}
+/* A destructive answer that is not the dialog's point: the danger colour on
+   the text, not a red slab beside the default. */
+.fe-btn--danger-quiet {
+  color: var(--fe-danger);
+  border-color: color-mix(in srgb, var(--fe-danger) 35%, var(--fe-border));
+}
+.fe-btn--danger-quiet:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fe-danger) 10%, transparent);
+}
+
+/* The Drafts view (DraftsView): THE table, under a line saying what a draft
+   is and how many are kept. */
+.fe-drafts {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.fe-drafts__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px var(--fe-gap);
+  padding: var(--fe-gap-sm) var(--fe-gap) 0;
+}
+.fe-drafts__lead,
+.fe-drafts__count {
+  margin: 0;
+  color: var(--fe-text-muted);
+  font-size: 12.5px;
+}
+.fe-drafts__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.fe-drafts__tile {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+.fe-drafts__open {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-drafts__open:hover {
+  text-decoration: underline;
+}
+.fe-drafts__open:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 2px;
+  border-radius: var(--fe-radius-sm);
+}
+
 /* ---- Top bar ---- */
 .fe-viewer__bar {
   flex: 0 0 auto;
@@ -7654,7 +7955,7 @@ filex-explorer {
 
 .fe-share__scrim {
   position: fixed;
-  inset: 0;
+  inset: var(--fe-overlay-top, 0px) 0 0; /* the host's own strip stays reachable — see .fe-modal__backdrop */
   z-index: 10000;
   display: flex;
   align-items: center;
@@ -9745,6 +10046,18 @@ filex-explorer {
 }
 /* "Will be created as report.docx" — a type whose editor needs its extension,
    said before Create. Quiet, not an error: nothing is wrong with the name. */
+/* Drafts (issue #71): the draft limit, and the way to Drafts beside it. */
+.fe-newdoc__limit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px var(--fe-gap);
+  margin-top: var(--fe-gap-sm);
+}
+.fe-newdoc__limit .fe-form__error {
+  margin: 0;
+  flex: 1 1 16rem;
+}
 .fe-newdoc__hint {
   margin: 0;
   font-size: var(--fe-text-xs);
@@ -10019,7 +10332,7 @@ filex-explorer {
 
 .fe-colmenu__backdrop {
   position: fixed;
-  inset: 0;
+  inset: var(--fe-overlay-top, 0px) 0 0; /* the host's own strip stays reachable — see .fe-modal__backdrop */
   z-index: 2147483000;
   background: transparent;
 }
@@ -13357,6 +13670,16 @@ filex-explorer {
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+}
+
+/* v4 — an app's OWN interface on a page: the frame takes the width and the
+ * height the page leaves, like a document step does (the interface draws its
+ * own layout; a 960px column would squeeze an editor). */
+.fe-apppage__body--ui {
+  max-width: none;
+  flex: 1 1 auto;
+  min-height: calc(100vh - 80px);
+  padding: 0;
 }
 
 /* ⚠⚠ v3 §3.2 — the step that shows a DOCUMENT is shaped by the window,

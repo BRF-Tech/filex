@@ -102,6 +102,25 @@ export interface PluginActionRow {
    * greyed row that says what is missing (lib/pluginMenu).
    */
   gated?: PluginGatedRule[];
+  /**
+   * v4 — the action opens the app's OWN interface (its view has a `ui`
+   * file): the explorer draws `AppFrame`, nothing is run on the server.
+   */
+  ui?: PluginUIRef;
+}
+
+/**
+ * How an app's own interface is opened (docs/APP-PLUGINS-API.md → An app's own
+ * interface). `url` is relative to the server's root unless interfaces have an
+ * origin of their own; the client joins it with its API base.
+ */
+export interface PluginUIRef {
+  url: string;
+  /** What the app was granted — what its bridge calls may do. */
+  grants: string[];
+  /** The app has a module: `engine.call` and `job.submit` answer. */
+  engine: boolean;
+  version: string;
 }
 
 /** One "offered once X is there" part of an action's rule. */
@@ -114,11 +133,13 @@ export interface PluginGatedRule {
 export interface PluginViewRow {
   plugin: string;
   id: string;
-  placement: 'modal' | 'inspector' | 'home' | string;
+  placement: 'modal' | 'inspector' | 'home' | 'viewer' | string;
   label: PluginText;
   applies?: PluginApplies;
   icon?: string;
   size?: string;
+  /** v4 — the view is the app's own interface (`viewer` views always are). */
+  ui?: PluginUIRef;
 }
 
 export interface PluginActionsResponse {

@@ -151,7 +151,7 @@ func (c *ContentIndexer) Handle(ctx context.Context, op Op) error {
 	   instead of feeding ciphertext to the extractor. */
 	head := make([]byte, len(e2e.MagicPrefix))
 	nRead, _ := io.ReadFull(rc, head)
-	if nRead == len(head) && e2e.HasMagicPrefix(head) {
+	if nRead == len(head) && e2e.HasEncryptedPrefix(head) /* wiring:e2 fxe — a single encrypted file too */ {
 		if c.index == nil {
 			return nil
 		}

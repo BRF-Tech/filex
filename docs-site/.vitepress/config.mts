@@ -55,6 +55,9 @@ export default defineConfig({
   //     a list, because the next handover must be excluded by default rather
   //     than by somebody remembering to add it. Measured: the v0.20.0 build
   //     was serving one at /handovers/2026-08-14-write-path-and-slow-storage.
+  //   (E2E-ROADMAP used to be here. Published since 2026-09-27 — the owner's
+  //     call — once it opened with a status table saying what is built and
+  //     what is only designed, so the site still describes what filex does.)
   srcExclude: ['DEPLOY_BRF.md', 'MIGRATION.md', 'MIGRATION_FISHAPP.md', 'CLOUD.md',
                'README.md', 'handovers/**'],
   // Example URLs in the docs (dev-server addresses). Real links stay checked.
@@ -137,6 +140,7 @@ export default defineConfig({
           { text: 'Notifications & Webhooks', link: '/NOTIFICATIONS' },
           { text: 'RBAC & Permissions', link: '/RBAC' },
           { text: 'End-to-end encryption', link: '/E2E-ENCRYPTION' },
+          { text: 'End-to-end encryption roadmap', link: '/E2E-ROADMAP' },
           { text: 'Replication', link: '/REPLICATION' },
           { text: 'Multi-tenancy', link: '/MULTI-TENANCY' },
           { text: 'Right-to-left languages', link: '/RTL' }
@@ -149,7 +153,6 @@ export default defineConfig({
           { text: 'Embedding the explorer', link: '/INTEGRATION' },
           { text: 'MCP & AI Tokens', link: '/MCP' },
           { text: 'OnlyOffice', link: '/ONLYOFFICE' },
-          { text: 'Convert Integration', link: '/CONVERT-INTEGRATION' },
           { text: 'ShareX', link: '/SHAREX' },
           { text: 'SSO (OIDC)', link: '/SSO' },
           { text: 'LDAP', link: '/LDAP' }

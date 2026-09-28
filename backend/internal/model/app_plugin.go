@@ -31,8 +31,18 @@ type AppPlugin struct {
 	ManifestJSON string `json:"-"`
 	// WasmPath is the module file inside the plugin's directory.
 	WasmPath string `json:"-"`
-	// SHA256 of the module as installed; checked again at every load.
-	SHA256    string `json:"sha256"`
+	// SHA256 of the module as installed; checked again at every load. (Of
+	// the manifest when there is no module: a language pack, an app that is
+	// only an interface.)
+	SHA256 string `json:"sha256"`
+	// UISHA256 is the interface bundle's sha256 (ui.zip), checked again at
+	// every load; "" when the app has no interface of its own (migration
+	// 00065). Its first 16 hex digits are the interface's address.
+	UISHA256 string `json:"ui_sha256,omitempty"`
+	// Signature is the detached signature this version was installed with
+	// ("" without one), kept so a roll-back to it can be held to the same
+	// rule on an instance that only runs signed apps (migration 00066).
+	Signature string `json:"-"`
 	Source    string `json:"source"`
 	SourceURL string `json:"source_url,omitempty"`
 	Signed    bool   `json:"signed"`
@@ -48,10 +58,10 @@ type AppPlugin struct {
 	// re-reads. Empty for GitHub (SourceURL says repo@ref) and uploads
 	// (migration 00063).
 	ManifestURL string `json:"manifest_url,omitempty"`
-	// AutoUpdate: a newer version found at the source is applied without
-	// asking, as long as it asks for nothing the administrator has not
-	// already approved (wasmplugin/updates.go). On by default.
-	AutoUpdate bool `json:"auto_update"`
+	// AutoUpdate is filex 0.47's per-app switch for installing a newer version
+	// by itself. Nothing reads it since 0.48 — nothing updates itself
+	// (wasmplugin/updates.go); the column stays for older rows.
+	AutoUpdate bool `json:"-"`
 	// UpdateJSON is what the last update check found (wasmplugin.UpdateInfo),
 	// kept so the Apps list can say it after a restart. "" = never checked.
 	UpdateJSON string    `json:"-"`
@@ -221,4 +231,27 @@ func (l *AppPluginLock) Live(now time.Time) bool {
 		return false
 	}
 	return l.Until == nil || now.Before(*l.Until)
+}
+
+// AppPluginVersion is a version an upgrade replaced, kept so an
+// administrator can go back to it without approving it again (migration
+// 00066). Dir is its folder under <data-dir>/app-plugins/_versions/<name>/,
+// holding its module, manifest, interface bundle and mirrored files.
+type AppPluginVersion struct {
+	ID              int64     `json:"id"`
+	PluginID        int64     `json:"plugin_id"`
+	Version         string    `json:"version"`
+	ManifestJSON    string    `json:"-"`
+	WasmPath        string    `json:"-"`
+	SHA256          string    `json:"sha256"`
+	UISHA256        string    `json:"ui_sha256,omitempty"`
+	PermissionsJSON string    `json:"-"`
+	Source          string    `json:"source"`
+	SourceURL       string    `json:"source_url,omitempty"`
+	ManifestURL     string    `json:"manifest_url,omitempty"`
+	Signed          bool      `json:"signed"`
+	Signature       string    `json:"-"`
+	Dir             string    `json:"-"`
+	ReplacedBy      *int64    `json:"replaced_by,omitempty"`
+	ReplacedAt      time.Time `json:"replaced_at"`
 }

@@ -44,19 +44,26 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Storage plugins](PLUGINS.md) — teaching filex a backend it does not ship:
   installing one, upgrading it in place, and writing one (the protocol, the Go
   SDK, presigned URLs and multipart) — plus **conformance**, the probes that
-  refuse a plugin which cannot do what it claims
+  refuse a plugin which cannot do what it claims, and
+  [updates from a source](PLUGINS.md#updates-from-a-source) that wait for your
+  review
 - [Apps (app plugins)](APP-PLUGINS.md) — sandboxed WebAssembly apps that add
   actions to the file menu, screens filex draws for them, and public links for
   outside participants: the two that ship (**e-Signature**,
   `BRF-Tech/filex-sign`, and **Convert**, `BRF-Tech/filex-convert`), installing
   one from GitHub through the permission review, what the administrator
-  controls, apps that wake up on their own,
+  controls, [updates](APP-PLUGINS.md#updates) that each wait for an
+  administrator and [going back](APP-PLUGINS.md#going-back) to the previous
+  version, [an app's own interface](APP-PLUGINS.md#an-apps-own-interface) (a
+  viewer for a file type, in a sandboxed frame), apps that wake up on their own,
   [signing documents end to end](APP-PLUGINS.md#signing-documents-end-to-end)
   (inside and outside signers, PINs, deadlines, the audit trail, verifying, your
   own certificate authority), [converting files](APP-PLUGINS.md#converting-files),
   what guards an app's public links, limits, troubleshooting
-- [Writing an app plugin](PLUGIN-KIT.md) — the manifest, the six exports,
-  every host function and its permission, the screen catalogue, the **hourly
+- [Writing an app plugin](PLUGIN-KIT.md) — the manifest, the exports,
+  every host function and its permission, the screen catalogue, **an app's own
+  interface** (HTML/JS in a sandboxed frame, the `@brftech/filex-app-ui` SDK,
+  with or without a module), the **hourly
   wake-up** that lets an app schedule its own work to the minute, the test kit
   that runs before the wasm build, and a signing walk-through with stock Go
 - [App plugin wire contract](APP-PLUGINS-API.md) — the exact routes, JSON
@@ -96,17 +103,17 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 ## Integrations
 
-- [OnlyOffice](ONLYOFFICE.md) — in‑browser editing of Office documents
-- [Converter side-car](CONVERT-INTEGRATION.md) — universal file conversion
-  through a separate service (the [Convert app](APP-PLUGINS.md#converting-files)
-  is the sandboxed alternative)
+- [OnlyOffice](ONLYOFFICE.md) — in‑browser editing of Office documents, New
+  document, and [drafts](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save):
+  nothing is in the folder until you save
 
 ## Features
 
 - [Desktop app](DESKTOP.md) — Windows/Linux/macOS app: multiple accounts, background sync,
   [dragging files out onto the desktop](DESKTOP.md#dragging-files-out),
   [opening Office documents off your own disk](DESKTOP.md#opening-documents-from-your-computer),
-  [a portable Windows copy that installs nothing](DESKTOP.md#portable-windows)
+  [a portable Windows copy that installs nothing](DESKTOP.md#portable-windows),
+  [the notification bell and your account menu in the window](DESKTOP.md#notifications-and-your-account)
 - [Folder sync](SYNC.md) — how a folder on your PC is kept in step with the server
 - [Uploads](UPLOADS.md) — the staged, resumable upload path: chunked, works on
   every driver, survives a dropped connection
@@ -130,11 +137,19 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   released, and how a public drop link is billed
 - [Protection & antivirus](PROTECTION.md) — ClamAV scanning, through a local
   binary or a clamd daemon over TCP or a unix socket, plus the trash and version
-  retention windows and the share-link life ceiling, behind one admin screen
+  retention windows, the share-link life ceiling and how many drafts a person
+  may keep, behind one admin screen
 - [Archives](ARCHIVES.md) — ZIP/7z/TAR creation, multi-format extraction and encryption providers
-- [End‑to‑end encryption](E2E-ENCRYPTION.md) — client‑side WebCrypto folders;
-  the server stores ciphertext and never receives a key. Recovery keys, optional
-  operator key escrow, and exactly what each one can and cannot open
+- [End‑to‑end encryption](E2E-ENCRYPTION.md) — client‑side WebCrypto folders
+  at a level of the owner's choosing: contents only (the default), or contents
+  and names; the server stores ciphertext and never receives a key. Encrypting
+  a folder you already have, a single file (`.fxe`), files of any size (the
+  streamed format), downloading a decrypted copy, recovery keys, optional
+  operator key escrow, `filex decrypt` for taking a folder or a file out, and
+  exactly what each one can and cannot open
+- [End‑to‑end encryption roadmap](E2E-ROADMAP.md) — what is built, what is
+  left (`filex encrypt`, large files in an in-place conversion) and the design
+  of the vault level, with open questions and estimates
 - [Multi‑tenancy](MULTI-TENANCY.md) — provider/tenant mode, per‑tenant isolation
   on one instance
 - [ShareX](SHAREX.md) — the screenshot‑upload endpoint and its custom uploader

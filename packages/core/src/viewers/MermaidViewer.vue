@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { sanitizeHtml } from '../lib/sanitizeHtml';
 import { sayFailure } from '../lib/errorWords';
 /**
  * MermaidViewer — render a `.mmd` / `.mermaid` source file.
@@ -86,7 +87,7 @@ async function load(): Promise<void> {
     const { svg } = await mermaid.render(id, src);
     if (myToken !== renderToken) return;
     if (surface.value) {
-      surface.value.innerHTML = svg;
+      surface.value.innerHTML = sanitizeHtml(svg, 'diagram');
       const svgEl = surface.value.querySelector('svg');
       if (svgEl) {
         svgEl.style.maxWidth = '100%';

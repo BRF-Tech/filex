@@ -94,6 +94,40 @@ export interface Plugin {
   in_use: number;
   conformance?: PluginConformance;
   load: PluginLoad;
+  /**
+   * Where newer versions of a binary plugin are published: `owner/name` (the
+   * filex-storage.json attached to the repository's latest release) or the
+   * https address of a filex-storage.json. Absent = none.
+   */
+  source?: string;
+  /** What the last check of the source found; absent before the first. */
+  update?: PluginUpdate;
+}
+
+/**
+ * What the last check of a plugin's source found (plugin.UpdateInfo).
+ * ⚠⚠ Nothing updates itself: `available` waits for an administrator's
+ * "Review update".
+ */
+export interface PluginUpdate {
+  checked_at?: string;
+  status: 'current' | 'available' | 'incompatible' | 'check_failed' | string;
+  version?: string;
+  requires?: string;
+  /** The feed's notes, plain text. */
+  notes?: string;
+  /** The build for this server's platform. */
+  sha256?: string;
+  platform?: string;
+  error?: string;
+}
+
+/** `POST /admin/plugins/updates/check` — one check, as it went. */
+export interface PluginUpdateReport {
+  checked_at: string;
+  checked: number;
+  available: string[];
+  failed: string[];
 }
 
 export interface PluginList {
@@ -108,6 +142,10 @@ export interface PluginList {
    * a report.
    */
   conformance_mode: ConformanceMode;
+  /** The daily check of the plugins' sources runs. */
+  update_check: boolean;
+  /** When the sources were last checked; null = never. */
+  updates_checked_at: string | null;
 }
 
 /** The list endpoint's raw shape, before the rename above. */
@@ -116,6 +154,8 @@ interface PluginListResponse {
   dir?: string;
   requires_signature?: boolean;
   conformance?: ConformanceMode;
+  update_check?: boolean;
+  updates_checked_at?: string | null;
 }
 
 /**
@@ -151,24 +191,63 @@ export const PluginsApi = {
       // only speaks up to say the safety net is DOWN, and inventing that
       // warning would be worse than staying silent.
       conformance_mode: data.conformance ?? 'enforce',
+      update_check: data.update_check ?? false,
+      updates_checked_at: data.updates_checked_at ?? null,
     };
   },
 
+  /** Read every binary plugin's source now. It installs nothing. */
+  async checkUpdates(): Promise<{ report: PluginUpdateReport; plugins: Plugin[] }> {
+    const { data } = await api.post<{ report: PluginUpdateReport; plugins?: Plugin[] }>(
+      '/admin/plugins/updates/check',
+      {},
+      { timeout: PLUGIN_INSTALL_TIMEOUT_MS },
+    );
+    return { report: data.report, plugins: data.plugins ?? [] };
+  },
+
+  /** Install from a source: its build for this platform, held to the feed's SHA-256; the source is kept. */
+  async fromSource(name: string, source: string): Promise<Plugin> {
+    const { data } = await api.post<Plugin>('/admin/plugins', { name, source }, { timeout: PLUGIN_INSTALL_TIMEOUT_MS });
+    return data;
+  },
+
+  /** Name (or, with '', clear) where newer versions are published. */
+  async setSource(id: number, source: string): Promise<Plugin> {
+    const { data } = await api.patch<Plugin>(`/admin/plugins/${id}`, { source });
+    return data;
+  },
+
+  /**
+   * The administrator's approval of the newer version the source has: the
+   * build is held to the feed's SHA-256, then upgraded like an uploaded one
+   * (a failure rolls back and answers 400 with the restored plugin).
+   */
+  async upgradeFromSource(id: number): Promise<Plugin> {
+    const { data } = await api.post<Plugin>(
+      `/admin/plugins/${id}/upgrade`,
+      { from_source: true },
+      { timeout: PLUGIN_INSTALL_TIMEOUT_MS },
+    );
+    return data;
+  },
+
   /** Upload a plugin binary. `signature` is required when the instance trusts keys. */
-  async upload(name: string, file: File, signature = ''): Promise<Plugin> {
+  async upload(name: string, file: File, signature = '', source = ''): Promise<Plugin> {
     const form = new FormData();
     form.append('name', name);
     form.append('file', file);
     if (signature) form.append('signature', signature);
+    if (source) form.append('source', source);
     const { data } = await api.post<Plugin>('/admin/plugins', form, { timeout: PLUGIN_INSTALL_TIMEOUT_MS });
     return data;
   },
 
   /** Download a plugin binary from a URL. sha256 is required by the server. */
-  async fromUrl(name: string, url: string, sha256: string, signature = ''): Promise<Plugin> {
+  async fromUrl(name: string, url: string, sha256: string, signature = '', source = ''): Promise<Plugin> {
     const { data } = await api.post<Plugin>(
       '/admin/plugins',
-      { name, url, sha256, signature },
+      { name, url, sha256, signature, ...(source ? { source } : {}) },
       { timeout: PLUGIN_INSTALL_TIMEOUT_MS },
     );
     return data;

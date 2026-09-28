@@ -27,8 +27,8 @@ import { tr as coreTr } from '@brftech/filex-core/src/locales/tr';
 
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
-import { NOTIFICATION_PHRASES } from '@/lib/notificationText';
-import { userEventKey, webhookEventKey } from '@/lib/webhookEvents';
+import { NOTIFICATION_PHRASES } from '@brftech/filex-core/src/lib/notificationText';
+import { userEventKey, webhookEventKey } from '@brftech/filex-core/src/lib/webhookEvents';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND = path.resolve(here, '../../../backend/internal');

@@ -4,14 +4,17 @@
 //
 //	GET   /api/admin/protection → {"trash_retention_days":30,"versions_keep_n":0,
 //	                               "share_max_ttl_days":7,"shares_over_max_ttl":0,
+//	                               "drafts_limit":50,"drafts_limit_min":1,
+//	                               "drafts_limit_max":1000,
 //	                               "antivirus":{ … see protectionAntivirusStatus }}
 //	PATCH /api/admin/protection → {trash_retention_days?, versions_keep_n?,
-//	                               share_max_ttl_days?, av_save_scan_window_minutes?,
+//	                               share_max_ttl_days?, drafts_limit?,
+//	                               av_save_scan_window_minutes?,
 //	                               av_max_scan_mb?, av_enabled?, av_mode?,
 //	                               av_clamd_addr?}
 //
 // The values live in the settings table (`trash.retention_days`,
-// `versions.keep_n`, `share.max_ttl_days`, `antivirus.enabled`,
+// `versions.keep_n`, `share.max_ttl_days`, `drafts.limit`, `antivirus.enabled`,
 // `antivirus.mode`, `antivirus.clamd_addr`,
 // `antivirus.save_scan_window_minutes`, `antivirus.max_scan_mb`).
 // `shares_over_max_ttl` is a read-only count of EXISTING live links that
@@ -56,6 +59,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/antivirus"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/dbsetting"
+	"github.com/brf-tech/filex/backend/internal/drafts"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/versioning"
@@ -98,9 +102,15 @@ type protectionResponse struct {
 	// (0 = no ceiling). SharesOverMaxTTL counts existing live links that
 	// outlive it — information for the operator, not something this API
 	// changes.
-	ShareMaxTTLDays  int                       `json:"share_max_ttl_days"`
-	SharesOverMaxTTL int                       `json:"shares_over_max_ttl"`
-	Antivirus        protectionAntivirusStatus `json:"antivirus"`
+	ShareMaxTTLDays  int `json:"share_max_ttl_days"`
+	SharesOverMaxTTL int `json:"shares_over_max_ttl"`
+	// DraftsLimit is how many drafts (issue #71) one person may keep; the
+	// bounds are shipped with it so the form renders the limits the API
+	// enforces instead of a second copy that drifts.
+	DraftsLimit    int                       `json:"drafts_limit"`
+	DraftsLimitMin int                       `json:"drafts_limit_min"`
+	DraftsLimitMax int                       `json:"drafts_limit_max"`
+	Antivirus      protectionAntivirusStatus `json:"antivirus"`
 }
 
 type protectionAntivirusStatus struct {
@@ -184,6 +194,9 @@ type protectionPatch struct {
 	TrashRetentionDays *int `json:"trash_retention_days"`
 	VersionsKeepN      *int `json:"versions_keep_n"`
 	ShareMaxTTLDays    *int `json:"share_max_ttl_days"`
+	// DraftsLimit is validated against drafts.LimitSetting and refused when
+	// out of range, like the antivirus numbers below.
+	DraftsLimit *int `json:"drafts_limit"`
 	// AVSaveScanWindowMinutes is validated against antivirus.SaveWindowSetting
 	// bounds and REFUSED when out of range, rather than being clamped: an
 	// operator typing 5 must be told no while they are looking at the form.
@@ -212,7 +225,7 @@ func (h *Protection) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.TrashRetentionDays == nil && req.VersionsKeepN == nil &&
-		req.ShareMaxTTLDays == nil && req.AVSaveScanWindowMinutes == nil &&
+		req.ShareMaxTTLDays == nil && req.DraftsLimit == nil && req.AVSaveScanWindowMinutes == nil &&
 		req.AVMaxScanMB == nil && req.AVEnabled == nil && req.AVMode == nil &&
 		req.AVClamdAddr == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no fields to update"})
@@ -229,6 +242,12 @@ func (h *Protection) Patch(w http.ResponseWriter, r *http.Request) {
 	if v := req.VersionsKeepN; v != nil && (*v < protKeepNMin || *v > protKeepNMax) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "versions_keep_n must be between 0 and 1000"})
 		return
+	}
+	if v := req.DraftsLimit; v != nil {
+		if err := drafts.LimitSetting.Validate(*v); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	if v := req.AVSaveScanWindowMinutes; v != nil {
 		if err := antivirus.SaveWindowSetting.Validate(*v); err != nil {
@@ -295,6 +314,12 @@ func (h *Protection) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 	if v := req.ShareMaxTTLDays; v != nil {
 		if err := h.Store.UpsertSetting(r.Context(), share.SettingKeyMaxTTLDays, strconv.Itoa(*v)); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if v := req.DraftsLimit; v != nil {
+		if err := h.Store.UpsertSetting(r.Context(), drafts.LimitSetting.Key, strconv.Itoa(*v)); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
@@ -378,6 +403,9 @@ func (h *Protection) snapshot(r *http.Request) protectionResponse {
 		VersionsKeepN:      keepN,
 		ShareMaxTTLDays:    maxTTL,
 		SharesOverMaxTTL:   over,
+		DraftsLimit:        drafts.Limit(ctx, h.Store),
+		DraftsLimitMin:     drafts.MinLimit,
+		DraftsLimitMax:     drafts.MaxLimit,
 		Antivirus: protectionAntivirusStatus{
 			Enabled:               sc.Supports(),
 			Binary:                sc.BinName(),

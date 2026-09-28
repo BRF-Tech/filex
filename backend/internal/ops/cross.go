@@ -224,6 +224,16 @@ func UniqueDest(ctx context.Context, drv storage.Driver, dst string, taken ...Ta
 	return uniqueCopyDest(ctx, drv, "", dst, taken...)
 }
 
+// UniqueDestNumbered is UniqueDest for a second DOCUMENT rather than a copy:
+// `dst` when nothing holds it, else `name (2).ext`, `name (3).ext`, … — the
+// numbering the New document dialog suggests for a name already taken. A
+// draft saved beside a file of its name lands there (issue #71). Same rules,
+// same Taken checks, same ErrNoFreeName as UniqueDest; only the spelling
+// differs.
+func UniqueDestNumbered(ctx context.Context, drv storage.Driver, dst string, taken ...Taken) (string, error) {
+	return uniqueDest(ctx, drv, "", dst, numberedName, taken...)
+}
+
 // MoveDest is where a same-storage move of `src` to `dst` lands: `dst` when
 // nothing holds it, a free name beside it when something does, and `src`
 // itself when the move would put the item back where it already is.

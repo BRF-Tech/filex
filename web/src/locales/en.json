@@ -528,10 +528,6 @@
     }
   },
   "external": {
-    "convertLegacy": "Legacy — being retired. The Convert app (Plugins → Apps) replaces it; while the app is installed, the file menu does not offer this converter.",
-    "names": {
-      "convert": "Converter"
-    },
     "title": "External services",
     "subtitle": "Optional editors and renderers — mounted only when reachable",
     "fields": {
@@ -924,7 +920,10 @@
       "pin_revealed": "PIN shown",
       "tags": "tags changed",
       "download_link": "downloaded by dragging it out",
-      "download_link_refused": "drag-out download refused"
+      "download_link_refused": "drag-out download refused",
+      "ui_save": "saved from its interface",
+      "upgrade": "upgraded",
+      "rollback": "put back to the previous version"
     },
     "target": {
       "auth_provider": "Sign-in provider",
@@ -1326,6 +1325,7 @@
       "drop_received": "Files received",
       "comment_added": "New comment",
       "e2e_escrow_used": "Escrow key used",
+      "e2e_password_changed": "Folder password changed",
       "plugin_notice": "App notification",
       "update_available": "Update available",
       "update_applied": "Update applied",
@@ -1333,6 +1333,7 @@
       "app_update_available": "App update available",
       "app_update_needs_approval": "App update needs approval",
       "app_update_failed": "App update failed",
+      "plugin_update_available": "Storage plugin update available",
       "replica_fail": "Replica write failed",
       "replica_fail_spike": "Replica failures rising",
       "replica_reconcile_done": "Replica retries queued",
@@ -1591,6 +1592,7 @@
       "drop_received": "File received through a public request link",
       "comment_added": "Comment added to a file or folder",
       "e2e_escrow_used": "Encrypted folder opened with the escrow key instead of its password",
+      "e2e_password_changed": "The password of an encrypted folder was changed, or reset with its recovery key",
       "plugin_notice": "App notification — an installed app sent a message (signature request, finished job, …)"
     },
     "secretSet": "Secret set",
@@ -1630,7 +1632,7 @@
   },
   "protection": {
     "title": "Protection",
-    "subtitle": "Trash retention, version policy, share-link life and antivirus",
+    "subtitle": "Trash retention, version policy, share-link life, drafts and antivirus",
     "unsupported": "The server does not support this version — the protection settings API was not found. This page activates after a backend update.",
     "savedOk": "Protection settings saved",
     "trash": {
@@ -1654,6 +1656,13 @@
       "hint": "0 = no limit. Default 7.",
       "errMin": "Enter an integer greater than or equal to 0",
       "overMax": "{n} existing link outlives this limit. It keeps working — revoke it under Shares if you want it gone. | {n} existing links outlive this limit. They keep working — revoke them under Shares if you want them gone."
+    },
+    "drafts": {
+      "title": "Drafts",
+      "desc": "A new document is a draft until its first save: it waits in the Drafts of the person who made it, where nobody else can see it, and nothing is created in its folder until it is saved. This is how many drafts one person may keep; at the limit, New document asks them to save or delete some first.",
+      "label": "Drafts per person",
+      "hint": "Between {min} and {max}. Default 50. Takes effect at once, with no restart.",
+      "errRange": "Enter a whole number between {min} and {max}."
     },
     "av": {
       "title": "Antivirus",
@@ -1820,7 +1829,8 @@
     "source": {
       "file": "Upload a binary",
       "url": "From a URL",
-      "remote": "Remote service"
+      "remote": "Remote service",
+      "feed": "From its source"
     },
     "state": {
       "running": "Running",
@@ -1839,7 +1849,8 @@
       "enabled": "Enabled",
       "binary": "Plugin binary",
       "address": "Address",
-      "token": "Token"
+      "token": "Token",
+      "source": "Update source"
     },
     "caps": {
       "read": "read",
@@ -1899,6 +1910,36 @@
     "signature": {
       "label": "Signature",
       "required": "This instance only accepts signed plugins: paste the detached signature over the binary's SHA-256, hex or base64, made with a key the operator trusts. Without it the install is refused."
+    },
+    "sourceHint": "A GitHub repository (owner/name — filex reads the filex-storage.json attached to its latest release) or the https address of a filex-storage.json. filex checks it daily and tells you when a newer version is there; nothing is installed without you.",
+    "checkUpdates": "Check for updates",
+    "updates": {
+      "checked": "Update check done: {waiting} waiting for your approval.",
+      "none": "Update check done: every plugin with a source is up to date.",
+      "failed": "Some sources could not be read — each row says why."
+    },
+    "update": {
+      "available": "Update available",
+      "incompatible": "{version} needs filex {requires}",
+      "checkFailed": "Could not check",
+      "upToDate": "Up to date"
+    },
+    "actions": {
+      "reviewUpdate": "Review update",
+      "setSource": "Update source…"
+    },
+    "review": {
+      "title": "Update {name}",
+      "jump": "Version {from} → {to}",
+      "sha": "SHA-256 of the {platform} build",
+      "notes": "Release notes",
+      "how": "filex downloads this build, refuses it unless its SHA-256 is the one above, and upgrades the plugin as it would an uploaded file: its claims are probed again, and the previous file comes back if the new one does not start."
+    },
+    "sourceForm": {
+      "title": "Update source of {name}",
+      "clear": "Leave it empty to stop checking.",
+      "saved": "Saved: {name} follows {source}.",
+      "cleared": "{name} has no update source now."
     }
   },
   "account": {
@@ -1932,26 +1973,24 @@
     "scheduledBadge": "Wakes hourly",
     "checkUpdates": "Check for updates",
     "updates": {
-      "checked": "Update check done: {updated} updated, {waiting} waiting for you.",
+      "checked": "Update check done: {waiting} waiting for your approval.",
       "none": "Update check done: every app is up to date.",
-      "failed": "{count} app could not be checked or updated — its row says why, under its version. | {count} apps could not be checked or updated — their rows say why, under their versions."
+      "failed": "{count} app could not be checked — its row says why, under its version. | {count} apps could not be checked — their rows say why, under their versions."
     },
     "update": {
       "available": "Update available",
       "needsApproval": "Needs approval",
-      "updated": "Updated automatically",
       "failed": "Update failed",
       "checkFailed": "Could not check",
       "failedDetail": "{version} was tried and undone; {current} keeps running",
       "newPermissions": "new: {permissions}",
       "addsModule": "brings a module",
       "needsNewerFilex": "{version} needs filex {requires}",
-      "autoFrom": "from {from}, {when}",
       "upToDate": "Up to date",
       "notChecked": "Not checked yet",
-      "autoOff": "Automatic updates are off",
       "noSource": "Installed from a file: there is no source to check for updates",
-      "noManifestAddress": "Installed from an address filex did not keep: upgrade it once from its URL to have it checked for updates"
+      "noManifestAddress": "Installed from an address filex did not keep: upgrade it once from its URL to have it checked for updates",
+      "previous": "Version {version} is kept to go back to"
     },
     "compat": {
       "bad": "Not compatible with this filex",
@@ -1993,10 +2032,9 @@
     "actions": {
       "details": "Details",
       "reviewUpdate": "Review update",
-      "autoUpdateOn": "Turn on automatic updates",
-      "autoUpdateOff": "Turn off automatic updates",
       "upgrade": "Upgrade",
-      "remove": "Remove"
+      "remove": "Remove",
+      "rollback": "Back to {version}"
     },
     "empty": {
       "title": "No apps installed",
@@ -2018,7 +2056,7 @@
       "repo": "Repository",
       "repoHint": "owner/name. filex reads filex-app.json from the repository at the ref (the default branch when empty) and fetches the module the manifest names, checking its SHA-256.",
       "ref": "Ref (tag, branch or commit)",
-      "wasm": "Module (.wasm) — leave empty for a language pack",
+      "wasm": "Module (.wasm) — leave empty for a language pack or an app that is only an interface",
       "manifest": "Manifest (filex-app.json)",
       "signature": "Signature",
       "signatureHint": "Optional: an ed25519 signature over the module's SHA-256, hex or base64.",
@@ -2086,7 +2124,48 @@
       "samePermissions": "It asks for the same permissions as the installed version.",
       "newPermission": "New",
       "incompatible": "{name} {version} works with filex {requires}; this is filex {filex}. It cannot be installed here.",
-      "enginesMissing": "This server does not have {engines}. The app installs, but what it does with them will not work until they are installed and filex is restarted."
+      "enginesMissing": "This server does not have {engines}. The app installs, but what it does with them will not work until they are installed and filex is restarted.",
+      "ui": "Interface (ui.zip) — for an app with its own interface",
+      "uiGroup": {
+        "title": "Interface",
+        "badge": "Has its own interface",
+        "sha256": "Interface SHA-256",
+        "files": "Files",
+        "size": "Size",
+        "noEngine": "It has no module: none of its code runs on the server. The interface reads and writes only the files it is opened with.",
+        "external": "Addresses outside the package",
+        "mirror": "Mirrored",
+        "mirrorText": "filex downloads this file once and serves it itself; browsers never go to this address.",
+        "live": "Live, read-only",
+        "liveText": "Your browser downloads files from this address. Its owner sees who uses it and when, and the app can add data from the file you open to these requests (in the address). If the address belongs to the app’s author, data can reach the author.",
+        "as": {
+          "style": "Style sheet",
+          "font": "Font",
+          "img": "Image",
+          "media": "Media"
+        },
+        "honest": "Browsers cannot fully stop an interface from sending data out (WebRTC: Chrome lets filex close it, Firefox does not). Trust this app as much as you would trust someone to see the files you open with it."
+      },
+      "diff": {
+        "moduleChanged": "Module: {from} → {to}",
+        "moduleSame": "The module is the same.",
+        "moduleRemoved": "This version has no module any more.",
+        "uiAdded": "This version adds its own interface.",
+        "uiRemoved": "This version drops its interface.",
+        "uiChanged": "Interface: {from} → {to}",
+        "uiSame": "The interface is the same.",
+        "files": "Interface files: {added} added, {removed} removed, {changed} changed",
+        "filesAdded": "Added",
+        "filesRemoved": "Removed",
+        "filesChanged": "Changed",
+        "filesMore": "… and {count} more",
+        "filex": "Works with filex: {from} → {to}",
+        "anyFilex": "any version",
+        "signed": "Signature: {from} → {to}",
+        "isSigned": "signed",
+        "isUnsigned": "unsigned",
+        "notes": "Release notes"
+      }
     },
     "detail": {
       "source": "Source",
@@ -2166,7 +2245,9 @@
         "empty": "Nothing logged yet.",
         "live": "Live — refreshed every 2 seconds"
       },
-      "grantedTitle": "What it was allowed to do"
+      "grantedTitle": "What it was allowed to do",
+      "previous": "Kept version",
+      "previousText": "{version}, replaced {when}"
     },
     "kind": {
       "languagePack": "Language pack"
@@ -2182,7 +2263,9 @@
       "breadcrumb": "App details",
       "back": "Apps",
       "missing": "No app named “{name}” is installed on this server."
-    }
+    },
+    "rollbackConfirm": "Put {name} back to {version}? Everybody moves to it at once; {current} is kept, so you can go forward again the same way.",
+    "rolledBack": "{name} is back to {version}."
   },
   "usage": {
     "title": "Usage & cost",
@@ -2339,6 +2422,7 @@
         "drop_received": "A file arrives through a request link",
         "comment_added": "Someone comments on a file",
         "e2e_escrow_used": "An encrypted folder is opened with the escrow key",
+        "e2e_password_changed": "The password of your encrypted folder is changed",
         "plugin_notice": "An installed app sends you a message"
       }
     },

@@ -81,6 +81,23 @@ const props = withDefaults(defineProps<{
    * "Stop and close"). Escape and an outside click still do nothing.
    */
   busyClose?: { question: string; confirm?: string } | null;
+  /**
+   * The slot draws the WHOLE card — its own head, its own close button, its
+   * own size and ground (the user settings dialog: head, rail and pane). The
+   * frame keeps everything that makes it a dialog: the backdrop, Escape, a
+   * click outside, the focus trap, the focus going home, `aria-modal`.
+   *
+   * ⚠ Why the settings dialog is THIS and not a native `<dialog>` any more:
+   * showModal() puts a dialog in the browser's top layer, above every
+   * z-index, and makes the rest of the page inert. In the desktop app the
+   * window's title bar IS page content (a frameless window), so minimise,
+   * maximise and close were under the backdrop and a click on them closed
+   * the dialog instead (owner, 2026-09-27: the title bar works ALWAYS).
+   */
+  bare?: boolean;
+  /** The id of a heading the slot draws itself — the dialog's name when there
+   *  is no `title` (a bare dialog names itself with its own heading). */
+  labelledby?: string;
 }>(), {
   closeOnBackdrop: true,
   busyClose: null,
@@ -102,6 +119,9 @@ const cardEl = ref<HTMLElement | null>(null);
 let modalSeq = 0;
 const titleId = `fe-modal-title-${++modalSeq}-${Math.random().toString(36).slice(2, 7)}`;
 let prevFocus: HTMLElement | null = null;
+/** Where the focus was the moment this dialog took it, if that is not
+ *  `prevFocus` — the home to fall back on when `prevFocus` is gone. */
+let lateFocus: HTMLElement | null = null;
 
 const FOCUSABLE =
   'input:not([disabled]),select:not([disabled]),textarea:not([disabled]),' +
@@ -120,6 +140,15 @@ let focusTimer: ReturnType<typeof setTimeout> | undefined;
 function focusFirst() {
   const card = cardEl.value;
   if (!card) return;
+  // A dialog that names its default answer (`data-fe-autofocus`) gets it, even
+  // in the footer: the draft close question's first footer button is Discard,
+  // and focusing it made Enter throw the draft away. The dialog's own focus
+  // call alone lost the race to this timer under load (v0.48.0 pretag).
+  const preferred = card.querySelector<HTMLElement>('[data-fe-autofocus]');
+  if (preferred) {
+    preferred.focus();
+    return;
+  }
   const within = (sel: string) => card.querySelector(sel)?.querySelector<HTMLElement>(FOCUSABLE) ?? null;
   const target = within('.fe-modal__body') ?? within('.fe-modal__actions') ?? card.querySelector<HTMLElement>(FOCUSABLE);
   target?.focus();
@@ -129,6 +158,7 @@ function wire() {
   if (wired) return;
   wired = true;
   prevFocus = (document.activeElement as HTMLElement | null) ?? null; /* wiring:c4 */
+  lateFocus = null;
   pushModal(me);
   document.addEventListener('keydown', onKey);
   // ⚠ The handle is kept and cleared on unwire: a dialog closed (or torn
@@ -140,7 +170,17 @@ function wire() {
     if (typeof document === 'undefined') return;
     // Only if the focus is not already inside (a component that focuses its
     // own field on mount keeps it).
-    if (wired && !cardEl.value?.contains(document.activeElement)) focusFirst();
+    if (wired && !cardEl.value?.contains(document.activeElement)) {
+      // ⚠ A dialog opened from a MENU row: at wire time the focus is on that
+      // row, the menu hands the focus back to its own button a tick later,
+      // and the row is gone once the menu's closing transition ends. Keep
+      // where the focus is NOW as the second home: measured in the desktop
+      // app, Escape on the user settings dialog (opened from the avatar)
+      // left the focus on <body> instead of on the avatar.
+      const now = document.activeElement as HTMLElement | null;
+      lateFocus = now && now !== document.body && now !== prevFocus ? now : null;
+      focusFirst();
+    }
   }, 30);
 }
 
@@ -153,9 +193,12 @@ function unwire() {
   }
   document.removeEventListener('keydown', onKey);
   popModal(me);
-  /* wiring:c4 — return focus to the opener. */
-  prevFocus?.focus?.();
+  /* wiring:c4 — return focus to the opener; to where the focus stood when
+     the dialog took it if the opener is gone (a menu row). */
+  const home = prevFocus?.isConnected ? prevFocus : lateFocus?.isConnected ? lateFocus : prevFocus;
+  home?.focus?.();
   prevFocus = null;
+  lateFocus = null;
 }
 
 // ⚠ `immediate`: a dialog created open (v-if + :open="true", which is how
@@ -273,18 +316,18 @@ function onBackdrop(e: MouseEvent) {
         ref="cardEl"
         class="fe-modal__card"
         :class="[
-          `fe-modal__card--${size || 'md'}`,
+          bare ? 'fe-modal__card--bare' : `fe-modal__card--${size || 'md'}`,
           chromeless && 'fe-modal__card--chromeless',
           fullbleed && !chromeless && 'fe-modal__card--fullbleed',
         ]"
         role="dialog"
         aria-modal="true"
-        :aria-labelledby="title && !chromeless && !fullbleed ? titleId : undefined"
-        :aria-label="!title || chromeless || fullbleed ? title || undefined : undefined"
+        :aria-labelledby="labelledby || (title && !chromeless && !fullbleed && !bare ? titleId : undefined)"
+        :aria-label="labelledby ? undefined : !title || chromeless || fullbleed || bare ? title || undefined : undefined"
         :aria-busy="busy ? 'true' : undefined"
         @click.stop
       >
-        <header v-if="title && !chromeless && !fullbleed" class="fe-modal__head">
+        <header v-if="title && !chromeless && !fullbleed && !bare" class="fe-modal__head">
           <h2 :id="titleId" class="fe-modal__title">{{ title }}</h2>
           <button
             type="button"
@@ -318,7 +361,7 @@ function onBackdrop(e: MouseEvent) {
             >{{ busyClose.confirm || t('modal.busy_close.confirm') }}</button>
           </div>
         </div>
-        <footer v-if="$slots.actions && !chromeless && !fullbleed" class="fe-modal__actions">
+        <footer v-if="$slots.actions && !chromeless && !fullbleed && !bare" class="fe-modal__actions">
           <slot name="actions" />
         </footer>
       </div>

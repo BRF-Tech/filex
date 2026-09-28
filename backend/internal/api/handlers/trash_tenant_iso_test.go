@@ -16,16 +16,26 @@ package handlers_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
-// trashOne soft-deletes a seeded node so it appears in the trash listing.
+// trashOne puts a seeded node in the trash the way a delete does: the row is
+// retagged to a `.filex-trash/` key and keeps its original path. (A row
+// soft-deleted where it stood is no trash entry since issue #74.)
 func (f *mtFix) trashOne(t *testing.T, nodeID int64) {
 	t.Helper()
-	require.NoError(t, f.Store.SoftDeleteNode(context.Background(), nodeID))
+	ctx := context.Background()
+	n, err := f.Store.GetNode(ctx, nodeID)
+	require.NoError(t, err)
+	key := fmt.Sprintf("/%s/1700000000-%06d__%s", trash.Prefix, n.ID, n.Name)
+	require.NoError(t, f.Store.SoftDeleteAndRetag(ctx, n.ID, key, pathkey.Hash(n.StorageID, key), n.Path))
 }
 
 // TestTrashList_DoesNotShowAnotherTenantsDeletedFiles

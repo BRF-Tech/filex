@@ -2,10 +2,11 @@
  * 171-app-plugin-updates — an installed app follows the source it came from,
  * and says which filex versions it works with. Walked in a real browser:
  *
- *   1. A language pack installed from an address moves to the new version
- *      its source publishes the moment "Check for updates" asks — the row
- *      says "Updated automatically", the version moves, and the
- *      administrators' bell hears it once.
+ *   1. ⚠⚠ Nothing updates itself (0.48, owner's rule). A language pack whose
+ *      source publishes a new version is ANNOUNCED when "Check for updates"
+ *      asks — "Update available", the jump, the bell once — and does not
+ *      move. "Review update" → Upgrade moves it for everybody; the version it
+ *      replaced is kept, and "Back to 1.0.0" puts it back.
  *   2. An app whose new version asks for a permission it was not granted is
  *      NOT installed: the row says "Needs approval" and what it adds, and
  *      "Review update" opens the review of that version — the jump and the
@@ -118,14 +119,14 @@ test.describe.serial('App updates — a source followed, a range said', () => {
     await new Promise<void>((ok) => server.close(() => ok()));
   });
 
-  test('a language pack moves to its source’s new version by itself — and says so', async ({ page }) => {
+  test('a language pack’s new version is announced, not installed — approved, then undone', async ({ page }) => {
     served.set('/pack/filex-app.json', packManifest('1.0.0'));
     const made = await api.post('/api/admin/app-plugins', {
       data: { url: '', manifest_url: `${origin}/pack/filex-app.json`, permissions: [] },
     });
     expect(made.status(), await made.text()).toBe(201);
     const installed = await made.json();
-    expect(installed.auto_update, 'on by default').toBe(true);
+    expect(installed.auto_update, 'there is no switch any more').toBeUndefined();
     expect(installed.update_source).toBe('url');
 
     served.set('/pack/filex-app.json', packManifest('1.0.1'));
@@ -134,23 +135,39 @@ test.describe.serial('App updates — a source followed, a range said', () => {
     await expect(row).toBeVisible();
     await checkNow(page);
 
-    await expect(page.getByTestId(`app-plugin-update-auto-${PACK}`)).toHaveText('Updated automatically');
-    await expect(page.getByTestId(`app-plugin-version-${PACK}`)).toHaveText('1.0.1');
-    await expect(page.getByTestId(`app-plugin-updates-${PACK}`)).toContainText('from 1.0.0');
-    await page.screenshot({ path: test.info().outputPath('apps-updated-automatically.png') });
+    await expect(page.getByTestId(`app-plugin-update-available-${PACK}`)).toHaveText('Update available');
+    await expect(page.getByTestId(`app-plugin-version-${PACK}`), 'nothing moved by itself').toHaveText('1.0.0');
+    await expect(page.getByTestId(`app-plugin-updates-${PACK}`)).toContainText('1.0.0 → 1.0.1');
+    await page.screenshot({ path: test.info().outputPath('apps-update-available.png') });
 
     // The administrators' bell heard it once, in words, not the event id.
-    const notes = await api.get('/api/notifications?limit=50');
-    expect(notes.ok()).toBeTruthy();
-    const items = ((await notes.json()).items ?? []) as { event: string; meta?: Record<string, unknown> }[];
-    const moved = items.filter((n) => n.event === 'app_updated' && n.meta?.plugin === PACK);
-    expect(moved, 'one notice for one update').toHaveLength(1);
-    expect(moved[0].meta?.version).toBe('1.0.1');
-
-    // A second check finds nothing new and says nothing again.
+    const noticesOf = async (event: string) =>
+      (((await (await api.get('/api/notifications?limit=50')).json()).items ?? []) as { event: string; meta?: Record<string, unknown> }[]).filter(
+        (n) => n.event === event && n.meta?.plugin === PACK,
+      );
+    expect(await noticesOf('app_update_available'), 'one notice for one version').toHaveLength(1);
     await checkNow(page);
-    const again = ((await (await api.get('/api/notifications?limit=50')).json()).items ?? []) as { event: string; meta?: Record<string, unknown> }[];
-    expect(again.filter((n) => n.event === 'app_updated' && n.meta?.plugin === PACK)).toHaveLength(1);
+    expect(await noticesOf('app_update_available'), 'and not again the next day').toHaveLength(1);
+    expect(await noticesOf('app_updated'), 'nothing was installed').toHaveLength(0);
+
+    // The administrator approves: Review update → Upgrade.
+    await page.getByTestId(`app-plugin-actions-${PACK}`).click();
+    await page.getByTestId(`app-plugin-actions-${PACK}-update`).click();
+    await expect(page.getByTestId('app-plugin-upgrade-jump')).toHaveText('Version 1.0.0 → 1.0.1', { timeout: 60_000 });
+    await page.getByLabel(/I understand|Anladım/).check();
+    await page.getByTestId('app-plugin-install').click();
+    // The list closes the dialog on success and redraws the row.
+    await expect(page.getByTestId(`app-plugin-version-${PACK}`)).toHaveText('1.0.1', { timeout: 60_000 });
+    await expect(page.getByTestId(`app-plugin-updates-${PACK}`)).toContainText('Version 1.0.0 is kept to go back to');
+    expect(await noticesOf('app_updated'), 'the approved change is told once').toHaveLength(1);
+
+    // Back to 1.0.0, after the question.
+    page.once('dialog', (d) => void d.accept());
+    await page.getByTestId(`app-plugin-actions-${PACK}`).click();
+    await page.getByTestId(`app-plugin-actions-${PACK}-rollback`).click();
+    await expect(page.getByTestId(`app-plugin-version-${PACK}`)).toHaveText('1.0.0', { timeout: 60_000 });
+    await expect(page.getByTestId(`app-plugin-updates-${PACK}`)).toContainText('Version 1.0.1 is kept to go back to');
+    await page.screenshot({ path: test.info().outputPath('apps-rolled-back.png') });
   });
 
   test('a version that asks for a new permission waits — and "Review update" shows what it asks', async ({ page }) => {

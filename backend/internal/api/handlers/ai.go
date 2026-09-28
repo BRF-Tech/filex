@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -14,6 +13,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/httpx"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -46,10 +46,9 @@ type AI struct {
 }
 
 // NewAI constructs the AI REST handler. shareSvc + publicURL power the share
-// endpoints (pass nil shareSvc to disable sharing); convertURL is surfaced via
-// /api/ai/root so agents learn conversion is an external (non-API) operation.
-func NewAI(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string, convertURL func(context.Context) string) *AI {
-	return &AI{ops: newAIOps(store, resolver, shareSvc, publicURL, convertURL)}
+// endpoints (pass nil shareSvc to disable sharing).
+func NewAI(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string) *AI {
+	return &AI{ops: newAIOps(store, resolver, shareSvc, publicURL)}
 }
 
 // AttachSearchIndex wires the search index into the ops core, so a file an
@@ -104,11 +103,10 @@ func (h *AI) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rc.Close()
-	w.Header().Set("Content-Type", mime)
+	httpx.ProtectServedFile(w.Header(), httpx.ServedType(mime, r.URL.Query().Get("path")))
 	if size > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	}
-	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = io.Copy(w, rc)
 }
 

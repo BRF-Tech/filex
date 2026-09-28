@@ -12,6 +12,20 @@
 //                                 what was granted, its settings and actions
 //   convert-wizard-1440.png       Convert… on a photo — three steps, the target
 //                                 picker headed by category
+//   app-interface-review-1440.png the review of an app that brings its own
+//                                 interface: the Interface group (the package's
+//                                 SHA-256, a live address in yellow, the plain
+//                                 note about what a browser cannot stop)
+//   app-new-document-1440.png     that app's kind of file in New document,
+//                                 under Apps (`new_documents`)
+//   app-interface-viewer-1440.png that app open as the viewer of its file type,
+//                                 in the preview's place
+//
+// The interface app is e2e/shots/board-app/: a small board viewer written for
+// these two pictures and never published. Its ui.zip is packed here, from the
+// files beside its manifest and the SDK this tree just built
+// (packages/app-ui/dist/filex-app-ui.iife.js), so the picture shows the SDK
+// of this release.
 //
 // The apps are the real builds of BRF-Tech/filex-sign and BRF-Tech/filex-convert,
 // found where the e2e suite finds them (scene.mjs → findApp). A missing build
@@ -38,11 +52,13 @@
 //   SHOTS_DRY_RUN=1        walk every scene to its picture and write nothing
 //   SHOTS_KEEP=1           leave the instance running afterwards
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
-import { seedFixtures } from './fixtures.mjs';
+import { seedFixtures, zipStored } from './fixtures.mjs';
 import {
   addLocalStorage,
   bootInstance,
@@ -60,6 +76,64 @@ import {
 const SET = 'apps';
 const ADMIN = { email: 'demo@demo.com', password: 'demo-shots' };
 
+const HERE = dirname(fileURLToPath(import.meta.url));
+const BOARD_APP = join(HERE, 'board-app');
+const SDK_IIFE = join(HERE, '..', '..', 'packages', 'app-ui', 'dist', 'filex-app-ui.iife.js');
+
+// The file the board viewer is opened on.
+const BOARD_FILE = 'Launch plan.board';
+const BOARD = {
+  title: 'Launch plan',
+  columns: [
+    {
+      title: 'To do',
+      cards: [
+        { title: 'Write the release notes', tag: 'docs' },
+        { title: 'Record the demo video', tag: 'marketing' },
+        { title: 'Translate the new strings', tag: 'languages' },
+      ],
+    },
+    {
+      title: 'Doing',
+      cards: [
+        { title: 'Screenshots for the README', tag: 'docs' },
+        { title: 'Store listing text', tag: 'desktop' },
+      ],
+    },
+    {
+      title: 'Done',
+      cards: [
+        { title: 'Freeze the feature list', tag: 'planning' },
+        { title: 'Security review', tag: 'security' },
+        { title: 'Beta on the demo server', tag: 'operations' },
+      ],
+    },
+  ],
+};
+
+/**
+ * Packs the board app into `dir`: ui.zip (its ui/ files and the SDK) and a
+ * manifest pinning that zip's SHA-256 — what an author ships.
+ */
+function packBoardApp(dir) {
+  if (!existsSync(SDK_IIFE)) {
+    throw new Error(`${SDK_IIFE} is missing — build the packages first (pnpm run build:packages; pnpm shots does)`);
+  }
+  const ui = join(BOARD_APP, 'ui');
+  const entries = readdirSync(ui)
+    .sort()
+    .map((name) => ({ name, data: readFileSync(join(ui, name)) }));
+  entries.push({ name: 'filex-app-ui.iife.js', data: readFileSync(SDK_IIFE) });
+  const zip = zipStored(entries);
+  const manifest = JSON.parse(readFileSync(join(BOARD_APP, 'filex-app.json'), 'utf8'));
+  manifest.ui.bundle.sha256 = createHash('sha256').update(zip).digest('hex');
+  const uiZip = join(dir, 'ui.zip');
+  const manifestPath = join(dir, 'filex-app.json');
+  writeFileSync(uiZip, zip);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return { uiZip, manifestPath, manifest };
+}
+
 /**
  * Close every toast still on screen, and wait for the layer to be empty.
  *
@@ -74,6 +148,39 @@ async function dismissToasts(page) {
     await sleep(150);
   }
   await sleep(250);
+}
+
+/**
+ * Shoots the install wizard's review dialog whole.
+ *
+ * ⚠⚠ The review is TALLER than the window — nine permissions, each with a
+ * sentence — and an element screenshot of something taller than the
+ * viewport is stitched by the browser. Over a dialog that floats above a
+ * scrolling page the stitch came back as the top of the review, a grey
+ * band, and the page underneath bleeding through it (v0.43.0, first take:
+ * 1344×3308 of which two thirds were nothing). So the window is grown to
+ * hold the whole dialog, and it is MEASURED to fit before the shutter.
+ */
+async function shootReview(page, perms, name) {
+  const dialog = page.locator('[role="dialog"]').filter({ has: perms });
+  let fits = '';
+  for (let i = 0; i < 5; i++) {
+    const box = await dialog.boundingBox();
+    const view = page.viewportSize();
+    if (!box || !view) throw new Error('the install review dialog has no box to measure');
+    if (box.y >= 0 && box.y + box.height <= view.height) {
+      fits = 'yes';
+      break;
+    }
+    fits = `${Math.ceil(box.y + box.height)}px of dialog in a ${view.height}px window`;
+    await page.setViewportSize({ width: view.width, height: Math.min(2600, Math.ceil(box.y + box.height + 48)) });
+    await sleep(300);
+  }
+  if (fits !== 'yes') throw new Error(`the install review does not fit the window (${fits}) — the picture would be stitched`);
+  await shot(dialog, SET, name);
+  // Back to the window every other picture here is framed in.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await sleep(300);
 }
 
 async function main() {
@@ -98,6 +205,7 @@ async function main() {
   });
   const browser = await chromium.launch();
   const seed = mkdtempSync(join(tmpdir(), 'filex-shots-apps-seed-'));
+  const boardDir = mkdtempSync(join(tmpdir(), 'filex-shots-apps-board-'));
   try {
     const admin = client(inst.url);
     await admin.login(ADMIN.email, ADMIN.password);
@@ -107,6 +215,8 @@ async function main() {
     // uploaded through filex, because inside a container this machine's disk
     // is not the instance's disk.
     seedFixtures(seed);
+    writeFileSync(join(seed, 'Documents', BOARD_FILE), `${JSON.stringify(BOARD, null, 2)}\n`);
+    const board = packBoardApp(boardDir);
     await addLocalStorage(admin, 'demo', inst.storageRoot('demo'), { onHost: !inst.container });
     await uploadTree(admin, 'demo://', seed);
 
@@ -146,32 +256,7 @@ async function main() {
       );
     }
     await sleep(400);
-    // ⚠⚠ The review is TALLER than the window — nine permissions, each with a
-    // sentence — and an element screenshot of something taller than the
-    // viewport is stitched by the browser. Over a dialog that floats above a
-    // scrolling page the stitch came back as the top of the review, a grey
-    // band, and the page underneath bleeding through it (v0.43.0, first take:
-    // 1344×3308 of which two thirds were nothing). So the window is grown to
-    // hold the whole dialog, and it is MEASURED to fit before the shutter.
-    const dialog = page.locator('[role="dialog"]').filter({ has: perms });
-    let fits = '';
-    for (let i = 0; i < 5; i++) {
-      const box = await dialog.boundingBox();
-      const view = page.viewportSize();
-      if (!box || !view) throw new Error('the install review dialog has no box to measure');
-      if (box.y >= 0 && box.y + box.height <= view.height) {
-        fits = 'yes';
-        break;
-      }
-      fits = `${Math.ceil(box.y + box.height)}px of dialog in a ${view.height}px window`;
-      await page.setViewportSize({ width: view.width, height: Math.min(2600, Math.ceil(box.y + box.height + 48)) });
-      await sleep(300);
-    }
-    if (fits !== 'yes') throw new Error(`the install review does not fit the window (${fits}) — the picture would be stitched`);
-    await shot(dialog, SET, 'apps-install-review-1440.png');
-    // Back to the window every other picture here is framed in.
-    await page.setViewportSize({ width: 1440, height: 1000 });
-    await sleep(300);
+    await shootReview(page, perms, 'apps-install-review-1440.png');
 
     await page.getByLabel(/I understand/).check();
     await page.getByTestId('app-plugin-install').click();
@@ -243,11 +328,90 @@ async function main() {
     await shot(page.locator('.fe-modal__card').filter({ has: view }), SET, 'convert-wizard-1440.png');
     await page.keyboard.press('Escape');
 
+    // ── 4. an app that brings its own interface: the review ─────────────
+    // Installed from the manifest and the bundle alone — it has no module.
+    await page.goto(`${inst.url}/admin/plugins`);
+    await page.getByTestId('plugins-tab-apps').click();
+    await page.getByTestId('app-plugins').waitFor();
+    await page.getByTestId('app-plugin-add').click();
+    await page.getByTestId('app-plugin-wizard').waitFor();
+    await page.getByTestId('app-plugin-source-file').click();
+    await page.getByTestId('app-plugin-manifest').setInputFiles(board.manifestPath);
+    await page.getByTestId('app-plugin-ui').setInputFiles(board.uiZip);
+    await page.getByTestId('app-plugin-review').click();
+    const uiPerms = page.getByTestId('app-plugin-permissions');
+    await uiPerms.waitFor({ timeout: 30_000 });
+    await page.getByTestId('app-plugin-ui-group').waitFor({ timeout: 10_000 });
+    // The group is the picture: the package's hash, the live address and the
+    // plain note, each one on screen before the shutter.
+    const sha = (await page.getByTestId('app-plugin-ui-sha256').innerText()).trim();
+    if (sha !== board.manifest.ui.bundle.sha256) {
+      throw new Error(`the review shows the interface's SHA-256 as ${sha}, the bundle is ${board.manifest.ui.bundle.sha256}`);
+    }
+    await page.getByTestId('app-plugin-ui-external').waitFor();
+    await page.getByTestId('app-plugin-ui-honest').waitFor();
+    await page.getByTestId('app-plugin-ui-no-engine').waitFor();
+    await sleep(400);
+    await shootReview(page, uiPerms, 'app-interface-review-1440.png');
+
+    await page.getByLabel(/I understand/).check();
+    await page.getByTestId('app-plugin-install').click();
+    await page.getByTestId(`app-plugin-${board.manifest.name}`).waitFor({ timeout: 30_000 });
+    await page.keyboard.press('Escape');
+    await sleep(300);
+
+    // ── 5. …its kind of file in New document ────────────────────────────
+    // A fresh page: the explorer reads the New document rows from the
+    // capabilities it loads, and this one loaded them before the install.
+    await page.goto(`${inst.url}/admin/explore?storage=demo`);
+    await page.getByTestId('sidenav-new').waitFor({ timeout: 25_000 });
+    await page.getByTestId('sidenav-new').click();
+    await page.locator('.fe-ctx__item', { hasText: 'New document' }).click();
+    const newdoc = page.getByTestId('newdoc-modal');
+    await newdoc.waitFor();
+    const appRow = page.getByTestId(`newdoc-type-app:${board.manifest.name}:board`);
+    await appRow.waitFor({ timeout: 10_000 });
+    await appRow.click();
+    await page.getByTestId('newdoc-name').fill('Q4 roadmap');
+    await sleep(400);
+    await shot(page.locator('.fe-modal__card').filter({ has: newdoc }), SET, 'app-new-document-1440.png');
+    await page.keyboard.press('Escape');
+    await sleep(300);
+
+    // ── 6. …and that interface open, as the viewer of its file type ─────
+    await page.goto(`${inst.url}/admin/explore?storage=demo`);
+    const docs = page.locator('[data-fe-path="demo://Documents"]').first();
+    await docs.waitFor({ timeout: 25_000 });
+    await docs.dblclick();
+    const boardRow = page.locator(`[data-fe-path="demo://Documents/${BOARD_FILE}"]`).first();
+    await boardRow.waitFor({ timeout: 15_000 });
+    // ⚠ The pane ignores a second open within 500 ms of the last one
+    // (FilePane OPEN_GUARD_MS — a double-click's stray clicks); the folder
+    // above opened faster than that, and a double-click straight after it
+    // opened nothing.
+    await sleep(700);
+    await boardRow.dblclick();
+    const frame = page.locator(`.fe-appframe[data-app="${board.manifest.name}"]`);
+    await frame.waitFor({ timeout: 20_000 });
+    await page.locator(`.fe-appframe[data-app="${board.manifest.name}"][data-connected="true"]`).waitFor({ timeout: 20_000 });
+    // Connected is the handshake; the picture is the board drawn from the
+    // file, every card of it, read through the SDK.
+    const inside = frame.frameLocator('iframe');
+    await inside.locator('.col').nth(BOARD.columns.length - 1).waitFor({ timeout: 20_000 });
+    const drawn = await inside.locator('.card').count();
+    const want = BOARD.columns.reduce((n, c) => n + c.cards.length, 0);
+    if (drawn !== want) throw new Error(`the board interface drew ${drawn} cards of ${want}`);
+    await dismissToasts(page);
+    await sleep(600);
+    await shot(page, SET, 'app-interface-viewer-1440.png');
+    await page.keyboard.press('Escape');
+
     await ctx.close();
   } finally {
     await browser.close();
     await inst.stop();
     rmSync(seed, { recursive: true, force: true });
+    rmSync(boardDir, { recursive: true, force: true });
   }
 }
 

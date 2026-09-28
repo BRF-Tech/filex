@@ -41,16 +41,15 @@ import (
 // absent (should never happen behind the middleware) getServer returns nil
 // and the SDK serves 400.
 type AIMCP struct {
-	store      db.Store
-	resolver   func(int64) (storage.Driver, error)
-	admin      *AIAdmin
-	share      *share.Service
-	publicURL  string
-	tenants    tenanturl.Resolver
-	convertURL func(context.Context) string
-	acl        *acl.Resolver
-	thumbs     *thumb.Pipeline
-	staged     *StagedUpload
+	store     db.Store
+	resolver  func(int64) (storage.Driver, error)
+	admin     *AIAdmin
+	share     *share.Service
+	publicURL string
+	tenants   tenanturl.Resolver
+	acl       *acl.Resolver
+	thumbs    *thumb.Pipeline
+	staged    *StagedUpload
 	// index is held rather than pushed into the core once, because a fresh
 	// aiOps is built per tool call below.
 	index   *search.Index
@@ -92,12 +91,12 @@ func (h *AIMCP) AttachTenants(rv tenanturl.Resolver) { h.tenants = rv }
 // NewAIMCP builds the MCP HTTP handler. `admin` powers the admin_* tools,
 // which are only registered for tokens carrying the `admin` scope; pass nil
 // to disable the admin tool surface entirely. shareSvc + publicURL power the
-// file_share / file_unshare tools; convertURL is surfaced via file_root.
-func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error), admin *AIAdmin, shareSvc *share.Service, publicURL string, convertURL func(context.Context) string) *AIMCP {
+// file_share / file_unshare tools.
+func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error), admin *AIAdmin, shareSvc *share.Service, publicURL string) *AIMCP {
 	h := &AIMCP{
 		store: store, resolver: resolver, admin: admin, share: shareSvc,
-		publicURL: publicURL, convertURL: convertURL,
-		tenants: tenanturl.New(store, publicURL, false),
+		publicURL: publicURL,
+		tenants:   tenanturl.New(store, publicURL, false),
 	}
 	h.handler = mcp.NewStreamableHTTPHandler(h.getServer, &mcp.StreamableHTTPOptions{
 		Stateless:    true,
@@ -117,7 +116,7 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 	if auth.UserFrom(r.Context()) == nil {
 		return nil
 	}
-	ops := newAIOps(h.store, h.resolver, h.share, h.publicURL, h.convertURL)
+	ops := newAIOps(h.store, h.resolver, h.share, h.publicURL)
 	ops.attachSearchIndex(h.index)
 	ops.tenants = h.tenants
 	ops.acl = h.acl

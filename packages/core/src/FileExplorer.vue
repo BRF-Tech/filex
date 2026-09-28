@@ -14,7 +14,7 @@
  * (PWA / OIDC) / CSRF (panel) / basic / none — `useFileApi` swallows
  * the difference.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, watch, watchEffect } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, reactive, ref, watch, watchEffect } from 'vue';
 import type { ExplorerConfig, SearchAccount, ThemeMode } from './types/ExplorerConfig';
 import type {
   FileNode,
@@ -69,7 +69,7 @@ import {
 import { attachViewPrefsHttp } from './lib/viewPrefsHttp';
 import { underApiBase } from './lib/appBase';
 import { provideTableEnv } from './lib/tableEnv';
-import { gateOnService, isOfficeExt, legacyConvertGate } from './lib/serviceGate';
+import { gateOnService, isOfficeExt } from './lib/serviceGate';
 import { opFailure, sayFailure } from './lib/errorWords';
 import { resolveUiProfile } from './lib/uiProfile';
 import RecentlyOpened from './components/RecentlyOpened.vue';
@@ -77,6 +77,7 @@ import {
   EMPTY_FILTERS,
   applyFilters,
   filtersActive,
+  nameMatches,
   type DriveFilters,
 } from './lib/fileFilters' /* surucu:d1 */;
 import ContextMenu, { type ContextAction } from './components/ContextMenu.vue';
@@ -85,6 +86,7 @@ import PendingOpsTray from './components/PendingOpsTray.vue';
 import InspectorPanel from './components/InspectorPanel.vue'; /* koru:k1 */
 import SideNav, { type NavDest } from './components/SideNav.vue'; /* gezinti:g1 */
 import HomeView from './components/HomeView.vue'; /* gorunum:v3-shell */
+import DraftsView from './components/DraftsView.vue'; /* Drafts, issue #71 */
 import ConnectionsPanel from './components/ConnectionsPanel.vue'; /* gezinti:g1 */
 import TokensPanel from './components/TokensPanel.vue'; /* gezinti:g1 */
 /* cila:c wiring */
@@ -137,6 +139,10 @@ import { useTabs, type TabState } from './composables/useTabs';
 import EncryptedFolderModal from './components/EncryptedFolderModal.vue';
 import RecoveryKeyModal from './components/RecoveryKeyModal.vue';
 import E2eRecoveryUnlockModal from './components/E2eRecoveryUnlockModal.vue';
+import E2eChangePasswordModal, { type E2eChangePasswordPayload } from './components/E2eChangePasswordModal.vue';
+import E2eSettingsModal from './components/E2eSettingsModal.vue';
+import E2eLockScreen from './components/E2eLockScreen.vue';
+import { E2E_LOCK } from './composables/useE2eLock';
 import {
   createKeyRing,
   createEncryptedFolder,
@@ -145,7 +151,7 @@ import {
   declineEscrowSlot,
   escrowOfferState,
   parseMarker,
-  unlockWithPassword,
+  unlockWithPasswordDetailed,
   unlockWithRecoveryKey,
   unlockWithEscrowKey,
   importEscrowPrivateKey,
@@ -159,7 +165,51 @@ import {
   E2E_MARKER_NAME,
   E2E_MAX_FILE_BYTES,
   type E2eMarker,
+  parseMarkerDetailed,
+  markerHasNames,
+  unlockNameKey,
+  enableNames,
+  finishNames,
+  encryptionLevel,
+  canRaiseToNames,
+  conversionPending,
+  startConversion,
+  finishConversion,
+  type ChoosableLevel,
+  changePassword,
+  startRekey,
+  finishRekey,
+  rewrapFileKey,
+  rekeyPending,
+  unlockPrevious,
+  decryptFileAny,
+  passwordChangeNeedsRekey,
+  markerHasEscrow,
+  E2eDecryptError,
+  E2eRekeyEscrowError,
+  type E2eCredential,
 } from './lib/e2ecrypto';
+import {
+  createE2eNameView,
+  storedName,
+  E2E_NAME_VIEW,
+  wireJoinPath,
+  wireParentPath,
+} from './composables/useE2eNames';
+import { classifyStoredName, namePlainProblem } from './lib/e2enames';
+import { numberedName, runNamePass, type NamePassProgress } from './lib/e2enamepass';
+import { runConversion, type ConvertProgress } from './lib/e2econvert';
+import { registerE2eNameResolver } from './lib/e2eNameRegistry';
+/* wiring:e2 fxe — single encrypted files, and the streamed paths of encrypted
+   folders (composables/useE2eFiles). */
+import E2eFileEncryptModal from './components/E2eFileEncryptModal.vue';
+import E2eFileUnlockModal from './components/E2eFileUnlockModal.vue';
+import E2eTooBigModal from './components/E2eTooBigModal.vue';
+import { useE2eFiles, isFxeActionKey, isFxeRow } from './composables/useE2eFiles';
+import { e2eMimeForExt } from './lib/e2emime';
+import type { UploadSource } from './lib/uploadSource';
+import { ownedByViewer, ownerNameOf } from './lib/fileFilters';
+/* /wiring:e2 fxe */
 /* /wiring:e2 */
 
 /* ui-fix — listing helpers shared with SecondaryPane (single source: the
@@ -181,7 +231,7 @@ import { nodeRowToFileNode as nodeRowToFileNodePure } from './lib/nodeRow'; /* R
 import { iconFamilyFor, isStorageRow } from './lib/fileIcons'; /* pane:p1 — the storage-row predicate's one home */
 import { openSurface } from './lib/openSurface';
 import { actionIconSvg } from './lib/actionIcons'; /* inceleme:r1 — the drop overlay's mark, off the emoji font */
-import { convertAppOffered, isPluginActionKey, pluginActionKey, pluginMenuRows } from './lib/pluginMenu'; /* App plugins — the menu block, pure */
+import { isPluginActionKey, pluginActionKey, pluginMenuRows } from './lib/pluginMenu'; /* App plugins — the menu block, pure */
 import { isPagePlacement, pluginPageUrl } from './lib/pluginPage'; /* App plugins — a `page` view opens in a new tab */
 import { lockOf, lockWords, lockedRefusal } from './lib/appLock'; /* App plugins — an app's hold on a file */
 import { linkWordsFor } from './lib/symlink'; /* issue #34 — a link the server will not follow */
@@ -215,6 +265,10 @@ import ArchiveCreateModal from './modals/ArchiveCreateModal.vue';
 import ArchiveExtractModal from './modals/ArchiveExtractModal.vue';
 import ArchivePasswordModal from './modals/ArchivePasswordModal.vue';
 import NewDocumentModal from './modals/NewDocumentModal.vue'; /* belge:n1 */
+import DraftConflictModal from './modals/DraftConflictModal.vue'; /* Drafts, issue #71 */
+import { draftFolderLabel, type DraftDto } from './lib/drafts';
+import { draftKeyOf } from './lib/internalPaths';
+import { useDraftSave, type SavedDraft } from './composables/useDraftSave';
 import RenameModal from './modals/RenameModal.vue';
 import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
 import Modal from './modals/Modal.vue'; /* tablo:t1 — the empty-trash confirmation */
@@ -225,12 +279,51 @@ import { createPurgeBatches, sayPurge } from './lib/purgeWords';
 import { sayRestore } from './lib/restoreWords';
 import { createStorageWatch, type StorageWatch, type WatchedStorageRow } from './lib/storageWatch';
 import PreviewModal from './modals/PreviewModal.vue';
-import ConvertModal from './modals/ConvertModal.vue';
 import PluginViewModal from './components/plugin/PluginViewModal.vue'; /* App plugins */
+import AppFrameModal from './components/plugin/AppFrameModal.vue'; /* App plugins — an app's own interface */
+import { appliesItemOf, appliesMatches } from './lib/pluginApplies';
+import { appViewersFor as appViewersForView, pickAppViewer } from './lib/appViewer';
 import PluginConfirmModal from './components/plugin/PluginConfirmModal.vue';
 import PermissionsModal from './modals/PermissionsModal.vue';
 import DestinationPickerModal from './modals/DestinationPickerModal.vue'; /* tasi:m1 */
 import { resolveLocale } from './locales/resolve';
+/* The bell, the full list and the avatar — the web's own components, drawn here
+   for a host that asks through `config.notifications` / `config.account`. */
+import NotificationBell from './components/NotificationBell.vue';
+import NotificationsPanel from './components/NotificationsPanel.vue';
+import AccountMenu from './components/AccountMenu.vue';
+import UserSettingsDialog from './components/UserSettingsDialog.vue';
+import { accountZoneControl } from './lib/timezone';
+import {
+  userSettingsApi,
+  type SettingsCapabilities,
+  type SettingsThemeMode,
+  type SettingsUser,
+  type UserSettingsHost,
+} from './lib/userSettingsHost';
+import {
+  NOTIFY_POLL_MS,
+  createNotificationFeed,
+  notificationsTransport,
+  type NotificationFeed,
+  type NotificationRowData,
+} from './composables/useNotificationFeed';
+import {
+  TRASH_VIEW_PATH,
+  explorerPathOf,
+  resolveNotificationTarget,
+  sameRowPath,
+  shareHref,
+  type NotificationDestination,
+} from './lib/notificationTarget';
+import {
+  EXPLORER_DRAWN_ROWS,
+  accountMenuRows,
+  explorerRowKey,
+  type AccountAction,
+  type AccountPerson,
+  type ExplorerMenuRow,
+} from './lib/accountMenu';
 import { newId } from './lib/uid';
 
 const props = defineProps<{
@@ -566,7 +659,7 @@ const trashActive = computed(() => trashMode.value);
  * pattern is trashMode's, generalised — including the part that matters most,
  * that load() clears the mode, or the view sticks and every later navigation
  * renders under the wrong heading. */
-type NavView = '' | 'home' | 'recent' | 'starred' | 'shared' | 'trash' | 'tag';
+type NavView = '' | 'home' | 'recent' | 'starred' | 'shared' | 'drafts' | 'trash' | 'tag';
 const navView = ref<NavView>('');
 /** Where the view was entered from, so "up" goes back there. */
 const navViewOrigin = ref<string>('');
@@ -791,6 +884,7 @@ const NAV_VIEW_DIRNAME: Record<Exclude<NavView, '' | 'trash' | 'tag'>, string> =
   recent: '.recent',
   starred: '.starred',
   shared: '.shared',
+  drafts: '.drafts',
 };
 
 /**
@@ -943,12 +1037,30 @@ const previewPosition = computed(() => {
   const i = path ? list.findIndex((n) => n.path === path) : -1;
   return { index: i === -1 ? 0 : i + 1, total: i === -1 ? 0 : list.length };
 });
-function onPreviewNav(delta: number) {
+async function onPreviewNav(delta: number) {
   const list = previewables.value;
   const i = list.findIndex((n) => n.path === previewTarget.value?.path);
   if (i === -1) return;
   const next = list[i + delta];
-  if (next) previewTarget.value = next;
+  if (!next) return;
+  /* wiring:e2 fxe — the next file is a single encrypted file: its unlock. */
+  if (isFxeRow(next) && !e2eActive.value && !next.e2e_root) {
+    showPreview.value = false;
+    void e2eFiles.open(next);
+    return;
+  }
+  /* wiring:e2 — inside an encrypted folder the next file is decrypted
+     BEFORE it becomes the preview target; switching first handed the viewer
+     the raw URL, i.e. ciphertext. */
+  if (e2eUnlocked.value && next.type === 'file') {
+    try {
+      await e2eFetchDecrypted(next);
+    } catch {
+      flashToast(t('e2e.decrypt_failed'));
+      return;
+    }
+  }
+  previewTarget.value = next;
 }
 const selection = useSelection(() => (displayOrder.value.length ? displayOrder.value : files.value));
 watch(
@@ -956,12 +1068,22 @@ watch(
   () => {
     emit(
       'selection-change',
-      selection.nodes.value.map((n) => ({ path: n.path, basename: n.basename, type: n.type })),
+      /* wiring:e2 names — `basename` stays what the server calls the item
+         (hosts pass it back to the API); an encrypted-names row adds its
+         plaintext as `display_name` for a host that draws it. */
+      selection.nodes.value.map((n) => ({
+        path: n.path,
+        basename: storedName(n),
+        type: n.type,
+        ...(n.e2e_stored ? { display_name: n.basename } : {}),
+      })),
     );
     // Presence focus: a single selected file is what the user is "on"; a
     // multi-select or folder selection clears it.
+    // ⚠ wiring:e2 names — presence is broadcast by the SERVER to everyone in
+    // the folder: the stored name, never the plaintext one.
     const focusFiles = selection.nodes.value.filter((n) => n.type === 'file');
-    realtime.setFocus(focusFiles.length === 1 ? focusFiles[0].basename : null);
+    realtime.setFocus(focusFiles.length === 1 ? storedName(focusFiles[0]) : null);
   },
 );
 
@@ -976,7 +1098,7 @@ const capabilitiesData = ref<Capabilities | null>(null);
  * `onMounted`, and that one swallowed catch was a silent, page-wide feature
  * kill. Everything gated on capabilities reads a ref that a failed or slow
  * call simply leaves null: app plugins (`pluginsEnabled` below), OnlyOffice,
- * draw.io, the convert service, new-document types. Nothing retried, so ONE
+ * draw.io, new-document types. Nothing retried, so ONE
  * unlucky request — a reload during a backend restart, a proxy hiccup — turned
  * every plugin deep link on that page load into a no-op, for the whole life of
  * the page, with nothing in the console to say why.
@@ -1028,11 +1150,296 @@ function loadCapabilities(): Promise<void> {
  * its host configured, and the account behind its credential when that
  * credential is a person's. Ranked in lib/timezone, never here. */
 const showTimeZone = ref(false);
-useExplorerTimeZone({
+/** `/api/auth/me` once per mount — the account's time zone and the avatar ask
+ *  the same question, and a second request for one answer is a cost for
+ *  nothing. A failure is forgotten, so the next asker tries again. */
+let meOnce: Promise<MeBody | undefined> | null = null;
+interface MeBody {
+  user?: (AccountPerson & SettingsUser) | null;
+}
+function fetchMeOnce(): Promise<MeBody | undefined> {
+  if (!meOnce) {
+    meOnce = api.jsonFetch<MeBody | undefined>(`${connectionsBase(props.config)}/api/auth/me`);
+    meOnce.catch(() => {
+      meOnce = null;
+    });
+  }
+  return meOnce;
+}
+
+const tzOwner = useExplorerTimeZone({
   config: () => props.config,
   capabilities: capabilitiesData,
-  fetchMe: () => api.jsonFetch(`${connectionsBase(props.config)}/api/auth/me`),
+  fetchMe: () => fetchMeOnce(),
 });
+
+/* === The bell and the avatar, for a host that cannot fill the slot ========
+ *
+ * 2026-09-27, owner: the desktop app raised an OS notification for every row
+ * and had nowhere inside its window to read one, and its header had no account
+ * menu at all — while the web draws both. The desktop mounts
+ * `<filex-explorer>`, which no slot reaches (see ExplorerConfig.brand), so the
+ * explorer draws them itself when the host asks (`config.notifications`,
+ * `config.account`). The components are the web's own, moved into this
+ * package; only the transport (this explorer's credential) and the landing
+ * (this explorer, navigated in place) are the explorer's.
+ */
+
+/**
+ * The feed the explorer's own bell reads — `null` unless the host asked.
+ *
+ * ⚠ Decided once, at setup, like `api` itself: a host that turns the bell on
+ * or off re-mounts the explorer (the desktop swaps the whole element on an
+ * account switch), and a feed created mid-life would start with no baseline.
+ */
+const notifFeed: NotificationFeed | null = props.config.notifications
+  ? (reactive(
+      createNotificationFeed({
+        transport: notificationsTransport(api.jsonFetch, connectionsBase(props.config)),
+        errorText: (e) => (e as Error)?.message || t('inspector.error'),
+        onRead: () => props.config.notifications?.onRead?.(),
+      }),
+    ) as NotificationFeed)
+  : null;
+let notifTimer: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  const cfg = props.config.notifications;
+  if (!notifFeed || !cfg) return;
+  void notifFeed.refreshFeed();
+  // ⚠ One loop per explorer, and none at all when the host already polls
+  // (the desktop's main process does, for the OS notifications) — it hands
+  // the count over instead, and a count that disagrees with the list's
+  // refreshes the list (acceptCount).
+  if (cfg.poll !== false) notifTimer = setInterval(() => void notifFeed.syncUnread(), NOTIFY_POLL_MS);
+  cfg.onUnread?.((n) => void notifFeed.acceptCount(n));
+});
+onBeforeUnmount(() => {
+  if (notifTimer) clearInterval(notifTimer);
+  notifTimer = null;
+});
+
+/**
+ * The administrators' door on the bell — when the host gave one AND the server
+ * says this is an administrator: the capabilities' own verdict for this
+ * credential, or the account's role when the avatar asked `/api/auth/me`. A
+ * door drawn for everybody would send an ordinary person to a console that
+ * bounces them.
+ */
+const notifManageHref = computed(() => {
+  const href = props.config.notifications?.manage?.href;
+  if (!href) return undefined;
+  const admin = callerAdmin.value || accountPerson.value?.role === 'admin';
+  return admin ? href : undefined;
+});
+function onNotifManage() {
+  props.config.notifications?.manage?.open();
+}
+
+/** Resolves once the first listing has landed — a reveal must not race it,
+ *  or the mount's own `load()` would finish last and take the reader back. */
+let markFirstLoad: () => void = () => {};
+const firstLoad = new Promise<void>((resolve) => {
+  markFirstLoad = resolve;
+});
+
+/**
+ * Take the reader to a notification's destination, IN THIS EXPLORER: the
+ * folder with the row selected (and the app screen the notice asked for), the
+ * Trash view with the deleted item selected, an app's home view, or — for a
+ * share — the public page in a new window. `none` goes nowhere.
+ *
+ * ⚠⚠ The destination comes from `resolveNotificationTarget`, the ONE resolver
+ * the web bell, the browser toast and the desktop OS toast all use; this only
+ * carries it out. It is exposed (and forwarded by the web component) so the
+ * desktop app hands a clicked OS notification to the same code its in-window
+ * bell uses, instead of re-mounting the explorer and ticking checkboxes from
+ * outside.
+ *
+ * ⚠ The row is selected through the explorer's own selection, after the
+ * listing has finished — `onOpenOpOutput`'s shape. A host that ticked the
+ * row's checkbox from outside had to retry for eight seconds, because the
+ * listing clears the selection when it lands and the host could not see when.
+ */
+async function revealNotification(dest: NotificationDestination): Promise<boolean> {
+  await firstLoad;
+  if (dest.kind === 'none') return false;
+  if (dest.kind === 'share') {
+    // A public share page is an anonymous web page, not a place in this
+    // explorer — a new window (the desktop's window-open handler sends it to
+    // the system browser).
+    window.open(shareHref(dest.token, connectionsBase(props.config)), '_blank', 'noopener');
+    return true;
+  }
+  if (dest.kind === 'app') {
+    await loadCapabilities();
+    await pluginActions.refresh();
+    await openPluginHome(`${dest.plugin}/${dest.view}`);
+    return true;
+  }
+  const address = explorerPathOf(dest);
+  if (!address) return false;
+  // The explorer's own address forms: a view sentinel as it is, a folder as
+  // the breadcrumb hands it over (`onNavigate`).
+  if (address === TRASH_VIEW_PATH) await load(TRASH_VIEW_PATH);
+  else await load(multiStorageRoot.value ? wireToVirtual(address) : stripAdapter(address));
+  const pick = dest.select;
+  if (pick) {
+    const node = files.value.find((f) => sameRowPath(f.path, pick));
+    if (node) {
+      selection.click(node.path);
+      await nextTick();
+      const row = Array.from(rootEl.value?.querySelectorAll<HTMLElement>('[data-fe-path]') ?? []).find((el) =>
+        sameRowPath(el.getAttribute('data-fe-path'), pick),
+      );
+      row?.scrollIntoView({ block: 'center' });
+    }
+  }
+  if (dest.kind === 'folder' && dest.open) {
+    const path = dest.select || address;
+    await openAppTarget({ plugin: dest.open.plugin, action: dest.open.action, view: dest.open.view, path });
+  }
+  return true;
+}
+
+/** A bell row (or a full-list row) was clicked — already marked read. */
+function onNotificationOpen(item: NotificationRowData) {
+  void revealNotification(resolveNotificationTarget(item.target));
+}
+
+/* ── the avatar ─────────────────────────────────────────────────────────── */
+
+/** Who is signed in — the host's word, or `/api/auth/me` with this credential. */
+const accountPerson = ref<(AccountPerson & SettingsUser) | null>(props.config.account?.person ?? null);
+onMounted(() => {
+  if (!props.config.account || props.config.account.person) return;
+  fetchMeOnce()
+    .then((body) => {
+      accountPerson.value = body?.user ?? null;
+    })
+    .catch(() => {
+      /* the avatar draws its fallback glyph and label; nothing else waits on it */
+    });
+});
+
+/**
+ * The toolbar's "⋯" rows, CLAIMED — the same contract the web page uses
+ * (Toolbar `fe:header-menu`): setting `claimed` synchronously tells the
+ * toolbar to stop drawing its own "⋯" for them, so the corner holds one menu.
+ *
+ * ⚠ Only when the host asked for the avatar. Without `config.account` this
+ * explorer claims nothing and a listening page (the web's Explore.vue) keeps
+ * the job it has always had. When it DOES claim, the event stops here, so a
+ * page listener cannot fold the same rows into a second menu.
+ */
+const explorerMenuRows = ref<ExplorerMenuRow[]>([]);
+let runExplorerMenuRow: ((key: string) => void) | null = null;
+function onOwnHeaderMenu(ev: Event) {
+  if (!props.config.account) return;
+  const detail = (ev as CustomEvent).detail as
+    | { items?: ExplorerMenuRow[]; run?: (key: string) => void; claimed?: boolean }
+    | undefined;
+  if (!detail || !Array.isArray(detail.items)) return;
+  detail.claimed = true;
+  ev.stopPropagation();
+  explorerMenuRows.value = detail.items;
+  runExplorerMenuRow = typeof detail.run === 'function' ? detail.run : null;
+}
+onMounted(() => rootEl.value?.addEventListener('fe:header-menu', onOwnHeaderMenu));
+onBeforeUnmount(() => rootEl.value?.removeEventListener('fe:header-menu', onOwnHeaderMenu));
+
+const accountRows = computed<AccountAction[]>(() => {
+  const acc = props.config.account;
+  if (!acc) return [];
+  const person = accountPerson.value;
+  const hostRows = typeof acc.actions === 'function' ? acc.actions(person) : acc.actions ?? [];
+  // The person's own settings, first — opened HERE (below), not by the host.
+  const own = acc.settings
+    ? [{ key: SETTINGS_ROW, label: t('userSettings.open'), icon: 'account' }, ...hostRows]
+    : hostRows;
+  const tail = typeof acc.tail === 'function' ? acc.tail(person) : acc.tail ?? [];
+  // The rows whose control this explorer draws itself stay out of the menu
+  // (EXPLORER_DRAWN_ROWS) — measured in the desktop window: Grid, Gallery and
+  // Details sat in the avatar two inches from the view switcher and the ⓘ.
+  const drawn = EXPLORER_DRAWN_ROWS.filter((k) => k !== 'inspector' || props.config.showInfoPanel !== false);
+  // ⚠ With the settings dialog here, the three explorer rows whose control it
+  // carries leave the menu — the same trade the web page makes
+  // (Explore.vue ROWS_WITH_ANOTHER_DOOR): one door each.
+  const inDialog = acc.settings ? SETTINGS_DIALOG_ROWS : [];
+  return accountMenuRows(own, explorerMenuRows.value, {
+    omit: [...drawn, ...inDialog, ...(acc.omit ?? [])],
+    tail,
+  });
+});
+
+/** One place a row is acted on: the explorer's through its own handler (the
+ *  SAME one its "⋯" uses), the host's through the host. */
+function onAccountSelect(key: string) {
+  const own = explorerRowKey(key);
+  if (own !== null) {
+    runExplorerMenuRow?.(own);
+    return;
+  }
+  if (key === SETTINGS_ROW && props.config.account?.settings) {
+    settingsOpen.value = true;
+    return;
+  }
+  props.config.account?.select(key, accountPerson.value);
+}
+
+/* ── the user settings dialog, in this window ───────────────────────────
+ *
+ * Owner, 2026-09-27: *"Kullanıcı ayarları uygulamanın İÇİNDE açılsın"* — the
+ * desktop app used to send the person to the web app in their browser for it.
+ * The dialog is the admin app's own (components/UserSettingsDialog.vue, moved
+ * into this package); what it needs from a host is built here from this
+ * explorer's own state: its credential for the account's endpoints, the person
+ * `/api/auth/me` answered, its capabilities, its toast, the account zone it
+ * registered (`tzOwner`) and its own theme mode.
+ *
+ * ⚠ The rows only some surfaces have — language, start page, one click or two,
+ * the desktop-app downloads, browser notifications — are NOT given: an
+ * explorer has no front door, and the desktop app keeps its language and its
+ * click setting in its own Settings, so repeating them here would be two doors
+ * to one switch.
+ */
+const SETTINGS_ROW = 'user-settings';
+/** The "⋯" rows whose control the dialog carries (Appearance, Compact list,
+ *  Time zone). */
+const SETTINGS_DIALOG_ROWS = ['theme', 'density', 'timezone'];
+const settingsOpen = ref(false);
+const settingsHost: UserSettingsHost = {
+  get locale() {
+    return String(locale.value);
+  },
+  get user() {
+    return accountPerson.value;
+  },
+  get isAdmin() {
+    return accountPerson.value?.role === 'admin';
+  },
+  get demoReadOnly() {
+    return capabilitiesData.value?.demo_mode === true;
+  },
+  get capabilities() {
+    return capabilitiesData.value as SettingsCapabilities | null;
+  },
+  api: userSettingsApi(api.jsonFetch, connectionsBase(props.config)),
+  setUser(u) {
+    accountPerson.value = { ...(accountPerson.value ?? {}), ...u };
+  },
+  toast(kind, message) {
+    showToast({ message }, kind === 'success' ? FLASH_TOAST_MS : ERROR_TOAST_MS);
+  },
+  errorText: (err, fallback) => (err as Error)?.message || fallback,
+  zone: accountZoneControl(tzOwner),
+  mode: {
+    get: (): SettingsThemeMode => {
+      const m = themeModePref.value === 'host' ? props.config.theme || 'auto' : themeModePref.value;
+      return m === 'light' || m === 'dark' ? m : 'auto';
+    },
+    set: (v) => setThemeModePref(v),
+  },
+};
 // Longest life a new share link may be given (server setting, days; 0 = no
 // ceiling). Both share dialogs derive their expiry choices from it.
 const shareMaxTtlDays = computed(() => capabilitiesData.value?.share_max_ttl_days ?? 0);
@@ -1108,6 +1515,64 @@ function stillOpening(ticket: number): boolean {
   return ticket > 0 && pluginView.value?.ticket === ticket;
 }
 
+/**
+ * v4 — an app's OWN interface opened as a dialog (a `modal` action whose view
+ * has a `ui` file) or as a home screen: the frame, not a surface. One at a
+ * time, like `pluginView`.
+ */
+const appFrameView = ref<{
+  plugin: string;
+  view: string;
+  placement: 'modal' | 'home';
+  ui: NonNullable<PluginViewRow['ui']>;
+  label: string;
+  files: { path: string; name: string; size?: number; mime?: string; readOnly?: boolean }[];
+} | null>(null);
+
+/** The file rows an interface is opened with (never more than it needs). */
+function appFrameFiles(targets: FileNode[]) {
+  return targets
+    .filter((n) => n.type === 'file')
+    .map((n) => ({
+      path: n.path,
+      name: n.basename,
+      size: n.size,
+      mime: n.mime_type,
+      readOnly: !!n.read_only || !nodeCanEdit(n),
+    }));
+}
+
+/** v4 — the views the server lists; `[]` while the feature is off. The rule
+ *  for which app opens a file is lib/appViewer's, shared with the editor tab. */
+const pluginViewList = computed<PluginViewRow[]>(() => (pluginsEnabled.value ? pluginActions.views.value : []));
+
+/** The app interfaces that open this file, in the server's order. An
+ *  encrypted folder's files open only in filex's own (decrypting) viewer. */
+function appViewersFor(n: FileNode | null | undefined): PluginViewRow[] {
+  if (e2eActive.value) return [];
+  return appViewersForView(pluginViewList.value, n);
+}
+
+/**
+ * Which app opens the file being previewed: what "Open with" chose, else
+ * the first app installed for the type, else none (the built-in viewer).
+ * `builtin` is "Open with" choosing filex's own viewer over an app.
+ */
+const previewAppChoice = ref<string | null>(null);
+const previewAppViewer = computed<PluginViewRow | null>(() =>
+  e2eActive.value ? null : pickAppViewer(pluginViewList.value, previewTarget.value, previewAppChoice.value),
+);
+
+/** "Open with" rows for one file: each app that opens it. */
+function openWithRows(sel: FileNode[]): ContextAction[] {
+  if (sel.length !== 1) return [];
+  return appViewersFor(sel[0]).map((v) => ({
+    key: `open-with:${v.plugin}/${v.id}`,
+    label: t('ctx.open_with', { app: pluginLabelOf(v.label, locale.value) || v.plugin }),
+    icon: 'open',
+  }));
+}
+
 /** The `inspector` views, for the details panel; `[]` while the feature is off. */
 const pluginInspectorViews = computed<PluginViewRow[]>(() =>
   pluginsEnabled.value ? pluginActions.views.value.filter((v) => v.placement === 'inspector') : [],
@@ -1133,6 +1598,13 @@ async function openPluginHome(key: string) {
   closeNavDrawer();
   if (props.config.appHomePage === true) {
     emit('open-app-home', { plugin: view.plugin, view: view.id });
+    return;
+  }
+  if (view.ui) {
+    appFrameView.value = {
+      plugin: view.plugin, view: view.id, placement: 'home', ui: view.ui,
+      label: pluginLabelOf(view.label, locale.value) || view.plugin, files: [],
+    };
     return;
   }
   try {
@@ -1314,6 +1786,14 @@ function failureText(err: unknown, fallback: string = t('toast.failed')): string
 async function runPluginAction(action: PluginActionRow, targets: FileNode[]) {
   const label = pluginLabelOf(action.label, locale.value);
   if (isPagePlacement(action.view_placement) && openPluginPage(action, targets)) return;
+  // v4 — the action opens the app's own interface: the frame, nothing run.
+  if (action.ui) {
+    appFrameView.value = {
+      plugin: action.plugin, view: action.view || action.id, placement: 'modal', ui: action.ui,
+      label: label || action.plugin, files: appFrameFiles(targets),
+    };
+    return;
+  }
   // ⚠ `paths` too: the screen's later events must name the same files the
   // run did, or its second screen talks about targets[0] alone (#64).
   const shell = {
@@ -1769,40 +2249,6 @@ const effectiveDrawioUrl = computed<string | null>(() => {
   return capabilitiesData.value?.drawio_url || null;
 });
 
-// Universal converter (p2r3/convert fork). convert_url is only populated by
-// the backend when the "convert" external service is enabled, so a simple
-// presence check is enough gating.
-const effectiveConvertUrl = computed<string | null>(() => {
-  if (props.config.convertBase) return props.config.convertBase;
-  /* ⚠ Health too, like the two above: the server fills `convert_url` whenever
-   * the service is ENABLED, so a converter that is enabled but unreachable
-   * used to be offered and then sat on "Loading the converter…" for ever. */
-  const ext = capabilitiesData.value?.external?.convert;
-  if (ext && !isExternalUsable(ext)) return null;
-  return capabilitiesData.value?.convert_url || null;
-});
-
-/* The legacy converter against the Convert app: one of them, never both
- * (lib/serviceGate `legacyConvertGate`). `legacyConvertUrl` is what every
- * door to the iframe dialog reads — the menu, the toolbar, the dialog's own
- * v-if — so none of them can offer what the rule withheld. */
-const legacyConvert = computed(() =>
-  legacyConvertGate({
-    appOffered: pluginsEnabled.value && convertAppOffered(pluginActions.actions.value),
-    configured:
-      !!props.config.convertBase ||
-      capabilitiesData.value?.external?.convert?.enabled === true ||
-      !!capabilitiesData.value?.convert_url,
-    healthy: !!effectiveConvertUrl.value,
-    callerAdmin: callerAdmin.value,
-    unhealthyReason: t('ctx.needs_convert'),
-    adminNote: t('convert.legacy_admin'),
-  }),
-);
-const legacyConvertUrl = computed<string | null>(() =>
-  legacyConvert.value.hidden || legacyConvert.value.disabled ? null : effectiveConvertUrl.value,
-);
-
 /* belge:n1 — what the SERVER can create, crossed with what WE could open.
  * `null` (a backend older than the feature) hides the entry entirely. */
 const newDocTypes = computed(() => capabilitiesData.value?.newdoc_types ?? null);
@@ -1817,6 +2263,161 @@ const canNewDocument = computed(() => {
         : true,
   );
 });
+
+/* === Drafts (issue #71) =================================================
+ * A new document is a DRAFT until its first save: New document writes it
+ * into the person's own drafts area of the storage they chose, the editor
+ * opens on it, and nothing appears in the folder until it is saved. The
+ * server says whether it keeps drafts for this caller (`capabilities.drafts`
+ * — a person acting for themselves: not an app token, not a confined embed);
+ * without that answer New document creates the file, as it always did.
+ *
+ * This holds the explorer's half: the count on the panel's "Drafts" row, the
+ * Drafts view's rows and its three verbs. The editor's half (the Save bar,
+ * the close question) is PreviewModal's, so every host that mounts a viewer
+ * gets it — not only this explorer.
+ */
+const draftsEnabled = computed(() => !!capabilitiesData.value?.drafts);
+/** The panel row's badge — a count, never a notification. */
+const draftCount = ref(0);
+const draftRows = ref<DraftDto[]>([]);
+const draftLimit = ref(0);
+const draftsLoading = ref(false);
+/** A verb is running on this draft (its row's actions are greyed). */
+const draftBusyKey = ref<string | null>(null);
+
+async function refreshDraftCount(): Promise<void> {
+  if (!draftsEnabled.value) {
+    draftCount.value = 0;
+    return;
+  }
+  try {
+    const { count, limit } = await api.drafts.count();
+    draftCount.value = count;
+    draftLimit.value = limit;
+  } catch {
+    /* A badge that could not be read keeps what it last said. */
+  }
+}
+
+async function loadDraftRows(): Promise<void> {
+  draftsLoading.value = true;
+  try {
+    const list = await api.drafts.list();
+    draftRows.value = list.drafts;
+    draftLimit.value = list.limit;
+    draftCount.value = list.count;
+  } catch (err) {
+    draftRows.value = [];
+    const msg = failureText(err);
+    emit('error', { message: msg, context: { op: 'nav-view:drafts' } });
+    flashToast(msg);
+  } finally {
+    draftsLoading.value = false;
+  }
+}
+
+/** After any change to a draft: the badge, and the view when it is open. */
+async function afterDraftsChanged(): Promise<void> {
+  if (navView.value === 'drafts') await loadDraftRows();
+  else await refreshDraftCount();
+}
+
+watch(draftsEnabled, (on) => void (on ? refreshDraftCount() : (draftCount.value = 0)), { immediate: true });
+
+function extOfName(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+}
+
+/**
+ * Open a draft in its editor — the same viewer a file opens in, on the
+ * draft's path; the viewer finds the draft by that path and draws its bar.
+ * A host that opens files in windows of its own (the desktop app) gets it
+ * the same way it gets any file.
+ */
+function openDraft(d: DraftDto, appChoice: string | null = null): void {
+  const node = {
+    type: 'file',
+    path: d.path,
+    basename: d.name,
+    extension: extOfName(d.name),
+    storage: d.storage,
+    size: d.size,
+    file_size: d.size,
+    mime_type: d.mime ?? '',
+    visibility: 'private',
+    extra_metadata: {},
+  } as unknown as FileNode;
+  if (openSurface(props.config, node) === 'host') {
+    emit('file-opened', { path: node.path, basename: node.basename });
+    return;
+  }
+  // The type it was MADE as: `LICENSE` made as Plain text opens in the text
+  // editor (#56), as it did when it was created.
+  previewOpenAs.value = d.type ? { path: node.path, ext: d.type } : null;
+  previewAppChoice.value = appChoice;
+  previewTarget.value = node;
+  previewMode.value = 'edit';
+  showPreview.value = true;
+}
+
+/** "Saved to …" — the file is where it belongs now. */
+function sayDraftSaved(saved: SavedDraft): void {
+  flashToast(t('draft.saved_to', { name: saved.name, folder: draftFolderLabel(saved.targetDir) }));
+}
+
+const draftListSave = useDraftSave(() => (draftsEnabled.value ? api.drafts : null), (err) => failureText(err));
+
+async function saveDraftFromList(d: DraftDto): Promise<void> {
+  if (draftBusyKey.value) return;
+  draftBusyKey.value = d.key;
+  try {
+    const saved = await draftListSave.save(d);
+    if (saved) {
+      sayDraftSaved(saved);
+      await afterDraftsChanged();
+    }
+  } catch (err) {
+    showToast({ message: failureText(err) }, ERROR_TOAST_MS);
+  } finally {
+    draftBusyKey.value = null;
+  }
+}
+
+/** Delete from the Drafts view: to the trash, like any deleted file. */
+async function discardDraftFromList(d: DraftDto): Promise<void> {
+  if (draftBusyKey.value) return;
+  draftBusyKey.value = d.key;
+  try {
+    await api.drafts.discard(d.key);
+    flashToast(t('draft.discarded', { name: d.name }));
+    await afterDraftsChanged();
+  } catch (err) {
+    showToast({ message: failureText(err) }, ERROR_TOAST_MS);
+  } finally {
+    draftBusyKey.value = null;
+  }
+}
+
+function onPreviewDraftSaved(saved: SavedDraft): void {
+  sayDraftSaved(saved);
+  void afterDraftsChanged();
+  // Standing in the folder it went to: show it there.
+  if (!navView.value && !trashMode.value) void load();
+}
+
+function onPreviewDraftDiscarded(): void {
+  const name = previewTarget.value?.basename ?? '';
+  flashToast(t('draft.discarded', { name }));
+  void afterDraftsChanged();
+}
+
+/** The New document dialog's "Open Drafts" (at the draft limit). */
+function openDraftsFromNewDocument(): void {
+  showNewDocument.value = false;
+  void loadNavView('drafts');
+}
 
 // Upload
 const uploadJobs = ref<UploadJob[]>([]);
@@ -1913,9 +2514,11 @@ const previewOpenAsExt = computed(() =>
 );
 watch(showPreview, (open) => {
   if (!open) previewOpenAs.value = null;
+  // Drafts: a draft's editor closed — its row changed (and may be gone).
+  if (!open && draftsEnabled.value && previewTarget.value && draftKeyOf(previewTarget.value.path)) {
+    void afterDraftsChanged();
+  }
 });
-const showConvert = ref(false);
-const convertTarget = ref<FileNode | null>(null);
 const showPerm = ref(false);
 const permTarget = ref<FileNode | null>(null);
 /* tasi:m1 — "Move to…" / "Copy to…" ask the SAME dialog where; only the mode
@@ -2344,16 +2947,18 @@ async function advFetchRows(
   target: string,
 ): Promise<{ rows: FileNode[]; truncated: boolean }> {
   if (scope === 'name') {
-    const resp = await api.search(target, query);
+    /* wiring:e2 names — inside an encrypted-names folder the name search is
+       the browser's own (the server cannot read the names). */
+    const resp = (await e2eSearchInside(target, query)) ?? (await api.search(target, query));
     return {
-      rows: filterListing(resp.files),
+      rows: filterListing(await e2eNames.decorate(resp.files, { root: resp.e2e_root || null })),
       truncated: advSearchTruncated(resp.files.length, MANAGER_SEARCH_PAGE, resp.truncated),
     };
   }
   const hits = await api.globalSearch(query, { limit: ADV_CONTENT_LIMIT, scope });
   const storageName = adapter.value || (props.config.storages ?? [])[0]?.name || '';
   return {
-    rows: filterListing(hits.map((h) => hitToNode(h, storageName))),
+    rows: filterListing(await e2eNames.decorate(hits.map((h) => hitToNode(h, storageName)))),
     truncated: advSearchTruncated(hits.length, ADV_CONTENT_LIMIT),
   };
 }
@@ -2560,10 +3165,13 @@ async function fetchNavRows(kind: 'recent' | 'starred' | 'shared'): Promise<File
     // The shared endpoint already answers in the listing shape, and reports
     // which storages are grant-only in the same call.
     sharedStorageNames.value = Array.isArray(body?.storages) ? body.storages : [];
-    return (Array.isArray(body?.files) ? body.files : []) as FileNode[];
+    return e2eNames.decorate((Array.isArray(body?.files) ? body.files : []) as FileNode[]);
   }
   const rows: Record<string, unknown>[] = Array.isArray(body?.nodes) ? body.nodes : [];
-  return rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null);
+  /* wiring:e2 names — Recent, Starred and Home name an item inside an
+     encrypted folder by its plaintext while that folder is unlocked, and as
+     "🔒 Encrypted item" while it is not (rows carry `e2e_root`). */
+  return e2eNames.decorate(rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null));
 }
 
 /* === gorunum:v3-shell — the Home view's own state ========================
@@ -2663,6 +3271,25 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
     if (navTag.value) await loadTagView(navTag.value, navTagKind.value);
     return;
   }
+  if (kind === 'drafts') {
+    // Drafts (issue #71) is drawn by its own view (DraftsView), like Home: the
+    // mode and the address move first (lesson #608 — a refresh in the gap
+    // must reload THIS view), then the rows come.
+    if (!navView.value) navViewOrigin.value = currentPath.value ?? '';
+    navView.value = 'drafts';
+    navTag.value = '';
+    navTagKind.value = '';
+    trashMode.value = false;
+    e2eRoot.value = '';
+    forgetFolderPerm();
+    selection.clear();
+    files.value = [];
+    dirname.value = NAV_VIEW_DIRNAME.drafts;
+    currentPath.value = NAV_VIEW_DIRNAME.drafts;
+    adapter.value = '';
+    await loadDraftRows();
+    return;
+  }
   if (kind === 'trash') {
     void probeTrashPolicy(); /* tablo:t1 — in parallel: the banner is above the
                                 listing and must not wait behind it */
@@ -2755,7 +3382,9 @@ async function loadTagView(tag: string, kind: TagKind | '' = '') {
       200,
       kind,
     );
-    files.value = rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null);
+    files.value = await e2eNames.decorate(
+      rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null),
+    );
     // Spans every storage, like Starred/Recent/Shared — so no storage crumb.
     adapter.value = '';
   } catch (err) {
@@ -2865,7 +3494,11 @@ function folderLabelOf(path: string): string {
   /* etiket:t1 — a THIRD surface that renders a path segment, and it had the
      same hole the tab strip did: in a virtual view the details panel headed
      itself ".starred". Same shared resolver, so it cannot drift again. */
-  return virtualSegmentLabel(seg, t) || seg;
+  const virtual = virtualSegmentLabel(seg, t);
+  if (virtual) return virtual;
+  /* wiring:e2 names — the plaintext of an encrypted folder's subfolder. */
+  const e2eLabel = e2eNames.segmentLabel(qualify(p));
+  return e2eLabel ?? seg;
 }
 function onInspectorManage(n: FileNode) {
   permTarget.value = n;
@@ -3397,8 +4030,21 @@ async function load(path?: string) {
           truncated: adv.truncated,
         }
       : searchQuery.value
-        ? await api.search(target, searchQuery.value)
+        ? ((await e2eSearchInside(target, searchQuery.value)) ?? (await api.search(target, searchQuery.value)))
         : await api.index(target);
+    /* wiring:e2 names — stored names become plaintext here, BEFORE the hidden
+       -file filter, which judges the plaintext (`.gitignore` is a dotfile,
+       its ciphertext is not). Content-only folders come back untouched.
+       ⚠ Before ANY of the listing's state is committed below, and with the
+       root read from the response, not from `e2eRoot`: everything after this
+       await is assigned in one synchronous run. Awaiting between `e2eRoot`
+       and `currentPath` opened a gap in which an upload read the NEW
+       folder's key and the OLD folder's path — a file encrypted for one
+       folder sent to another. e2e/shots/e2e-recovery.mjs, which uploads 1.2 s
+       after opening a folder, once found nothing in the folder it had opened. */
+    resp.files = await e2eNames.decorate(resp.files, {
+      root: typeof resp.e2e_root === 'string' && resp.e2e_root ? resp.e2e_root : null,
+    });
     // A search that matched more than it returned says so (banner strip). The
     // server's `truncated` is the answer; an older server that does not send
     // it leaves the full-page guess the advanced search count always made.
@@ -3657,7 +4303,7 @@ async function loadTrash() {
   selection.clear();
   try {
     const { entries } = await api.listTrash();
-    files.value = entries.map(
+    const trashRows = entries.map(
       (e) =>
         ({
           type: 'file',
@@ -3687,14 +4333,22 @@ async function loadTrash() {
             ttl_days: e.ttl_days ?? null,
             /* A permanent delete is on its way for it (purgeSelection). */
             purging: trashPurging.value.has(e.id),
+            /* #71 — a discarded draft of the asker's: its Location reads
+               "Drafts" (ListView), which is where Restore puts it back. */
+            ...(e.draft ? { draft: true } : {}),
           },
           /* Who put it here — the Trash draws it where a folder draws the
              owner. Keys absent when nobody is named, as the listing sends. */
           ...(e.deleted_by_id !== undefined ? { deleted_by_id: e.deleted_by_id } : {}),
           ...(e.deleted_by_name ? { deleted_by_name: e.deleted_by_name } : {}),
           ...(e.deleted_by_self ? { deleted_by_self: true } : {}),
+          /* wiring:e2 names — the encrypted folder it was deleted from. */
+          ...((e as { e2e_root?: string }).e2e_root ? { e2e_root: (e as { e2e_root?: string }).e2e_root } : {}),
         }) as unknown as FileNode,
     );
+    /* wiring:e2 names — a trashed item keeps its stored name; decrypt it the
+       way its folder would, and keep the long-name sidecars out of sight. */
+    files.value = await e2eNames.decorate(trashRows);
     dirname.value = '.trash';
     currentPath.value = '.trash';
   } catch (err) {
@@ -3937,6 +4591,9 @@ defineExpose({
   /* App plugins — a notification's `target.open` lands here (see the
      function's own note for why this is a method and not a prop). */
   openAppTarget,
+  /* A notification's destination, carried out in this explorer — the desktop
+     app hands a clicked OS notification here (see the function's note). */
+  revealNotification,
 });
 
 onMounted(async () => {
@@ -3945,7 +4602,13 @@ onMounted(async () => {
   preloadEditor();
 
   const fromPersist = readPersistedPath();
-  await load(fromPersist || undefined);
+  try {
+    await load(fromPersist || undefined);
+  } finally {
+    // A reveal waits for this (revealNotification); a failed first listing
+    // must not leave it waiting forever.
+    markFirstLoad();
+  }
   await nextTick();
   rootEl.value?.focus();
   // Best-effort initial fetch — silent if the older backend doesn't
@@ -4026,8 +4689,29 @@ function paletteHitItem(hit: GlobalSearchHit) {
 // the host holds several accounts (#47), one call per account through the
 // host's hook, each answer stamped with its account. One account failing
 // costs its own group, not the others'.
+/**
+ * wiring:e2 names — search hits that sit inside an encrypted-names folder,
+ * named the way every other view names them: plaintext while the folder is
+ * unlocked, the locked placeholder while it is not. The key file and
+ * long-name sidecars are dropped. Hits outside such folders pass untouched.
+ */
+async function e2eNameHits(hits: GlobalSearchHit[]): Promise<GlobalSearchHit[]> {
+  if (!hits.some((h) => typeof h.e2e_root === 'string' && h.e2e_root)) return hits;
+  const storageName = adapter.value || (props.config.storages ?? [])[0]?.name || '';
+  const named = await Promise.all(
+    hits.map((h) => e2eNames.decorate([hitToNode(h, storageName)]).then((r) => r[0] ?? null)),
+  );
+  const out: GlobalSearchHit[] = [];
+  hits.forEach((h, i) => {
+    const n = named[i];
+    if (!n) return;
+    out.push(n.e2e_stored ? { ...h, name: n.basename, e2e_display_dir: n.e2e_display_dir } : h);
+  });
+  return out;
+}
+
 async function paletteGlobalSearch(q: string): Promise<GlobalSearchHit[]> {
-  const own = api.globalSearch(q, { limit: 8, scope: 'all' });
+  const own = api.globalSearch(q, { limit: 8, scope: 'all' }).then(e2eNameHits);
   const hook = props.config.accountSearch;
   if (!hook) return own;
   let others: SearchAccount[] = [];
@@ -4225,7 +4909,12 @@ useKeyboardShortcuts(rootEl, {
     showNewFolder.value = false;
     showRename.value = false;
     showDelete.value = false;
-    showPreview.value = false;
+    /* #71 — a draft's editor is closed only through its own question (Save
+       to disk / Keep in Drafts / Discard). Its dialog answers Escape itself
+       (modals/Modal → PreviewModal.requestClose); closing it from here as
+       well dropped the editor behind the question the moment Escape was
+       pressed — measured in a real browser, question and editor both gone. */
+    if (!(previewTarget.value && draftKeyOf(previewTarget.value.path))) showPreview.value = false;
     ctxRef.value?.hide();
     dismissToast();
     /* gezinti:g1 — an open Connections / API-keys overlay is the topmost thing
@@ -4286,7 +4975,6 @@ useKeyboardShortcuts(rootEl, {
   onPreview: () => void dispatchItemAction('preview', activeTargets()),
   onShare: () => void dispatchItemAction('access', activeTargets()),
   onTags: () => void dispatchItemAction('tags', activeTargets()),
-  onConvert: () => void dispatchItemAction('convert', activeTargets()),
   onOpenTab: () => void dispatchItemAction('open-tab', activeTargets()),
   onCopyPath: () => {
     const n = activeTargets()[0];
@@ -4381,6 +5069,20 @@ function openNode(n: FileNode) {
     void load(target);
     return;
   }
+  /* wiring:e2 fxe — a single encrypted file: its password, then the viewers. */
+  if (isFxeRow(n) && !e2eActive.value && !n.e2e_root) {
+    void e2eFiles.open(n);
+    return;
+  }
+  /* wiring:e2 — a file from Recent, Starred, a tag, search or Home that
+     lives inside an encrypted folder is opened IN its folder: the lock
+     screen when the folder is locked, the decrypted preview when it is not.
+     Opening it here handed the viewer ciphertext. */
+  if (n.type === 'file' && !e2eActive.value && typeof n.e2e_root === 'string' && n.e2e_root) {
+    const parent = wireParentPath(n.path);
+    void load(multiStorageRoot.value ? wireToVirtual(parent) : stripAdapter(parent));
+    return;
+  }
   /* wiring:e2 — opening a file inside an encrypted folder: while unlocked,
      decrypt + show a read-only preview (the blob URL feeds the existing
      viewers); while locked nothing opens at all (the lock screen already
@@ -4425,6 +5127,9 @@ function openNode(n: FileNode) {
   previewMode.value = nodeCanEdit(n)
     ? previewModeForExt(ext)
     : 'view';
+  previewAppChoice.value = null;
+  // An app's interface for this type edits it (unless this person may not).
+  if (appViewersFor(n).length && nodeCanEdit(n)) previewMode.value = 'edit';
   previewTarget.value = n;
   showPreview.value = true;
   emit('file-opened', { path: n.path, basename: n.basename });
@@ -4500,6 +5205,11 @@ async function restoreSelection(targets?: FileNode[]) {
 }
 
 function previewNode(n: FileNode) {
+  /* wiring:e2 fxe */
+  if (isFxeRow(n) && !e2eActive.value && !n.e2e_root) {
+    void e2eFiles.open(n);
+    return;
+  }
   /* wiring:e2 — the preview is fed from the decrypted blob as well */
   if (e2eUnlocked.value && n.type === 'file') {
     void e2eOpenPreview(n);
@@ -4507,6 +5217,7 @@ function previewNode(n: FileNode) {
   }
   /* /wiring:e2 */
   previewMode.value = 'view';
+  previewAppChoice.value = null;
   previewTarget.value = n;
   showPreview.value = true;
   void markRecent(n);
@@ -4525,6 +5236,11 @@ function openNodeInNewTab(n: FileNode) {
       ? wireToVirtual(n.path)
       : stripAdapter(n.path);
     void load(target);
+    return;
+  }
+  /* wiring:e2 fxe — the standalone route would show ciphertext. */
+  if (isFxeRow(n) && !e2eActive.value && !n.e2e_root) {
+    void e2eFiles.open(n);
     return;
   }
   /* wiring:e2 — the standalone editor route pulls the RAW (encrypted) bytes
@@ -5003,9 +5719,6 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
       : openExt === 'drawio' || openExt === 'dio'
         ? gateOnService(!!effectiveDrawioUrl.value, callerAdmin.value, t('ctx.needs_drawio'))
         : {};
-  /* The legacy converter: configured-and-healthy is the only state in which
-     it is offered as working, and never beside the Convert app. */
-  const convertGate = legacyConvert.value;
   return [
     { key: 'open', label: t('ctx.open'), ...openGate, hidden: !single || openGate.hidden === true },
     { key: 'open-tab', label: t('ctx.open_new_tab'), hidden: !single || sel[0]?.type !== 'dir' } /* wiring:d1 — open the folder in a new tab */,
@@ -5015,17 +5728,19 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
        `window.open` per node and the browser blocks the second popup; there is
        one streaming archive behind it now (lib/downloadSelection), and the
        server expands a selected folder itself, so a lone folder is a zip too.
-       ⚠ Still single-only inside an encrypted folder: those bytes are
-       decrypted IN THE BROWSER, one file at a time, and the server has no
-       plaintext to zip. */
-    { key: 'download', label: t('ctx.download'), hidden: !any || (e2eActive.value && !single), disabled: !any },
-    {
-      key: 'convert',
-      label: t('ctx.convert'),
-      title: convertGate.title,
-      hidden: !single || convertGate.hidden === true || !w || e2eActive.value /* wiring:e2 — convert is meaningless on ciphertext */,
-      disabled: !isFile || convertGate.disabled === true,
-    },
+       Inside an encrypted folder the server has no plaintext to zip: the zip
+       is made in this tab (below), and a LOCKED folder downloads one row at
+       a time. */
+    /* wiring:e2 fxe — inside an unlocked encrypted folder a selection of any
+       size downloads DECRYPTED now (a zip made in this tab); the ciphertext is
+       "Download encrypted copy" below. */
+    { key: 'download', label: t('ctx.download'), hidden: !any || (e2eLocked.value && !single), disabled: !any },
+    /* wiring:e2 fxe — single encrypted files, and the ciphertext copy. */
+    ...e2eFiles.menuRows(sel, {
+      canWrite: w,
+      inEncrypted: e2eActive.value,
+      unlockedEncryptedCopy: e2eUnlocked.value || (single && e2eUnlockedRootRow(sel[0]) !== null),
+    }),
     { key: 'archive-create', label: t('ctx.archive_create'), hidden: !any || (single && isArchive) || !w || e2eActive.value || archiveAllowedFormats.value.length === 0, disabled: !any },
     { key: 'archive-extract', label: t('ctx.archive_extract'), hidden: !isArchive || !w || e2eActive.value, disabled: !isArchive },
     { key: 'archive-extract-here', icon: 'archive-extract', label: t('archive.extract_here'), hidden: !isArchive || !w || e2eActive.value, disabled: !isArchive },
@@ -5041,6 +5756,8 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
       title: single ? undefined : t('ctx.access.one_only'),
     },
     { key: 'details', label: t('ctx.details'), hidden: !any } /* koru:k1 */,
+    /* wiring:e2 convert — encrypt a folder that already exists, in place. */
+    { key: 'e2e-convert', label: t('e2e.convert.ctx'), icon: 'lock', hidden: !e2eCanConvert(sel, w) },
     /* ⚠ "Copy node id" is NOT here any more (owner's call, 2026-09-13): it is a
        developer's handle on a support ticket, not an everyday verb, and this
        list is rendered by BOTH the right-click menu and the selection bar — so
@@ -5080,6 +5797,7 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
     /* App plugins — one row per action whose `applies` rule accepts the
        selection, under its own `sep-plugins` divider; `[]` when the feature
        is off, in the trash, or inside an encrypted folder (lib/pluginMenu). */
+    ...openWithRows(sel),
     ...pluginActionRows(sel),
     ...keepActionsFor(sel),
     { divider: true, key: 'sep2', label: '', hidden: !w },
@@ -5163,6 +5881,19 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
     await onPluginAction(key, targets);
     return;
   }
+  /* v4 — "Open with <app>": the preview, in that app's interface. */
+  if (key.startsWith('open-with:')) {
+    if (targets[0]) {
+      previewNode(targets[0]);
+      previewAppChoice.value = key.slice('open-with:'.length);
+    }
+    return;
+  }
+  /* wiring:e2 fxe */
+  if (isFxeActionKey(key)) {
+    await e2eFiles.dispatch(key, targets, (tg) => downloadSelection(tg, { encrypted: true }));
+    return;
+  }
   switch (key) {
     /* gorunum:v1 — the selection bar's × . It used to be delivered by
      * synthesising a click on the listing's background, because nothing here
@@ -5181,6 +5912,9 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       break;
     case 'preview':
       if (targets[0]) previewNode(targets[0]);
+      break;
+    case 'e2e-convert':
+      if (targets[0]) e2eOpenConvert(targets[0]);
       break;
     case 'download':
       await downloadSelection(targets);
@@ -5252,9 +5986,6 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       if (ds && targets[0]) void ds.reveal(keepRemoteOf(targets[0]));
       break;
     }
-    case 'convert':
-      if (targets[0]) openConvert(targets[0]);
-      break;
     case 'access':
       if (targets[0]) {
         permTarget.value = targets[0];
@@ -5375,6 +6106,17 @@ async function paste() {
     // The server does the transfer (the ops queue carries both the source
     // and the target storage).
     const plan = resolveTransfer(items, targetWire, cb.mode === 'cut' ? 'move' : 'copy');
+    /* wiring:e2 names — inside an encrypted-names folder every item moves
+       with its name re-sealed for the target folder (e2eTransferNamed). */
+    const named = await e2eTransferNamed(cb.mode === 'cut' ? 'move' : 'copy', items, targetWire, qualify(sourceDir) || undefined);
+    if (named) {
+      if (named.undo && named.ops.length) {
+        opUndo.set(named.ops[named.ops.length - 1].id, { message: t('toast.moved'), fn: named.undo });
+      }
+      if (named.ops.length) flashToast(cb.mode === 'cut' ? t('split.move_queued') : t('split.copy_queued'));
+      clipboard.value = { mode: null, items: [], sourcePath: null };
+      return;
+    }
     if (cb.mode === 'cut') {
       const originWire = qualify(sourceDir) || undefined;
       const collides = await movedNamesCollide(items, targetWire);
@@ -5444,9 +6186,17 @@ function downloadFile(n: FileNode) {
  *  server to walk the same folders again, for a second archive. */
 const archivePreparing = ref(false);
 
-async function downloadSelection(targets: FileNode[]): Promise<void> {
+async function downloadSelection(targets: FileNode[], opts: { encrypted?: boolean } = {}): Promise<void> {
   if (targets.length === 0) return;
+  /* wiring:e2 fxe — decrypted in this tab where there is a key for it (a
+     `.fxe`, an unlocked encrypted folder or a selection inside one);
+     `encrypted` is "Download encrypted copy": the bytes the server has. */
+  if (!opts.encrypted && (await e2eDownloadDecrypted(targets))) return;
   if (targets.length === 1 && targets[0].type === 'file') {
+    if (opts.encrypted) {
+      window.open(api.downloadUrl(targets[0].path), '_blank');
+      return;
+    }
     downloadFile(targets[0]);
     return;
   }
@@ -5460,7 +6210,13 @@ async function downloadSelection(targets: FileNode[]): Promise<void> {
   showToast({ message: t('toast.archive.preparing') }, STICKY_TOAST_MS);
   try {
     const ticket = await downloadArchive(api, targets.map((n) => n.path));
-    flashToast(t('toast.archive.started', { name: ticket.name, count: String(ticket.files) }));
+    /* wiring:e2 names — the server names the zip after what it stores (the
+       ciphertext of a folder inside an encrypted-names folder); the toast
+       says which folder in the person's words. The zip keeps the server's
+       name: sending the plaintext to name it would hand it to the server. */
+    const shownName =
+      targets.length === 1 && targets[0].e2e_stored ? `${targets[0].basename}.zip` : ticket.name;
+    flashToast(t('toast.archive.started', { name: shownName, count: String(ticket.files) }));
   } catch (err) {
     const e = err as Error & { status?: number };
     /* 409 is the server saying the selection held nothing this account may
@@ -5497,7 +6253,7 @@ async function onDestinationPicked(dest: string): Promise<void> {
   destPickerBusy.value = true;
   try {
     const outcome = await transferItems(targets.map((n) => n.path), dest, originWire || undefined, move ? 'move' : 'copy');
-    const name = labelOfWire(dest, dest);
+    const name = e2eNames.segmentLabel(dest) ?? labelOfWire(dest, dest); /* wiring:e2 names */
     /* ⚠ `transferItems` has already flashed "queued". This REPLACES it rather
      * than stacking on it — there is one toast slot (`showToast`), and the
      * useful half of the sentence is the destination, which "queued" does not
@@ -5528,8 +6284,26 @@ async function onDestinationPicked(dest: string): Promise<void> {
 
 /* belge:n1 — after creating it, OPEN it. Creating a file and leaving the
  * person looking at a listing is half the feature. */
-async function onDocumentCreated(file: { path: string; name: string; ext: string }) {
+async function onDocumentCreated(file: {
+  path: string;
+  name: string;
+  ext: string;
+  draft?: DraftDto;
+  app?: { plugin: string; view: string };
+}) {
   showNewDocument.value = false;
+  // Made from an app's row (`new_documents`): it opens in the app's view the
+  // row names, whatever else opens that extension ("Open with", decided).
+  const appChoice = file.app ? `${file.app.plugin}/${file.app.view}` : null;
+  // Drafts (issue #71): nothing was created in the folder — the document is a
+  // draft, and its editor opens on it. The folder is not reloaded: there is
+  // nothing new in it yet.
+  if (file.draft) {
+    draftCount.value += 1;
+    openDraft(file.draft, appChoice);
+    void refreshDraftCount();
+    return;
+  }
   const dir = file.path.slice(0, file.path.lastIndexOf('/'));
   if (dir && dir !== qualify(currentPath.value)) await load(dir);
   else await load();
@@ -5553,6 +6327,7 @@ async function onDocumentCreated(file: { path: string; name: string; ext: string
     return;
   }
   previewOpenAs.value = file.ext ? { path: node.path, ext: file.ext } : null;
+  previewAppChoice.value = appChoice;
   previewTarget.value = node;
   // ⚠ NOT previewModeForExt: that sends office types to 'view', which is right
   // for a peek at somebody else's file and wrong for the one you just made.
@@ -5742,7 +6517,10 @@ async function submitNewFolder(name: string) {
   const inPane = mutationInPane.value; /* ui-fix — new folder in the side pane */
   try {
     const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
-    await api.newFolder(dirWire, name);
+    /* wiring:e2 names — inside an encrypted-names folder the server gets the
+       stored name only (and a long name's sidecar first). */
+    const wireName = await e2eWireName(dirWire, name, { isDir: true });
+    await api.newFolder(dirWire, wireName);
     showNewFolder.value = false;
     // Free now, not after the listing below: a New folder opened meanwhile is
     // a new dialog, not this one still busy.
@@ -5770,22 +6548,30 @@ async function submitRename(name: string) {
   try {
     const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
     const oldPath = target.path; // qualified
-    const oldName = target.basename;
+    /* wiring:e2 names — both ends of a rename, and its undo, travel as STORED
+       names: the plaintext never reaches the server. */
+    const oldName = storedName(target);
+    // A folder keeps its id (its contents are sealed under it).
+    const wireName = await e2eWireName(
+      wireParent(oldPath),
+      name,
+      target.type === 'dir' ? { keepIdOf: oldPath } : {},
+    );
     // A folder is a job of the queue when the server runs it there: on an
     // object store every object inside it is a request of its own, and inside
     // this one the dialog outlasted the proxy with nothing on screen.
     const queued = target.type === 'dir' && serverQueues('rename');
     let job: PendingOpDto | undefined;
-    if (queued) job = (await api.renameQueued(dirWire, oldPath, name)).op;
-    else await api.rename(dirWire, oldPath, name);
+    if (queued) job = (await api.renameQueued(dirWire, oldPath, wireName)).op;
+    else await api.rename(dirWire, oldPath, wireName);
     showRename.value = false;
     renameTarget.value = null;
     renameReq.end(ticket);
     // Clean inverse: rename the new path back to the old basename — as a job
     // too, when this one was.
-    const newPath = wireJoin(wireParent(oldPath), name);
+    const newPath = wireJoin(wireParent(oldPath), wireName);
     const undo =
-      name && name !== oldName
+      wireName && wireName !== oldName
         ? async () => {
             if (!queued) {
               await api.rename(dirWire, newPath, oldName);
@@ -5812,7 +6598,13 @@ async function submitRename(name: string) {
     // 409 is the server refusing to replace what already has the name
     // (NAME_TAKEN). Everything else still says what went wrong — in the
     // dialog while it is on screen, as a toast once it is not.
-    const words = e.status === 409 ? t('newdoc.err.exists', { name }) : failureText(err);
+    // wiring:e2 names — said with the name the person typed, never the stored one.
+    const words =
+      err instanceof E2eNameRefused
+        ? t('e2e.names.bad_name', { name })
+        : e.status === 409
+          ? t('newdoc.err.exists', { name })
+          : failureText(err);
     refuseInDialog(renameReq, ticket, err, { op: 'rename' }, words);
   } finally {
     renameReq.end(ticket);
@@ -5991,45 +6783,6 @@ async function confirmDelete() {
   }
 }
 
-function openConvert(n: FileNode) {
-  // A shortcut or a stale menu must not open what the rule withholds.
-  if (!legacyConvertUrl.value) return;
-  convertTarget.value = n;
-  showConvert.value = true;
-}
-
-function onConvertDone(name: string) {
-  flashToast(t('toast.converted_to', { name }));
-  void load();
-}
-
-/** Each opening of the converter, so a save can tell whether ITS window is
- *  still the one on screen. */
-let convertSession = 0;
-watch(showConvert, (open) => {
-  if (open) convertSession++;
-});
-
-/**
- * Saves a conversion's result into the folder the converter works in.
- *
- * ⚠ The converter's window may be closed while this runs — its × says the
- * file still arrives, because it does: the upload is this function's, not
- * the window's. The window says "done" itself (`@done`) while it is open;
- * once it is not, this says it, or nothing would.
- */
-async function saveConverted(file: File): Promise<void> {
-  const session = convertSession;
-  const windowGone = () => session !== convertSession || !showConvert.value;
-  try {
-    await api.uploadMultipart(qualify(currentPath.value), [file]);
-  } catch (err) {
-    if (windowGone()) showToast({ message: t('convert.save_failed') }, ERROR_TOAST_MS);
-    throw err;
-  }
-  if (windowGone()) onConvertDone(file.name);
-}
-
 
 // ------- Upload -------
 
@@ -6063,11 +6816,29 @@ async function uploadFiles(list: File[]) {
     return;
   }
   if (e2eUnlocked.value) {
-    list = await e2eEncryptUploads(list);
+    const prepared = await e2eEncryptUploads(list, target);
+    list = prepared.files;
     if (list.length === 0) return;
+    /* wiring:e2 names — a long name's sidecar goes up BEFORE its item, so
+       the item is never listed without the file that names it. */
+    if (prepared.sidecars.length > 0) {
+      try {
+        await api.uploadMultipart(target, prepared.sidecars);
+      } catch (err) {
+        emit('error', { message: (err as Error).message, context: { op: 'e2e-name-sidecar' } });
+        flashToast(t('e2e.names.write_failed'));
+        return;
+      }
+    }
   }
   /* /wiring:e2 */
   for (const f of list) {
+    /* wiring:e2 stream — a file encrypted as it is sent only goes staged. */
+    const source = e2eUploadSources.get(f);
+    if (source) {
+      if (!(await chunkedUpload(f, target, source))) flashToast(t('e2e.upload.streaming_unsupported'));
+      continue;
+    }
     // Anything above the chunk size goes on the STAGED path: chunked into
     // filex's own staging area, resumable across a dropped connection and — via
     // the bookmark in lib/uploadResume — across a reloaded tab. It works on
@@ -6081,7 +6852,7 @@ async function uploadFiles(list: File[]) {
         // that never happened, which is precisely the complaint.
         flashToast(
           t('upload.resuming', {
-            name: f.name,
+            name: e2eUploadNames.get(f) ?? f.name,
             percent: f.size > 0 ? Math.round((pending.offset / f.size) * 100) : 0,
           }),
         );
@@ -6102,7 +6873,7 @@ async function legacyUpload(file: File, dest?: string) {
   const target = dest ?? qualify(currentPath.value);
   uploadJobs.value = [
     ...uploadJobs.value,
-    { id, file, path: target, totalBytes: file.size, uploadedBytes: 0, percent: 0, status: 'uploading', cancel() {} },
+    { id, file, displayName: e2eUploadNames.get(file), path: target, totalBytes: file.size, uploadedBytes: 0, percent: 0, status: 'uploading', cancel() {} },
   ];
   const patch = (p: Partial<UploadJob>) => {
     const idx = uploadJobs.value.findIndex((j) => j.id === id);
@@ -6146,7 +6917,7 @@ async function legacyUpload(file: File, dest?: string) {
  * "starts from zero" behaviour this change exists to remove. A real failure is
  * shown to the user instead, and picking the same file again continues it.
  */
-async function chunkedUpload(file: File, dest?: string): Promise<boolean> {
+async function chunkedUpload(file: File, dest?: string, source?: UploadSource /* wiring:e2 stream */): Promise<boolean> {
   // Register the progress row LAZILY — only once `begin` succeeded and bytes are
   // actually moving. A server with no staged path then shows no badge at all,
   // so the fallback's own badge is the only one the user sees (no
@@ -6155,14 +6926,14 @@ async function chunkedUpload(file: File, dest?: string): Promise<boolean> {
   let registered = false;
   const patch = (job: UploadJob) => {
     if (!registered) {
-      uploadJobs.value = [...uploadJobs.value, { ...job, id } as UploadJob];
+      uploadJobs.value = [...uploadJobs.value, { ...job, id, displayName: e2eUploadNames.get(file) } as UploadJob];
       registered = true;
       return;
     }
     const idx = uploadJobs.value.findIndex((j) => j.id === id);
     if (idx !== -1) {
       const next = [...uploadJobs.value];
-      next[idx] = { ...job, id } as UploadJob;
+      next[idx] = { ...job, id, displayName: e2eUploadNames.get(file) } as UploadJob;
       uploadJobs.value = next;
     }
   };
@@ -6171,6 +6942,7 @@ async function chunkedUpload(file: File, dest?: string): Promise<boolean> {
     await chunked.uploadFile({
       path: target,
       file,
+      source /* wiring:e2 stream */,
       onProgress: (job) => {
         if (!registered && job.status !== 'uploading' && job.uploadedBytes <= 0) return;
         patch(job);
@@ -6194,6 +6966,7 @@ async function chunkedUpload(file: File, dest?: string): Promise<boolean> {
         {
           id,
           file,
+          displayName: e2eUploadNames.get(file),
           path: target,
           totalBytes: file.size,
           uploadedBytes: 0,
@@ -6205,7 +6978,7 @@ async function chunkedUpload(file: File, dest?: string): Promise<boolean> {
       ];
       registered = true;
     }
-    flashToast(t('upload.failed', { name: file.name }));
+    flashToast(t('upload.failed', { name: e2eUploadNames.get(file) ?? file.name }));
     emit('error', { message, context: { op: 'upload', file: file.name } });
     return true;
   }
@@ -6494,6 +7267,11 @@ function handDragOut(ev: DragEvent, items: DragItem[], origin: string | null, mi
      the app the drag is still a server-side move — the payload stays with us —
      and the shell is told to "give up" so it doesn't watch the drives for
      nothing. */
+  /* wiring:e2 — a row inside an encrypted folder is never handed to the OS
+     as a file: the bytes behind its URL are ciphertext, and the OS would
+     save them under the plaintext name as if they were the document. The
+     in-app move still works (the payload is ours). */
+  if (e2eActive.value || items.some((it) => !!(it as { e2e_root?: string }).e2e_root)) return;
   if (dragOut.value) {
     ev.preventDefault();
     if (origin !== null) beginNativeDrag(items, origin);
@@ -6646,6 +7424,16 @@ async function moveSourcesAsync(
 ): Promise<'queued' | 'done' | 'refused'> {
   try {
     const originWire = originOverride ?? qualify(currentPath.value); /* wiring:d1 — the real source folder for a drag coming from the split pane */
+    /* wiring:e2 names — see e2eTransferNamed. */
+    const named = await e2eTransferNamed('move', sources, targetDir, originWire);
+    if (named) {
+      if (named.undo && named.ops.length) {
+        opUndo.set(named.ops[named.ops.length - 1].id, { message: t('toast.moved'), fn: named.undo });
+      }
+      if (named.ops.length) flashToast(t('split.move_queued'));
+      selection.clear();
+      return 'queued';
+    }
     const collides = await movedNamesCollide(sources, targetDir);
     if (api.endpoints.moveAsync) {
       const { op } = await api.moveAsync(sources, targetDir, originWire);
@@ -6854,6 +7642,11 @@ function quickLookToggle() {
   const sel = selection.nodes.value;
   const n = sel.length === 1 ? sel[0] : null;
   if (!n || n.type !== 'file' || n.basename === '.trash') return;
+  /* wiring:e2 fxe — a peek at a single encrypted file asks for its password. */
+  if (isFxeRow(n) && !e2eActive.value && !n.e2e_root) {
+    void e2eFiles.open(n);
+    return;
+  }
   /* wiring:e2 — in an encrypted folder the Space peek decrypts first, then opens */
   if (e2eActive.value) {
     if (!e2eUnlocked.value) return;
@@ -7022,6 +7815,10 @@ function tabLabel(path: string): string {
   const virtualLabel = virtualSegmentLabel(p.split('/').pop() || p, t);
   if (virtualLabel) return virtualLabel;
   if (!p) return multiStorageRoot.value ? t('breadcrumb.root') : adapter.value || t('breadcrumb.root');
+  /* wiring:e2 names — a tab open inside an encrypted folder is named by the
+     plaintext (or the locked placeholder), never by the ciphertext. */
+  const e2eLabel = e2eNames.segmentLabel(qualify(p));
+  if (e2eLabel !== null) return e2eLabel;
   return p.split('/').pop() || p;
 }
 const tabItems = computed(() =>
@@ -7214,8 +8011,9 @@ const paneRowVisible = computed(
  * a folder that is still loading does not flash its lock screen and a failed
  * listing still gets the retry state rather than "not found".
  */
-const hostBodyState = computed<'' | 'home' | 'notfound' | 'locked'>(() => {
+const hostBodyState = computed<'' | 'home' | 'drafts' | 'notfound' | 'locked'>(() => {
   if (navView.value === 'home') return 'home';
+  if (navView.value === 'drafts') return 'drafts';
   if (loading.value && files.value.length === 0) return '';
   if (notFoundPath.value) return 'notfound';
   if (loadError.value && files.value.length === 0) return '';
@@ -7530,6 +8328,13 @@ async function transferItems(
   let outcome: TransferOutcome;
   if (plan.kind === 'copy') {
     try {
+      /* wiring:e2 names — see e2eTransferNamed. */
+      const named = await e2eTransferNamed('copy', list, targetWire);
+      if (named) {
+        flashToast(t('split.copy_queued'));
+        void splitPaneRef.value?.reload();
+        return 'queued';
+      }
       const { op } = await api.copy(list, targetWire);
       pendingOps.register(op);
       flashToast(plan.cross ? t('split.cross_copy') : t('split.copy_queued'));
@@ -7570,6 +8375,75 @@ function onPaneTransfer(p: { sources: string[]; targetWire: string; originWire?:
 const e2eRing = createKeyRing();
 // Maps aren't reactive — a version counter drives the computeds.
 const e2eRingVer = ref(0);
+/* wiring:e2 fxe — single encrypted files (`.fxe`) and the streamed paths of
+ * encrypted folders (composables/useE2eFiles; the rest of this block is near
+ * the end of the script, `=== wiring:e2 fxe ===`). Made BEFORE the name view,
+ * which asks it for the real names of the `.fxe` files opened in this tab. */
+/** Files made as they are uploaded (a STREAM file over the one-shot limit). */
+const e2eUploadSources = new WeakMap<File, UploadSource>();
+
+const e2eFiles = useE2eFiles({
+  api,
+  chunked,
+  locale: () => locale.value,
+  t: (key, vars) => t(key, vars),
+  toast: (message, error) => showToast({ message }, error ? ERROR_TOAST_MS : FLASH_TOAST_MS),
+  emitError: (message, op) => emit('error', { message, context: { op } }),
+  escrowPublicKey: () => e2eEscrowPub.value,
+  escrowKid: () => e2eEscrowKid.value,
+  registerOp: (op) => pendingOps.register(op),
+  reload: () => load(),
+  openPreview: (node, url) => {
+    e2eUrls.set(node.path, url);
+    previewMode.value = 'view';
+    previewTarget.value = node;
+    showPreview.value = true;
+    emit('file-opened', { path: node.path, basename: node.basename });
+    // The row on screen is named for what it is, now that this tab knows.
+    if (node.fxe_name) {
+      files.value = files.value.map((r) => (r.path === node.path ? { ...r, fxe_name: node.fxe_name } : r));
+    }
+  },
+  showRecoveryKey: (key, name) => {
+    recoveryKeyValue.value = key;
+    recoveryKeyFolder.value = name;
+    recoveryKeyVariant.value = 'file';
+    showRecoveryKey.value = true;
+  },
+});
+
+/** The preview on screen is a decrypted `.fxe`: nothing that would send its
+ *  plaintext to the server (save, OnlyOffice, a new tab, share) is offered. */
+const fxePreviewing = computed(() => !!previewTarget.value?.fxe_name);
+
+/* wiring:e2 names — the one place stored (ciphertext) names become the names
+ * people see, shared with every pane, picker and tray this explorer hosts
+ * (provide/inject), so they all decrypt the same way. See useE2eNames. */
+const e2eNames = createE2eNameView({
+  api,
+  ring: e2eRing,
+  lockedLabel: () => t('e2e.names.locked_item'),
+  unreadableLabel: () => t('e2e.names.unreadable_item'),
+  fileName: (path) => e2eFiles.realName(path) /* wiring:e2 fxe */,
+});
+provide(E2E_NAME_VIEW, e2eNames);
+/* wiring:e2 names — the notification bell and panel live outside this
+ * component; they name an item inside a folder this explorer has unlocked
+ * through the registry, and read "🔒 Encrypted item" otherwise. Read-only:
+ * nothing leaves the name view, and a lock (or unmount) ends it. */
+const e2eUnregisterNames = registerE2eNameResolver((wire, rootHint) => {
+  void e2eNames.version.value;
+  const root = e2eNames.rootOf(wire, rootHint);
+  if (!root || !e2eRing.names(root)) return null;
+  const name = e2eNames.segmentLabel(wire);
+  if (!name || name === '…') return null;
+  return { name, path: e2eNames.displayPath(wire) };
+});
+onBeforeUnmount(e2eUnregisterNames);
+/** Plaintext name of an encrypted upload, for its progress row and toasts. */
+const e2eUploadNames = new WeakMap<File, string>();
+/** Features a newer filex put in this folder's marker that this build lacks. */
+const e2eUnsupported = ref<string[]>([]);
 // Wire path of the encrypted root we are inside ('' = no encrypted context).
 const e2eRoot = ref('');
 // path → decrypted blob objectURL (preview). Revoked on lock/unmount.
@@ -7586,7 +8460,6 @@ const e2eLocked = computed(() => {
 });
 
 // Lock screen form.
-const e2ePw = ref('');
 const e2eUnlockBusy = ref(false);
 const e2eUnlockErr = ref('');
 // Encrypted-folder creation modal.
@@ -7605,7 +8478,7 @@ const e2eRecoverErr = ref<string | null>(null);
 // The shown-once key. Held only while its dialog is open.
 const showRecoveryKey = ref(false);
 const recoveryKeyValue = ref('');
-const recoveryKeyVariant = ref<'created' | 'upgraded'>('created');
+const recoveryKeyVariant = ref<'created' | 'upgraded' | 'replaced' | 'file' /* wiring:e2 fxe */>('created');
 const recoveryKeyFolder = ref('');
 // A v1 folder that just opened by password: offer to give it recovery now,
 // because this is the only moment filex holds the password.
@@ -7663,34 +8536,43 @@ function e2eRevokeAll() {
 }
 onBeforeUnmount(e2eRevokeAll);
 
-/** Unlock: fetch the marker from the root, verify the password LOCALLY, put the KEK in memory. */
-async function e2eUnlock() {
-  if (!e2ePw.value || e2eUnlockBusy.value || !e2eRoot.value) return;
-  e2eUnlockBusy.value = true;
-  e2eUnlockErr.value = '';
+/**
+ * Unlock the encrypted folder at `root` with its password — for the main
+ * pane's lock screen and the split pane's (E2E_LOCK) alike: the ring is one
+ * per tab, so a folder opened in one pane is open in the other. Returns null
+ * when it opened, else the message to show.
+ *
+ * The offers that ride on an unlock — a pre-v0.31 folder's recovery upgrade,
+ * an escrow slot — need the password in hand and the strip to show them in,
+ * so they are made only when `root` is the folder the MAIN pane is in.
+ */
+async function e2eUnlockRoot(root: string, password: string): Promise<string | null> {
+  let markerText = '';
   try {
-    let markerText = '';
-    try {
-      const { blob, url } = await api.fetchBlob(wireJoin(e2eRoot.value, E2E_MARKER_NAME), { fresh: true });
-      URL.revokeObjectURL(url);
-      markerText = await blob.text();
-    } catch {
-      e2eUnlockErr.value = t('e2e.unlock.marker_missing');
-      return;
-    }
-    const marker = parseMarker(markerText);
-    if (!marker) {
-      e2eUnlockErr.value = t('e2e.unlock.marker_missing');
-      return;
-    }
-    e2eMarker.value = marker;
-    const fmk = await unlockWithPassword(marker, e2ePw.value);
-    if (!fmk) {
-      e2eUnlockErr.value = t('e2e.unlock.wrong');
-      return;
-    }
-    e2eRing.set(e2eRoot.value, fmk);
-    e2eRingVer.value++;
+    const { blob, url } = await api.fetchBlob(wireJoin(root, E2E_MARKER_NAME), { fresh: true });
+    URL.revokeObjectURL(url);
+    markerText = await blob.text();
+  } catch {
+    return t('e2e.unlock.marker_missing');
+  }
+  const parsed = parseMarkerDetailed(markerText);
+  if (!parsed) return t('e2e.unlock.marker_missing');
+  const here = root === e2eRoot.value;
+  /* wiring:e2 names — a marker that REQUIRES a feature this build does not
+   * know is refused by name, not opened: opening it is how an older client
+   * writes plaintext into a folder that promised otherwise. */
+  if (parsed.unsupported.length > 0) {
+    if (here) e2eUnsupported.value = parsed.unsupported;
+    return t('e2e.unlock.unsupported', { features: parsed.unsupported.join(', ') });
+  }
+  const marker = parsed.marker;
+  if (here) e2eMarker.value = marker;
+  const opened = await unlockWithPasswordDetailed(marker, password);
+  if ('error' in opened) {
+    return opened.error === 'damaged' ? t('e2e.unlock.damaged') : t('e2e.unlock.wrong');
+  }
+  if (!(await e2eAdoptKeys(root, marker, opened.fmk))) return t('e2e.names.key_failed');
+  if (here) {
     /* wiring:e2 recovery — a folder from before recovery existed has no way
      * back in but its password. This is the ONE moment we hold that password,
      * so ask now. Asking is all we do: the folder keeps working untouched if
@@ -7698,7 +8580,7 @@ async function e2eUnlock() {
      * operator an escrow key (when the install has one), which is why the
      * prompt says so rather than doing it quietly. */
     if (marker.v === 1) {
-      e2eUpgradePw.value = e2ePw.value;
+      e2eUpgradePw.value = password;
       e2eUpgradeOffer.value = true;
     } else if (escrowOfferState(marker, e2eEscrowKid.value) === 'offer') {
       /* wiring:e2 escrow-offer — a v2 folder that predates escrow here.
@@ -7708,42 +8590,95 @@ async function e2eUnlock() {
        * branch above, which seals an escrow slot as part of the upgrade and
        * already discloses that — two offers on one unlock would be two
        * chances to get the disclosure wrong. */
-      e2eEscrowPw.value = e2ePw.value;
+      e2eEscrowPw.value = password;
       e2eEscrowOfferMode.value = 'unlock';
       e2eEscrowErr.value = '';
       e2eEscrowOffer.value = true;
     }
-    e2ePw.value = '';
+  }
+  /* wiring:e2 names — the rows on screen still carry stored names; read the
+   * folder again so they come back decrypted, in both panes. */
+  if (here) await load();
+  void splitPaneRef.value?.reload();
+  return null;
+}
+
+/** The main pane's lock screen. */
+async function e2eUnlock(password: string) {
+  if (!password || e2eUnlockBusy.value || !e2eRoot.value) return;
+  e2eUnlockBusy.value = true;
+  e2eUnlockErr.value = '';
+  try {
+    const err = await e2eUnlockRoot(e2eRoot.value, password);
+    if (err) e2eUnlockErr.value = err;
   } finally {
     e2eUnlockBusy.value = false;
   }
 }
 
+/* The split pane's lock screen reaches the same unlock (composables/useE2eLock). */
+provide(E2E_LOCK, {
+  locked: (root: string) => {
+    void e2eRingVer.value;
+    return !e2eRing.has(root);
+  },
+  unlock: e2eUnlockRoot,
+  recovery: (root: string) => {
+    // The recovery and escrow dialogs belong to the main pane: go there.
+    activePane.value = 'main';
+    void load(paneToUser(root)).then(() => {
+      if (e2eRoot.value === root) void openRecoveryUnlock();
+    });
+  },
+});
+
+/**
+ * Put an unlocked folder's keys in the ring: the FMK, and — when its names
+ * are encrypted — the name key sealed under it. False when the marker says
+ * names are encrypted and the slot does not open under this FMK: the folder
+ * would then show and write garbage names, so it is not opened at all.
+ */
+async function e2eAdoptKeys(root: string, marker: E2eMarker, fmk: CryptoKey): Promise<boolean> {
+  let names = null;
+  if (markerHasNames(marker)) {
+    names = await unlockNameKey(marker, fmk);
+    if (!names) return false;
+  }
+  /* wiring:e2 password — mid re-key, the files not re-wrapped yet are under
+     the previous folder key, which the marker seals under the new one. */
+  let previous: CryptoKey | null = null;
+  if (rekeyPending(marker)) {
+    previous = await unlockPrevious(marker, fmk);
+    if (!previous) return false;
+  }
+  e2eRing.set(root, fmk, names, previous);
+  e2eNames.setMarker(root, marker);
+  e2eRingVer.value++;
+  return true;
+}
+
 /** "Kilitle" (Lock): drop the in-memory key and the decrypted blobs. */
 function e2eLock() {
   if (!e2eRoot.value) return;
-  e2eRing.lock(e2eRoot.value);
+  const root = e2eRoot.value;
+  e2eRing.lock(root);
+  // Plaintext names leave memory with the key.
+  e2eNames.forget(root);
   e2eRingVer.value++;
   e2eRevokeAll();
+  showE2eSettings.value = false;
+  e2eRecoveryInHand = null;
+  showPwChange.value = false;
   flashToast(t('e2e.locked_toast'));
+  void load();
 }
 
 // Extension → preview MIME: so the decrypted blob renders correctly in
 // <img>/<video>/<object> tags (the server knows the encrypted file as
-// octet-stream, so the type coming from there is useless).
-const E2E_MIME: Record<string, string> = {
-  txt: 'text/plain', md: 'text/markdown', log: 'text/plain', csv: 'text/csv',
-  json: 'application/json', xml: 'application/xml', html: 'text/html',
-  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
-  webp: 'image/webp', bmp: 'image/bmp', avif: 'image/avif', svg: 'image/svg+xml',
-  pdf: 'application/pdf',
-  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4',
-  mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac',
-  m4a: 'audio/mp4', aac: 'audio/aac', opus: 'audio/opus',
-};
+// octet-stream, so the type coming from there is useless). One table for
+// folder files and single encrypted files: lib/e2emime.
 function e2eMimeFor(n: FileNode): string {
-  const ext = (n.extension || '').toLowerCase();
-  return E2E_MIME[ext] || 'application/octet-stream';
+  return e2eMimeForExt(n.extension);
 }
 
 /**
@@ -7759,7 +8694,7 @@ async function e2eFetchDecrypted(n: FileNode): Promise<string | null> {
   if (!kek) return null;
   const buf = await api.fetchArrayBuffer(n.path);
   if (!hasMagic(buf)) return null;
-  const plain = await decryptFile(kek, buf);
+  const plain = await decryptFileAny(kek, e2eRing.previous(e2eRoot.value), buf);
   const url = URL.createObjectURL(new Blob([plain], { type: e2eMimeFor(n) }));
   e2eUrls.set(n.path, url);
   return url;
@@ -7785,52 +8720,72 @@ async function e2eOpenPreview(n: FileNode) {
   void markRecent(n);
 }
 
-/** Decrypt + download under the original name. A file with no magic comes down as-is. */
+/** Decrypt + download under the original name. A file with no magic comes down as-is.
+ *  wiring:e2 stream — decrypted AS IT ARRIVES, into the save sink this
+ *  browser has (lib/e2esave): either header version, any size where the
+ *  browser can write a stream to disk. */
 async function e2eDownload(n: FileNode) {
-  try {
-    const buf = await api.fetchArrayBuffer(n.path);
-    const kek = e2eKek();
-    let out = buf;
-    if (hasMagic(buf)) {
-      if (!kek) throw new Error('locked');
-      out = await decryptFile(kek, buf);
-    }
-    const url = URL.createObjectURL(new Blob([out], { type: e2eMimeFor(n) }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = n.basename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  } catch {
+  const kek = e2eKek();
+  if (!kek) {
     flashToast(t('e2e.download.failed'));
+    return;
   }
+  await e2eFiles.downloadFolderFile(n, kek, e2eRing.previous(e2eRoot.value), e2eRoot.value);
 }
 
-/** Upload list → encrypted File list (anything over 200MB + the marker name is skipped). */
-async function e2eEncryptUploads(list: File[]): Promise<File[]> {
+/** Upload list → encrypted File list (anything over 200MB + the marker name is skipped).
+ *
+ *  wiring:e2 names — in a folder whose names are encrypted the File is also
+ *  RENAMED to its stored (ciphertext) name here, the one place every upload
+ *  path goes through, so neither the single POST nor the staged/chunked path
+ *  can carry the plaintext name to the server. The plaintext stays in the
+ *  browser for the progress row (`e2eUploadNames`). A long name comes back
+ *  with a sidecar the caller uploads first. A name a disk could not hold is
+ *  refused here rather than uploaded under a name `filex decrypt` could not
+ *  write back. */
+async function e2eEncryptUploads(
+  list: File[],
+  target: string,
+): Promise<{ files: File[]; sidecars: File[] }> {
   const kek = e2eKek();
-  if (!kek) return [];
+  if (!kek) return { files: [], sidecars: [] };
   const out: File[] = [];
+  const sidecars: File[] = [];
+  await e2eKnowRootOf(target);
+  const encNames = !!e2eNames.writesEncrypted(target);
   for (const f of list) {
     if (f.name === E2E_MARKER_NAME) continue;
-    if (f.size > E2E_MAX_FILE_BYTES) {
-      flashToast(t('e2e.upload.too_big'));
+    if (encNames && namePlainProblem(f.name)) {
+      flashToast(t('e2e.names.bad_name', { name: f.name }));
       continue;
     }
     try {
-      const ct = await encryptFile(kek, await f.arrayBuffer());
-      out.push(new File([ct], f.name, { type: 'application/octet-stream' }));
+      /* wiring:e2 stream — over the one-shot limit: a STREAM (0x02) file,
+         encrypted as it is uploaded (nothing held but the chunk in flight). */
+      const source = f.size > E2E_MAX_FILE_BYTES ? await e2eFiles.folderUploadSource(f, kek) : null;
+      const ct = source ? null : await encryptFile(kek, await f.arrayBuffer());
+      let name = f.name;
+      if (encNames) {
+        const enc = await e2eNames.nameForWrite(target, f.name);
+        if (!enc) throw new Error('e2e: the folder name key is missing');
+        name = enc.stored;
+        if (enc.sidecar) {
+          sidecars.push(new File([enc.sidecar.content], enc.sidecar.name, { type: 'text/plain' }));
+        }
+      }
+      const file = new File(ct ? [ct] : [], name, { type: 'application/octet-stream' });
+      if (source) e2eUploadSources.set(file, source);
+      if (encNames) e2eUploadNames.set(file, f.name);
+      out.push(file);
     } catch (err) {
-      emit('error', { message: (err as Error).message, context: { op: 'e2e-encrypt', file: f.name } });
+      emit('error', { message: (err as Error).message, context: { op: 'e2e-encrypt' } });
     }
   }
-  return out;
+  return { files: out, sidecars };
 }
 
 /** EncryptedFolderModal submit: create the folder + upload the marker + leave it unlocked. */
-async function submitEncryptedFolder(payload: { name: string; password: string }) {
+async function submitEncryptedFolder(payload: { name: string; password: string; level?: ChoosableLevel }) {
   if (e2eActive.value) {
     // Nested encrypted folders blur root detection — not in the MVP.
     flashToast(t('e2e.create.nested'));
@@ -7844,8 +8799,12 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
      * escrow slot when the installation has one. Both are decided HERE and
      * never again: the wrapped copies are written into the marker now, so a
      * folder created without escrow can never be opened by an escrow key. */
-    const { marker, fmk, recoveryKey } = await createEncryptedFolder(payload.password, {
+    /* wiring:e2 — the level chosen in the dialog. Level 1 (contents only,
+     * a v2 marker every filex since 0.31 opens) is the default; level 2 also
+     * encrypts the names (v3). */
+    const { marker, fmk, recoveryKey, names } = await createEncryptedFolder(payload.password, {
       escrowPublicKey: e2eEscrowPub.value,
+      encryptNames: payload.level === 'names',
     });
     const markerFile = new File([JSON.stringify(marker)], E2E_MARKER_NAME, {
       type: 'application/json',
@@ -7853,7 +8812,8 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
     const newDirWire = wireJoin(dirWire, payload.name);
     await api.uploadMultipart(newDirWire, [markerFile]);
     // It starts unlocked in the creating session (they just typed the password).
-    e2eRing.set(newDirWire, fmk);
+    e2eRing.set(newDirWire, fmk, names ?? null);
+    e2eNames.setMarker(newDirWire, marker);
     e2eRingVer.value++;
     showEncFolder.value = false;
     // ⚠ Show the key only after the marker is safely uploaded. Showing it
@@ -7937,12 +8897,23 @@ async function e2eRecoverUnlock(payload: { mode: 'recovery' | 'escrow'; value: s
         return;
       }
     }
-    e2eRing.set(e2eRoot.value, fmk);
-    e2eRingVer.value++;
+    if (!(await e2eAdoptKeys(e2eRoot.value, e2eMarker.value, fmk))) {
+      e2eRecoverErr.value = t('e2e.names.key_failed');
+      return;
+    }
     showRecoveryUnlock.value = false;
     flashToast(
       payload.mode === 'escrow' ? t('e2e.recover.escrow_done') : t('e2e.recover.recovery_done'),
     );
+    await load();
+    /* wiring:e2 password — a recovery key that was used is a password that
+       was lost (or leaked): a new one is set before the folder is used. The
+       key stays in this tab's memory only for that, and closing the dialog
+       locks the folder. Escrow is the operator's door and resets nothing. */
+    if (payload.mode === 'recovery') {
+      e2eRecoveryInHand = payload.value;
+      e2eOpenPasswordChange('reset');
+    }
   } catch (err) {
     e2eRecoverErr.value = (err as Error).message;
   } finally {
@@ -7957,7 +8928,8 @@ async function openRecoveryUnlock() {
     try {
       const { blob, url } = await api.fetchBlob(wireJoin(e2eRoot.value, E2E_MARKER_NAME), { fresh: true });
       URL.revokeObjectURL(url);
-      e2eMarker.value = parseMarker(await blob.text());
+      const parsed = parseMarkerDetailed(await blob.text());
+      e2eMarker.value = parsed && parsed.unsupported.length === 0 ? parsed.marker : null;
     } catch {
       e2eMarker.value = null;
     }
@@ -7980,6 +8952,7 @@ async function e2eDoUpgrade() {
     });
     await api.uploadMultipart(e2eRoot.value, [markerFile]);
     e2eMarker.value = up.marker;
+    e2eNames.setMarker(e2eRoot.value, up.marker);
     e2eUpgradeOffer.value = false;
     e2eUpgradePw.value = '';
     recoveryKeyValue.value = up.recoveryKey;
@@ -8018,6 +8991,7 @@ async function e2eWriteMarker(next: E2eMarker) {
   const file = new File([JSON.stringify(next)], E2E_MARKER_NAME, { type: 'application/json' });
   await api.uploadMultipart(e2eRoot.value, [file]);
   e2eMarker.value = next;
+  e2eNames.setMarker(e2eRoot.value, next);
 }
 
 /** Accept: seal this folder's master key to the installation's escrow key.
@@ -8096,6 +9070,821 @@ function e2eDeclineUpgrade() {
   e2eUpgradePw.value = '';
 }
 
+
+/* --- wiring:e2 names ----------------------------------------------------
+ *
+ * Encrypted file and folder names (docs/E2E-ENCRYPTION.md → "Encrypted
+ * names"). The crypto is lib/e2enames.ts, the display side is the name view
+ * (composables/useE2eNames). What lives here is the writing side and the
+ * switch of an existing folder:
+ *
+ *   - every name this explorer SENDS into an encrypted-names folder goes
+ *     through `e2eWireName` (new folder, rename) or `e2eEncryptUploads`
+ *     (upload) — there is no other door, and none falls back to plaintext;
+ *   - a name is sealed for the folder it is in (its folder id, lib/e2enames),
+ *     so a move or copy between folders re-seals it: one queue step per item,
+ *     move and rename together (`e2eTransferNamed`); a folder keeps its id,
+ *     so nothing inside it is touched;
+ *   - a long name's sidecar is written before the item; it is never deleted
+ *     with the item, because it is a pure function of the name and a restore
+ *     needs it;
+ *   - searching inside such a folder is done here, in the browser
+ *     (`e2eSearchInside`), because the server can no longer read the names;
+ *   - raising a folder from level 1 to level 2 (its settings, never an offer)
+ *     renames what is there, resumably (lib/e2enamepass, `e2eRaiseLevel`).
+ */
+
+/** A name the folder cannot hold (see lib/e2enames `namePlainProblem`). */
+class E2eNameRefused extends Error {
+  constructor(public problem: string) {
+    super(`e2e: invalid name (${problem})`);
+    this.name = 'E2eNameRefused';
+  }
+}
+
+/**
+ * The name to SEND for a plaintext name written into `dirWire`: the stored
+ * (ciphertext) name inside an encrypted-names folder, the name itself
+ * anywhere else. A long name's sidecar is uploaded first. Throws when the
+ * folder's names are encrypted but it is locked — never falls back to the
+ * plaintext.
+ */
+async function e2eWireName(
+  dirWire: string,
+  plainName: string,
+  opts: { isDir?: boolean; keepIdOf?: string } = {},
+): Promise<string> {
+  await e2eKnowRootOf(dirWire);
+  if (!e2eNames.writesEncrypted(dirWire)) return plainName;
+  const problem = namePlainProblem(plainName);
+  if (problem) throw new E2eNameRefused(problem);
+  const enc = await e2eNames.nameForWrite(dirWire, plainName, opts);
+  if (!enc) return plainName;
+  if (enc.sidecar) {
+    await api.uploadMultipart(dirWire, [
+      new File([enc.sidecar.content], enc.sidecar.name, { type: 'text/plain' }),
+    ]);
+  }
+  return enc.stored;
+}
+
+/**
+ * Make sure the name view knows whether `dirWire` sits in an encrypted-names
+ * folder BEFORE a name is sent there. The listing on screen normally taught
+ * it already; this closes the gap where it did not (a write racing the first
+ * listing), because the fallback of a gap is sending a plaintext name.
+ */
+async function e2eKnowRootOf(dirWire: string): Promise<void> {
+  const root = e2eRoot.value;
+  if (!root) return;
+  const d = dirWire.replace(/\/+$/, '');
+  const r = root.replace(/\/+$/, '');
+  if (d === r || d.startsWith(r.endsWith('://') ? r : `${r}/`)) await e2eNames.markerFor(root);
+}
+
+/**
+ * wiring:e2 names — a move or copy that crosses folders inside an
+ * encrypted-names folder. A name is sealed for the folder it is in
+ * (lib/e2enames → folder ids), so each item arrives under a name sealed for
+ * its NEW folder: one queue step per item, the move and the rename together
+ * (api.transferNamed — the server moves onto the literal new name, so nothing
+ * stops half-way). A folder keeps its id, so nothing inside it is touched. A
+ * long name's sidecar is written into the target first.
+ *
+ * Null when this is not such a transfer (the ordinary path applies): the
+ * target is not inside an encrypted-names folder, or the sources are not all
+ * inside the same one (the server's boundary guard refuses those anyway).
+ */
+async function e2eTransferNamed(
+  kind: 'copy' | 'move',
+  sources: string[],
+  targetWire: string,
+  originWire?: string,
+): Promise<{ ops: PendingOpDto[]; undo: (() => Promise<{ queued: boolean }>) | null } | null> {
+  await e2eKnowRootOf(targetWire);
+  const root = e2eNames.writesEncrypted(targetWire);
+  if (!root || !e2eRing.names(root)) return null;
+  if (!sources.every((src) => e2eNames.rootOf(src) === root)) return null;
+  const ops: PendingOpDto[] = [];
+  const back: Array<{ moved: string; origin: string; name: string }> = [];
+  const same = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '');
+  // The names already in the target: a copy next to its original (or onto a
+  // taken name) is numbered the way an upload conflict is — the server cannot
+  // invent a name there, only the browser can.
+  let taken = new Set<string>();
+  try {
+    taken = new Set(((await api.index(targetWire)).files ?? []).map((f) => f.basename));
+  } catch {
+    /* the server refuses a taken name anyway */
+  }
+  for (const src of sources) {
+    const origin = wireParent(src);
+    if (kind === 'move' && same(origin, targetWire)) continue;
+    const stored = wireBasename(src);
+    const dec = await e2eNames.plainNameOf(src);
+    if (!dec || dec.state === 'unreadable' || dec.name === null) {
+      throw new Error(t('e2e.names.move_unreadable'));
+    }
+    const isDir = await e2eIsDir(src);
+    const opts = isDir ? { keepIdOf: src } : {};
+    let enc = await e2eNames.nameForWrite(targetWire, dec.name, opts);
+    if (!enc) return null;
+    for (let i = 2; kind === 'copy' && taken.has(enc.stored) && i < 100; i++) {
+      enc = (await e2eNames.nameForWrite(targetWire, numberedName(dec.name, i), opts))!;
+    }
+    if (taken.has(enc.stored)) throw new Error(t('e2e.names.move_taken', { name: dec.name }));
+    taken.add(enc.stored);
+    if (enc.sidecar) {
+      await api.uploadMultipart(targetWire, [
+        new File([enc.sidecar.content], enc.sidecar.name, { type: 'text/plain' }),
+      ]);
+    }
+    const { op } = await api.transferNamed(kind, src, targetWire, enc.stored, originWire);
+    pendingOps.register(op);
+    ops.push(op);
+    back.push({ moved: wireJoin(targetWire, enc.stored), origin, name: stored });
+  }
+  const undo =
+    kind === 'move'
+      ? async () => {
+          for (const b of back) {
+            const { op } = await api.transferNamed('move', b.moved, b.origin, b.name);
+            pendingOps.register(op);
+          }
+          return { queued: true };
+        }
+      : null;
+  return { ops, undo };
+}
+
+/** Is the item at `wire` a folder? From a row on screen, else from its
+ *  parent's listing (a stored name alone cannot say for a plaintext one). */
+async function e2eIsDir(wire: string): Promise<boolean> {
+  const known =
+    files.value.find((f) => f.path === wire) ??
+    (splitPaneRef.value?.visibleNodes() ?? []).find((f: FileNode) => f.path === wire);
+  if (known) return known.type === 'dir';
+  const c = classifyStoredName(wireBasename(wire)).kind;
+  if (c === 'dir' || c === 'longdir') return true;
+  if (c === 'file' || c === 'long') return false;
+  try {
+    const res = await api.index(wireParent(wire));
+    return (res.files ?? []).some((f) => f.path === wire && f.type === 'dir');
+  } catch {
+    return false;
+  }
+}
+
+/** Folders visited, at most, by one in-browser search. */
+const E2E_SEARCH_MAX_DIRS = 2000;
+
+/**
+ * Search inside an encrypted-names folder, in the browser: the server stores
+ * ciphertext names, so its index cannot match anything a person types. Walks
+ * the folder breadth-first from `target`, decrypting each listing, and
+ * matches with the same fold the name filter uses. Null when `target` is not
+ * inside such a folder (the server search applies). A locked folder answers
+ * with no rows and its root, so the lock screen shows.
+ */
+async function e2eSearchInside(target: string, q: string): Promise<ManagerResponse | null> {
+  const root = e2eNames.writesEncrypted(target);
+  if (!root) return null;
+  const idx = target.indexOf('://');
+  const adapterName = idx === -1 ? adapter.value : target.slice(0, idx);
+  const base: ManagerResponse = {
+    adapter: adapterName,
+    storages: (props.config.storages ?? []).map((st) => st.name),
+    dirname: target,
+    read_only: false,
+    files: [],
+    e2e_root: root,
+  };
+  if (!e2eRing.names(root)) return base;
+  const hits: FileNode[] = [];
+  const queue = [target];
+  let dirs = 0;
+  while (queue.length > 0 && hits.length < MANAGER_SEARCH_PAGE && dirs < E2E_SEARCH_MAX_DIRS) {
+    const dir = queue.shift()!;
+    dirs++;
+    let res: ManagerResponse;
+    try {
+      res = await api.index(dir);
+    } catch {
+      continue;
+    }
+    const rows = filterListing(await e2eNames.decorate(res.files ?? [], { root }));
+    for (const r of rows) {
+      if (r.type === 'dir') queue.push(r.path);
+      if (nameMatches(r.basename, q)) hits.push(r);
+      if (hits.length >= MANAGER_SEARCH_PAGE) break;
+    }
+  }
+  return { ...base, files: hits, truncated: queue.length > 0 } as ManagerResponse;
+}
+
+/* Encryption level (docs/E2E-ENCRYPTION.md → "Encryption levels"): a
+ * property of the folder, shown in the strip and changed only in the
+ * folder's encryption settings — never offered after an unlock. */
+const showE2eSettings = ref(false);
+
+/* wiring:e2 names — the marker in hand is the marker of the folder we are IN.
+ * It used to be whichever folder was unlocked last, so stepping from one
+ * unlocked encrypted folder into another kept the first one's answers (and
+ * its offers, and the password held for them) on screen over the second.
+ * A different root drops every open offer and the password held for it. */
+watch(e2eRoot, async (root, prev) => {
+  if (root === prev) return;
+  e2eUpgradeOffer.value = false;
+  e2eUpgradePw.value = '';
+  e2eEscrowOffer.value = false;
+  e2eEscrowPw.value = '';
+  showE2eSettings.value = false;
+  e2eNamesErr.value = '';
+  e2eNamesProgress.value = null;
+  e2eUnsupported.value = [];
+  if (!root) {
+    e2eMarker.value = null;
+    return;
+  }
+  const m = e2eNames.markerCached(root);
+  e2eMarker.value = m === undefined ? null : m;
+  if (m === undefined) {
+    const fetched = await e2eNames.markerFor(root);
+    if (e2eRoot.value === root) e2eMarker.value = fetched;
+  }
+});
+const e2eNamesBusy = ref(false);
+const e2eNamesErr = ref('');
+const e2eNamesProgress = ref<NamePassProgress | null>(null);
+let e2eNamesStop = false;
+
+const e2eLevel = computed(() => {
+  void e2eRingVer.value;
+  return encryptionLevel(e2eMarker.value);
+});
+const e2eNamesOn = computed(() => e2eLevel.value !== 'content');
+const e2eCanRaise = computed(() => {
+  void e2eRingVer.value;
+  return canRaiseToNames(e2eMarker.value);
+});
+/** Rows in view whose names need the pass: never encrypted (a WebDAV
+ *  write), or moved in over WebDAV and so sealed for another folder. Shown,
+ *  flagged, and fixed from the settings by the same pass (lib/e2enamepass). */
+const e2ePlainNamed = computed(() =>
+  e2eNamesOn.value
+    ? files.value.filter((f) => f.e2e_name_state === 'plain' || f.e2e_name_state === 'unreadable').length
+    : 0,
+);
+
+/**
+ * Raise the folder from level 1 to level 2 (or resume that, or encrypt names
+ * that arrived in the clear later). The marker is written FIRST — v3, a fresh
+ * name key and root id, `pending` — and only then is a single entry renamed;
+ * `pending` is cleared when the pass finishes with nothing left over. Contents
+ * are not touched: this is renames only.
+ */
+async function e2eRaiseLevel(): Promise<boolean> {
+  const root = e2eRoot.value;
+  const fmk = root ? e2eRing.get(root) : undefined;
+  let marker = e2eMarker.value;
+  if (!root || !fmk || !marker || e2eNamesBusy.value) return false;
+  showE2eSettings.value = false;
+  e2eNamesBusy.value = true;
+  e2eNamesErr.value = '';
+  e2eNamesStop = false;
+  try {
+    if (!markerHasNames(marker)) {
+      const started = await enableNames(marker, fmk);
+      await e2eWriteMarker(started.marker);
+      e2eRing.setNames(root, started.names);
+      e2eRingVer.value++;
+      marker = started.marker;
+    }
+    const nk = e2eRing.names(root);
+    if (!nk) throw new Error('e2e: the folder name key is missing');
+    e2eNamesProgress.value = { renamed: 0, failed: 0, seen: 0 };
+    const prog = e2eNamesProgress.value;
+    await runNamePass(nk, root, {
+      list: async (dir) => (await api.index(dir)).files ?? [],
+      readSidecar: async (dir, name) => {
+        try {
+          return new TextDecoder().decode(await api.fetchArrayBuffer(wireJoinPath(dir, name)));
+        } catch {
+          return null;
+        }
+      },
+      writeSidecar: async (dir, name, content) => {
+        await api.uploadMultipart(dir, [new File([content], name, { type: 'text/plain' })]);
+      },
+      // A folder rename is a job of the queue where the server has one: the
+      // queue keeps order, so a folder is renamed after its contents.
+      rename: async (dir, row, to) => {
+        if (row.type === 'dir' && serverQueues('rename')) {
+          const job = (await api.renameQueued(dir, row.path, to)).op;
+          if (job) pendingOps.register(job);
+        } else {
+          await api.rename(dir, row.path, to);
+        }
+      },
+      stopped: () => e2eNamesStop,
+    }, prog);
+    if (e2eNamesStop) {
+      flashToast(t('e2e.names.stopped', { n: prog.renamed }));
+      return false;
+    }
+    if (prog.failed > 0) {
+      e2eNamesErr.value = t('e2e.names.partial', { n: prog.failed });
+      return false;
+    }
+    // The marker as it is NOW (a conversion may have written it meanwhile).
+    const current = e2eMarker.value ?? marker;
+    if (current.names?.pending) await e2eWriteMarker(finishNames(current));
+    e2eNamesProgress.value = null;
+    flashToast(t('e2e.names.done', { n: prog.renamed }));
+    return true;
+  } catch (err) {
+    e2eNamesErr.value = t('e2e.names.failed');
+    emit('error', { message: (err as Error).message, context: { op: 'e2e-names' } });
+    return false;
+  } finally {
+    e2eNamesBusy.value = false;
+    await load();
+  }
+}
+
+/* --- wiring:e2 convert --------------------------------------------------
+ *
+ * Encrypting a folder that already exists, in place (docs/E2E-ENCRYPTION.md →
+ * "Encrypting a folder you already have"). The same dialog as creating one
+ * (EncryptedFolderModal, `existing`), then:
+ *
+ *   1. the key file is written FIRST, conversion pending (`conv`, and at level
+ *      2 the names pending too) — from then on the server treats the folder
+ *      as encrypted, and the password opens it;
+ *   2. every file is encrypted over itself (lib/e2econvert), each write one
+ *      the server keeps no plaintext version of; resumable by the magic;
+ *   3. at level 2 the names pass (e2eRaiseLevel) renames what is there;
+ *   4. the key file drops `conv`, and what filex holds from before goes:
+ *      thumbnails and extracted content always, versions and trash entries
+ *      as chosen in the dialog (recorded in the key file, so a resumed run
+ *      honours the same choice).
+ */
+const e2eConvTarget = ref<FileNode | null>(null);
+const e2eConvRunning = ref(false);
+const e2eConvErr = ref('');
+const e2eConvProgress = ref<ConvertProgress | null>(null);
+let e2eConvStop = false;
+const e2eConvPending = computed(() => {
+  void e2eRingVer.value;
+  return conversionPending(e2eMarker.value);
+});
+
+/** A plain folder this person can write, not inside or itself an encrypted one. */
+function e2eCanConvert(sel: FileNode[], writable: boolean): boolean {
+  const n = sel.length === 1 ? sel[0] : null;
+  return (
+    !!n &&
+    n.type === 'dir' &&
+    writable &&
+    !e2eActive.value &&
+    !n.e2e &&
+    !n.e2e_root &&
+    !trashActive.value &&
+    typeof crypto !== 'undefined' &&
+    !!crypto.subtle
+  );
+}
+
+function e2eOpenConvert(n: FileNode) {
+  e2eConvTarget.value = n;
+  showEncFolder.value = true;
+}
+
+/** Any encrypted folder inside `root`? Encrypted folders do not nest. */
+async function e2eConvFindNested(root: string): Promise<boolean> {
+  const queue = [root];
+  while (queue.length) {
+    const dir = queue.shift()!;
+    const res = await api.index(dir);
+    if (dir !== root && typeof res.e2e_root === 'string' && res.e2e_root) return true;
+    for (const f of res.files ?? []) {
+      if (f.type !== 'dir') continue;
+      if (f.e2e) return true;
+      queue.push(f.path);
+    }
+  }
+  return false;
+}
+
+async function submitConvertFolder(payload: {
+  name: string;
+  password: string;
+  level?: ChoosableLevel;
+  cleanup?: { versions: boolean; trash: boolean };
+}) {
+  const target = e2eConvTarget.value;
+  if (!target) return;
+  const root = target.path;
+  e2eCreateBusy.value = true;
+  try {
+    if (await e2eConvFindNested(root)) {
+      flashToast(t('e2e.convert.nested'));
+      return;
+    }
+    const made = await createEncryptedFolder(payload.password, { escrowPublicKey: e2eEscrowPub.value });
+    let marker = made.marker;
+    let names = null;
+    if (payload.level === 'names') {
+      const started = await enableNames(marker, made.fmk);
+      marker = started.marker;
+      names = started.names;
+    }
+    marker = startConversion(marker, undefined, payload.cleanup ?? { versions: false, trash: false });
+    await api.uploadMultipart(root, [
+      new File([JSON.stringify(marker)], E2E_MARKER_NAME, { type: 'application/json' }),
+    ]);
+    // Unlocked in this tab from the start: they just typed the password.
+    e2eRing.set(root, made.fmk, names);
+    e2eNames.setMarker(root, marker);
+    e2eRingVer.value++;
+    showEncFolder.value = false;
+    e2eConvTarget.value = null;
+    // ⚠ The key after the key file is safely written, as when creating.
+    recoveryKeyValue.value = made.recoveryKey;
+    recoveryKeyFolder.value = payload.name;
+    recoveryKeyVariant.value = 'created';
+    showRecoveryKey.value = true;
+    await load(paneToUser(root));
+    await nextTick();
+    // The watch on e2eRoot fills the marker in its own tick; this run must not
+    // depend on which came first.
+    if (e2eRoot.value === root) {
+      e2eMarker.value = marker;
+      void e2eRunConversion();
+    }
+  } catch (err) {
+    emit('error', { message: (err as Error).message, context: { op: 'e2e-convert' } });
+    flashToast(t('e2e.convert.failed'));
+  } finally {
+    e2eCreateBusy.value = false;
+  }
+}
+
+/** Steps 2–4, for the folder the main pane is in. Resumes where it stopped. */
+async function e2eRunConversion() {
+  const root = e2eRoot.value;
+  const fmk = root ? e2eRing.get(root) : undefined;
+  const marker = e2eMarker.value;
+  if (!root || !fmk || !marker || !conversionPending(marker) || e2eConvRunning.value) return;
+  e2eConvRunning.value = true;
+  e2eConvErr.value = '';
+  e2eConvStop = false;
+  e2eConvProgress.value = { total: 0, done: 0, skipped: 0, tooBig: 0, failed: 0 };
+  const prog = e2eConvProgress.value;
+  try {
+    await runConversion(
+      root,
+      {
+        list: async (dir) => (await api.index(dir)).files ?? [],
+        head: (wire) => api.fetchHead(wire, 16),
+        read: (wire) => api.fetchArrayBuffer(wire),
+        write: async (dir, row, data, expect) => {
+          await api.uploadMultipart(
+            dir,
+            [new File([data], row.basename, { type: 'application/octet-stream' })],
+            undefined,
+            { e2e_convert: '1', ...(expect ? { expect } : {}) },
+          );
+        },
+        encrypt: (data) => encryptFile(fmk, data),
+        stopped: () => e2eConvStop,
+      },
+      prog,
+      { maxBytes: E2E_MAX_FILE_BYTES },
+    );
+    if (e2eConvStop) {
+      flashToast(t('e2e.convert.stopped', { n: prog.done }));
+      return;
+    }
+    if (prog.failed + prog.tooBig > 0) {
+      e2eConvErr.value = t('e2e.convert.partial', { n: prog.failed + prog.tooBig });
+      return;
+    }
+    // Level 2: the names, now that every file is ciphertext.
+    if (e2eMarker.value?.names?.pending && !(await e2eRaiseLevel())) return;
+    const current = e2eMarker.value ?? marker;
+    const cleanup = current.conv?.cleanup;
+    await e2eWriteMarker(finishConversion(current));
+    e2eConvProgress.value = null;
+    try {
+      const out = await api.e2eCleanup({ path: root, versions: !!cleanup?.versions, trash: !!cleanup?.trash });
+      flashToast(
+        t('e2e.convert.done', {
+          n: prog.done + prog.skipped,
+          versions: out.versions_deleted,
+          trash: out.trash_purged,
+        }),
+      );
+    } catch (err) {
+      flashToast(t('e2e.convert.cleanup_failed'));
+      emit('error', { message: (err as Error).message, context: { op: 'e2e-convert-cleanup' } });
+    }
+  } catch (err) {
+    e2eConvErr.value = t('e2e.convert.failed');
+    emit('error', { message: (err as Error).message, context: { op: 'e2e-convert' } });
+  } finally {
+    e2eConvRunning.value = false;
+    await load();
+  }
+}
+
+/** From the settings: the password dialog, or the escrow way back. */
+function e2eSettingsPassword() {
+  showE2eSettings.value = false;
+  e2eOpenPasswordChange('change');
+}
+function e2eSettingsEscrow() {
+  showE2eSettings.value = false;
+  e2eOpenEscrowOffer();
+}
+
+/* --- wiring:e2 password -------------------------------------------------
+ *
+ * Changing an encrypted folder's password (docs/E2E-ENCRYPTION.md →
+ * "Changing the password"). The crypto is lib/e2ecrypto (`changePassword`,
+ * `startRekey`, `rewrapFileKey`, `finishRekey`); the dialog is
+ * E2eChangePasswordModal. What lives here:
+ *
+ *   - the order of writes: the key file first, THEN the announcement (the
+ *     server records it and tells the owner), THEN — for a re-key — the
+ *     re-wrap of every file, which is resumable because the marker already
+ *     holds the previous folder key;
+ *   - the reset after a recovery-key unlock: the key used is kept in memory
+ *     only for this, and closing the dialog locks the folder.
+ */
+const showPwChange = ref(false);
+const pwMode = ref<'change' | 'reset'>('change');
+const pwBusy = ref(false);
+const pwErr = ref<string | null>(null);
+/** The recovery key that just unlocked the folder, for the forced reset. */
+let e2eRecoveryInHand: string | null = null;
+/** Re-wrap in progress (a re-key), and what it has done so far. */
+const e2eRekeyBusy = ref(false);
+const e2eRekeyErr = ref('');
+const e2eRekeyProgress = ref<{ done: number; failed: number } | null>(null);
+
+const e2eRekeyPending = computed(() => {
+  void e2eRingVer.value;
+  return rekeyPending(e2eMarker.value);
+});
+const e2ePwNeedsRekey = computed(() => !!e2eMarker.value && passwordChangeNeedsRekey(e2eMarker.value));
+
+function e2eOpenPasswordChange(mode: 'change' | 'reset') {
+  pwMode.value = mode;
+  pwErr.value = null;
+  showPwChange.value = true;
+}
+
+/** × on the dialog. In 'reset' mode that is "lock the folder instead". */
+function e2eClosePasswordChange() {
+  if (pwBusy.value) return;
+  if (pwMode.value === 'reset') {
+    e2eLock();
+    return;
+  }
+  showPwChange.value = false;
+}
+
+/** Tell the server (audit log + the folder owner's notification). A failure
+ *  is said, not thrown: the password HAS changed, and saying otherwise would
+ *  be the lie. */
+async function e2eAnnouncePassword(root: string, via: 'password' | 'recovery_key', rekey: boolean) {
+  try {
+    await api.e2ePasswordChanged({ path: root, via, rekey });
+  } catch (err) {
+    emit('error', { message: (err as Error).message, context: { op: 'e2e-password-announce' } });
+    showToast({ message: t('e2e.password.announce_failed') }, ERROR_TOAST_MS);
+  }
+}
+
+async function e2eSubmitPassword(payload: E2eChangePasswordPayload) {
+  const root = e2eRoot.value;
+  const marker = e2eMarker.value;
+  if (!root || !marker || pwBusy.value) return;
+  const cred: E2eCredential | null =
+    payload.proof ?? (e2eRecoveryInHand ? { recoveryKey: e2eRecoveryInHand } : null);
+  if (!cred) {
+    pwErr.value = t('e2e.password.current_required');
+    return;
+  }
+  const via: 'password' | 'recovery_key' = 'recoveryKey' in cred ? 'recovery_key' : 'password';
+  pwBusy.value = true;
+  pwErr.value = null;
+  try {
+    if (!payload.rotate) {
+      const next = await changePassword(marker, cred, payload.newPassword);
+      await e2eWriteMarker(next);
+      e2eRecoveryInHand = null;
+      showPwChange.value = false;
+      await e2eAnnouncePassword(root, via, false);
+      flashToast(t('e2e.password.done'));
+      return;
+    }
+    // A re-key: the key file first (new folder key, previous one sealed
+    // inside it), then the keys in memory, then the recovery key if a new
+    // one was issued, then the file keys.
+    const start = await startRekey(marker, cred, payload.newPassword, {
+      escrowPublicKey: e2eEscrowPub.value,
+    });
+    await e2eWriteMarker(start.marker);
+    // A pre-0.31 folder's "add a recovery key" offer is moot now: the re-key
+    // gave it a recovery key (and a folder key of its own).
+    e2eUpgradeOffer.value = false;
+    e2eUpgradePw.value = '';
+    e2eRing.set(root, start.fmk, start.names ?? e2eRing.names(root) ?? null, start.previous);
+    e2eRingVer.value++;
+    e2eRevokeAll();
+    e2eRecoveryInHand = null;
+    showPwChange.value = false;
+    if (start.recoveryKeyIsNew) {
+      recoveryKeyValue.value = start.recoveryKey;
+      recoveryKeyFolder.value = wireBasename(root);
+      recoveryKeyVariant.value = 'replaced';
+      showRecoveryKey.value = true;
+    }
+    await e2eAnnouncePassword(root, via, true);
+    await e2eRunRekey();
+  } catch (err) {
+    if (err instanceof E2eDecryptError) {
+      pwErr.value = via === 'recovery_key' ? t('e2e.password.wrong_recovery') : t('e2e.password.wrong_current');
+    } else if (err instanceof E2eRekeyEscrowError) {
+      pwErr.value = t('e2e.password.escrow_blocked');
+    } else {
+      pwErr.value = t('e2e.password.failed');
+      emit('error', { message: (err as Error).message, context: { op: 'e2e-password' } });
+    }
+  } finally {
+    pwBusy.value = false;
+  }
+}
+
+/** One file, back where it was, under the same stored name. */
+async function e2eWriteBack(dir: string, name: string, bytes: ArrayBuffer): Promise<void> {
+  const file = new File([bytes], name, { type: 'application/octet-stream' });
+  if (chunked.shouldChunk(file)) {
+    await chunked.uploadFile({ path: dir, file });
+    return;
+  }
+  await api.uploadMultipart(dir, [file]);
+}
+
+/** The re-wrap pass: every encrypted file under `dir`, children first. A file
+ *  already under the new key is skipped (rewrapFileKey answers null), so
+ *  running it again after an interruption finishes the job. */
+async function e2eRekeyPass(dir: string, previous: CryptoKey, fmk: CryptoKey): Promise<void> {
+  const prog = e2eRekeyProgress.value!;
+  let res: ManagerResponse;
+  try {
+    res = await api.index(dir);
+  } catch {
+    prog.failed++;
+    return;
+  }
+  for (const row of res.files ?? []) {
+    if (row.basename === E2E_MARKER_NAME) continue;
+    if (row.type === 'dir') {
+      await e2eRekeyPass(row.path, previous, fmk);
+      continue;
+    }
+    try {
+      /* wiring:e2 stream — a large file is re-wrapped from its header; its
+         body is re-sent unread instead of being held in memory. */
+      if ((row.size ?? 0) > E2E_MAX_FILE_BYTES) {
+        if (await e2eFiles.rewrapLarge(row, previous, fmk)) prog.done++;
+        continue;
+      }
+      const data = await api.fetchArrayBuffer(row.path);
+      if (!hasMagic(data)) continue; // never encrypted (a DAV write, a sidecar)
+      const out = await rewrapFileKey(data, previous, fmk);
+      if (out) await e2eWriteBack(dir, row.basename, out);
+      prog.done++;
+    } catch {
+      prog.failed++;
+    }
+  }
+}
+
+/** Run (or resume) the re-wrap; on success drop the previous key from the
+ *  key file and from memory. */
+async function e2eRunRekey() {
+  const root = e2eRoot.value;
+  const fmk = root ? e2eRing.get(root) : undefined;
+  const previous = root ? e2eRing.previous(root) : undefined;
+  if (!root || !fmk || !previous || e2eRekeyBusy.value) return;
+  e2eRekeyBusy.value = true;
+  e2eRekeyErr.value = '';
+  e2eRekeyProgress.value = { done: 0, failed: 0 };
+  try {
+    await e2eRekeyPass(root, previous, fmk);
+    const prog = e2eRekeyProgress.value;
+    if (prog.failed > 0) {
+      e2eRekeyErr.value = t('e2e.password.rekey_partial', { n: prog.failed });
+      return;
+    }
+    const marker = e2eMarker.value;
+    if (marker && rekeyPending(marker)) await e2eWriteMarker(finishRekey(marker));
+    e2eRing.dropPrevious(root);
+    e2eRingVer.value++;
+    flashToast(t('e2e.password.rekey_done', { n: prog.done }));
+  } catch (err) {
+    e2eRekeyErr.value = t('e2e.password.failed');
+    emit('error', { message: (err as Error).message, context: { op: 'e2e-rekey' } });
+  } finally {
+    e2eRekeyBusy.value = false;
+    await load();
+  }
+}
+
+/* --- wiring:e2 fxe ------------------------------------------------------
+ *
+ * Single encrypted files (`.fxe`) and the streamed paths of encrypted
+ * folders — docs/E2E-ENCRYPTION.md → "Single encrypted files", "Streaming
+ * content", "Downloading a decrypted copy". The work is in
+ * composables/useE2eFiles; this block lends it the explorer.
+ */
+
+
+/** `path` without trailing slashes, for comparing wire paths. */
+function e2eTrimWire(path: string): string {
+  return path.replace(/\/+$/, '');
+}
+
+/** The ring's root for a row that IS an unlocked encrypted folder, or null. */
+function e2eUnlockedRootRow(n: FileNode | undefined): string | null {
+  if (!n || n.type !== 'dir' || n.e2e !== true) return null;
+  const want = e2eTrimWire(n.path);
+  return e2eRing.roots().find((r) => e2eTrimWire(r) === want) ?? null;
+}
+
+/**
+ * "Download", when this tab holds the key: a `.fxe` decrypts, a file of an
+ * unlocked encrypted folder streams decrypted, and folders or several items
+ * become a zip of plaintext made here. False: not ours, the server's
+ * download applies.
+ */
+async function e2eDownloadDecrypted(targets: FileNode[]): Promise<boolean> {
+  const single = targets.length === 1 ? targets[0] : null;
+  if (single && isFxeRow(single) && !e2eActive.value && !single.e2e_root) {
+    await e2eFiles.download(single);
+    return true;
+  }
+  let root: string | null = null;
+  if (e2eUnlocked.value) root = e2eRoot.value;
+  else if (single) root = e2eUnlockedRootRow(single);
+  if (!root && targets.length > 0) {
+    // Rows from the split pane, Recent or Starred: their own encrypted root,
+    // when every one of them sits in the same unlocked folder.
+    const roots = targets.map((n) => e2eNames.rootOf(n.path, n.e2e_root ?? null));
+    const first = roots[0];
+    if (first && roots.every((r) => r === first)) {
+      root = e2eRing.roots().find((r) => e2eTrimWire(r) === e2eTrimWire(first)) ?? null;
+    }
+  }
+  if (!root) return false;
+  const fmk = e2eRing.get(root);
+  if (!fmk) return false;
+  if (single && single.type === 'file') {
+    await e2eFiles.downloadFolderFile(single, fmk, e2eRing.previous(root), root);
+    return true;
+  }
+  const here = e2eNames.segmentLabel(qualify(currentPath.value)) ?? wireBasename(qualify(currentPath.value));
+  const zipName = `${single ? single.basename : here || 'filex'}.zip`;
+  await e2eFiles.downloadDecryptedZip(targets, {
+    root,
+    fmk,
+    previous: e2eRing.previous(root),
+    decorate: (rows, o) => e2eNames.decorate(rows, o),
+    zipName,
+  });
+  return true;
+}
+
+/** The too-big dialog's way out (E2eTooBigModal): the encrypted bytes as the
+ *  server has them — the `.fxe` itself, or the encrypted folder as a zip,
+ *  which carries its key file — for `filex decrypt` on the person's computer. */
+function e2eDownloadEncryptedInstead() {
+  const info = e2eFiles.tooBig.value;
+  e2eFiles.closeTooBig();
+  if (!info) return;
+  if (info.encrypted.kind === 'file') {
+    window.open(api.downloadUrl(info.encrypted.path), '_blank');
+    return;
+  }
+  const folder: FileNode = { path: info.encrypted.path, basename: wireBasename(info.encrypted.path), type: 'dir' };
+  void downloadSelection([folder], { encrypted: true });
+}
+/* === /wiring:e2 fxe === */
+
 /** Drop the shown-once key from memory the moment its dialog closes. */
 function closeRecoveryKey() {
   showRecoveryKey.value = false;
@@ -8147,7 +9936,6 @@ function closeRecoveryKey() {
            bar's position can never describe two different panes. */"
       :selection-pane="activePaneId /* pane:p1 — which half the bar mounts into */"
       :paste-enabled="!!clipboard.mode"
-      :convert-enabled="!!legacyConvertUrl"
       :can-go-up="canGoUp"
       :at-virtual-root="atVirtualRoot"
       :can-write="canWriteHere"
@@ -8196,7 +9984,30 @@ function closeRecoveryKey() {
            settings, sign out), passed straight through. The explorer knows
            nothing about them and must not: they are the EMBEDDER's chrome,
            and an embed with none renders an empty cluster. -->
-      <template #header-actions><slot name="header-actions"></slot></template>
+      <template #header-actions>
+        <!-- The bell and the avatar, for a host that cannot fill this slot
+             (config.notifications / config.account — the desktop app). The
+             web's components, not a copy; the bell sits to the LEFT of the
+             avatar, where the web page puts it. -->
+        <NotificationBell
+          v-if="notifFeed"
+          :feed="notifFeed"
+          :locale="locale"
+          :manage-href="notifManageHref"
+          @open="onNotificationOpen"
+          @manage="onNotifManage"
+        />
+        <AccountMenu
+          v-if="config.account"
+          :actions="accountRows"
+          :user="accountPerson"
+          :version="capabilitiesData?.version"
+          :locale="locale"
+          :fallback-label="t('explore.account')"
+          @select="onAccountSelect"
+        />
+        <slot name="header-actions"></slot>
+      </template>
     </Toolbar>
 
     <!-- koru:k1 — fe__main lays the listing body and the inspector panel out
@@ -8224,13 +10035,15 @@ function closeRecoveryKey() {
       @reorder-storages="onReorderStorages"
       :shared-storages="sharedStorageNames"
       :trash-visible="config.trashVisible !== false"
+      :drafts-visible="draftsEnabled && identitySurfaces /* Drafts, issue #71 */"
+      :draft-count="draftCount"
       :show-connections="connectionsEnabled"
       :show-my-shares="mySharesEnabled /* paylas:m1 — off unless the host has the page */"
       :show-identity-surfaces="identitySurfaces"
       :can-write="canWriteHere && !atVirtualRoot && !trashActive"
       :locale="locale"
-      :can-request-files="canWriteHere && !atVirtualRoot && !trashActive && !navView /* surucu:d1 */"
-      :can-new-document="canNewDocument && !trashActive && !navView /* belge:n1 */"
+      :can-request-files="canWriteHere && !atVirtualRoot && !trashActive && !navView && !e2eActive /* surucu:d1; wiring:e2 — a visitor's upload would land in the clear */"
+      :can-new-document="canNewDocument && !trashActive && !navView && !e2eActive /* belge:n1; wiring:e2 — the server writes the template in the clear */"
       @new-document="showNewDocument = true"
       :quota="quotaSnapshot /* surucu:d1 */"
       :theme="themeMode /* surucu:d1 — the teleported New menu leaves .fe */"
@@ -8524,20 +10337,130 @@ function closeRecoveryKey() {
         </button>
       </div>
     </div>
+    <!-- wiring:e2 convert — the folder is being encrypted in place, or that
+         stopped before every file was done. Files that are done open. -->
+    <div
+      v-if="e2eUnlocked && (e2eConvPending || e2eConvRunning || e2eConvErr)"
+      class="fe-e2e-upgrade fe-e2e-upgrade--names"
+      role="status"
+      data-testid="e2e-convert-strip"
+    >
+      <div class="fe-e2e-upgrade__text">
+        <strong>{{ e2eConvRunning ? t('e2e.convert.busy') : t('e2e.convert.resume_title') }}</strong>
+        <p v-if="!e2eConvRunning">{{ t('e2e.convert.resume_body') }}</p>
+        <p v-if="e2eConvProgress" class="fe-e2e-upgrade__progress" data-testid="e2e-convert-progress">
+          {{
+            t('e2e.convert.progress', {
+              n: e2eConvProgress.done + e2eConvProgress.skipped,
+              total: e2eConvProgress.total,
+              failed: e2eConvProgress.failed + e2eConvProgress.tooBig,
+            })
+          }}
+        </p>
+        <p v-if="e2eConvErr" class="fe-form__error" role="alert">{{ e2eConvErr }}</p>
+      </div>
+      <div class="fe-e2e-upgrade__actions">
+        <button v-if="e2eConvRunning" type="button" class="fe-btn" data-testid="e2e-convert-stop" @click="e2eConvStop = true">
+          {{ t('e2e.names.stop') }}
+        </button>
+        <button
+          v-else
+          type="button"
+          class="fe-btn fe-btn--primary"
+          data-testid="e2e-convert-resume"
+          @click="e2eRunConversion"
+        >
+          {{ t('e2e.names.resume') }}
+        </button>
+      </div>
+    </div>
+    <!-- wiring:e2 names — a change from level 1 to level 2 that is under way
+         or did not finish (it was started in the folder's encryption
+         settings; nothing here is offered unasked). Files open throughout. -->
+    <div
+      v-if="e2eUnlocked && !e2eConvPending && !e2eConvRunning && (e2eLevel === 'pending' || e2eNamesBusy || e2eNamesErr)"
+      class="fe-e2e-upgrade fe-e2e-upgrade--names"
+      role="status"
+      data-testid="e2e-names-progress-strip"
+    >
+      <div class="fe-e2e-upgrade__text">
+        <strong>{{ e2eNamesBusy ? t('e2e.names.busy') : t('e2e.names.resume_title') }}</strong>
+        <p v-if="!e2eNamesBusy">{{ t('e2e.names.resume_body') }}</p>
+        <p v-if="e2eNamesProgress" class="fe-e2e-upgrade__progress" data-testid="e2e-names-progress">
+          {{ t('e2e.names.progress', { n: e2eNamesProgress.renamed, failed: e2eNamesProgress.failed }) }}
+        </p>
+        <p v-if="e2eNamesErr" class="fe-form__error" role="alert">{{ e2eNamesErr }}</p>
+      </div>
+      <div class="fe-e2e-upgrade__actions">
+        <button
+          v-if="e2eNamesBusy"
+          type="button"
+          class="fe-btn"
+          data-testid="e2e-names-stop"
+          @click="e2eNamesStop = true"
+        >
+          {{ t('e2e.names.stop') }}
+        </button>
+        <button
+          v-else
+          type="button"
+          class="fe-btn fe-btn--primary"
+          data-testid="e2e-names-resume"
+          @click="e2eRaiseLevel"
+        >
+          {{ t('e2e.names.resume') }}
+        </button>
+      </div>
+    </div>
+    <!-- wiring:e2 password — a re-key that has not finished: files open
+         either way (the previous key is sealed in the key file), and this
+         finishes re-wrapping them. -->
+    <div
+      v-if="e2eUnlocked && (e2eRekeyPending || e2eRekeyBusy)"
+      class="fe-e2e-upgrade fe-e2e-upgrade--rekey"
+      role="status"
+      data-testid="e2e-rekey-offer"
+    >
+      <div class="fe-e2e-upgrade__text">
+        <strong>{{ t('e2e.password.resume_title') }}</strong>
+        <p>{{ t('e2e.password.resume_body') }}</p>
+        <p v-if="e2eRekeyProgress" class="fe-e2e-upgrade__progress" data-testid="e2e-rekey-progress">
+          {{ t('e2e.password.progress', { n: e2eRekeyProgress.done, failed: e2eRekeyProgress.failed }) }}
+        </p>
+        <p v-if="e2eRekeyErr" class="fe-form__error" role="alert">{{ e2eRekeyErr }}</p>
+      </div>
+      <div class="fe-e2e-upgrade__actions">
+        <button
+          type="button"
+          class="fe-btn fe-btn--primary"
+          data-testid="e2e-rekey-resume"
+          :disabled="e2eRekeyBusy"
+          @click="e2eRunRekey"
+        >
+          {{ e2eRekeyBusy ? t('e2e.password.busy') : t('e2e.names.resume') }}
+        </button>
+      </div>
+    </div>
     <div v-if="e2eUnlocked" class="fe-e2e-strip" role="status">
       <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
       <span class="fe-e2e-strip__icon" aria-hidden="true" v-html="actionIconSvg('lock')"></span>
       <span class="fe-e2e-strip__label">{{ t('e2e.strip.label') }}</span>
-      <!-- The way back for somebody who declined. Quiet, but present: a
-           refusal that could not be reversed without deleting the folder
-           would not be a decision, it would be a trap. -->
+      <!-- wiring:e2 names — say which kind of folder this is: whether the
+           server can read the names is exactly what people ask. -->
+      <span class="fe-e2e-strip__names" data-testid="e2e-names-status">
+        {{ e2eNamesOn ? t('e2e.level.names') : t('e2e.level.content') }}
+      </span>
+      <!-- The folder's keys and its level live in one place. The escrow way
+           back (for somebody who declined) is in there too: quiet, but
+           present — a refusal that could not be reversed would be a trap. -->
       <button
-        v-if="e2eEscrowOfferState !== 'n/a' && !e2eEscrowOffer"
         type="button"
         class="fe-btn fe-e2e-strip__btn"
-        @click="e2eOpenEscrowOffer"
+        data-testid="e2e-settings-open"
+        :disabled="e2eRekeyBusy || e2eNamesBusy"
+        @click="showE2eSettings = true"
       >
-        {{ t('e2e.escrowoffer.strip_action') }}
+        {{ t('e2e.settings.open') }}
       </button>
       <button type="button" class="fe-btn fe-e2e-strip__btn" @click="e2eLock">
         {{ t('e2e.strip.lock') }}
@@ -8599,6 +10522,22 @@ function closeRecoveryKey() {
         @open-node="openNode"
         @context-node="onContextTarget"
       />
+      <!-- Drafts (issue #71): the person's drafts, across every storage — THE
+           table (DataTable), with Open / Save to disk / Delete per row. Like
+           Home it has no listing behind it, so it short-circuits the states
+           below. -->
+      <DraftsView
+        v-else-if="hostBodyState === 'drafts'"
+        :drafts="draftRows"
+        :loading="draftsLoading"
+        :limit="draftLimit"
+        :locale="locale"
+        :name-filter="driveFilters.name ?? ''"
+        :busy-key="draftBusyKey"
+        @open="(d: DraftDto) => openDraft(d)"
+        @save="saveDraftFromList"
+        @delete="discardDraftFromList"
+      />
       <!-- Dead deep link (404) or RBAC-hidden dir (403, shown identically):
            a dedicated state instead of a misleading "this folder is empty". -->
       <div v-else-if="hostBodyState === 'notfound'" class="fe-state">
@@ -8631,54 +10570,14 @@ function closeRecoveryKey() {
            rendered until the correct password is entered. The password is
            verified against the marker in the browser; it never reaches the
            server. -->
-      <div v-else class="fe-state fe-e2e-lock">
-        <svg
-          class="fe-state__art"
-          viewBox="0 0 120 100"
-          width="110"
-          height="92"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <rect x="38" y="44" width="44" height="34" rx="6" />
-          <path d="M46 44v-8a14 14 0 0 1 28 0v8" />
-          <circle cx="60" cy="59" r="3" fill="currentColor" stroke="none" />
-          <path d="M60 62v7" />
-        </svg>
-        <p class="fe-state__title">{{ t('e2e.locked.title') }}</p>
-        <p class="fe-state__hint">{{ t('e2e.locked.hint') }}</p>
-        <form class="fe-e2e-lock__form" @submit.prevent="e2eUnlock">
-          <input
-            v-model="e2ePw"
-            type="password"
-            class="fe-input fe-e2e-lock__input"
-            :placeholder="t('e2e.locked.pw_placeholder')"
-            :aria-label="t('e2e.locked.pw_placeholder') /* the title and hint above
-              say what this screen is; the field still needs its own name */"
-            autocomplete="current-password"
-            :disabled="e2eUnlockBusy"
-          />
-          <button
-            type="submit"
-            class="fe-btn fe-btn--primary"
-            :disabled="e2eUnlockBusy || !e2ePw"
-          >
-            {{ e2eUnlockBusy ? t('e2e.locked.busy') : t('e2e.locked.unlock') }}
-          </button>
-        </form>
-        <p v-if="e2eUnlockErr" class="fe-form__error" role="alert">{{ e2eUnlockErr }}</p>
-        <!-- wiring:e2 recovery — the second door. Always offered: whether
-             this folder actually has one is answered inside the dialog,
-             which can say "this folder predates recovery keys" instead of
-             leaving the user guessing why there is no link. -->
-        <button type="button" class="fe-e2e-optlink" @click="openRecoveryUnlock">
-          {{ t('e2e.locked.use_recovery') }}
-        </button>
-      </div>
+      <E2eLockScreen
+        v-else
+        :locale="locale"
+        :busy="e2eUnlockBusy"
+        :error="e2eUnlockErr"
+        @unlock="e2eUnlock"
+        @recovery="openRecoveryUnlock"
+      />
       <!-- /wiring:e2 -->
       </template>
 
@@ -9076,7 +10975,9 @@ function closeRecoveryKey() {
       :only-office-ready="!!effectiveOnlyOfficeBase"
       :drawio-ready="!!effectiveDrawioUrl"
       :can-configure="callerAdmin"
+      :drafts="draftsEnabled /* issue #71 — a new document is a draft until saved */"
       @close="showNewDocument = false"
+      @open-drafts="openDraftsFromNewDocument"
       @created="onDocumentCreated"
       @error="emit('error', { message: $event.message, context: { op: 'newdoc' } })"
     />
@@ -9149,8 +11050,9 @@ function closeRecoveryKey() {
       :locale="locale"
       :busy="e2eCreateBusy"
       :escrow-kid="e2eEscrowKid"
-      @close="showEncFolder = false"
-      @submit="submitEncryptedFolder"
+      :existing="e2eConvTarget ? e2eConvTarget.basename : null"
+      @close="showEncFolder = false; e2eConvTarget = null"
+      @submit="(p) => (e2eConvTarget ? submitConvertFolder(p) : submitEncryptedFolder(p))"
     />
     <!-- wiring:e2 recovery — the key, shown exactly once. -->
     <RecoveryKeyModal
@@ -9161,6 +11063,36 @@ function closeRecoveryKey() {
       :escrow-kid="e2eEscrowKid"
       :variant="recoveryKeyVariant"
       @close="closeRecoveryKey"
+    />
+    <!-- wiring:e2 — the folder's encryption settings: its level, its
+         password, the escrow way back. -->
+    <E2eSettingsModal
+      :open="showE2eSettings"
+      :locale="locale"
+      :level="e2eLevel"
+      :can-raise="e2eCanRaise"
+      :plain-named="e2ePlainNamed"
+      :escrow-state="e2eEscrowOfferState === 'n/a' || e2eEscrowOffer ? 'n/a' : e2eEscrowOfferState"
+      :busy="e2eNamesBusy"
+      @close="showE2eSettings = false"
+      @raise-level="e2eRaiseLevel"
+      @fix-names="e2eRaiseLevel"
+      @change-password="e2eSettingsPassword"
+      @escrow="e2eSettingsEscrow"
+    />
+    <!-- wiring:e2 password — change the folder password, or set a new one
+         after a recovery-key unlock ('reset': closing it locks the folder). -->
+    <E2eChangePasswordModal
+      :open="showPwChange"
+      :locale="locale"
+      :mode="pwMode"
+      :needs-rekey="e2ePwNeedsRekey"
+      :has-recovery="markerHasRecovery(e2eMarker)"
+      :has-escrow="markerHasEscrow(e2eMarker)"
+      :busy="pwBusy"
+      :error="pwErr"
+      @close="e2eClosePasswordChange"
+      @submit="e2eSubmitPassword"
     />
     <!-- wiring:e2 recovery — the way back in without the password. -->
     <E2eRecoveryUnlockModal
@@ -9174,6 +11106,59 @@ function closeRecoveryKey() {
       @close="showRecoveryUnlock = false"
       @submit="e2eRecoverUnlock"
     />
+    <!-- wiring:e2 fxe — single encrypted files: encrypt, open/download/remove,
+         and a new password (the folder dialog, told it is a file). -->
+    <E2eFileEncryptModal
+      :open="!!e2eFiles.encryptTarget.value"
+      :locale="locale"
+      :file-name="e2eFiles.encryptTarget.value?.basename ?? ''"
+      :busy="e2eFiles.encryptBusy.value"
+      :error="e2eFiles.encryptError.value"
+      :progress="e2eFiles.encryptProgress.value"
+      :escrow-kid="e2eEscrowKid"
+      :can-purge="callerAdmin"
+      :not-owner="!!e2eFiles.encryptTarget.value && !ownedByViewer(e2eFiles.encryptTarget.value)"
+      :owner-name="e2eFiles.encryptTarget.value ? ownerNameOf(e2eFiles.encryptTarget.value) : ''"
+      @close="e2eFiles.closeEncrypt()"
+      @submit="(p) => e2eFiles.submitEncrypt(p)"
+    />
+    <E2eFileUnlockModal
+      :open="!!e2eFiles.unlockTarget.value"
+      :locale="locale"
+      :intent="e2eFiles.unlockIntent.value"
+      :file-name="e2eFiles.unlockTarget.value ? (e2eFiles.realName(e2eFiles.unlockTarget.value.path) ?? e2eFiles.unlockTarget.value.basename) : ''"
+      :known="!!e2eFiles.unlockTarget.value && !!e2eFiles.realName(e2eFiles.unlockTarget.value.path)"
+      :has-recovery="e2eFiles.unlockHasRecovery.value"
+      :busy="e2eFiles.unlockBusy.value"
+      :error="e2eFiles.unlockError.value"
+      :progress="e2eFiles.unlockProgress.value"
+      :needs-save="e2eFiles.unlockNeedsSave.value"
+      :escrow-state="e2eFiles.unlockEscrow.value"
+      :escrow-kid="e2eFiles.unlockEscrowKid.value || e2eEscrowKid"
+      @close="e2eFiles.closeUnlock()"
+      @submit="(p) => e2eFiles.submitUnlock(p)"
+    />
+    <E2eTooBigModal
+      :open="!!e2eFiles.tooBig.value"
+      :locale="locale"
+      :info="e2eFiles.tooBig.value"
+      @close="e2eFiles.closeTooBig()"
+      @download="e2eDownloadEncryptedInstead"
+    />
+    <E2eChangePasswordModal
+      :open="!!e2eFiles.pwTarget.value"
+      :locale="locale"
+      mode="change"
+      subject="file"
+      :needs-rekey="false"
+      :has-recovery="true"
+      :has-escrow="false"
+      :busy="e2eFiles.pwBusy.value"
+      :error="e2eFiles.pwError.value"
+      @close="e2eFiles.closePassword()"
+      @submit="(p) => e2eFiles.submitPassword(p)"
+    />
+    <!-- /wiring:e2 fxe -->
     <!-- /wiring:e2 -->
     <RenameModal
       :open="showRename"
@@ -9229,12 +11214,12 @@ function closeRecoveryKey() {
       :file="previewTarget"
       :theme="themeMode"
       :preview-url="(p) => e2ePreviewSrc(p) /* wiring:e2 — decrypted blob > raw URL */"
-      :download-url="(p) => (e2eUnlocked ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 */"
-      :only-office-base="e2eActive ? null : effectiveOnlyOfficeBase /* wiring:e2 — OO cannot open ciphertext */"
+      :download-url="(p) => (e2eUnlocked || fxePreviewing ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 (+ fxe) */"
+      :only-office-base="e2eActive || fxePreviewing ? null : effectiveOnlyOfficeBase /* wiring:e2 — OO cannot open ciphertext */"
       :only-office-config-endpoint="effectiveOnlyOfficeConfigEndpoint"
       :can-configure="callerAdmin"
-      :new-tab-enabled="!e2eActive /* wiring:e2 — the standalone route pulls raw bytes */"
-      :save-text-endpoint="e2eActive ? null : api.endpoints.saveText || null /* wiring:e2 — a plaintext save would be a leak */"
+      :new-tab-enabled="!e2eActive && !fxePreviewing /* wiring:e2 — the standalone route pulls raw bytes */"
+      :save-text-endpoint="e2eActive || fxePreviewing ? null : api.endpoints.saveText || null /* wiring:e2 — a plaintext save would be a leak */"
       :archive-list-endpoint="api.endpoints.archiveList || null"
       :open-mode="previewMode"
       :open-as="previewOpenAsExt /* #56 — a New document opens as its type */"
@@ -9247,7 +11232,7 @@ function closeRecoveryKey() {
       :index="previewPosition.index /* gorunum:v1 — the 3-of-9 counter */"
       :total="previewPosition.total"
       :nav-enabled="previewPosition.total > 1"
-      :share-enabled="!e2eActive /* gorunum:v2 — the viewer's share icon opens the
+      :share-enabled="!e2eActive && !fxePreviewing /* gorunum:v2 — the viewer's share icon opens the
            SAME dialog the menu opens. It shipped disabled because nothing was
            listening; an icon that does nothing is worse than no icon. Off inside
            an encrypted folder, where a link would serve ciphertext. */"
@@ -9256,10 +11241,49 @@ function closeRecoveryKey() {
         if (n) { permTarget = n; permInitialTab = undefined; showPerm = true; }
       }"
       :api-base="props.config.apiBase ?? ''"
+      :drafts-endpoint="draftsEnabled ? api.draftsBase : null /* Drafts, issue #71 */"
+      :app-viewer="previewAppViewer /* v4 — an app's own interface for this type */"
+      :api="api"
+      :user-name="props.config.userName || ''"
+      @toast="flashToast"
+      @op="(op) => onPluginOpQueued(op)"
       @nav="onPreviewNav"
+      @draft-saved="onPreviewDraftSaved"
+      @draft-discarded="onPreviewDraftDiscarded"
       @close="showPreview = false"
     />
+    <!-- Drafts (issue #71): the Drafts view's Save, when the name is taken. -->
+    <DraftConflictModal
+      :open="!!draftListSave.question.value"
+      :locale="locale"
+      :theme="themeMode"
+      :name="draftListSave.question.value?.name ?? ''"
+      :suggested="draftListSave.question.value?.suggested ?? ''"
+      :folder="draftListSave.question.value?.folder ?? ''"
+      :busy="draftListSave.busy.value"
+      :error="draftListSave.error.value"
+      @cancel="draftListSave.cancel"
+      @confirm="draftListSave.confirm"
+    />
     <!-- App plugins — a `modal` view, and the manifest's confirm question. -->
+    <!-- v4 — an app's own interface, as a dialog or its home screen. -->
+    <AppFrameModal
+      v-if="appFrameView"
+      :key="`${appFrameView.plugin}/${appFrameView.view}`"
+      :api="api"
+      :locale="locale"
+      :theme="themeMode"
+      :plugin="appFrameView.plugin"
+      :view="appFrameView.view"
+      :placement="appFrameView.placement"
+      :ui="appFrameView.ui"
+      :label="appFrameView.label"
+      :files="appFrameView.files"
+      :user-name="props.config.userName || ''"
+      @close="appFrameView = null"
+      @toast="flashToast"
+      @op="(op) => onPluginOpQueued(op)"
+    />
     <PluginViewModal
       v-if="pluginView"
       :open="pluginViewShown"
@@ -9289,17 +11313,6 @@ function closeRecoveryKey() {
       :danger="pluginConfirm?.action.danger === true"
       @close="pluginConfirm = null"
       @confirm="onPluginConfirmed"
-    />
-    <ConvertModal
-      v-if="showConvert && convertTarget && legacyConvertUrl"
-      :convert-url="legacyConvertUrl"
-      :admin-note="callerAdmin ? t('convert.legacy_admin') : ''"
-      :file-name="convertTarget?.basename || convertTarget?.path || ''"
-      :fetch-bytes="() => api.fetchArrayBuffer(convertTarget?.path ?? '')"
-      :upload="saveConverted"
-      :locale="locale"
-      @close="showConvert = false"
-      @done="onConvertDone"
     />
     <PermissionsModal
       v-if="showPerm && permTarget"
@@ -9439,6 +11452,22 @@ function closeRecoveryKey() {
       @customize="showShortcutsHelp = false; showShortcutSettings = true /* wiring:c2 */"
     />
     <!-- /cila:c wiring -->
+
+    <!-- The person's own settings — the admin app's dialog, for a host that
+         asked (`config.account.settings`, the desktop app). -->
+    <UserSettingsDialog
+      v-if="settingsOpen"
+      v-model="settingsOpen"
+      :host="settingsHost"
+    />
+
+    <!-- The full list "See all" opens — teleported to <body>, like the web's. -->
+    <NotificationsPanel
+      v-if="notifFeed"
+      :feed="notifFeed"
+      :locale="locale"
+      @open="onNotificationOpen"
+    />
 
     <!-- wiring:c1 — tema galerisi -->
     <ThemeGallery

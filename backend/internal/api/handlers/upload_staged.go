@@ -508,7 +508,13 @@ func (h *StagedUpload) Commit(w http.ResponseWriter, r *http.Request) {
 	//     guard hung off the driver write would therefore protect small
 	//     uploads and silently skip every large one on exactly the storage
 	//     backend where it matters most.
-	if err := writehook.BeforeOverwrite(r.Context(), row.StorageID, row.StorageKey); err != nil {
+	// wiring:e2 convert — an in-place E2E conversion write keeps no version of
+	// the plaintext it replaces (e2e_convert.go checks that it is one).
+	guardCtx := r.Context()
+	if r.URL.Query().Get("e2e_convert") == "1" {
+		guardCtx = e2eConversionContext(guardCtx, h.Store, drv, row.StorageID, row.StorageKey, true, h.stagedHead(row))
+	}
+	if err := writehook.BeforeOverwrite(guardCtx, row.StorageID, row.StorageKey); err != nil {
 		slog.Warn("staged commit refused: snapshot",
 			slog.String("id", row.ID),
 			slog.Int64("storage", row.StorageID),
@@ -1458,6 +1464,18 @@ func (h *StagedUpload) verifyHash(row *model.StagedUpload) error {
 // sniffMime detects the content type from the first bytes of the staged data,
 // then refines ZIP-based office formats — identical to what vfUpload does with
 // the multipart body, so a file uploaded either way gets the same mime.
+// stagedHead is the first 8 bytes of an upload's staged body, or nil.
+func (h *StagedUpload) stagedHead(row *model.StagedUpload) []byte {
+	rd, err := h.Area.Open(row.ID)
+	if err != nil {
+		return nil
+	}
+	defer rd.Close()
+	var head [8]byte
+	n, _ := io.ReadFull(rd, head[:])
+	return head[:n]
+}
+
 func (h *StagedUpload) sniffMime(row *model.StagedUpload) string {
 	rd, err := h.Area.Open(row.ID)
 	if err != nil {

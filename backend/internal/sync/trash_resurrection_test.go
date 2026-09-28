@@ -434,9 +434,11 @@ func TestSyncCataloguesAReappearedObjectAsANewFile(t *testing.T) {
 	_, run := runSync(t, store, st)
 	require.Equal(t, "ok", run.Status, run.Error)
 
-	stale, err := store.GetNode(ctx, old.ID)
-	require.NoError(t, err)
-	assert.NotNil(t, stale.DeletedAt, "the trashed row must stay trashed")
+	// Not revived. Since issue #74 the same pass drops the old row altogether:
+	// it was deleted where it stood and nothing of it is in the trash.
+	if stale, err := store.GetNode(ctx, old.ID); err == nil {
+		assert.NotNil(t, stale.DeletedAt, "the old row was revived")
+	}
 
 	live, err := store.GetNodeByPath(ctx, st.ID, pathkey.Hash(st.ID, "/veri.csv"))
 	require.NoError(t, err)

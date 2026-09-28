@@ -60,4 +60,13 @@ describe('Go under WSL runs from a mirror on WSL\'s own disk', () => {
     expect(read('scripts/release/gates/engines.mjs')).toMatch(/wslMirrorCd\(/);
     expect(read('scripts/lib/go-build.mjs')).toMatch(/wslMirrorCd\(cwd\)/);
   });
+
+  // ⚠ `node e2e/run.mjs local --build` spawned a bare `go build`: on a Windows
+  // machine whose only Go is in WSL it failed with "'go' is not recognized"
+  // (2026-09-27). Every build of the binary goes through build-backend/goBuild.
+  it('the e2e runner builds the binary through build-backend, never a bare go', () => {
+    const src = read('e2e/run.mjs');
+    expect(src).not.toMatch(/run\(\s*'go'/);
+    expect(src).toMatch(/run\('node', \['scripts\/build-backend\.mjs', '--out', out\]/);
+  });
 });

@@ -41,6 +41,16 @@ export function parentDirOf(path: string): string {
 }
 
 /**
+ * The folder a row sits in, AS SHOWN: the plaintext path for a row inside an
+ * encrypted-names folder (set by the explorer's name view,
+ * composables/useE2eNames), `parentDirOf(path)` for everything else. Every
+ * view's Location line reads this, so none of them prints ciphertext.
+ */
+export function displayParentDirOf(n: FileNode): string {
+  return typeof n.e2e_display_dir === 'string' ? n.e2e_display_dir : parentDirOf(n.path);
+}
+
+/**
  * Hide system/internal entries the user must never see as files: filex's own
  * directories and the keep marker (lib/internalPaths — the one client list,
  * held equal to the server's by a test), the virtual `.trash` row, and the E2E
@@ -249,6 +259,9 @@ export const VIRTUAL_SEGMENTS: Record<string, string> = {
   '.recent': 'node.recent',
   '.starred': 'node.starred',
   '.shared': 'node.shared',
+  /* Drafts (issue #71): a view like the rest — a reload on `#.drafts` opens
+     it, instead of asking the backend for a folder called `.drafts`. */
+  '.drafts': 'node.drafts',
 };
 
 /**

@@ -327,6 +327,12 @@ dialog says why — *"Office documents need a document server (OnlyOffice), whic
 is not configured here."* — rather than creating a file nobody on this install
 could then open.
 
+An installed app may add rows of its own (`new_documents` — draw.io's
+**draw.io diagram**, say): they are listed under **Apps**, in the app's own
+words, while the app runs, and the new file — empty, or a copy of the app's
+template — opens in the app's interface, a draft like any other
+([APP-PLUGINS.md](APP-PLUGINS.md#what-a-person-sees)).
+
 ⚠ The server states the dependency and the client resolves it, deliberately:
 an embedder may point at a document server this process cannot reach, so the
 client is the only place that knows the true answer. What it must not do is
@@ -360,7 +366,7 @@ field selects the name part only, the way a rename does, so typing replaces
   extension is swapped (`notes.txt` → `notes.md`); a name with no extension, or
   one you chose (`test.conf`), stays as it is.
 
-![The New document dialog with a Plain text document named LICENSE](screenshots/v0.47.0/newdoc/newdoc-any-name-1280.png)
+![The New document dialog with a Plain text document named LICENSE](screenshots/v0.48.0/newdoc/newdoc-any-name-1280.png)
 
 The create itself is `POST /api/files/manager?action=newfile` with
 `{path, name, type, exact_name}`, where `type` is one of the `newdoc_types`
@@ -369,6 +375,58 @@ keys and `exact_name: true` says `name` is the whole file name. Without
 the contract a client from before #56 relies on — and with it only a type whose
 row says `ext_required: true` still gains its extension. A text type asked for
 under another type's `ext_required` extension answers `400 EXT_NEEDS_TYPE`.
+Where the server keeps drafts (below), the explorer sends the same body to
+`POST /api/files/drafts` instead.
+
+### Drafts: nothing is in the folder until you save
+
+Choosing New document, naming it and closing the editor used to leave an empty
+file behind (#71). Now **Create makes a draft**: a real file, with the name and
+type you chose, kept in your own drafts area of that storage — and the folder
+you were in gets nothing until you save it.
+
+- **The editor opens on the draft**, with a bar above it that says where it
+  will go ("will be saved to projects / docs") and a **Save** button. The
+  built-in editors write into the draft as you type (every few seconds); the
+  document server saves into it through its own autosave, and draw.io when
+  you press its Save. While there are changes not yet written, the browser's own
+  "leave this page?" question stands between you and a closed tab.
+- **Save** puts the draft in its folder under its name. If a file has taken the
+  name in the meantime, filex asks first — *"projects / docs already has a file
+  called report.txt. Save the draft as report (2).txt instead?"* — and nothing
+  moves before you answer. If the folder itself is gone, Save says so and the
+  draft stays in Drafts.
+- **Closing a draft you never saved** asks three things: **Save to disk**,
+  **Keep in Drafts** (the default) or **Discard**. A discarded draft goes to
+  the [Trash](TRASH-VERSIONING.md#discarded-drafts), where the usual retention
+  deletes it; restoring it puts it back in Drafts.
+- **Drafts**, in the navigation panel beside Recent, Starred and Trash, lists
+  your drafts from every storage — name, where it will be saved, storage,
+  modified — with **Open**, **Save to disk** and **Delete** on each row. The
+  panel shows how many you have; a draft never raises a notification.
+- **A draft is yours alone.** Nobody else sees it, an administrator included:
+  it is not in any listing, search, share, WebDAV, S3, SFTP, FTPS or NFS view,
+  desktop sync or storage usage figure, and no version history is kept of it.
+  On disk it is `.filex-drafts/<your user id>/<key>/<name>` — one of the
+  [names filex keeps for itself](BACKEND.md#names-filex-keeps-for-itself).
+- **At most 50 drafts per person**, by default. An administrator changes the
+  number under *Admin → Protection → Drafts*
+  ([PROTECTION.md](PROTECTION.md#drafts)); at the limit, New document says so
+  and offers to open Drafts — it never creates the file in the folder instead.
+
+| What Create opens — a draft, under the bar that says where Save puts it | Closing a draft that was never saved |
+|---|---|
+| ![The text editor on a new draft, with the draft bar](screenshots/v0.48.0/newdoc/newdoc-license-editor-1280.png) | ![Save to disk, Keep in Drafts or Discard](screenshots/v0.48.0/newdoc/drafts-close-1280.png) |
+
+| Save, when a file has taken the name meanwhile | Drafts, in the navigation panel |
+|---|---|
+| ![Save the draft under another name?](screenshots/v0.48.0/newdoc/drafts-taken-1280.png) | ![The Drafts view](screenshots/v0.48.0/newdoc/drafts-view-1280.png) |
+
+Drafts belong to a person, so a caller that is not one creates the file
+directly, as before: an app token, and an embed confined to one folder by its
+host (one proxy token shared by all its users). `GET /api/files/capabilities`
+carries `drafts: { limit }` exactly when the caller's New document makes
+drafts. The endpoints are in [BACKEND.md → Drafts](BACKEND.md#drafts).
 
 ---
 
@@ -520,6 +578,14 @@ later.)
 - The shared secret is the whole trust boundary. Treat it as one wherever it
   lives — an env file with `chmod 600` and not committed, or the stored row,
   which `GET /api/admin/external` redacts to `"***"` and never returns.
+- ⚠ **You trust the Document Server as much as filex's own pages.** To open
+  the editor, the explorer loads the server's `web-apps/apps/api/documents/api.js`
+  as a script *into the filex page itself* — that is how the Document Server's
+  editor API works — so that script runs with everything the page can do, in
+  the signed-in person's session. Point filex only at a Document Server you run
+  or trust as fully as filex, reach it over HTTPS, and keep its host as closely
+  guarded as filex's. (draw.io is different: it runs in its own frame, and
+  filex only exchanges messages with that frame at its configured origin.)
 
 ---
 

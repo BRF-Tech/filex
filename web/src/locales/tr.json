@@ -528,10 +528,6 @@
     }
   },
   "external": {
-    "convertLegacy": "Eski — kullanımdan kalkıyor. Yerini Dönüştür uygulaması (Eklentiler → Uygulamalar) alıyor; uygulama kuruluyken dosya menüsü bu dönüştürücüyü sunmaz.",
-    "names": {
-      "convert": "Dönüştürücü"
-    },
     "title": "Dış servisler",
     "subtitle": "Opsiyonel editör ve render servisleri — sadece erişilebilirse mount edilir",
     "fields": {
@@ -924,7 +920,10 @@
       "pin_revealed": "PIN gösterildi",
       "tags": "etiketler değiştirildi",
       "download_link": "dışarı sürüklenerek indirildi",
-      "download_link_refused": "dışarı sürükleyerek indirme reddedildi"
+      "download_link_refused": "dışarı sürükleyerek indirme reddedildi",
+      "ui_save": "arayüzünden kaydedildi",
+      "upgrade": "yükseltildi",
+      "rollback": "önceki sürüme döndürüldü"
     },
     "target": {
       "auth_provider": "Kimlik sağlayıcısı",
@@ -1326,6 +1325,7 @@
       "drop_received": "Dosya geldi",
       "comment_added": "Yeni yorum",
       "e2e_escrow_used": "Emanet anahtarı kullanıldı",
+      "e2e_password_changed": "Klasör parolası değişti",
       "plugin_notice": "Uygulama bildirimi",
       "update_available": "Güncelleme var",
       "update_applied": "Güncelleme uygulandı",
@@ -1333,6 +1333,7 @@
       "app_update_available": "Uygulama güncellemesi var",
       "app_update_needs_approval": "Uygulama güncellemesi onay bekliyor",
       "app_update_failed": "Uygulama güncellemesi başarısız",
+      "plugin_update_available": "Depo eklentisi güncellemesi var",
       "replica_fail": "Kopyaya yazılamadı",
       "replica_fail_spike": "Kopya hataları artıyor",
       "replica_reconcile_done": "Kopya yeniden denemeleri kuyrukta",
@@ -1591,6 +1592,7 @@
       "drop_received": "Herkese açık istek bağlantısından dosya alındı",
       "comment_added": "Bir dosyaya veya klasöre yorum eklendi",
       "e2e_escrow_used": "Şifreli klasör parolası yerine emanet anahtarıyla açıldı",
+      "e2e_password_changed": "Şifreli bir klasörün parolası değiştirildi ya da kurtarma anahtarıyla sıfırlandı",
       "plugin_notice": "Uygulama bildirimi — kurulu bir uygulama mesaj gönderdi (imza isteği, biten iş, …)"
     },
     "secretSet": "Secret tanımlı",
@@ -1630,7 +1632,7 @@
   },
   "protection": {
     "title": "Koruma",
-    "subtitle": "Çöp kutusu saklama süresi, sürüm politikası, paylaşım bağlantısı süresi ve antivirüs",
+    "subtitle": "Çöp kutusu saklama süresi, sürüm politikası, paylaşım bağlantısı süresi, taslaklar ve antivirüs",
     "unsupported": "Sunucu bu sürümü desteklemiyor — koruma ayarları API'si bulunamadı. Backend güncellemesinden sonra bu sayfa etkinleşir.",
     "savedOk": "Koruma ayarları kaydedildi",
     "trash": {
@@ -1654,6 +1656,13 @@
       "hint": "0 = sınırsız. Varsayılan 7.",
       "errMin": "0 veya daha büyük bir tam sayı girin",
       "overMax": "Mevcut {n} bağlantı bu sınırı aşıyor. Çalışmaya devam ederler — kaldırmak isterseniz Paylaşımlar sayfasından iptal edin."
+    },
+    "drafts": {
+      "title": "Taslaklar",
+      "desc": "Yeni bir belge, ilk kaydına kadar bir taslaktır: onu oluşturan kişinin, başka kimsenin göremediği Taslaklar’ında bekler ve kaydedilene kadar klasöründe hiçbir şey oluşturulmaz. Bir kişinin tutabileceği en fazla taslak sayısı budur; sınıra gelindiğinde Yeni belge önce bazılarının kaydedilmesini ya da silinmesini ister.",
+      "label": "Kişi başına taslak",
+      "hint": "{min} ile {max} arasında. Varsayılan 50. Yeniden başlatma gerekmeden hemen geçerli olur.",
+      "errRange": "{min} ile {max} arasında tam sayı girin."
     },
     "av": {
       "title": "Antivirüs",
@@ -1820,7 +1829,8 @@
     "source": {
       "file": "Dosya yükle",
       "url": "URL'den",
-      "remote": "Uzak servis"
+      "remote": "Uzak servis",
+      "feed": "Kaynağından"
     },
     "state": {
       "running": "Çalışıyor",
@@ -1839,7 +1849,8 @@
       "enabled": "Açık",
       "binary": "Eklenti dosyası",
       "address": "Adres",
-      "token": "Token"
+      "token": "Token",
+      "source": "Güncelleme kaynağı"
     },
     "caps": {
       "read": "okuma",
@@ -1899,6 +1910,36 @@
     "signature": {
       "label": "İmza",
       "required": "Bu kurulum yalnızca imzalı eklenti kabul eder: ikili dosyanın SHA-256 özeti üzerine, işletmecinin güvendiği bir anahtarla üretilmiş ayrık imzayı (hex ya da base64) yapıştırın. İmza olmadan kurulum reddedilir."
+    },
+    "sourceHint": "Bir GitHub reposu (sahip/ad — filex son sürüme eklenmiş filex-storage.json dosyasını okur) ya da bir filex-storage.json dosyasının https adresi. filex bunu her gün denetler ve yeni bir sürüm olduğunda size söyler; siz onaylamadan hiçbir şey kurulmaz.",
+    "checkUpdates": "Güncellemeleri denetle",
+    "updates": {
+      "checked": "Güncelleme denetimi bitti: {waiting} güncelleme onayınızı bekliyor.",
+      "none": "Güncelleme denetimi bitti: kaynağı olan tüm eklentiler güncel.",
+      "failed": "Bazı kaynaklar okunamadı; nedeni satırında yazıyor."
+    },
+    "update": {
+      "available": "Güncelleme var",
+      "incompatible": "{version} için filex {requires} gerekiyor",
+      "checkFailed": "Denetlenemedi",
+      "upToDate": "Güncel"
+    },
+    "actions": {
+      "reviewUpdate": "Güncellemeyi incele",
+      "setSource": "Güncelleme kaynağı…"
+    },
+    "review": {
+      "title": "{name} güncellemesi",
+      "jump": "Sürüm {from} → {to}",
+      "sha": "{platform} derlemesinin SHA-256 değeri",
+      "notes": "Sürüm notları",
+      "how": "filex bu derlemeyi indirir, SHA-256 değeri yukarıdakiyle aynı değilse reddeder ve eklentiyi yüklenmiş bir dosya gibi yükseltir: yapabildikleri yeniden sınanır, yeni dosya başlamazsa öncekisi geri gelir."
+    },
+    "sourceForm": {
+      "title": "{name} için güncelleme kaynağı",
+      "clear": "Denetimi durdurmak için boş bırakın.",
+      "saved": "Kaydedildi: {name}, {source} kaynağını izliyor.",
+      "cleared": "{name} için artık güncelleme kaynağı yok."
     }
   },
   "account": {
@@ -1932,26 +1973,24 @@
     "scheduledBadge": "Saatte bir uyanır",
     "checkUpdates": "Güncellemeleri denetle",
     "updates": {
-      "checked": "Güncelleme denetimi bitti: {updated} güncellendi, {waiting} sizi bekliyor.",
+      "checked": "Güncelleme denetimi bitti: {waiting} güncelleme onayınızı bekliyor.",
       "none": "Güncelleme denetimi bitti: tüm uygulamalar güncel.",
-      "failed": "{count} uygulama denetlenemedi ya da güncellenemedi; nedeni satırında, sürümün altında yazıyor."
+      "failed": "{count} uygulama denetlenemedi; nedeni satırında, sürümün altında yazıyor."
     },
     "update": {
       "available": "Güncelleme var",
       "needsApproval": "Onay bekliyor",
-      "updated": "Kendiliğinden güncellendi",
       "failed": "Güncelleme başarısız",
       "checkFailed": "Denetlenemedi",
       "failedDetail": "{version} denendi ve geri alındı; {current} çalışmaya devam ediyor",
       "newPermissions": "yeni: {permissions}",
       "addsModule": "modül getiriyor",
       "needsNewerFilex": "{version} için filex {requires} gerekiyor",
-      "autoFrom": "{from} sürümünden, {when}",
       "upToDate": "Güncel",
       "notChecked": "Henüz denetlenmedi",
-      "autoOff": "Otomatik güncelleme kapalı",
       "noSource": "Dosyadan kuruldu: güncellemelerin denetleneceği bir kaynak yok",
-      "noManifestAddress": "filex'in saklamadığı bir adresten kuruldu: güncellemelerinin denetlenmesi için bir kez URL'sinden yükseltin"
+      "noManifestAddress": "filex'in saklamadığı bir adresten kuruldu: güncellemelerinin denetlenmesi için bir kez URL'sinden yükseltin",
+      "previous": "{version} sürümü geri dönmek için saklanıyor"
     },
     "compat": {
       "bad": "Bu filex ile uyumlu değil",
@@ -1993,10 +2032,9 @@
     "actions": {
       "details": "Ayrıntılar",
       "reviewUpdate": "Güncellemeyi incele",
-      "autoUpdateOn": "Otomatik güncellemeyi aç",
-      "autoUpdateOff": "Otomatik güncellemeyi kapat",
       "upgrade": "Yükselt",
-      "remove": "Kaldır"
+      "remove": "Kaldır",
+      "rollback": "{version} sürümüne dön"
     },
     "empty": {
       "title": "Kurulu uygulama yok",
@@ -2018,7 +2056,7 @@
       "repo": "Repo",
       "repoHint": "sahip/ad. filex, verilen ref’teki (boşsa varsayılan dal) filex-app.json dosyasını okur, manifestin adını verdiği modülü indirir ve SHA-256’sını doğrular.",
       "ref": "Ref (etiket, dal ya da commit)",
-      "wasm": "Modül (.wasm) — dil paketi için boş bırakın",
+      "wasm": "Modül (.wasm) — dil paketi ya da yalnız arayüzden oluşan bir uygulama için boş bırakın",
       "manifest": "Manifest (filex-app.json)",
       "signature": "İmza",
       "signatureHint": "İsteğe bağlı: modülün SHA-256'sı üzerinde ed25519 imzası, hex ya da base64.",
@@ -2086,7 +2124,48 @@
       "samePermissions": "Kurulu sürümle aynı izinleri istiyor.",
       "newPermission": "Yeni",
       "incompatible": "{name} {version}, filex {requires} ile çalışıyor; bu sunucu filex {filex}. Burada kurulamaz.",
-      "enginesMissing": "Bu sunucuda {engines} yok. Uygulama kurulur, ama bunlarla yaptığı işler bu motorlar kurulup filex yeniden başlatılana kadar çalışmaz."
+      "enginesMissing": "Bu sunucuda {engines} yok. Uygulama kurulur, ama bunlarla yaptığı işler bu motorlar kurulup filex yeniden başlatılana kadar çalışmaz.",
+      "ui": "Arayüz (ui.zip) — kendi arayüzü olan bir uygulama için",
+      "uiGroup": {
+        "title": "Arayüz",
+        "badge": "Kendi arayüzü var",
+        "sha256": "Arayüz SHA-256",
+        "files": "Dosyalar",
+        "size": "Boyut",
+        "noEngine": "Modülü yok: sunucuda hiçbir kodu çalışmaz. Arayüz yalnız birlikte açıldığı dosyaları okur ve yazar.",
+        "external": "Paketin dışındaki adresler",
+        "mirror": "Aynalanıyor",
+        "mirrorText": "filex bu dosyayı bir kez indirip kendisi sunar; tarayıcılar bu adrese hiç gitmez.",
+        "live": "Canlı, yalnız okuma",
+        "liveText": "Tarayıcınız bu adresten dosya indirir. Adresin sahibi kimin ne zaman kullandığını görür; uygulama isterse bu isteklere açtığınız dosyadan veri ekleyebilir (adres satırında). Adres uygulamanın yazarına aitse bu, verinin yazara gidebilmesi demektir.",
+        "as": {
+          "style": "Stil dosyası",
+          "font": "Yazı tipi",
+          "img": "Görsel",
+          "media": "Medya"
+        },
+        "honest": "Tarayıcılar bir arayüzün dışarı veri göndermesini tamamen engelleyemiyor (WebRTC; Chrome’da kapatılabiliyor, Firefox’ta kapatılamıyor). Bu uygulamaya, onunla açtığınız dosyaları görmesine güvendiğiniz biri kadar güvenin."
+      },
+      "diff": {
+        "moduleChanged": "Modül: {from} → {to}",
+        "moduleSame": "Modül aynı.",
+        "moduleRemoved": "Bu sürümün artık modülü yok.",
+        "uiAdded": "Bu sürüm kendi arayüzünü getiriyor.",
+        "uiRemoved": "Bu sürüm arayüzünü kaldırıyor.",
+        "uiChanged": "Arayüz: {from} → {to}",
+        "uiSame": "Arayüz aynı.",
+        "files": "Arayüz dosyaları: {added} eklendi, {removed} çıkarıldı, {changed} değişti",
+        "filesAdded": "Eklenenler",
+        "filesRemoved": "Çıkarılanlar",
+        "filesChanged": "Değişenler",
+        "filesMore": "… ve {count} dosya daha",
+        "filex": "Uyduğu filex: {from} → {to}",
+        "anyFilex": "her sürüm",
+        "signed": "İmza: {from} → {to}",
+        "isSigned": "imzalı",
+        "isUnsigned": "imzasız",
+        "notes": "Sürüm notları"
+      }
     },
     "detail": {
       "source": "Kaynak",
@@ -2166,7 +2245,9 @@
         "empty": "Henüz günlük kaydı yok.",
         "live": "Canlı — 2 saniyede bir yenilenir"
       },
-      "grantedTitle": "Yapmasına izin verilenler"
+      "grantedTitle": "Yapmasına izin verilenler",
+      "previous": "Saklanan sürüm",
+      "previousText": "{version}, {when} tarihinde yerini bıraktı"
     },
     "kind": {
       "languagePack": "Dil paketi"
@@ -2182,7 +2263,9 @@
       "breadcrumb": "Uygulama ayrıntıları",
       "back": "Uygulamalar",
       "missing": "Bu sunucuda “{name}” adında kurulu bir uygulama yok."
-    }
+    },
+    "rollbackConfirm": "{name}, {version} sürümüne geri alınsın mı? Herkes hemen o sürüme geçer; {current} saklanır, aynı yoldan yeniden ileri gidebilirsiniz.",
+    "rolledBack": "{name}, {version} sürümüne geri alındı."
   },
   "usage": {
     "title": "Kullanım ve maliyet",
@@ -2339,6 +2422,7 @@
         "drop_received": "İstek bağlantısıyla bir dosya geldiğinde",
         "comment_added": "Biri bir dosyaya yorum yaptığında",
         "e2e_escrow_used": "Şifreli bir klasör emanet anahtarıyla açıldığında",
+        "e2e_password_changed": "Şifreli klasörünüzün parolası değiştiğinde",
         "plugin_notice": "Kurulu bir uygulama size mesaj gönderdiğinde"
       }
     },

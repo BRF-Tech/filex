@@ -21,7 +21,9 @@ import EncryptedFolderModal from '@brftech/filex-core/src/components/EncryptedFo
 import NewFolderModal from '@brftech/filex-core/src/modals/NewFolderModal.vue';
 
 function fieldNames(root: Element): Array<{ type: string; name: string }> {
-  return Array.from(root.querySelectorAll<HTMLInputElement>('input:not([type="checkbox"])')).map((i) => ({
+  return Array.from(
+    root.querySelectorAll<HTMLInputElement>('input:not([type="checkbox"]):not([type="radio"])'),
+  ).map((i) => ({
     type: i.type,
     name: (i.labels?.[0]?.textContent ?? i.getAttribute('aria-label') ?? '').trim(),
   }));
@@ -38,6 +40,13 @@ describe('the folder dialogs name their fields', () => {
       expect(names[1].name).not.toBe(names[2].name);
       if (locale === 'en') expect(names.map((n) => n.name)).toEqual(['Folder name', 'Folder password', 'Repeat the password']);
       else expect(names.map((n) => n.name)).toEqual(['Klasör adı', 'Klasör parolası', 'Parolayı tekrar girin']);
+      // The level choice: one radio per level that works, each named by its
+      // label, level 1 chosen.
+      const radios = Array.from(document.body.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+      expect(radios).toHaveLength(2);
+      for (const r of radios) expect((r.labels?.[0]?.textContent ?? '').trim(), 'a level has no label').not.toBe('');
+      expect(radios[0].checked).toBe(true);
+      expect(radios[0].labels?.[0]?.textContent).toContain(locale === 'en' ? 'Contents only' : 'Yalnız içerik');
       w.unmount();
       document.body.innerHTML = '';
     });

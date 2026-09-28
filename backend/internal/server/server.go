@@ -26,6 +26,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/drafts"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/external"
 	"github.com/brf-tech/filex/backend/internal/filebody"
@@ -549,6 +550,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			MaxInputBytes:  int64(cfg.AppPluginMaxInputMB) << 20,
 			MaxOutputBytes: int64(cfg.AppPluginMaxOutputMB) << 20,
 			MaxWasmBytes:   int64(cfg.AppPluginMaxWasmMB) << 20,
+			MaxUIBytes:     int64(cfg.AppPluginMaxUIMB) << 20,
 		})
 		if err != nil {
 			slog.Warn("app-plugins: runtime unavailable; continuing without them", slog.Any("err", err))
@@ -849,6 +851,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// The env var is inert once a row exists (see package dbsetting).
 	antivirus.SeedSettings(ctx, store)
 	usage.SeedSettings(ctx, store)
+	drafts.SeedSettings(ctx, store)
 	// ⚠⚠ This resolution is what the process RUNS with until it restarts.
 	// enabled / mode / clamd address are read once, here, because the lines
 	// below are the wiring itself: registering the queue handler and handing
@@ -974,6 +977,9 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		pipeline.Forget(ctx, nodeID)
 		srvObj.releaseStagingFor(ctx, nodeID)
 	}
+	// The sync drops the row of an object gone from the storage for good
+	// (issue #74): the same per-node caches go, the same way.
+	worker.AttachReclaim(trashSvc.Reclaim)
 	srvObj.trash = trashSvc
 
 	// Versioning service — snapshots before destructive writes; the API
@@ -986,6 +992,31 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 
 	// Mailer for invite/share notices — verified periodically in Start().
 	srvObj.mailer = mailer.New(store)
+	if pluginMgr != nil {
+		// A binary storage plugin that names a source is checked daily and
+		// the administrators hear of a newer version once (plugin/updates.go);
+		// nothing is installed without an administrator. The range grammar is
+		// the apps' own, so there is one in filex.
+		notifier := srvObj.notify
+		pluginMgr.SetUpdateHooks(plugin.UpdateHooks{
+			Range: wasmplugin.JudgeFilexRange,
+			Announce: func(ctx context.Context, name, version, notes string) {
+				if notifier == nil {
+					return
+				}
+				if _, err := notifier.Send(ctx, notify.Event{
+					Event: notify.EventPluginUpdateAvailable, Severity: notify.SeverityInfo,
+					Title: name + " " + version + " is available", Body: notes,
+					// A storage plugin's name is its only label; the bell
+					// reads {plugin} from plugin_label_<lang>.
+					Meta: map[string]any{"plugin": name, "plugin_label_en": name, "version": version},
+				}); err != nil {
+					slog.Warn("plugins: update notice not sent", slog.String("plugin", name), slog.Any("err", err))
+				}
+			},
+		})
+		pluginMgr.StartUpdater(ctx, cfg.AppPluginUpdateCheck && !cfg.Demo.Mode)
+	}
 	if appPlugins != nil {
 		appPlugins.SetNotify(srvObj.notify)
 		appPlugins.SetMailer(srvObj.mailer)
@@ -1183,6 +1214,14 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			slog.String("public_url", cfg.PublicURL))
 	} else {
 		slog.Info("http: serving at the root of the host (no base path)")
+	}
+	// Who may show filex's pages in a frame (internal/secheaders): the first
+	// thing to check when a dashboard that embeds filex shows a refusal.
+	if len(cfg.FrameAncestors) > 0 {
+		slog.Info("http: pages may be framed by filex and these origins",
+			slog.String("frame_ancestors", strings.Join(cfg.FrameAncestors, " ")))
+	} else {
+		slog.Info("http: pages may be framed by filex itself only (FILEX_FRAME_ANCESTORS unset)")
 	}
 
 	// The staging directory itself is created here (not lazily in the router)
@@ -1402,7 +1441,12 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 	defaults := []defRow{
 		{name: "onlyoffice", url: cfg.ExternalServices.OnlyOffice.URL, secret: cfg.ExternalServices.OnlyOffice.JWTSecret, callback: cfg.ExternalServices.OnlyOffice.CallbackURL},
 		{name: "drawio", url: cfg.ExternalServices.Drawio.URL, secret: ""},
-		{name: "convert", url: cfg.ExternalServices.Convert.URL, secret: ""},
+	}
+	// The iframe converter (p2r3/convert) is gone since 0.48: conversion is
+	// the Convert app. Its row went with migration 00068; an environment that
+	// still names it is told, once, rather than silently ignored.
+	if strings.TrimSpace(os.Getenv("FILEX_CONVERT_URL")) != "" {
+		slog.Warn("FILEX_CONVERT_URL is no longer used: the iframe converter was removed; install the Convert app (Admin → Plugins → Apps) — docs/APP-PLUGINS.md")
 	}
 	for _, d := range defaults {
 		cur, _ := store.GetExternalService(ctx, d.name)

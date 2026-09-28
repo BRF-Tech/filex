@@ -21,6 +21,11 @@
  * ⚠ It is in the package, not in the admin SPA: fm.example.com, the desktop shell
  * and the embeds all reach `page` views through the same explorer, so a copy
  * per host would be a copy per host to keep in step.
+ *
+ * v4 — a view that is the app's OWN interface (its row carries `ui`) is drawn
+ * by AppFrame instead of a conversation: this file asks the actions list
+ * which it is, so every host (the new-tab page, the app's home page, the
+ * admin panel's Apps section) gets the frame without knowing about it.
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../../types/ExplorerConfig';
@@ -33,6 +38,8 @@ import SurfaceFooterButtons from './SurfaceFooterButtons.vue';
 import SurfaceSections from './SurfaceSections.vue';
 import { walkNodes } from '../../lib/surfaceValues';
 import { openTargetFor } from '../../lib/surfaceOpen';
+import AppFrame from './AppFrame.vue';
+import type { PluginUIRef } from '../../types/Plugins';
 
 const props = defineProps<{
   locale: LocaleCode;
@@ -219,7 +226,39 @@ async function load(): Promise<void> {
   }
 }
 
-onMounted(() => void load());
+/**
+ * v4 — the app's own interface for this view, when it is one: found in the
+ * actions list (a `home`/`viewer` row, or an action whose view it is).
+ */
+const uiRef = ref<PluginUIRef | null>(null);
+const uiPlacement = ref<'page' | 'home'>('page');
+const uiChecked = ref(false);
+const uiFiles = computed(() =>
+  props.path ? [{ path: props.path, name: props.path.split('/').pop() || props.path }] : [],
+);
+
+async function findUI(): Promise<void> {
+  try {
+    const list = await props.api.pluginActions();
+    const row = list.views.find((v) => v.plugin === props.plugin && v.id === props.view && v.ui);
+    if (row?.ui) {
+      uiRef.value = row.ui;
+      uiPlacement.value = row.placement === 'home' ? 'home' : 'page';
+      return;
+    }
+    const act = list.actions.find((a) => a.plugin === props.plugin && a.view === props.view && a.ui);
+    if (act?.ui) uiRef.value = act.ui;
+  } catch {
+    /* no list: the conversation below says what the server says */
+  } finally {
+    uiChecked.value = true;
+  }
+}
+
+onMounted(async () => {
+  await findUI();
+  if (!uiRef.value) void load();
+});
 defineExpose({ reload: load });
 /**
  * Is this step showing a DOCUMENT?
@@ -276,7 +315,29 @@ const showsDocument = computed(() => {
       </a>
     </header>
 
-    <main class="fe-apppage__body">
+    <main v-if="uiRef" class="fe-apppage__body fe-apppage__body--ui">
+      <AppFrame
+        :api="api"
+        :app="plugin"
+        :version="uiRef.version"
+        :view="view"
+        :placement="uiPlacement"
+        :ui="uiRef"
+        :files="uiFiles"
+        :locale="locale"
+        :theme="theme"
+        :title="title"
+        @toast="(m) => (toast = m.text)"
+        @op="(op) => emit('op', op)"
+      />
+      <p v-if="toast" class="fe-surface__text" role="status">{{ toast }}</p>
+    </main>
+    <main v-else-if="!uiChecked" class="fe-apppage__body">
+      <p class="fe-surface__text fe-surface__text--muted" data-testid="plugin-page-loading">
+        {{ t('plugin.view.loading') }}
+      </p>
+    </main>
+    <main v-else class="fe-apppage__body">
       <SurfaceSections
         v-if="state === 'surface' && sections.length"
         :sections="sections"

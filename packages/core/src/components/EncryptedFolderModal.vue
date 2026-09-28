@@ -1,6 +1,13 @@
 <script setup lang="ts">
 /**
- * EncryptedFolderModal — create an E2E-encrypted folder (wiring:e2).
+ * EncryptedFolderModal — create an E2E-encrypted folder (wiring:e2), or
+ * encrypt one that already exists (`existing`: its name; wiring:e2 convert).
+ *
+ * One dialog for both, because they ask the same things — a password, the
+ * level, the acknowledgement — and the second only adds what encrypting in
+ * place cannot undo: the plaintext copies filex already holds, and whether to
+ * remove them (docs/E2E-ENCRYPTION.md → "Encrypting a folder you already
+ * have").
  *
  * Collects folder name + password ×2 and an explicit "I understand there
  * is NO recovery" acknowledgement. The parent (FileExplorer) performs the
@@ -12,8 +19,9 @@
 import { ref, watch } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { E2E_MIN_PASSWORD_LEN } from '../lib/e2ecrypto';
+import { E2E_DEFAULT_LEVEL, E2E_MIN_PASSWORD_LEN, type ChoosableLevel } from '../lib/e2ecrypto';
 import Modal from '../modals/Modal.vue';
+import E2eLevelPicker from './E2eLevelPicker.vue';
 
 const props = defineProps<{
   open: boolean;
@@ -24,11 +32,22 @@ const props = defineProps<{
    *  Shown BEFORE the folder is created: escrow means the operator can open
    *  it without the password, and that is not a detail to discover later. */
   escrowKid?: string | null;
+  /** Encrypt this existing folder in place (its name as people read it). */
+  existing?: string | null;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
-  (e: 'submit', payload: { name: string; password: string }): void;
+  (
+    e: 'submit',
+    payload: {
+      name: string;
+      password: string;
+      level: ChoosableLevel;
+      /** `existing` only: remove the versions / trash entries filex holds. */
+      cleanup?: { versions: boolean; trash: boolean };
+    },
+  ): void;
 }>();
 
 const { t } = useLocale(() => props.locale);
@@ -36,7 +55,16 @@ const name = ref('');
 const password = ref('');
 const password2 = ref('');
 const ack = ref(false);
+/* wiring:e2 — the folder's encryption level. Level 1 (contents only) is the
+ * default: names stay readable to WebDAV, the CLI and desktop sync, and every
+ * filex since 0.31 opens the folder. Level 2 also encrypts the names; each
+ * option says what it costs before anyone chooses (E2eLevelPicker). */
+const level = ref<ChoosableLevel>(E2E_DEFAULT_LEVEL);
 const err = ref<string | null>(null);
+/* wiring:e2 convert — on by default: they are plaintext copies of what is
+ * being encrypted. Off is a choice, and it is said what it leaves behind. */
+const dropVersions = ref(true);
+const dropTrash = ref(true);
 
 watch(
   () => props.open,
@@ -46,6 +74,9 @@ watch(
       password.value = '';
       password2.value = '';
       ack.value = false;
+      level.value = E2E_DEFAULT_LEVEL;
+      dropVersions.value = true;
+      dropTrash.value = true;
       err.value = null;
     }
   },
@@ -53,12 +84,12 @@ watch(
 
 function submit() {
   if (props.busy) return;
-  const clean = name.value.trim();
+  const clean = props.existing ? props.existing : name.value.trim();
   if (!clean) {
     err.value = t('modal.newfolder.placeholder');
     return;
   }
-  if (/[\\/]/.test(clean) || clean === '.' || clean === '..' || clean.startsWith('.filex')) {
+  if (!props.existing && (/[\\/]/.test(clean) || clean === '.' || clean === '..' || clean.startsWith('.filex'))) {
     err.value = t('e2e.create.bad_name');
     return;
   }
@@ -75,22 +106,33 @@ function submit() {
     return;
   }
   err.value = null;
-  emit('submit', { name: clean, password: password.value });
+  emit('submit', {
+    name: clean,
+    password: password.value,
+    level: level.value,
+    ...(props.existing ? { cleanup: { versions: dropVersions.value, trash: dropTrash.value } } : {}),
+  });
 }
 </script>
 
 <template>
-  <Modal :open="open" :title="t('e2e.create.title')" size="sm" @close="emit('close')">
+  <Modal
+    :open="open"
+    :title="existing ? t('e2e.convert.title', { name: existing }) : t('e2e.create.title')"
+    size="sm"
+    @close="emit('close')"
+  >
     <!-- ⚠ Every field carries a visible <label>. They had placeholders only
          (v0.41.0 screenshot pass): the name of a field vanished the moment
          anything was typed into it, and on the two password fields — where
          what is typed is dots — nothing on screen said which box was which.
          A placeholder is a hint, not a name; the length rule stays one. -->
     <form class="fe-e2e-form" @submit.prevent="submit">
-      <label class="fe-field">
+      <label v-if="!existing" class="fe-field">
         <span class="fe-field__label">{{ t('modal.newfolder.placeholder') }}</span>
         <input v-model="name" type="text" class="fe-input" autocomplete="off" :disabled="busy" />
       </label>
+      <p v-else class="fe-e2e-names__hint" data-testid="e2e-convert-lead">{{ t('e2e.convert.lead') }}</p>
       <label class="fe-field">
         <span class="fe-field__label">{{ t('e2e.create.pw_label') }}</span>
         <input
@@ -113,6 +155,25 @@ function submit() {
           @keydown.enter.prevent="submit"
         />
       </label>
+      <!-- wiring:e2 — the level: what the server will and will not see. -->
+      <div class="fe-e2e-names" data-testid="e2e-create-names">
+        <E2eLevelPicker v-model="level" :locale="locale" :disabled="busy" />
+        <p class="fe-e2e-names__hint">{{ t('e2e.create.names_root_hint') }}</p>
+      </div>
+      <!-- wiring:e2 convert — what encrypting now cannot reach, said before. -->
+      <div v-if="existing" class="fe-e2e-convert-past" data-testid="e2e-convert-past">
+        <strong>{{ t('e2e.convert.past_title') }}</strong>
+        <p>{{ t('e2e.convert.past_body') }}</p>
+        <label class="fe-e2e-ack">
+          <input v-model="dropVersions" type="checkbox" :disabled="busy" data-testid="e2e-convert-versions" />
+          <span>{{ t('e2e.convert.drop_versions') }}</span>
+        </label>
+        <label class="fe-e2e-ack">
+          <input v-model="dropTrash" type="checkbox" :disabled="busy" data-testid="e2e-convert-trash" />
+          <span>{{ t('e2e.convert.drop_trash') }}</span>
+        </label>
+        <p class="fe-e2e-names__hint">{{ t('e2e.convert.past_outside') }}</p>
+      </div>
       <div class="fe-e2e-warn" role="alert">
         <strong>{{ t('e2e.create.warn_title') }}</strong>
         <p>{{ t('e2e.create.warn_body') }}</p>
@@ -124,7 +185,7 @@ function submit() {
         <p>{{ t('e2e.create.escrow_body') }}</p>
       </div>
       <label class="fe-e2e-ack">
-        <input v-model="ack" type="checkbox" :disabled="busy" />
+        <input v-model="ack" type="checkbox" :disabled="busy" data-testid="e2e-create-ack" />
         <span>{{ t('e2e.create.ack') }}</span>
       </label>
       <p v-if="err" class="fe-form__error">{{ err }}</p>
@@ -134,7 +195,7 @@ function submit() {
         {{ t('modal.newfolder.cancel') }}
       </button>
       <button type="button" class="fe-btn fe-btn--primary" :disabled="busy" @click="submit">
-        {{ busy ? t('e2e.create.busy') : t('e2e.create.create') }}
+        {{ busy ? t('e2e.create.busy') : existing ? t('e2e.convert.submit') : t('e2e.create.create') }}
       </button>
     </template>
   </Modal>

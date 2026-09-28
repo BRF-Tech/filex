@@ -283,7 +283,6 @@ onMounted(load);
 function serviceName(id: string): string {
   if (id === 'onlyoffice') return 'ONLYOFFICE';
   if (id === 'drawio') return 'draw.io';
-  if (id === 'convert') return t('external.names.convert');
   return id;
 }
 </script>
@@ -351,15 +350,6 @@ function serviceName(id: string): string {
             </h2>
             <p v-if="s.env_managed" class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
               {{ t('external.envManagedHint') }}
-            </p>
-            <!-- ⚠ The iframe converter is retiring; the Convert app replaces
-                 it, and the file menu offers only one of the two. -->
-            <p
-              v-if="s.id === 'convert'"
-              class="text-xs text-amber-600 dark:text-amber-400 mt-0.5"
-              data-testid="external-convert-legacy"
-            >
-              {{ t('external.convertLegacy') }}
             </p>
             <p
               v-if="

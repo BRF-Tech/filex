@@ -50,6 +50,10 @@
 # about them at all — `-text` means never convert, in either direction, however
 # text-like a .csv or .xml fixture looks to the heuristic.
 e2e/fixtures/**  -text -eol
+# The encrypted folders `filex decrypt` is tested against: ciphertext, a
+# long-name sidecar and a plaintext stray whose SHA-256 is pinned — one
+# converted line ending and the round trip reports corruption.
+backend/internal/e2edecrypt/testdata/folders/** -text -eol
 
 # ── Binaries ──────────────────────────────────────────────────────────────
 # `text=auto` already guesses these correctly, but a guess is a thing that can

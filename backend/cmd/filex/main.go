@@ -11,6 +11,7 @@
 //	filex thumb backfill [--storage <id|name>] [--limit N] [--retry-failed]
 //	filex client login | ls | upload | download | mkdir | rm | mv | search | share
 //	filex e2e-escrow keygen                      # install-time E2E key escrow
+//	filex decrypt <folder|zip|file> [-o DIR]     # offline: decrypt a downloaded E2E folder
 //	filex --version
 package main
 
@@ -66,6 +67,7 @@ func main() {
 		mountCmd(),
 		selfUpdateCmd(),
 		e2eEscrowCmd(),
+		decryptCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

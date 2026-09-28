@@ -13,25 +13,33 @@ import (
 	"github.com/brf-tech/filex/backend/internal/config"
 )
 
-// The update routes over HTTP: the per-app switch, "Check now", and an
-// upgrade from the app's own source — each held to the same gate as the rest
-// of the Apps surface.
+// The update routes over HTTP: "Check now", an upgrade from the app's own
+// source and going back to the kept version — each held to the same gate as
+// the rest of the Apps surface. The per-app automatic-update switch is gone
+// (filex 0.48: nothing updates itself), and asking for it says so.
 func TestAppPlugins_UpdateRoutes(t *testing.T) {
 	f := newAppFixture(t, nil)
 	id := f.installEcho(t) // uploaded: no source to ask
 	one := fmt.Sprintf("%s/api/admin/app-plugins/%d", f.srv.URL, id)
 
 	status, raw := doReq(t, f.admin, http.MethodPatch, one, map[string]any{"auto_update": false})
+	require.Equal(t, http.StatusBadRequest, status, string(raw))
+	assert.Contains(t, string(raw), "waits for an administrator")
+	status, raw = doReq(t, f.admin, http.MethodPatch, one, map[string]any{"enabled": true})
 	require.Equal(t, http.StatusOK, status, string(raw))
 	var row struct {
-		AutoUpdate   bool   `json:"auto_update"`
-		Enabled      bool   `json:"enabled"`
-		UpdateSource string `json:"update_source"`
+		Enabled      bool            `json:"enabled"`
+		UpdateSource string          `json:"update_source"`
+		Extra        json.RawMessage `json:"auto_update"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &row))
-	assert.False(t, row.AutoUpdate)
-	assert.True(t, row.Enabled, "switching updates leaves the app on")
+	assert.True(t, row.Enabled)
 	assert.Empty(t, row.UpdateSource, "an uploaded app has no source")
+	assert.Nil(t, row.Extra, "the answer no longer carries a switch that does nothing")
+
+	// Nothing kept yet: there is no version to go back to.
+	status, raw = doReq(t, f.admin, http.MethodPost, one+"/rollback", map[string]any{})
+	assert.Equal(t, http.StatusNotFound, status, string(raw))
 
 	status, raw = doReq(t, f.admin, http.MethodPatch, one, map[string]any{})
 	assert.Equal(t, http.StatusBadRequest, status, string(raw))
@@ -95,11 +103,9 @@ func TestAppPlugins_LanguagePackInstallsFromItsManifestAddressAlone(t *testing.T
 		Source       string `json:"source"`
 		ManifestURL  string `json:"manifest_url"`
 		UpdateSource string `json:"update_source"`
-		AutoUpdate   bool   `json:"auto_update"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &row))
 	assert.Equal(t, "url", row.Source)
 	assert.Equal(t, src.URL+"/filex-app.json", row.ManifestURL)
 	assert.Equal(t, "url", row.UpdateSource, "the update check has an address to re-read")
-	assert.True(t, row.AutoUpdate)
 }

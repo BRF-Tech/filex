@@ -190,8 +190,9 @@ describe('AppPluginsTab', () => {
 //
 // The rows here are the SERVER's own bytes for "Check now"'s answer
 // (testdata/wire/app-plugin-update-check.json): an app whose newer release
-// asks for a new permission, and a language pack that moved by itself and is
-// outside its own range for this filex.
+// asks for a new permission, and a language pack whose newer version waits
+// for an approval, which keeps the version its last approval replaced and is
+// outside its own range for this filex. ⚠⚠ Nothing updates itself (0.48).
 describe('AppPluginsTab — updates', () => {
   const WIRE = path.resolve(__dirname, '../../../backend/internal/api/handlers/testdata/wire');
   const checkAnswer = () => JSON.parse(readFileSync(path.join(WIRE, 'app-plugin-update-check.json'), 'utf8'));
@@ -232,14 +233,19 @@ describe('AppPluginsTab — updates', () => {
     await flushPromises();
 
     await openRowMenu(w, 'app-plugin-actions-lang-es');
-    expect(menuEntries().map((e) => e.label)).not.toContain(en.appPlugins.actions.reviewUpdate);
-    closeRowMenus();
-
-    await openRowMenu(w, 'app-plugin-actions-sign');
     expect(menuEntries().map((e) => e.label)).toEqual([
       en.appPlugins.actions.details,
       en.appPlugins.actions.reviewUpdate,
-      en.appPlugins.actions.autoUpdateOff,
+      'Back to 0.9.0',
+      en.appPlugins.actions.upgrade,
+      en.appPlugins.actions.remove,
+    ]);
+    closeRowMenus();
+
+    await openRowMenu(w, 'app-plugin-actions-sign');
+    expect(menuEntries().map((e) => e.label), 'nothing kept, nothing to go back to; no automatic switch').toEqual([
+      en.appPlugins.actions.details,
+      en.appPlugins.actions.reviewUpdate,
       en.appPlugins.actions.upgrade,
       en.appPlugins.actions.remove,
     ]);
@@ -256,7 +262,7 @@ describe('AppPluginsTab — updates', () => {
     w.unmount();
   });
 
-  it('"Check for updates" asks the server, redraws the list and says what moved', async () => {
+  it('"Check for updates" asks the server, redraws the list and says what waits — it installs nothing', async () => {
     const { api } = await import('@/api/client');
     (api.post as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
       if (url === '/admin/app-plugins/updates/check') return { data: checkAnswer() };
@@ -270,40 +276,38 @@ describe('AppPluginsTab — updates', () => {
     await flushPromises();
     const call = (api.post as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(call[0]).toBe('/admin/app-plugins/updates/check');
-    expect(call[2]?.timeout, 'a check installs what may be installed: it waits for the compiles').toBeGreaterThanOrEqual(600_000);
+    expect(call[2]?.timeout, 'a check reads every app’s source: it waits for all of them').toBeGreaterThanOrEqual(600_000);
     expect(w.find('[data-testid="app-plugin-updates-sign"]').exists(), 'the list is the answer’s').toBe(true);
     const { useToastStore } = await import('@/stores/toast');
-    expect(useToastStore().toasts.map((x) => x.message)).toEqual(['Güncelleme denetimi bitti: 1 güncellendi, 1 sizi bekliyor.']);
+    expect(useToastStore().toasts.map((x) => x.message)).toEqual(['Güncelleme denetimi bitti: 2 güncelleme onayınızı bekliyor.']);
     w.unmount();
   });
 
-  it('the row menu switches automatic updates for that app, and an app with no source has no switch', async () => {
+  it('"Back to <version>" puts the kept version back, after asking, and redraws the list', async () => {
     const { api } = await import('@/api/client');
-    (api.patch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (_u: string, body: { auto_update: boolean }) => ({
-      data: { ...listAnswer.plugins[0], auto_update: body.auto_update },
-    }));
-    listAnswer = {
-      ...listAnswer,
-      plugins: [...listAnswer.plugins, { ...listAnswer.plugins[0], id: 11, name: 'uploaded', source: 'upload', update_source: undefined, update: undefined }],
-    };
+    const back = { ...listAnswer.plugins[1], version: '0.9.0', previous: { version: '1.0.0', replaced_at: '2026-09-27T08:00:00Z' } };
+    (api.post as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === '/admin/app-plugins/9/rollback') return { data: back };
+      return { data: {} };
+    });
+    const ask = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     const w = mountTab();
     await flushPromises();
-    await openRowMenu(w, 'app-plugin-actions-uploaded');
-    const uploaded = menuEntries().map((e) => e.label);
-    expect(uploaded, 'no source, nothing to switch').not.toContain(en.appPlugins.actions.autoUpdateOff);
-    expect(uploaded).not.toContain(en.appPlugins.actions.autoUpdateOn);
-    closeRowMenus();
-    expect(w.find('[data-testid="app-plugin-updates-uploaded"]').text()).toContain(en.appPlugins.update.noSource);
+    expect(w.find('[data-testid="app-plugin-updates-lang-es"]').text()).toContain('Version 0.9.0 is kept to go back to');
 
-    await openRowMenu(w, 'app-plugin-actions-sign');
-    await pickMenuItem('app-plugin-actions-sign-auto-update');
+    await openRowMenu(w, 'app-plugin-actions-lang-es');
+    await pickMenuItem('app-plugin-actions-lang-es-rollback');
     await flushPromises();
-    expect((api.patch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(['/admin/app-plugins/7', { auto_update: false }]);
-    // The row takes the server's answer: the switch is off, and the cell says so.
-    expect(w.find('[data-testid="app-plugin-updates-sign"]').text()).toContain(en.appPlugins.update.autoOff);
-    await openRowMenu(w, 'app-plugin-actions-sign');
-    expect(menuEntries().map((e) => e.label)).toContain(en.appPlugins.actions.autoUpdateOn);
-    closeRowMenus();
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(ask.mock.calls[0][0]).toContain('back to 0.9.0');
+    expect((api.post as unknown as ReturnType<typeof vi.fn>).mock.calls, 'said no: nothing sent').toHaveLength(0);
+
+    await openRowMenu(w, 'app-plugin-actions-lang-es');
+    await pickMenuItem('app-plugin-actions-lang-es-rollback');
+    await flushPromises();
+    expect((api.post as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('/admin/app-plugins/9/rollback');
+    const { useToastStore } = await import('@/stores/toast');
+    expect(useToastStore().toasts.map((x) => x.message)).toContain('Spanish language pack is back to 0.9.0.');
     w.unmount();
   });
 });

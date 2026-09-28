@@ -67,17 +67,6 @@ export type PluginMenuNode = AppliesNodeLike & {
   lock?: { plugin?: string } | null;
 };
 
-/**
- * The Convert app's manifest name (BRF-Tech/filex-convert). Its actions
- * replace the legacy iframe converter — see serviceGate `legacyConvertGate`.
- */
-export const CONVERT_APP = 'convert';
-
-/** Whether the Convert app has any action on this instance for this caller. */
-export function convertAppOffered(actions: readonly Pick<PluginActionRow, 'plugin'>[]): boolean {
-  return actions.some((a) => a.plugin === CONVERT_APP);
-}
-
 /** The menu key for an action row: the server's, or `plugin:<plugin>/<id>`. */
 export function pluginActionKey(a: Pick<PluginActionRow, 'plugin' | 'id' | 'key'>): string {
   return a.key || `plugin:${a.plugin}/${a.id}`;

@@ -63,7 +63,10 @@
  * Unscoped styles (`fe-pane*`, and the `fe__primary` / `fe-subhead` / `fe__body`
  * classes the layout already owns) — webcomponent data-v rule.
  */
-import { computed, provide, ref, watch } from 'vue';
+import { computed, inject, provide, ref, watch } from 'vue';
+import { E2E_NAME_VIEW } from '../composables/useE2eNames';
+import { E2E_LOCK } from '../composables/useE2eLock';
+import E2eLockScreen from './E2eLockScreen.vue';
 
 import type { FileApi } from '../composables/useFileApi';
 import type { ClickMod } from '../composables/useRowTouch';
@@ -297,6 +300,31 @@ function isStorageRow(n: FileNode): boolean {
 }
 
 /** THE location this pane is showing, whichever side is driving. */
+/* wiring:e2 names — provided by FileExplorer; absent when the pane is used alone. */
+const e2eNameView = inject(E2E_NAME_VIEW, null);
+/* wiring:e2 — the explorer's lock: a self-driven pane standing inside a
+   locked encrypted folder draws the same lock screen the main pane does, and
+   the same unlock opens the folder for both (composables/useE2eLock). */
+const e2eLock = inject(E2E_LOCK, null);
+/** The encrypted folder this pane's listing is inside ('' = none). */
+const ownE2eRoot = ref('');
+const paneUnlockBusy = ref(false);
+const paneUnlockErr = ref('');
+const paneLocked = computed(
+  () => props.selfDriven && !!e2eLock && !!ownE2eRoot.value && e2eLock.locked(ownE2eRoot.value),
+);
+async function onPaneUnlock(password: string) {
+  if (!e2eLock || !ownE2eRoot.value || paneUnlockBusy.value) return;
+  paneUnlockBusy.value = true;
+  paneUnlockErr.value = '';
+  try {
+    const err = await e2eLock.unlock(ownE2eRoot.value, password);
+    if (err) paneUnlockErr.value = err;
+    else await loadFolder(ownPath.value);
+  } finally {
+    paneUnlockBusy.value = false;
+  }
+}
 const panePath = computed(() => (props.selfDriven ? ownPath.value : (props.path ?? '')));
 const paneRows = computed<FileNode[]>(() =>
   props.selfDriven ? ownRows.value : (props.rows ?? []),
@@ -323,13 +351,21 @@ async function loadFolder(target?: string): Promise<void> {
     if (props.multiRoot && !requested) {
       ownRows.value = props.virtualRows ? props.virtualRows() : [];
       ownPerm.value = ''; /* the drive list is not a folder — no level to carry */
+      ownE2eRoot.value = '';
       ownPath.value = '';
       emit('navigate', '');
       return;
     }
     const resp = await props.api.index(props.qualify(requested));
     ownPerm.value = ((resp as { perm?: unknown }).perm as string) || '';
-    ownRows.value = filterListing(resp.files);
+    /* wiring:e2 names — the split pane names encrypted items the way the main
+       pane does (plaintext when unlocked, "🔒 Encrypted item" when not):
+       through the explorer's one name view, before the hidden-file filter. */
+    const e2eRootHere = typeof resp.e2e_root === 'string' ? resp.e2e_root : '';
+    if (e2eRootHere !== ownE2eRoot.value) paneUnlockErr.value = '';
+    ownE2eRoot.value = e2eRootHere;
+    const shown = e2eNameView ? await e2eNameView.decorate(resp.files, { root: e2eRootHere || null }) : resp.files;
+    ownRows.value = filterListing(shown);
     if (
       injectTrashRow(ownRows.value, resp.adapter, resp.dirname, props.trashVisible !== false, {
         navOffersTrash: props.navOffersTrash,
@@ -788,6 +824,18 @@ watch(panePath, () => {
       <!-- The host draws the body itself for the states that have no listing
            behind them (Home, a dead deep link, the lock screen). -->
       <slot v-if="bodyOverride" name="body"></slot>
+
+      <!-- wiring:e2 — inside a locked encrypted folder: its lock screen, not
+           rows of "🔒 Encrypted item". -->
+      <E2eLockScreen
+        v-else-if="paneLocked"
+        compact
+        :locale="locale"
+        :busy="paneUnlockBusy"
+        :error="paneUnlockErr"
+        @unlock="onPaneUnlock"
+        @recovery="e2eLock?.recovery(ownE2eRoot)"
+      />
 
       <!-- Initial load: skeleton ghosts (view-mode aware) instead of an
            empty/"no files" flash. Only when there is nothing yet — navigation

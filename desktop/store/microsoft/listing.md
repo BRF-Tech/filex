@@ -49,7 +49,7 @@ Kubernetes — see filex.sh.
 - "Open with filex" for Office documents, edited in your server's document editor
 - Share links with a PIN, an expiry and a download limit
 - Download and upload limits, and a time window for syncing
-- Notifications for what happens on your server, in the tray
+- Notifications for what happens on your server, from the tray — and the bell and your account menu in the window
 - Starts at sign-in if you want it to, quietly in the tray
 - English and Turkish interface
 - Open source (MIT); no telemetry, no ads
@@ -98,7 +98,7 @@ tek bir programdır — ayrıntılar filex.sh'ta.
 - Office belgeleri için "filex ile aç"; sunucunuzun belge düzenleyicisinde düzenleme
 - PIN, süre sonu ve indirme sınırı olan paylaşım bağlantıları
 - İndirme ve yükleme sınırları, senkron için zaman aralığı
-- Sunucunuzda olanlar için tepside bildirimler
+- Sunucunuzda olanlar için tepside bildirimler; pencerede zil ve hesap menüsü
 - İsterseniz oturum açılışında tepside sessizce başlar
 - Türkçe ve İngilizce arayüz
 - Açık kaynak (MIT); telemetri yok, reklam yok

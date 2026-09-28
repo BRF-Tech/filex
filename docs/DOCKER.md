@@ -90,7 +90,8 @@ docker build \
 | `minio`       | `minio`      | S3-compatible blob store |
 
 The production-shaped stack in [`deploy/compose/docker-compose.full.yml`](../deploy/compose/docker-compose.full.yml)
-adds three more profiles — `drawio`, `convert` and **`clamav`**. The last one
+adds two more profiles — `drawio` and **`clamav`** (the `convert` side-car was
+removed in 0.48: conversion is the Convert app). The last one
 is how antivirus is meant to be run under Docker: **the filex images ship no
 scanner** (ClamAV plus its signature database is close to a gigabyte), so
 `clamav/clamav` runs as its own container and filex streams each file to it

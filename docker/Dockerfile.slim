@@ -41,12 +41,13 @@ WORKDIR /src
 # source code edits when only deps haven't changed.
 COPY package.json pnpm-workspace.yaml ./
 COPY pnpm-lock.yaml* ./
+COPY packages/app-ui/package.json ./packages/app-ui/
 COPY packages/core/package.json ./packages/core/
 COPY packages/webcomponent/package.json ./packages/webcomponent/
 COPY packages/react/package.json ./packages/react/
 COPY web/package.json ./web/
 
-# Install all workspace deps (core/webcomponent/react/web). Use --no-frozen-lockfile
+# Install all workspace deps (app-ui/core/webcomponent/react/web). Use --no-frozen-lockfile
 # in dev images that don't ship a lockfile yet; CI ships a lockfile so it's frozen.
 # vue-tsc OOMs the default 1.7 GB Node heap once we pull in
 # @brftech/filex-core (workspace dep with code-split viewers). Bump

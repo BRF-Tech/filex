@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { DENSITY_KEY, getDensity, setDensity } from '@/lib/density';
+import { DENSITY_KEY, getDensity, setDensity } from '@brftech/filex-core/src/lib/density';
 
 const TOOLBAR = path.resolve(
   __dirname,

@@ -91,6 +91,22 @@ describe('core Modal — a dialog mounted open', () => {
     opener.remove();
   });
 
+  // v0.48.0: the draft close question focused Discard (the first footer
+  // button) whenever its own focus call lost the race to this timer.
+  it('focuses the answer a dialog marks data-fe-autofocus, even in the footer', () => {
+    const w = mount(Modal, {
+      props: { open: true, title: 'Close this draft?' },
+      slots: {
+        default: '<p>Not saved yet.</p>',
+        actions: '<button data-testid="discard">Discard</button><button data-testid="keep" data-fe-autofocus>Keep</button>',
+      },
+      attachTo: document.body,
+    });
+    mounted.push(w);
+    vi.advanceTimersByTime(50);
+    expect(document.activeElement?.getAttribute('data-testid')).toBe('keep');
+  });
+
   it('answers Escape with the dialog in FRONT only', () => {
     const back = dialog({ title: 'Back' });
     const front = dialog({ title: 'Front' });
@@ -169,5 +185,87 @@ describe('PluginViewModal — the frame every app screen opens in', () => {
     expect(close.text()).toBe('Kapat');
     close.trigger('click');
     expect(w.emitted('close')).toHaveLength(1);
+  });
+});
+
+/* `bare` — the user settings dialog draws its own card (head, rail, pane) and
+   used to be a native <dialog> for that reason alone. showModal() put it in
+   the browser's top layer, over the desktop app's own title bar, and made
+   minimise / maximise / close inert behind it (owner, 2026-09-27: the title
+   bar works ALWAYS). As a bare Modal it keeps the dialog's whole behaviour
+   and none of the top layer. */
+describe('core Modal — bare: the slot draws the whole card', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    while (mounted.length) mounted.pop()!.unmount();
+    vi.useRealTimers();
+  });
+
+  function bare(props: Record<string, unknown> = {}) {
+    const w = mount(Modal, {
+      props: { open: true, bare: true, labelledby: 'own-heading', ...props },
+      slots: {
+        default: '<section><h2 id="own-heading">Own heading</h2><button data-testid="own-x">x</button><input data-testid="own-first" /></section>',
+        actions: '<button data-testid="ok">OK</button>',
+      },
+      attachTo: document.body,
+    });
+    mounted.push(w);
+    return w;
+  }
+
+  it('draws no header and no footer of its own, only the frame', () => {
+    const w = bare({ title: 'Ignored' });
+    expect(w.find('.fe-modal__head').exists()).toBe(false);
+    expect(w.find('.fe-modal__actions').exists()).toBe(false);
+    expect(w.find('.fe-modal__card').classes()).toContain('fe-modal__card--bare');
+    expect(w.find('.fe-modal__card').classes()).not.toContain('fe-modal__card--md');
+  });
+
+  it('is still a modal dialog, named by the heading the slot draws', () => {
+    const w = bare();
+    const card = w.find('.fe-modal__card');
+    expect(card.attributes('role')).toBe('dialog');
+    expect(card.attributes('aria-modal')).toBe('true');
+    expect(card.attributes('aria-labelledby')).toBe('own-heading');
+    expect(card.attributes('aria-label')).toBeUndefined();
+    expect(document.getElementById('own-heading')?.textContent).toBe('Own heading');
+  });
+
+  it('closes on Escape and on an outside click, and takes the focus and gives it back', () => {
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    opener.focus();
+    const w = bare();
+    vi.advanceTimersByTime(50);
+    expect(w.element.contains(document.activeElement)).toBe(true);
+    escape();
+    click(w.find('.fe-modal__backdrop').element);
+    expect(w.emitted('close')).toHaveLength(2);
+    w.unmount();
+    mounted.splice(mounted.indexOf(w), 1);
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+  /* Opened from a MENU row: the focus is on the row when the dialog wires
+     itself, the menu hands the focus to its own button a tick later, and the
+     row is removed when the menu's closing transition ends. Measured in the desktop app: Escape on the
+     user settings dialog (opened from the avatar) left the focus on <body>. */
+  it('gives the focus back to the menu button when the row that opened it is gone', () => {
+    const button = document.createElement('button');
+    const row = document.createElement('button');
+    document.body.append(button, row);
+    row.focus();
+    const w = bare();
+    button.focus();
+    vi.advanceTimersByTime(50);
+    expect(w.element.contains(document.activeElement)).toBe(true);
+    // The row outlives the dialog's first moments (the menu's closing
+    // transition) and is gone by the time the dialog closes.
+    row.remove();
+    w.unmount();
+    mounted.splice(mounted.indexOf(w), 1);
+    expect(document.activeElement).toBe(button);
+    button.remove();
   });
 });

@@ -296,7 +296,10 @@ function build() {
   run('node', ['scripts/sync-embed.mjs'], { cwd: REPO });
   const out = path.join(REPO, 'bin', process.platform === 'win32' ? 'filex.exe' : 'filex');
   fs.mkdirSync(path.dirname(out), { recursive: true });
-  run('go', ['build', '-o', out, './cmd/filex'], { cwd: path.join(REPO, 'backend') });
+  // Through build-backend (goBuild): a native Go where there is one, else WSL
+  // building from its own disk (~/wt mirror). A raw `go build` here failed on a
+  // Windows machine whose only Go lives in WSL (2026-09-27).
+  run('node', ['scripts/build-backend.mjs', '--out', out], { cwd: REPO });
   return out;
 }
 
@@ -778,6 +781,10 @@ async function main() {
     // would hit a trash sidecar left behind an hour earlier and fail. 211 such
     // directories had piled up in the OS temp dir before this landed.
     E2E_STORAGE_ROOT: storageRootDir,
+    // The binary under test, for specs that run its CLI side against what the
+    // server stored (172-e2e-names: `filex decrypt` on a folder the browser
+    // encrypted).
+    E2E_FILEX_BIN: binary,
   };
   if (flag('s3')) {
     const s3 = await startS3(apiRoot);

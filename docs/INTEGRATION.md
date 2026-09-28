@@ -15,6 +15,29 @@ trash, convert) is built in.
 
 All three render the **same** explorer — they differ only in how you mount it.
 
+None of them is an `<iframe>`: the explorer runs in your page. Showing filex's
+own pages inside a frame instead (a home dashboard's tile) is refused by the
+browser unless the dashboard's origin is in `FILEX_FRAME_ANCESTORS` — see
+[CONFIGURATION.md → Security headers and framing](CONFIGURATION.md#security-headers-and-framing).
+
+**Apps with an interface of their own open in a frame INSIDE your page.** An
+app may bring its own HTML/JS interface ([APP-PLUGINS.md → An app's own
+interface](APP-PLUGINS.md#an-apps-own-interface)); the explorer draws it in a
+sandboxed `<iframe>` it creates in your page, served from filex's
+`/_appui/…` (or from `FILEX_APP_UI_ORIGIN` when interfaces have an origin of
+their own). Two things follow for the page that embeds the explorer:
+
+- A `frame-src` in **your** page's Content-Security-Policy must allow that
+  origin (filex's, or the interface origin) — otherwise the interface is
+  refused.
+- ⚠ Give your page a `frame-src` at all. It is what stops an interface from
+  navigating its own frame away — to its author's server, or to a document
+  of its own making where filex's WebRTC countermeasure never ran (measured:
+  without the host page's `frame-src`, Firefox and WebKit followed both).
+  filex's own pages send one; on your page it is yours to send. List only
+  what your page really frames: filex's origin (or the interface origin),
+  never `data:` or `blob:`.
+
 ⚠ The stylesheet column is not a detail: the look is one global sheet plus the
 `--fe-*` tokens on it, and only the Vue wrapper imports it by hand. The web
 component carries the same bytes *inside its JavaScript* and appends them to
@@ -706,6 +729,92 @@ of the other person's file would go out as whoever the window is showing. The
 desktop app sets the `Authorization` header on that download explicitly
 (`desktop/src/main.ts`, `remote:download`), and keys its prepared drag copies by
 account as well as by path.
+
+## 4f. The notification bell and the account menu (host hooks)
+
+The filex web app ends its top bar in a **bell** and an **avatar**. A host that
+mounts the Vue SFC fills the `header-actions` slot with them; a host that mounts
+`<filex-explorer>` cannot fill any slot (see `brand` above), so it asks the
+explorer to draw them itself — the same components (`NotificationBell`,
+`NotificationsPanel`, `AccountMenu` from `@brftech/filex-core`). The desktop app
+does exactly this.
+
+```ts
+config.notifications = {
+  // Poll /api/notifications every 15 s (default). false for a host that
+  // already polls and hands the count over:
+  poll: false,
+  onUnread: (cb) => { host.onBellCount = cb; },   // host calls cb(count)
+  onRead: () => host.refreshBadge(),              // a row was marked read here
+  // The administrators' console door on the bell — drawn for an administrator
+  // only (the explorer asks the server who that is). Optional.
+  manage: { href: 'https://files.example.com/admin/notifications', open: () => host.openAdmin() },
+};
+
+config.account = {
+  // The person's own settings — the admin app's user settings dialog, opened
+  // IN the explorer from a "User settings" row it puts first. It talks to the
+  // account's own endpoints with the explorer's credential; the rows only some
+  // hosts have (language, start page, one click or two, desktop-app downloads,
+  // browser notifications) are not drawn. With it, the "⋯" rows the dialog
+  // carries (theme, compact view, time zone) leave the menu.
+  settings: true,
+  // The host's rows above the explorer's own settings rows (shortcuts, the
+  // tour — they fold in from the "⋯", as on the web). A function receives who
+  // is signed in (/api/auth/me).
+  actions: (person) =>
+    person?.role === 'admin' ? [{ key: 'admin', label: 'Admin panel', icon: 'admin' }] : [],
+  // Rows below the explorer's — where a host that wants one puts Sign out.
+  // The desktop app gives none: signing an account out of the app is an app
+  // setting (Settings → Accounts), not an interface one.
+  tail: () => [],
+  // Explorer rows the host has another door for. The ones the explorer draws
+  // itself (view switcher, details toggle, panel toggle — EXPLORER_DRAWN_ROWS)
+  // are left out without being named here.
+  omit: [],
+  select: (key, person) => host.run(key),
+  // person: { display_name, email, avatar_url, role } — optional; asked of the
+  // server with the explorer's own credential when absent.
+};
+```
+
+The bell reads the **user-scoped** endpoints only (`GET /api/notifications`,
+`…/unread-count`, `POST …/{id}/read`, `POST …/read-all`) with the explorer's
+credential, and a click lands **in this explorer**: the folder with the row
+selected (and the app screen the notice asked for), the Trash view, an app's
+home view, or a share page in a new window. The same landing is available to a
+host for a notification it raised itself (an OS toast) — the element exposes it:
+
+```ts
+await el.revealNotification(dest);   // dest: resolveNotificationTarget(row.target)
+```
+
+⚠ A Vue host that fills `header-actions` with its own bell must not ALSO set
+`config.notifications` — it would draw two. Leave both out (every embed today)
+and nothing new renders or is fetched.
+
+## 4g. A host title bar above the explorer
+
+Everything the explorer draws over the whole window — every dialog (the user
+settings dialog included), the share dialog, the connections overlay, the
+full notification list, the column menu's click catcher — starts at the CSS
+custom property `--fe-overlay-top`, which is `0px` unless the host sets it. A
+host that keeps a strip of its own at the top of the window, and needs it to
+keep working while a dialog is open, sets it to that strip's height on any
+scope above the explorer:
+
+```css
+:root { --fe-overlay-top: 34px; }   /* the height of your bar, border included */
+```
+
+The desktop app is that host: its window is frameless, so minimise, maximise,
+close and the strip the OS drags the window by are page content, and they
+answer the first click with a dialog open. The dialogs' heights leave room for
+the strip too. Nothing changes for a host that does not set it.
+
+No explorer dialog uses the browser's top layer (`<dialog>.showModal()`): that
+layer is above every z-index and makes the rest of the page inert, strip
+included.
 
 ## 5. Backend side (what the host must provide)
 

@@ -38,9 +38,13 @@ import (
 type Target struct {
 	Rel string
 	// Verb is the syspath exception this target may claim (the desktop's
-	// open-with round trip); syspath.Change — the zero value — for every
-	// other write.
+	// open-with round trip, a person's own draft); syspath.Change — the zero
+	// value — for every other write.
 	Verb syspath.Verb
+	// Person is who the write is FOR, when the exception depends on it
+	// (syspath.OwnDraft: a draft is written only by its owner's editor). 0
+	// when nobody is named, which is what every other write passes.
+	Person int64
 	// named: the path is named by the write but not changed by it.
 	named bool
 }
@@ -60,6 +64,10 @@ func Names(rel string) Target { return Target{Rel: rel, named: true} }
 
 // As claims the syspath exception v for this target.
 func (t Target) As(v syspath.Verb) Target { t.Verb = v; return t }
+
+// By names the person the write is for (syspath.RefusedBy): the owner of a
+// draft is the only one whose OwnDraft claim is honoured.
+func (t Target) By(person int64) Target { t.Person = person; return t }
 
 // Locks answers which app lock covers a path: on it (Lock) or on it or
 // anything under it (LockWithin). *acl.Set implements it; a nil *acl.Set
@@ -99,7 +107,7 @@ func (e *LockedError) Unwrap() error { return ErrLocked }
 // locks may be nil (no ACL resolver wired): then only names are judged.
 func Check(locks Locks, app int64, targets ...Target) error {
 	for _, t := range targets {
-		if syspath.Refused(t.Verb, t.Rel) {
+		if syspath.RefusedBy(t.Verb, t.Rel, t.Person) {
 			return &syspath.ReservedError{Rel: t.Rel}
 		}
 	}

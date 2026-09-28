@@ -14,6 +14,7 @@ const (
 	CodeTimeout     = "timeout"      // the call outlived its budget
 	CodeRefused     = "refused"      // describe disagrees with the manifest
 	CodeUnsupported = "unsupported"  // this host cannot run plugins (arch)
+	CodeBusy        = "busy"         // every screen-call slot of the plugin is taken
 )
 
 // CallError is a failed guest call, classified.

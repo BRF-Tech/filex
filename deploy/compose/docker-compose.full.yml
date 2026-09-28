@@ -1,14 +1,14 @@
 # filex — full stack (production-shaped) with toggleable integrations.
 #
 # Always-on core:  filex + PostgreSQL (DB) + Redis (queue) + Caddy (HTTPS proxy)
-# Opt-in add-ons:  ONLYOFFICE · draw.io · the LEGACY Converter side-car · MinIO (S3)
+# Opt-in add-ons:  ONLYOFFICE · draw.io · MinIO (S3)
 #                  · ClamAV (antivirus — this image ships no scanner)
 #
 # ── Toggling add-ons ────────────────────────────────────────────────────
 # Every add-on is a Compose *profile*. Turn one on/off in your .env by editing
 # COMPOSE_PROFILES (comma list) together with the matching FILEX_*_URL:
 #
-#   COMPOSE_PROFILES=onlyoffice,drawio,minio,clamav   # (convert left out → off)
+#   COMPOSE_PROFILES=onlyoffice,drawio,minio,clamav
 #
 # To drop ONLYOFFICE tomorrow: remove `onlyoffice` from COMPOSE_PROFILES and
 # blank FILEX_ONLYOFFICE_URL, then:
@@ -114,7 +114,6 @@ services:
       # keeps the public URL, which is right for this stack as written.
       FILEX_ONLYOFFICE_CALLBACK_URL: ${FILEX_ONLYOFFICE_CALLBACK_URL:-}
       FILEX_DRAWIO_URL: ${FILEX_DRAWIO_URL:-}
-      FILEX_CONVERT_URL: ${FILEX_CONVERT_URL:-}
       # ── Zero-touch config (fill in .env) ────────────────────────────────
       # SSO: set FILEX_AUTH_DRIVERS=local,oidc + the FILEX_OIDC_* vars. These
       # are read on EVERY boot; the admin, SMTP, site name, trash retention and
@@ -237,18 +236,6 @@ services:
     profiles: ["drawio"]
     environment:
       DRAWIO_SELF_CONTAINED: "1"
-    restart: unless-stopped
-
-  convert:
-    # ⚠⚠ LEGACY since v0.43.0 — the Convert APP (a WebAssembly app plugin,
-    # installed from Admin → Plugins → Apps) supersedes this and hides it
-    # wherever it is installed. Keep this service only for an installation
-    # that does not use apps.
-    # filex embeds the p2r3/convert universal converter (GPL-2.0, in-browser
-    # WASM) in a hidden iframe. This is our fork with the embed bridge; see
-    # docs/CONVERT-INTEGRATION.md. Caddy serves it under /convert.
-    image: ${CONVERT_IMAGE:-ghcr.io/brf-tech/converter-filex:latest}
-    profiles: ["convert"]
     restart: unless-stopped
 
   # ClamAV as its own container — the normal way to scan under Docker, since

@@ -8,6 +8,7 @@ a share link**. Trash and versioning themselves are documented in
 
 - [Protection settings API](#protection-settings-api)
 - [Share-link life (`share.max_ttl_days`)](#share-link-life-sharemax_ttl_days)
+- [Drafts](#drafts)
 - [Antivirus (ClamAV)](#antivirus-clamav)
 - [Version retention (`versions.keep_n`)](#version-retention-versionskeep_n)
 - [The `file.infected` event](#the-fileinfected-event)
@@ -20,11 +21,11 @@ Admin-only:
 
 | Method & path | Body | Notes |
 |---|---|---|
-| `GET /api/admin/protection` | — | Returns the four retention/share values plus an `antivirus` block (below). `shares_over_max_ttl` is a read-only count (below). |
-| `PATCH /api/admin/protection` | `{"trash_retention_days"?: n, "versions_keep_n"?: n, "share_max_ttl_days"?: n, "av_enabled"?: bool, "av_mode"?: "binary"\|"daemon", "av_clamd_addr"?: s, "av_max_scan_mb"?: n, "av_save_scan_window_minutes"?: n}` | Partial update; echoes the fresh GET shape. Validation: retention **1–3650** days, keep_n **0–1000** (`0` = unlimited, retention job off), share TTL **0–3650** days (`0` = no ceiling). Out-of-range → **400**. |
+| `GET /api/admin/protection` | — | Returns the four retention/share values plus an `antivirus` block (below). `shares_over_max_ttl` is a read-only count (below). `drafts_limit` with its bounds `drafts_limit_min`/`drafts_limit_max` ([Drafts](#drafts)). |
+| `PATCH /api/admin/protection` | `{"trash_retention_days"?: n, "versions_keep_n"?: n, "share_max_ttl_days"?: n, "av_enabled"?: bool, "av_mode"?: "binary"\|"daemon", "av_clamd_addr"?: s, "av_max_scan_mb"?: n, "av_save_scan_window_minutes"?: n, "drafts_limit"?: n}` | Partial update; echoes the fresh GET shape. Validation: retention **1–3650** days, keep_n **0–1000** (`0` = unlimited, retention job off), share TTL **0–3650** days (`0` = no ceiling), drafts **1–1000**. Out-of-range → **400**. |
 
 The values live in the `settings` table (`trash.retention_days`,
-`versions.keep_n`, `share.max_ttl_days`, `antivirus.*`) — no migration, and the
+`versions.keep_n`, `share.max_ttl_days`, `drafts.limit`, `antivirus.*`) — no migration, and the
 generic `/api/admin/settings` endpoints see the same rows.
 
 ### The `antivirus` block
@@ -78,6 +79,21 @@ links currently outlive the ceiling (no expiry, or an expiry later than
 Revoking any of them is a manual decision under **Shares** — the intended case
 is a hosting operator whose tenants handed customers long-lived links before the
 limit existed.
+
+## Drafts
+
+How many [drafts](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save)
+— new documents not saved yet — one person may keep. Default **50**, allowed
+**1–1000**; *Admin → Protection → Drafts*, `drafts.limit` in the settings
+table, and `FILEX_DRAFTS_LIMIT` seeds it once on a fresh install. It is one
+number for the whole instance and counts each person's live drafts across every
+storage; a discarded draft in the trash no longer counts.
+
+At the limit, New document creates nothing: the dialog says how many drafts the
+server allows and offers to open Drafts, where the person can save or delete
+some. ⚠ It never falls back to creating the file in the folder — that would be
+the empty file #71 was about. Lowering the limit below what somebody already
+keeps deletes nothing; they just cannot start another until they are under it.
 
 ## Antivirus (ClamAV)
 

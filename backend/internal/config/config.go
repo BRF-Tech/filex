@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/brf-tech/filex/backend/internal/basepath"
+	"github.com/brf-tech/filex/backend/internal/secheaders"
 )
 
 // Config is the top-level runtime configuration object.
@@ -121,6 +122,11 @@ type Config struct {
 	AppPluginMaxInputMB  int `yaml:"app_plugin_max_input_mb"`
 	AppPluginMaxOutputMB int `yaml:"app_plugin_max_output_mb"`
 	AppPluginMaxWasmMB   int `yaml:"app_plugin_max_wasm_mb"`
+	// AppPluginMaxUIMB caps an app's interface bundle, zipped
+	// (FILEX_APP_PLUGIN_MAX_UI_MB, default 128) — the HTML/JS/CSS an app
+	// brings for its own interface (docs/APP-PLUGINS-API.md → An app's own
+	// interface).
+	AppPluginMaxUIMB int `yaml:"app_plugin_max_ui_mb"`
 	// AppPluginUpdateCheck (FILEX_APP_PLUGIN_UPDATE_CHECK, default on) runs
 	// the daily check that asks every installed app's source for a newer
 	// version and installs the ones that ask for nothing new
@@ -160,6 +166,23 @@ type Config struct {
 	Upload           UploadConfig  `yaml:"upload"`
 	Cache            CacheConfig   `yaml:"cache"`
 	Archive          ArchiveConfig `yaml:"archive"`
+	// FrameAncestors names the pages, besides filex itself, that may show
+	// filex's own pages inside a frame (a home dashboard such as Homarr or
+	// Organizr): FILEX_FRAME_ANCESTORS / `frame_ancestors`, origins such as
+	// https://home.example.com or https://*.example.com, or * for any page.
+	// Empty (the default) means filex only. Load validates it and refuses to
+	// start on a value that is not an origin. internal/secheaders,
+	// docs/CONFIGURATION.md.
+	FrameAncestors []string `yaml:"frame_ancestors"`
+	// AppUIOrigin serves apps' own interfaces from an origin of their own
+	// (FILEX_APP_UI_ORIGIN / `app_ui_origin`, e.g.
+	// https://apps.files-usercontent.example): the reverse proxy sends that
+	// host to filex too, filex answers ONLY the interface route there and
+	// refuses the interface route on every other host. Empty (the default)
+	// serves them from filex's own origin, opaque by sandbox. An origin: a
+	// scheme and a host, no path — Load refuses anything else, and the
+	// public URL's own origin. docs/APP-PLUGINS.md → An origin of their own.
+	AppUIOrigin string `yaml:"app_ui_origin"`
 	/* kimlik:e3 cloud */
 	Cloud CloudConfig `yaml:"cloud"`
 	// VersionsOnOverwrite installs the pre-write versioning guard. Default on.
@@ -625,7 +648,6 @@ type HeaderProxyConfig struct {
 type ExtServices struct {
 	OnlyOffice OnlyOfficeConfig `yaml:"onlyoffice"`
 	Drawio     DrawioConfig     `yaml:"drawio"`
-	Convert    ConvertConfig    `yaml:"convert"`
 }
 
 // OnlyOfficeConfig — Document Server URL + JWT secret.
@@ -645,11 +667,6 @@ type OnlyOfficeConfig struct {
 
 // DrawioConfig — embed URL.
 type DrawioConfig struct {
-	URL string `yaml:"url"`
-}
-
-// ConvertConfig — universal converter (p2r3/convert fork) embed URL.
-type ConvertConfig struct {
 	URL string `yaml:"url"`
 }
 
@@ -895,6 +912,17 @@ func Load(path string) (Config, error) {
 	if err := resolveBasePath(&cfg, basePathFrom); err != nil {
 		return Config{}, err
 	}
+	// Who may frame filex's pages: a value that is not an origin stops the
+	// server here, with what to write instead (internal/secheaders).
+	fa, err := secheaders.Normalize(cfg.FrameAncestors)
+	if err != nil {
+		return Config{}, fmt.Errorf("config: %w", err)
+	}
+	cfg.FrameAncestors = fa
+	// Where apps' interfaces are served from: an origin, never filex's own.
+	if cfg.AppUIOrigin, err = normalizeAppUIOrigin(cfg.AppUIOrigin, cfg.PublicURL); err != nil {
+		return Config{}, fmt.Errorf("config: %w", err)
+	}
 	// Default the OIDC redirect to <public_url>/api/auth/oidc/callback so an
 	// issuer + client id/secret are enough to stand up SSO (no need to also
 	// spell out the callback URL).
@@ -1076,6 +1104,7 @@ func applyEnv(c *Config) {
 		{"FILEX_APP_PLUGIN_MAX_INPUT_MB", &c.AppPluginMaxInputMB},
 		{"FILEX_APP_PLUGIN_MAX_OUTPUT_MB", &c.AppPluginMaxOutputMB},
 		{"FILEX_APP_PLUGIN_MAX_WASM_MB", &c.AppPluginMaxWasmMB},
+		{"FILEX_APP_PLUGIN_MAX_UI_MB", &c.AppPluginMaxUIMB},
 	} {
 		if v := os.Getenv(kv.env); v != "" {
 			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
@@ -1238,9 +1267,6 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_DRAWIO_URL"); v != "" {
 		c.ExternalServices.Drawio.URL = v
 	}
-	if v := os.Getenv("FILEX_CONVERT_URL"); v != "" {
-		c.ExternalServices.Convert.URL = v
-	}
 	if v := os.Getenv("FILEX_SYNC_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			c.Sync.DefaultInterval = d
@@ -1287,6 +1313,12 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_CORS_ALLOWED_ORIGINS"); v != "" {
 		c.CORS.AllowedOrigins = strings.Split(v, ",")
+	}
+	if v := os.Getenv("FILEX_FRAME_ANCESTORS"); strings.TrimSpace(v) != "" {
+		c.FrameAncestors = secheaders.Split(v)
+	}
+	if v := os.Getenv("FILEX_APP_UI_ORIGIN"); strings.TrimSpace(v) != "" {
+		c.AppUIOrigin = strings.TrimSpace(v)
 	}
 	if v := os.Getenv("FILEX_QUEUE_DRIVER"); v != "" {
 		c.Queue.Driver = v

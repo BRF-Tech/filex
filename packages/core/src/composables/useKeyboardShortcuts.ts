@@ -58,7 +58,6 @@ export interface ShortcutHandlers {
   onPreview?: () => void; // P
   onShare?: () => void; // Shift+S
   onTags?: () => void; // T
-  onConvert?: () => void; // (unbound)
   onOpenTab?: () => void; // (unbound)
   onCopyPath?: () => void; // (unbound)
   onCopyId?: () => void; // (unbound)
@@ -166,7 +165,6 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   { id: 'preview', defaultCombo: 'P', labelKey: 'shortcuts.preview', groupKey: 'shortcuts.group.nav' },
   { id: 'share', defaultCombo: 'Shift+S', labelKey: 'shortcuts.share', groupKey: 'shortcuts.group.file' },
   { id: 'tags', defaultCombo: 'T', labelKey: 'shortcuts.tags', groupKey: 'shortcuts.group.file' },
-  { id: 'convert', defaultCombo: '', labelKey: 'shortcuts.convert', groupKey: 'shortcuts.group.file' },
   { id: 'open-tab', defaultCombo: '', labelKey: 'shortcuts.open_tab', groupKey: 'shortcuts.group.tabs' },
   { id: 'copy-path', defaultCombo: '', labelKey: 'shortcuts.copy_path', groupKey: 'shortcuts.group.file' },
   { id: 'copy-id', defaultCombo: '', labelKey: 'shortcuts.copy_id', groupKey: 'shortcuts.group.file' },
@@ -205,7 +203,6 @@ const HANDLER_KEY: Record<string, keyof ShortcutHandlers> = {
   preview: 'onPreview',
   share: 'onShare',
   tags: 'onTags',
-  convert: 'onConvert',
   'open-tab': 'onOpenTab',
   'copy-path': 'onCopyPath',
   'copy-id': 'onCopyId',
@@ -427,7 +424,6 @@ export const MENU_ACTION_SHORTCUTS: Record<string, string> = {
   'open-tab': 'open-tab',
   preview: 'preview',
   download: 'download',
-  convert: 'convert',
   access: 'share',
   details: 'inspector',
   'copy-id': 'copy-id',

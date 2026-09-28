@@ -2,6 +2,8 @@ package wasmplugin
 
 import (
 	"fmt"
+	"net"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -36,12 +38,37 @@ const (
 	// at the minute it named. An app without it is never woken, and there
 	// is no other way in — see schedule.go.
 	PermSchedule Permission = "schedule"
+	// The interface's own permissions (uiperm.go) — DERIVED from the
+	// manifest's `ui` block, never listed in `permissions`: `ui` for having
+	// an interface at all, `ui:eval` / `ui:wasm-eval` for its script-policy
+	// exceptions. Live addresses are `ui-net:<as>:<url>`.
+	PermUI         Permission = "ui"
+	PermUIEval     Permission = "ui:eval"
+	PermUIWasmEval Permission = "ui:wasm-eval"
+	// PermUIPackageFetch: the interface reads its own package — this
+	// version's files, nothing else (`ui.package_fetch`).
+	PermUIPackageFetch Permission = "ui:package-fetch"
+	// PermUIDownload: the interface hands the person files to keep on their
+	// own disk, each time with their say (`ui.download`).
+	PermUIDownload Permission = "ui:download"
 )
 
 // Parameterised prefixes.
 const (
 	permPrefixHTTP    = "http:"
 	permPrefixEngines = "engines:"
+	// permPrefixUINet is a live address an interface loads from:
+	// `ui-net:<as>:<url>` (uiperm.go).
+	permPrefixUINet = "ui-net:"
+	// permPrefixUIViewer is a kind of file the app's interface opens IN
+	// PLACE OF filex's preview (a `viewer` view): `ui-viewer:.drawio`,
+	// `ui-viewer:image/svg+xml`. Derived, like every `ui` permission, so an
+	// update that makes the app the viewer of one more kind is a new grant
+	// (security review UI-6).
+	permPrefixUIViewer = "ui-viewer:"
+	// permPrefixUINew is a kind of file the app adds to filex's "New" menu:
+	// `ui-new:.drawio` (`new_documents`).
+	permPrefixUINew = "ui-new:"
 )
 
 // permPrefixEvents is NOT in the set. `events:<name>` parsed, was granted and
@@ -64,6 +91,7 @@ var bare = map[Permission]bool{
 	PermFilesRead: true, PermFilesWrite: true, PermFilesLock: true, PermSign: true, PermMailSend: true,
 	PermNotifySend: true, PermUsersLookup: true, PermSettings: true, PermState: true,
 	PermPublicPages: true, PermSchedule: true,
+	PermUI: true, PermUIEval: true, PermUIWasmEval: true, PermUIPackageFetch: true, PermUIDownload: true,
 }
 
 // ParsePermission validates one manifest entry.
@@ -78,21 +106,67 @@ func ParsePermission(s string) (Permission, error) {
 	}
 	switch {
 	case strings.HasPrefix(s, permPrefixHTTP):
-		host := strings.TrimPrefix(s, permPrefixHTTP)
-		if host == "" || strings.ContainsAny(host, "/ \t") {
-			return "", fmt.Errorf("permission %q: expected http:<host or *.host>", s)
+		host := strings.ToLower(strings.TrimPrefix(s, permPrefixHTTP))
+		if !grantableHost(host) {
+			return "", fmt.Errorf("permission %q: expected http:<host> or http:*.<domain> (a wildcard covers the subdomains of a name with at least two labels, never a whole top-level domain)", s)
 		}
-		return Permission(permPrefixHTTP + strings.ToLower(host)), nil
+		return Permission(permPrefixHTTP + host), nil
 	case strings.HasPrefix(s, permPrefixEngines):
 		name := strings.TrimPrefix(s, permPrefixEngines)
 		if !knownEngine(name) {
 			return "", fmt.Errorf("permission %q: unknown engine (known: %s)", s, strings.Join(enginebin.Names(), ", "))
 		}
 		return p, nil
+	case strings.HasPrefix(s, permPrefixUINet):
+		as, u, err := parseUINet(strings.TrimPrefix(s, permPrefixUINet))
+		if err != nil {
+			return "", fmt.Errorf("permission %q: %w", s, err)
+		}
+		return UINetPermission(as, u), nil
+	case strings.HasPrefix(s, permPrefixUIViewer):
+		kind := strings.TrimPrefix(s, permPrefixUIViewer)
+		if !viewerKindOK(kind) {
+			return "", fmt.Errorf("permission %q: expected ui-viewer:.<ext> or ui-viewer:<type/subtype>", s)
+		}
+		return p, nil
+	case strings.HasPrefix(s, permPrefixUINew):
+		ext, ok := strings.CutPrefix(strings.TrimPrefix(s, permPrefixUINew), ".")
+		if !ok || !viewerExtRe.MatchString(ext) {
+			return "", fmt.Errorf("permission %q: expected ui-new:.<ext>", s)
+		}
+		return p, nil
 	case strings.HasPrefix(s, permPrefixEvents):
 		return "", fmt.Errorf("permission %q: filex does not deliver file events to apps yet, so this permission would grant nothing — leave it out", s)
 	}
 	return "", fmt.Errorf("unknown permission %q", s)
+}
+
+// hostLabelRe is one DNS label: letters, digits and inner hyphens.
+var hostLabelRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// grantableHost is what an `http:` permission may name: a host name, an IP
+// literal, or `*.` and a name of at least two labels.
+//
+// ⚠⚠ The grant is what an administrator reads in the review, so it must mean
+// what it says: no bare `*`, no whole top-level domain, no port or user-info,
+// nothing HasHost's suffix match would read wider than it looks.
+func grantableHost(host string) bool {
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	if net.ParseIP(host) != nil {
+		return true
+	}
+	labels := strings.Split(strings.TrimPrefix(host, "*."), ".")
+	if strings.HasPrefix(host, "*.") && len(labels) < 2 {
+		return false
+	}
+	for _, l := range labels {
+		if !hostLabelRe.MatchString(l) {
+			return false
+		}
+	}
+	return true
 }
 
 // Grants is the set an administrator approved.
@@ -196,6 +270,23 @@ func (p Permission) Label(lang string) string {
 		return permText(lang, "public_pages", nil)
 	case p == PermSchedule:
 		return permText(lang, "schedule", nil)
+	case p == PermUI:
+		return permText(lang, "ui", nil)
+	case p == PermUIEval:
+		return permText(lang, "ui_eval", nil)
+	case p == PermUIWasmEval:
+		return permText(lang, "ui_wasm_eval", nil)
+	case p == PermUIPackageFetch:
+		return permText(lang, "ui_package_fetch", nil)
+	case p == PermUIDownload:
+		return permText(lang, "ui_download", nil)
+	case strings.HasPrefix(s, permPrefixUINet):
+		as, u, _ := parseUINet(strings.TrimPrefix(s, permPrefixUINet))
+		return permText(lang, "ui_net_"+as, srvtext.Vars{"url": u})
+	case strings.HasPrefix(s, permPrefixUIViewer):
+		return permText(lang, "ui_viewer", srvtext.Vars{"kind": strings.TrimPrefix(s, permPrefixUIViewer)})
+	case strings.HasPrefix(s, permPrefixUINew):
+		return permText(lang, "ui_new", srvtext.Vars{"ext": strings.TrimPrefix(s, permPrefixUINew)})
 	case strings.HasPrefix(s, permPrefixHTTP):
 		h := strings.TrimPrefix(s, permPrefixHTTP)
 		return permText(lang, "http", srvtext.Vars{"host": h})

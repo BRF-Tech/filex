@@ -103,13 +103,36 @@ describe('where a person finds it', () => {
      its own `filex {{ version }}` would be a second spelling of one line, and
      a refactor that dropped the line would lose it without a sound. */
   const SRC = path.resolve(__dirname, '../../src/components');
-  for (const f of ['TopNav.vue', 'AccountMenu.vue', 'UserSettingsModal.vue']) {
+  for (const f of ['TopNav.vue']) {
     it(`${f} draws ProductVersion from the server’s capabilities`, () => {
       const src = readFileSync(path.join(SRC, f), 'utf8');
       expect(src, `${f} does not draw the version line`).toMatch(/<ProductVersion\b[^>]*:version="caps\.data\.version"/);
       expect(src, `${f} spells the line out itself`).not.toMatch(/filex \{\{\s*caps\.data\.version/);
     });
   }
+
+  /* The explorer page's avatar is core's AccountMenu since 2026-09-27 (the
+     desktop app draws the same one): the web file hands it the server's
+     version, and core draws the line with the same piece. */
+  it('the avatar hands core the server’s version, and core draws ProductVersion from it', () => {
+    const web = readFileSync(path.join(SRC, 'AccountMenu.vue'), 'utf8');
+    expect(web).toMatch(/<AccountMenu\b[^>]*:version="caps\.data\.version"/);
+    expect(web).not.toMatch(/filex \{\{/);
+    const core = readFileSync(path.resolve(__dirname, '../../../packages/core/src/components/AccountMenu.vue'), 'utf8');
+    expect(core).toMatch(/<ProductVersion\b[^>]*:version="version"/);
+    expect(core).not.toMatch(/filex \{\{/);
+  });
+
+  /* The settings dialog is core's UserSettingsDialog since 2026-09-27 (the
+     desktop app opens the same one in its window): the web file hands it the
+     server's capabilities, and core draws the line with the same piece. */
+  it('the settings dialog hands core the server’s capabilities, and core draws ProductVersion from them', () => {
+    const web = readFileSync(path.join(SRC, 'UserSettingsModal.vue'), 'utf8');
+    expect(web).toMatch(/get capabilities\(\) \{\s*return caps\.data;/);
+    const core = readFileSync(path.resolve(__dirname, '../../../packages/core/src/components/UserSettingsDialog.vue'), 'utf8');
+    expect(core).toMatch(/<ProductVersion\b[^>]*:version="host\.capabilities\?\.version"/);
+    expect(core).not.toMatch(/filex \{\{/);
+  });
 
   /* The sign-in page and the About page printed the server's whole string
      themselves — the same 40-digit commit, twice on sign-in. */

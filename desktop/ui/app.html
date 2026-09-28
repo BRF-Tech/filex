@@ -68,6 +68,17 @@
          package cannot see would be a token in name only. */
       :root {
         --rail: 64px;
+        /* The title bar's height, border included (box-sizing is border-box
+           below). ONE number, read by the bar and by the explorer:
+           `--fe-overlay-top` is core's contract for "a strip of the host's own
+           at the top of the window" — every dialog, scrim and screen the
+           explorer draws starts under it, so minimise, maximise, close and
+           the drag strip answer the first click even with a dialog open
+           (owner, 2026-09-27: the title bar works ALWAYS). core base.css
+           `.fe-modal__backdrop` says why a z-index alone was not enough;
+           scripts/titlebar-e2e.mjs measures it. */
+        --titlebar-h: 34px;
+        --fe-overlay-top: var(--titlebar-h);
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; margin: 0; }
@@ -122,7 +133,7 @@
          maximize / close in the top-right, on macOS it leaves room on the LEFT
          for the native traffic lights (body.is-mac) and draws no buttons. */
       #titlebar {
-        flex: 0 0 34px;
+        flex: 0 0 var(--titlebar-h);
         display: flex;
         align-items: stretch;
         background: var(--fe-bg-elev);
@@ -1357,142 +1368,44 @@
       }
 
       /**
-       * Where a clicked notification asked us to land: `{ kind: 'folder',
-       * storage, folder, select, open }` or `{ kind: 'trash', select }` from
-       * the shared resolver (web/src/lib/notificationTarget.ts,
-       * imported by the main process — this page never works it out itself).
-       * Consumed by the next mountExplorer() and then cleared.
+       * Where a clicked notification (or a palette hit from another account)
+       * asked us to land, when there is no explorer on screen for that account
+       * yet: a destination from the shared resolver
+       * (packages/core/src/lib/notificationTarget.ts, run by the main
+       * process — this page never works it out itself). Handed to the next
+       * mounted explorer (revealNotification) and then cleared.
        */
       let pendingReveal = null;
 
       /**
-       * Select one row inside the listing that is already on screen.
+       * Carry a destination out in the mounted explorer — the SAME code the
+       * explorer's own bell runs (core FileExplorer revealNotification): the
+       * folder with the row selected, the app screen the notice asked for, the
+       * Trash view, an app's home view.
        *
-       * ⚠ Compared attribute-by-attribute rather than through a
-       * `[data-fe-path="…"]` selector: a real file name may contain a quote or
-       * a backslash, and a selector built by concatenation breaks on exactly
-       * those names.
-       *
-       * ⚠⚠ THE CHECKBOX, NEVER THE ROW. Since issue #26 a click anywhere
-       * else on a row OPENS it — under `openTrigger: 'single'`, and on touch
-       * whatever the setting — so this clicked the row and the notification
-       * about a file opened that file instead of pointing at it, with the
-       * eight-second loop below re-opening it on every pass. web/src/views/
-       * Explore.vue has said "the checkbox, never the row" since that issue;
-       * this surface was the copy that never got the note. A tick also ADDS to
-       * a selection rather than replacing it, so anything else still ticked is
-       * unticked first: the notification points at ONE file.
+       * ⚠ This page used to do it itself — re-mount the explorer on the folder,
+       * then tick the row's checkbox from outside for up to eight seconds,
+       * because it could not see when the listing had landed — and to call
+       * el.openAppTarget for the app screen, which a custom element never had
+       * (a Vue custom element exposes its OWN setup, not the inner
+       * explorer's), so the app screen never opened. The web component now
+       * forwards both methods (packages/webcomponent).
        */
-      function tickRow(row) {
-        const box = row.querySelector('.fe-list__check');
-        if (box) box.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      }
-
-      async function revealRow(qualified) {
-        if (!qualified) return false;
-        const deadline = Date.now() + 8000;
-        // ⚠⚠ The selection has to STICK. The listing clears it when its load
-        // finishes, which is after the first rows are on screen — so a reveal
-        // that returns on the first success is a coin toss (measured in the
-        // browser; same fix as web/src/views/Explore.vue). Re-click whenever
-        // it is found unselected, stop once it has survived three checks.
-        let stable = 0;
-        while (Date.now() < deadline) {
-          const row = Array.from(document.querySelectorAll('[data-fe-path]'))
-            .find((el) => sameRowPath(el.getAttribute('data-fe-path'), qualified));
-          if (row && row.getAttribute('aria-selected') === 'true') {
-            if (++stable >= 3) return true;
-          } else {
-            stable = 0;
-            if (row) {
-              for (const other of Array.from(document.querySelectorAll('[data-fe-path][aria-selected="true"]'))) {
-                if (other !== row) tickRow(other);
-              }
-              row.scrollIntoView({ block: 'center' });
-              tickRow(row);
-            }
-          }
-          await new Promise((r) => setTimeout(r, 200));
-        }
-        return false;
-      }
-
-      /**
-       * `#qldemo/Documents` → `qldemo://Documents`. The inverse of the hash the
-       * explorer writes, for the one case with no row to select.
-       *
-       * ⚠ Kept in step with web/src/lib/notificationTarget.ts
-       * (`qualifiedFromHash`). This page is plain HTML served from disk — it
-       * cannot import a TypeScript module — but it can at least not invent a
-       * second rule: same two shapes, same conversion.
-       */
-      function qualifiedFromFolder(dest) {
-        if (!dest || !dest.storage) return '';
-        return dest.folder ? dest.storage + '://' + dest.folder : dest.storage + '://';
-      }
-
-      /**
-       * Two spellings of one row's `data-fe-path`: `docs://Documents/a.txt`
-       * and `docs:///Documents/a.txt`. The Trash view builds its rows from the
-       * ORIGINAL path, which is stored with a leading slash, so an exact
-       * comparison found nothing to select there.
-       *
-       * ⚠ Kept in step with web/src/lib/notificationTarget.ts (`sameRowPath`)
-       * for the same reason as qualifiedFromFolder above.
-       */
-      function sameRowPath(a, b) {
-        const norm = (p) => {
-          const s = String(p == null ? '' : p);
-          const at = s.indexOf('://');
-          return at < 0 ? s : s.slice(0, at + 3) + s.slice(at + 3).replace(/^\/+/, '');
-        };
-        return norm(a) === norm(b);
-      }
-
-      /**
-       * Where the explorer mounts for a clicked notification: the folder, or
-       * the Trash view (`.trash`, the sentinel the explorer opens as its Trash
-       * view — web/src/lib/notificationTarget.ts `TRASH_VIEW_PATH`).
-       */
-      function startPathOf(dest) {
-        if (!dest) return '';
-        if (dest.kind === 'trash') return '.trash';
-        return qualifiedFromFolder(dest);
-      }
-
-      /**
-       * Carry out a clicked notification's destination inside the explorer:
-       * reveal the row, then open the app screen the notice asked for.
-       *
-       * ⚠⚠ The app screen used to be DROPPED here. The main process
-       * resolves the whole destination — `{storage, folder, select, open}` —
-       * through the shared resolver and sends all of it, and this page read
-       * `.select` and nothing else. So "please sign this" opened the signing
-       * screen in a browser and a FOLDER in the desktop app: one notification,
-       * two behaviours, which is exactly what one shared resolver exists to
-       * prevent.
-       */
-      async function carryOutReveal(dest) {
-        if (!dest) return;
-        if (dest.select) await revealRow(dest.select);
-        if (dest.kind === 'trash' || !dest.open || !dest.open.plugin) return;
-        const el = explorer;
-        if (!el || typeof el.openAppTarget !== 'function') return;
-        const path = dest.select || qualifiedFromFolder(dest);
-        if (!path) return;
+      async function revealIn(el, dest) {
+        if (!el || !dest || typeof el.revealNotification !== 'function') return;
         try {
-          await el.openAppTarget({
-            plugin: dest.open.plugin,
-            action: dest.open.action,
-            view: dest.open.view,
-            path,
-          });
+          await el.revealNotification(dest);
         } catch (err) {
           // A refusal is the explorer's to report (it toasts); this only makes
-          // sure a thrown one does not take the mount with it.
-          console.warn('[notify] openAppTarget failed', err);
+          // sure a thrown one does not take the page with it.
+          console.warn('[notify] reveal failed', err);
         }
       }
+
+      /** One subscriber for the unread count the main process reads (its poll
+       *  feeds the OS notifications and the badge) — the mounted explorer's
+       *  bell. A rail switch remounts and overwrites it. */
+      let explorerUnreadCb = null;
 
       /**
        * The server refused this account's token (revoked or expired). The
@@ -1603,14 +1516,10 @@
           brand: { name: 'filex', markUrl: brandMarkUrl() },
           // One storage does not deserve a drive-picker in front of it: open the
           // files. More than one, and the root listing is the useful landing.
-          // ⚠ A notification click wins over the default landing folder. The
-          // component reads initialPath once, at construction, and this window
-          // persists no path (below) — so "go there" means mounting there,
-          // which is why openNotification() below remounts rather than poking
-          // a live component.
-          initialPath: pendingReveal
-            ? startPathOf(pendingReveal)
-            : storages.length === 1 ? `${storages[0].name}://` : undefined,
+          // A pending notification or palette hit is carried out AFTER the
+          // mount, by the explorer itself (revealIn below) — it navigates in
+          // place, so there is no second way of landing to keep in step here.
+          initialPath: storages.length === 1 ? `${storages[0].name}://` : undefined,
           // ⚠ Deliberately not persisted. The stored path is a single global
           // key, so remembering it would try to open account A's folder after a
           // switch to account B.
@@ -1651,6 +1560,42 @@
             cancel: () => window.filexApp.dragCancel(),
             stop: () => window.filexApp.dragStop(),
             onProgress: (cb) => { explorerDragCb = cb; },
+          },
+          // The bell and the avatar in the explorer's own header — the WEB's
+          // components (packages/core NotificationBell / AccountMenu), drawn by
+          // the explorer because no slot reaches a custom element. Before
+          // 2026-09-27 this window raised an OS notification for every row and
+          // had nowhere to read one, and its header had no account menu.
+          notifications: {
+            // The main process already polls the bell (OS notifications, dock
+            // badge) and hands the count over — no second loop in here.
+            poll: false,
+            onUnread: (cb) => { explorerUnreadCb = cb; },
+            // The badge moves with a read made in the window, not 15 s later.
+            onRead: () => { void window.filexApp.notifyRefresh(); },
+            // The administrators' console, in the browser — drawn for an
+            // administrator only (the explorer decides who that is).
+            manage: {
+              href: account.serverUrl.replace(/[/]+$/, '') + '/admin/notifications',
+              open: () => window.filexApp.openAdmin(account.id, 'notifications'),
+            },
+          },
+          // ⚠ The avatar holds the person's INTERFACE settings; this window's
+          // own ⚙ holds the APP's (owner, 2026-09-27). So: "User settings" is
+          // the explorer's own row and opens the web app's settings dialog IN
+          // this window (settings: true); "Admin panel ↗" stays for an
+          // administrator; the explorer's shortcut and tour rows fold in from
+          // the "⋯". There is NO Sign out here — signing an account out of the
+          // app is done in Settings → Accounts, beside the other accounts —
+          // so this block gives no tail. Language, one click or two, sync and
+          // the other accounts stay in Settings as well.
+          account: {
+            settings: true,
+            actions: (person) =>
+              person && person.role === 'admin'
+                ? [{ key: 'admin', label: T('set.admin'), icon: 'admin' }]
+                : [],
+            select: (key) => { if (key === 'admin') void window.filexApp.openAdmin(account.id); },
           },
           // #47 — the palette's "Everywhere" group searches EVERY account on
           // the rail, one badge per account. The explorer holds no credential
@@ -1693,27 +1638,40 @@
         if (pendingReveal) {
           const want = pendingReveal;
           pendingReveal = null;
-          void carryOutReveal(want);
+          void revealIn(explorer, want);
         }
       }
 
       /**
        * A native notification was clicked (src/notifications.ts → preload
-       * `onNotificationOpen`). The payload is the RESOLVED destination; this
-       * function only carries it out. A share never reaches here — the main
-       * process sends those to the system browser.
+       * onNotificationOpen). The payload is the RESOLVED destination — the
+       * main process has already marked the row read — and this function only
+       * carries it out. A share never reaches here: the main process sends
+       * those to the system browser.
        */
       async function openNotification(payload) {
         const dest = payload && payload.dest;
-        // A folder, or the Trash view (a `file.trashed` notice) — the same two
-        // kinds main.ts forwards (src/notifications.ts `opensInWindow`).
-        if (!dest || (dest.kind !== 'folder' && dest.kind !== 'trash')) return;
+        // A folder, the Trash view or an app's home view — the kinds main.ts
+        // forwards (src/notifications.ts opensInWindow).
+        if (!dest || (dest.kind !== 'folder' && dest.kind !== 'trash' && dest.kind !== 'app')) return;
+        // ⚠ A click on a toast while the app sat in the tray OPENS this window,
+        // and the main process sends the destination as soon as it has loaded —
+        // before this page's first getState() has answered. Ask for the state
+        // rather than dropping the click on an empty account list.
+        if (!(state.accounts || []).length) {
+          try { state = await window.filexApp.getState(); } catch { /* keep what we had */ }
+        }
         const active = (state.accounts || []).find((a) => a.id === state.activeId);
         // The account may have been switched between the toast and the click.
         if (!active || (payload.accountId && payload.accountId !== active.id)) return;
+        // ⚠ In place when the explorer is already up for this account: the tabs,
+        // the split and the scroll the person had stay where they were — the
+        // same landing the in-window bell's row gets.
+        if (explorer && mountedFor === active.id) {
+          await revealIn(explorer, dest);
+          return;
+        }
         pendingReveal = dest;
-        // Force a remount: mountExplorer() is a no-op while the same account is
-        // already mounted, and the component has no "navigate to" input.
         mountedFor = null;
         await mountExplorer(active);
       }
@@ -2765,6 +2723,11 @@
       });
       window.filexApp.onOpenSettings(() => toggleSettings(true));
       window.filexApp.onNotificationOpen((p) => void openNotification(p));
+      window.filexApp.onNotificationUnread((p) => {
+        // Only the account on screen: the main process polls the ACTIVE
+        // account, and a count for another would paint the wrong bell.
+        if (p && p.accountId === state.activeId && explorerUnreadCb) explorerUnreadCb(p.count);
+      });
       refresh();
     </script>
   </body>

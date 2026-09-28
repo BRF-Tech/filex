@@ -1,0 +1,8 @@
+{
+  "title": "New board",
+  "columns": [
+    { "title": "To do", "cards": [] },
+    { "title": "Doing", "cards": [] },
+    { "title": "Done", "cards": [] }
+  ]
+}

@@ -96,19 +96,19 @@ export const DEMO_CREDENTIAL_FIELDS = { user: 'demo_user', pass: 'demo_pass' };
  * "the anonymous answer names no host" is a claim about redaction rather than
  * about an empty config.
  *
- * ⚠ Why all three and not just OnlyOffice: `redactExternalHosts` walks the
- * `external` map and blanks three flat aliases, so ONE seeded service exercises
- * the loop but proves nothing about `onlyoffice_url`/`drawio_url`/`convert_url`
+ * ⚠ Why both and not just OnlyOffice: `redactExternalHosts` walks the
+ * `external` map and blanks the flat aliases, so ONE seeded service exercises
+ * the loop but proves nothing about `onlyoffice_url`/`drawio_url`
  * individually — a redaction that dropped one alias would have passed. Measured
- * on demo.filex.sh 2026-09-07: the payload carries FOUR services (mermaid too),
- * and only these three can be seeded from the environment, which is why the
+ * on demo.filex.sh 2026-09-07: the payload carried FOUR services (mermaid too;
+ * the iframe converter was removed in 0.48), and only these can be seeded from
+ * the environment, which is why the
  * check also asserts the list-free property "no entry under `external` has a
  * `url` key at all". That covers mermaid, and whatever is added next.
  */
 export const EXTERNAL_SENTINELS = [
   { name: 'onlyoffice', env: 'FILEX_ONLYOFFICE_URL', alias: 'onlyoffice_url', host: 'onlyoffice-sentinel.invalid' },
   { name: 'drawio', env: 'FILEX_DRAWIO_URL', alias: 'drawio_url', host: 'drawio-sentinel.invalid' },
-  { name: 'convert', env: 'FILEX_CONVERT_URL', alias: 'convert_url', host: 'convert-sentinel.invalid' },
 ];
 
 /**
@@ -308,13 +308,22 @@ export const SCREENSHOTS = [
       'packages/core/src/components/ChoiceButtons.vue',
     ],
   },
+  // ── v0.48.0: an app's own interface (e2e/shots/apps.mjs + board-app/) ──
+  {
+    file: `${SHOTS_ROOT_REL}/apps/app-interface-review-1440.png`,
+    depicts: ['web/src/components/plugins/AppPluginInstallWizard.vue'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/apps/app-interface-viewer-1440.png`,
+    depicts: ['packages/core/src/components/plugin/AppFrame.vue', 'packages/app-ui/src', 'e2e/shots/board-app'],
+  },
   {
     file: `${SHOTS_ROOT_REL}/signing/bell-badge-1440.png`,
-    depicts: ['web/src/components/NotificationBell.vue', 'web/src/components/UnreadBadge.vue'],
+    depicts: ['packages/core/src/components/NotificationBell.vue', 'packages/core/src/components/UnreadBadge.vue'],
   },
   {
     file: `${SHOTS_ROOT_REL}/signing/notifications-list-1440.png`,
-    depicts: ['web/src/components/NotificationsPanel.vue'],
+    depicts: ['packages/core/src/components/NotificationsPanel.vue'],
   },
   {
     file: `${SHOTS_ROOT_REL}/signing/my-shares-1440.png`,

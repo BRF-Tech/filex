@@ -551,10 +551,10 @@ func (lc *lazyCatalogue) deletePass(ctx context.Context, dir string, parent *int
 				batch = below
 			}
 		}
-		// 6. In place, through the tombstone pass's own function: never a
-		// path the scan rule skips, the file rows each Stat-confirmed again,
-		// and never bytes — the trash purge leaves a path alone whose row was
-		// deleted where it stood (trash.ownsBytesAt).
+		// 6. Through the tombstone pass's own function: never a path the
+		// scan rule skips, every row Stat-confirmed again, deepest first,
+		// and never bytes — the rows are dropped from the catalogue, not put
+		// in the trash, which holds none of their bytes (issue #74).
 		removed += s.tombstoneRows(ctx, batch, b)
 		if n.Type == model.NodeTypeDirectory {
 			p := db.CatalogueFolderPath(n.Path)

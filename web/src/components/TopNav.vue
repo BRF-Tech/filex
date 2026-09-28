@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { defineAsyncComponent, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { defineAsyncComponent, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import {
   Menu as MenuIcon,
   LogOut,
@@ -15,6 +15,7 @@ import { ProductVersion, localeTag, personInitial, personName, productVersionLin
 import { useAuthStore } from '@/stores/auth';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { signOut } from '@/lib/signOut';
+import { useSettingsDeepLink } from '@/composables/useSettingsDeepLink';
 // gorunum:v3-shell — ⚠ no LocaleSwitcher and no DarkModeToggle here any more.
 // Both did a job the user-settings modal already does, one click away in the
 // account menu below (Preferences → Language, Preferences → Theme), and the
@@ -33,31 +34,12 @@ const showSettings = ref(false);
 
 const emit = defineEmits<{ (e: 'toggleSidebar'): void }>();
 
-const route = useRoute();
 const router = useRouter();
 
-/**
- * `?settings=1` opens the dialog — the deep link that replaced the retired
- * /admin/profile page.
- *
- * ⚠ It has to exist, and it has to be on a route rather than a button: the
- * server prints where to change the first-run password into the startup
- * banner AND into `<data>/.first-run.txt`, a file that is already sitting on
- * installs in the field saying `/admin/profile`. A dialog reachable only by
- * clicking an avatar cannot be named in either place. The parameter is
- * stripped the moment it is honoured, so a reload or a shared URL does not
- * reopen it.
- */
-watch(
-  () => route.query.settings,
-  (v) => {
-    if (v === undefined || v === null) return;
-    showSettings.value = true;
-    const { settings: _drop, ...rest } = route.query;
-    router.replace({ path: route.path, query: rest, hash: route.hash });
-  },
-  { immediate: true },
-);
+// `?settings=1` opens the dialog — the deep link that replaced the retired
+// /admin/profile page (see the composable for why it must exist, and why the
+// explorer page honours it too).
+useSettingsDeepLink(showSettings);
 const auth = useAuthStore();
 const caps = useCapabilitiesStore();
 const { t, locale } = useI18n();

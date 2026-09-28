@@ -111,12 +111,12 @@ export const ALLOW: Allow[] = [
     why: 'A FIXED box adds no scrollable overflow, so off the left edge is off screen in either direction; it only exists for setDragImage.',
   },
   {
-    file: 'web/src/components/AccountMenu.vue',
+    file: 'packages/core/src/components/AccountMenu.vue',
     line: ':style="{ top: pos.top, right: pos.right, left: pos.left }"',
-    why: 'anchorUnderEndEdge (web/src/lib/anchoredPanel.ts) answers `right` in LTR and `left` in RTL — both are bound, the absent one is unset.',
+    why: 'anchorUnderEndEdge (packages/core/src/lib/anchoredPanel.ts) answers `right` in LTR and `left` in RTL — both are bound, the absent one is unset.',
   },
   {
-    file: 'web/src/components/NotificationBell.vue',
+    file: 'packages/core/src/components/NotificationBell.vue',
     line: ':style="{ top: pos.top, right: pos.right, left: pos.left, width: pos.width }"',
     why: 'anchorUnderEndEdge answers `right` in LTR and `left` in RTL.',
   },

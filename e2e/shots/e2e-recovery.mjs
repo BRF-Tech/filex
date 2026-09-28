@@ -134,6 +134,26 @@ async function explorerReady(page) {
   await page.getByTestId('sidenav-new').first().waitFor({ state: 'visible', timeout: 30000 });
 }
 
+/**
+ * Opens a folder of the listing by double-click and proves it arrived (the
+ * address ends in `#<storage>/<name>`), trying again when it did not.
+ *
+ * ⚠ The pane ignores an open within 500 ms of the last one (FilePane
+ * OPEN_GUARD_MS). In the full `pnpm shots` run of v0.48.0 the double-click on
+ * the new folder opened nothing: the upload landed beside it instead of in
+ * it, and three checks and the lock screen failed after it, while the same
+ * scene alone passed.
+ */
+async function openFolder(page, name) {
+  const done = () => decodeURIComponent(new URL(page.url()).hash).endsWith(`/${name}`);
+  for (let i = 0; i < 3 && !done(); i++) {
+    await page.waitForTimeout(700);
+    await page.getByText(name, { exact: true }).first().dblclick();
+    await page.waitForTimeout(1200);
+  }
+  if (!done()) throw new Error(`the folder ${name} did not open (the address is ${page.url()})`);
+}
+
 async function openNewFolder(page) {
   const plus = page.locator('[data-testid="sidenav-new"]');
   if (await plus.count()) {
@@ -364,7 +384,20 @@ async function main(expectedKid) {
   );
   await shot(page, 'create-encrypted-folder.png');
 
-  await createDialog.locator('input[type="checkbox"]').first().check();
+  // The level: 1 (contents only) is the default, and only the levels that
+  // work are offered. This walk-through uses level 2 — recovery must reach
+  // the names too.
+  check(
+    'the create dialog offers level 1 (contents only) by default',
+    await createDialog.locator('[data-testid="e2e-level-content"]').isChecked(),
+  );
+  check(
+    'the create dialog offers exactly the two levels that work',
+    (await createDialog.locator('input[type="radio"]').count()) === 2,
+  );
+  await createDialog.locator('[data-testid="e2e-level-names"]').check();
+  // ⚠ By its test id: the dialog has more than one checkbox-like control.
+  await createDialog.locator('[data-testid="e2e-create-ack"]').check();
   await createDialog.getByRole('button', { name: /create encrypted folder/i }).click();
 
   // ── 2. the recovery key, shown once ───────────────────────────────
@@ -398,9 +431,13 @@ async function main(expectedKid) {
   const marker = path.join(STORAGE_ROOT, folderName, '.filex-e2e.json');
   const markerJson = JSON.parse(fs.readFileSync(marker, 'utf8'));
   check(
-    'the marker on disk is v2 with a recovery slot and an escrow slot',
-    markerJson.v === 2 && !!markerJson.rk && !!markerJson.esc,
-    `v=${markerJson.v} fmk=${markerJson.fmk} esc.kid=${markerJson.esc?.kid}`,
+    'the marker on disk is v3 (encrypted names) with a recovery slot and an escrow slot',
+    markerJson.v === 3 &&
+      Array.isArray(markerJson.req) &&
+      markerJson.req.includes('names') &&
+      !!markerJson.rk &&
+      !!markerJson.esc,
+    `v=${markerJson.v} req=${JSON.stringify(markerJson.req)} fmk=${markerJson.fmk} esc.kid=${markerJson.esc?.kid}`,
   );
   check(
     'the marker contains neither the password nor the recovery key',
@@ -408,8 +445,7 @@ async function main(expectedKid) {
       !JSON.stringify(markerJson).includes(recoveryKey.replace(/-/g, '')),
   );
 
-  await page.getByText(folderName, { exact: true }).first().dblclick();
-  await page.waitForTimeout(1200);
+  await openFolder(page, folderName);
 
   const upload = page.locator('input[type="file"]').first();
   const secretPath = path.join(os.tmpdir(), 'filex-e2e-recovery-secret', 'secret.txt');
@@ -418,7 +454,11 @@ async function main(expectedKid) {
   await upload.setInputFiles(secretPath);
   await page.waitForTimeout(2500);
 
-  const onDisk = path.join(STORAGE_ROOT, folderName, 'secret.txt');
+  /* ⚠ The file is not called `secret.txt` on disk: this walk-through chose
+     level 2, which encrypts names, so the server stores a ciphertext name. It
+     is the one entry beside the marker. */
+  const storedEntry = () =>
+    fs.readdirSync(path.join(STORAGE_ROOT, folderName)).find((n) => n !== '.filex-e2e.json') || '';
   /* ⚠ POLL, do not sleep and hope. The upload is a round trip: on a loaded
      machine the fixed wait above expired before the bytes reached the disk,
      this read returned `magic=` (no file at all), and the run stopped here
@@ -426,12 +466,20 @@ async function main(expectedKid) {
      (v0.43.0). Waiting for the eight bytes to BE there is the same check,
      without the race; a file that never appears still fails, 15s later. */
   let head = '';
+  let secretStored = '';
   for (let i = 0; i < 60; i++) {
-    head = fs.existsSync(onDisk) ? fs.readFileSync(onDisk).subarray(0, 8).toString() : '';
+    secretStored = storedEntry();
+    const onDisk = secretStored ? path.join(STORAGE_ROOT, folderName, secretStored) : '';
+    head = onDisk && fs.existsSync(onDisk) ? fs.readFileSync(onDisk).subarray(0, 8).toString() : '';
     if (head.length === 8) break;
     await page.waitForTimeout(250);
   }
   check('the uploaded file is ciphertext on disk', head === 'filexe2e', `magic=${head}`);
+  check(
+    'and its name on disk is ciphertext too',
+    /^[A-Za-z0-9_-]{23,}$/.test(secretStored) && secretStored !== 'secret.txt',
+    secretStored,
+  );
 
   // ── 4. the move guard ─────────────────────────────────────────────
   const guard = await api(token, 'POST', '/api/files/copy', {
@@ -444,7 +492,7 @@ async function main(expectedKid) {
     `${guard.status} ${guard.json?.error?.slice(0, 60) || ''}`,
   );
   const guardOut = await api(token, 'POST', '/api/files/move', {
-    source: [`${STORAGE}://${folderName}/secret.txt`],
+    source: [`${STORAGE}://${folderName}/${secretStored}`],
     target: `${STORAGE}://`,
   });
   check(
@@ -554,11 +602,11 @@ async function main(expectedKid) {
     // notification, and until 2026-09-14 it was taken of the unlocked listing
     // with nothing open — byte-identical to unlocked-with-recovery-key.png, a
     // caption the pixels did not back. The header has had a bell since the
-    // 2026-09-14 shell (web/src/components/NotificationBell.vue), so the row
+    // 2026-09-14 shell (packages/core/src/components/NotificationBell.vue), so the row
     // the event produced is one click away; the panel fetches on open.
     //
     // ⚠ Matched on "Encrypted folder opened", not on /escrow/: the bell renders
-    // the event through web/src/lib/notificationText.ts, whose wording is its
+    // the event through packages/core/src/lib/notificationText.ts, whose wording is its
     // own, so the server's title is not what is on screen.
     //
     // ⚠ And the page is RELOADED first, which is why the folder is locked
@@ -649,8 +697,7 @@ async function main(expectedKid) {
   await page.goto(`${BASE}/admin/explore?storage=${STORAGE}`, { waitUntil: 'load' });
   await explorerReady(page);
   await page.waitForTimeout(2500);
-  await page.getByText(legacyName, { exact: true }).first().dblclick();
-  await page.waitForTimeout(1500);
+  await openFolder(page, legacyName);
   // ⚠ The double-click's first click SELECTS the row, and the selection
   // survives opening the folder: the lock screen below came out under a
   // "1 selected" bar with nothing listed (2026-09-14, reported as a product

@@ -45,7 +45,7 @@ import {
   wordsIn,
 } from '@brftech/filex-core/src/lib/errorWords';
 import { useLocale } from '@brftech/filex-core/src/composables/useLocale';
-import { renderNotification } from '@/lib/notificationText';
+import { renderNotification } from '@brftech/filex-core/src/lib/notificationText';
 
 const LRI = String.fromCharCode(0x2066);
 const PDI = String.fromCharCode(0x2069);

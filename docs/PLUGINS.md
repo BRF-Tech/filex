@@ -35,7 +35,7 @@ Admin → Plugins → Storage plugins  Admin → Storages → Add storage
 
 ## Install one
 
-**Admin → Plugins → Storage plugins → Install a plugin**, in one of three ways.
+**Admin → Plugins → Storage plugins → Install a plugin**, in one of four ways.
 (The Plugins page has two tabs, **Storage plugins** and **Apps** — the other
 kind of plugin, [APP-PLUGINS.md](APP-PLUGINS.md). It opens on **Apps** when the
 app runtime is on and at least one app is installed.)
@@ -43,10 +43,11 @@ app runtime is on and at least one app is installed.)
 | Source | What happens | When to use it |
 |---|---|---|
 | **Upload a binary** | The file is stored under `<data-dir>/plugins/<name>/`, hashed, and launched. | The normal case. |
+| **From its source** | A GitHub repository (`owner/name`) or the https address of a `filex-storage.json` ([Updates](#updates-from-a-source)): filex reads it, takes the build for **this server's** platform, holds it to the SHA-256 the feed names, and installs it as a URL install would. The source is kept, so newer versions are announced. | A plugin its author publishes with a feed. |
 | **From a URL** | Downloaded, checked against a **required** SHA256 (and the signature, when required) **before anything is executed**, then as above. The URL must point at a **public** host: private, loopback and link-local targets are refused, after DNS and on every redirect, so a plugin URL cannot become a probe of the server's own network. | Unattended installs, scripted setups. |
 | **Remote service** | Nothing is launched: filex connects to an address you give it with a bearer token you give it. **Remote = TLS**: `https://` anywhere; plain `http://` only when the address is on the private network (loopback, link-local, RFC 1918, ULA), because the token and every storage credential travel on that connection. | A sidecar container, a plugin on another host, or a plugin you are developing. |
 
-![The Plugins page with the example plugin running](screenshots/v0.47.0/admin-plugins.png)
+![The Plugins page with the example plugin running](screenshots/v0.48.0/admin-plugins.png)
 
 > ⚠ **A plugin runs with filex's own privileges** and is handed the credentials
 > of every storage created on it. Install only plugins you trust — the same
@@ -209,6 +210,68 @@ plugin.
 > called (`myfs-v2` replaces `myfs` *as* `myfs`). One name means one backup and
 > one rollback; the signature you send is stored beside it, and a rollback
 > restores the previous signature with the previous file.
+
+## Updates from a source
+
+⚠⚠ **Nothing updates itself** — a storage plugin no more than an app
+([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). A binary plugin may
+name an **update source**; filex reads it once a day (and when you press
+**Check for updates**) and **tells you** when a newer version for this
+server's platform is there. Installing it is your decision.
+
+- **Naming a source.** At install (the **Update source** field of an upload
+  or a URL install, or **From its source**), or later from the row's
+  **Actions → Update source…**; empty stops the checks. `PATCH
+  /api/admin/plugins/{id}` `{"source": "…"}`.
+- **A source** is `owner/name` — the `filex-storage.json` attached to the
+  GitHub repository's **latest release**
+  (`https://github.com/<owner>/<name>/releases/latest/download/filex-storage.json`)
+  — or the https address of a `filex-storage.json` anywhere.
+- **What the row says**: *Update available* and the jump (`1.0.0 → 1.1.0`),
+  a newer version that needs a newer filex, *Could not check* (and why — the
+  feed names another plugin, has no build for this platform, a build without
+  its hash), or *Up to date*. The bell tells the administrators once per
+  version (*"Storage plugin myfs 1.1.0 is available"*).
+- **Review update** (the row's **Actions**) shows the version jump, the
+  SHA-256 of the build for this platform, the source and its notes (plain
+  text). **Upgrade** — `POST /api/admin/plugins/{id}/upgrade`
+  `{"from_source": true}` — downloads that build, **refuses it unless its
+  SHA-256 is the one the feed names** (before anything is stopped), and then
+  upgrades exactly as an uploaded file would ([Upgrade in
+  place](#upgrade-in-place)): the signature on an instance that requires one,
+  the conformance gate, the roll-back when the new binary does not come up.
+- **Check for updates** — `POST /api/admin/plugins/updates/check` — reads
+  every source now and installs nothing: `{report: {checked_at, checked,
+  available, failed}, plugins}`.
+- `FILEX_APP_PLUGIN_UPDATE_CHECK=0` stops the daily check for storage plugins
+  too (one switch for "no request leaves the server by itself"); a demo never
+  checks. A **remote** plugin is upgraded where it runs and has no source.
+
+**Publishing a feed** (for a plugin's author): attach a `filex-storage.json`
+to every release —
+
+```json
+{
+  "name": "myfs",
+  "version": "1.3.0",
+  "filex": ">=0.47.0",
+  "notes": "What changed, as plain text.",
+  "binaries": {
+    "linux/amd64":   {"url": "https://github.com/acme/filex-myfs/releases/download/v1.3.0/myfs-linux-amd64",   "sha256": "…"},
+    "linux/arm64":   {"url": "https://github.com/acme/filex-myfs/releases/download/v1.3.0/myfs-linux-arm64",   "sha256": "…"},
+    "windows/amd64": {"url": "https://github.com/acme/filex-myfs/releases/download/v1.3.0/myfs-windows-amd64.exe", "sha256": "…", "signature": "…"}
+  }
+}
+```
+
+`name` is the plugin's install name or the driver it describes; `version` is
+compared with the version the running plugin **describes** (a pre-release is
+never taken); `filex` is a range in the grammar apps use
+([PLUGIN-KIT.md](PLUGIN-KIT.md#which-filex-it-works-with)); each build's
+`sha256` is required, and `signature` (a detached ed25519 signature over the
+sha256, as for an upload) is needed on an instance that only runs signed
+plugins. The feed is read through the same guarded client as a URL install
+and is capped at 1 MiB; its notes at 8 KiB.
 
 ---
 

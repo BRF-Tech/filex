@@ -99,9 +99,10 @@ func (w *txWatch) UpdateNodeMeta(ctx context.Context, id int64, size int64, mime
 	return w.Store.UpdateNodeMeta(ctx, id, size, mime, etag, mtime)
 }
 
-func (w *txWatch) SoftDeleteNode(ctx context.Context, id int64) error {
-	w.note(ctx, "SoftDeleteNode")
-	return w.Store.SoftDeleteNode(ctx, id)
+// The delete pass drops a gone row (issue #74), it does not trash it.
+func (w *txWatch) HardDeleteNode(ctx context.Context, id int64) error {
+	w.note(ctx, "HardDeleteNode")
+	return w.Store.HardDeleteNode(ctx, id)
 }
 
 func (w *txWatch) DiscoverCatalogueFolders(ctx context.Context, storageID int64, folders []model.CatalogueFolder) error {
@@ -135,7 +136,7 @@ func TestCatalogueTx_AFolderIsWrittenInOneTransaction(t *testing.T) {
 	assert.Equal(t, 1, res.Removed, "the row whose file is gone")
 	assert.Equal(t, 1, w.txs, "one transaction for the folder")
 	assert.Empty(t, w.outside, "no catalogue write outside it")
-	for _, what := range []string{"CreateNode", "DiscoverCatalogueFolders", "RecordCatalogueFolder", "SoftDeleteNode"} {
+	for _, what := range []string{"CreateNode", "DiscoverCatalogueFolders", "RecordCatalogueFolder", "HardDeleteNode"} {
 		assert.Positive(t, w.inside[what], "%s ran inside the folder's transaction", what)
 	}
 	assert.Nil(t, l.row("/klasör/silinen.txt"))

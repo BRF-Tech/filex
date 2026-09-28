@@ -19,7 +19,7 @@ import {
 import { applySessionLook } from '@/lib/instanceThemes';
 import { applyPrefLocale, loadOfferedLocales } from '@/i18n';
 import { applyAccountTheme } from '@/lib/theme';
-import { applyAccountDensity } from '@/lib/density';
+import { applyAccountDensity } from '@brftech/filex-core';
 import { installTableEnv } from '@/lib/tableEnv';
 
 const auth = useAuthStore();

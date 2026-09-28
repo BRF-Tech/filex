@@ -33,6 +33,9 @@ type Worker struct {
 	// avScan, when set, enqueues an antivirus scan for a file the walk has
 	// just catalogued or whose content drifted. See AttachAntivirus.
 	avScan func(ctx context.Context, n *model.Node)
+	// reclaim, when set, releases a node's per-node caches when the sync drops
+	// its row for good. See AttachReclaim.
+	reclaim func(ctx context.Context, nodeID int64)
 	// fallback is the global poll cadence for storages with no interval of
 	// their own (FILEX_SYNC_INTERVAL).
 	fallback time.Duration
@@ -99,6 +102,16 @@ func (w *Worker) AttachIndex(idx *search.Index) {
 // leaves the walk byte for byte as it was.
 func (w *Worker) AttachAntivirus(fn func(ctx context.Context, n *model.Node)) {
 	w.avScan = fn
+}
+
+// AttachReclaim wires what releases a node's per-node caches (the cached
+// thumbnail file, a staging directory) when the sync drops the node's row for
+// good: an object gone from the storage (issue #74). It is the trash purge's
+// own hook (trash.Service.Reclaim), so the two ways a row ends release the
+// same things. Called after the drop has committed; nil leaves the caches to
+// their own sweepers.
+func (w *Worker) AttachReclaim(fn func(ctx context.Context, nodeID int64)) {
+	w.reclaim = fn
 }
 
 // Start launches one syncer per enabled storage. ctx is the parent
@@ -266,6 +279,7 @@ func (w *Worker) startOne(parent context.Context, st *model.Storage) {
 		store:    w.store,
 		index:    w.index,
 		avScan:   w.avScan,
+		reclaim:  w.reclaim,
 		storage:  st,
 		driver:   driver,
 		rule:     ruleFor(st, cfg),
@@ -294,6 +308,7 @@ type storageSyncer struct {
 	store   db.Store
 	index   *search.Index
 	avScan  func(ctx context.Context, n *model.Node)
+	reclaim func(ctx context.Context, nodeID int64)
 	storage *model.Storage
 	driver  storage.Driver
 	// rule says which paths the walk does not enter: filex's own trees and

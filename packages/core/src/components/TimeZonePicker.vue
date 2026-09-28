@@ -3,7 +3,7 @@
  * TimeZonePicker — a search box that opens a ranked list of zones.
  *
  * ⚠⚠ ONE picker, two hosts. It was written inside the web app's user-settings
- * modal (`web/src/components/UserSettingsModal.vue`), and then the embed
+ * dialog (`components/UserSettingsDialog.vue`), and then the embed
  * needed the same control — an embed has no settings dialog, so its "⋯" menu
  * opens `TimeZoneDialog`, which mounts this. `packages/core` cannot import from
  * `web/`, so the picker moved here and both surfaces render it from this one

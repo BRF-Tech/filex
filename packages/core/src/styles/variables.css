@@ -3,6 +3,19 @@
  *
  * Consumer overrides by setting `--fe-*` on a higher scope.
  */
+
+/* A host contract, not a colour: where every window-sized layer the explorer
+ * draws BEGINS (dialogs, scrims, the notification list — base.css
+ * `.fe-modal__backdrop` says why). A host with a bar of its own at the top of
+ * the window — the desktop app's title bar — sets it to that bar's height.
+ * ⚠ `:where()`: zero specificity, so a host's `:root { --fe-overlay-top }`
+ * wins whichever stylesheet loads first; and on `:root`, never on `.fe`,
+ * because the backdrops carry `.fe` and a value there would shadow the
+ * host's. */
+:where(:root) {
+  --fe-overlay-top: 0px;
+}
+
 :root {
   /* gorunum:v1 — the product's own palette and metrics. Everything below is a
    * measured value, not a taste: the type scale, the control heights and the

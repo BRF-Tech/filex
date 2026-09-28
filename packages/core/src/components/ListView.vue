@@ -50,7 +50,7 @@ import {
 import { matchedInContent, snippetSegments } from '../lib/snippet'; /* bul:s3 */
 import { drawsAsPage, previewKindFor } from '../lib/filePreview'; /* tablo:t1 */
 import { applyDragGhost } from '../lib/dragGhost'; /* wiring:c4 */
-import { parentDirOf } from '../lib/listing'; /* Location column — one split rule for every view */
+import { displayParentDirOf } from '../lib/listing'; /* Location column — one split rule for every view */
 import { trashTimeLeft } from '../lib/trashTimeLeft'; /* one "time left" sentence, shared with the admin Trash page */
 import {
   groupByDate,
@@ -420,7 +420,12 @@ function isPlainDir(n: FileNode): boolean {
  * stripped and this printed `My files/My files://Photos` (2026-09-14).
  */
 function locationLabel(n: FileNode): string {
-  const dir = parentDirOf(n.path);
+  // #71 — a discarded draft came from Drafts, not from a folder: the server
+  // sends only its name as the path, and Restore puts it back in Drafts.
+  if (((n as Record<string, unknown>).extra_metadata as { draft?: boolean } | undefined)?.draft) {
+    return t('node.drafts');
+  }
+  const dir = displayParentDirOf(n);
   const store = String((n as Record<string, unknown>).storage ?? '').trim();
   return [store, dir].filter(Boolean).join('/');
 }

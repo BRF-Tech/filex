@@ -64,7 +64,7 @@ const (
 // IsLanguagePack reports whether the manifest is a language pack and
 // nothing else: it adds at least one language to filex and declares nothing
 // a module could run — no action, no screen, no public page, no setting, no
-// permission, and no module address.
+// permission, no module address and no interface of its own.
 //
 // ⚠⚠ Such an app has NO module. It installs from its manifest alone, never
 // starts a runtime instance, and is listed as a language pack. A translator
@@ -76,7 +76,7 @@ const (
 // ordinary app, so an app that was built the old way (a module whose only
 // job was to carry `ui_locales`) keeps loading exactly as it did.
 func (m *Manifest) IsLanguagePack() bool {
-	return len(m.UILocales) > 0 && m.Wasm == nil &&
+	return len(m.UILocales) > 0 && m.Wasm == nil && m.UI == nil &&
 		len(m.Actions) == 0 && len(m.Views) == 0 && len(m.PublicPages) == 0 &&
 		len(m.Settings) == 0 && len(m.Permissions) == 0
 }

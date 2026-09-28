@@ -721,7 +721,7 @@ export function applyStoredPalette(id: string | undefined | null): void {
   //
   // ⚠ The other three preferences already got this right and only the palette
   // did not — `applyAccountTheme` (web/src/lib/theme.ts), `applyAccountDensity`
-  // (web/src/lib/density.ts) and `applyPrefLocale` (web/src/i18n) each return
+  // (lib/density.ts) and `applyPrefLocale` (web/src/i18n) each return
   // early on a value the account does not carry. This was the odd one out.
   //
   // ⚠⚠ Silence is not the same as an invalid id, either: `setCustomThemes`

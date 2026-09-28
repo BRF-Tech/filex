@@ -57,6 +57,20 @@ frame is re-fetch the listing — `action`/`name` are there for toasts and for
 future incremental patching, and the sections below say exactly when they are
 not populated.
 
+One frame is about no folder at all and reaches **every open socket**,
+subscribed or not:
+
+```json
+{"type":"app.updated","app":"drawio","version":"1.3.0"}
+```
+
+An administrator approved a version of an installed app — an upgrade, or
+going back to the one before ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)).
+The explorer drops its cached menu rows and every open interface of that app
+offers to reload (the new interface has a new address). Like every frame it is
+sent without blocking: a socket that is not reading misses it and gets the new
+version the next time it opens the app.
+
 ## Coalescing: what a burst looks like on the wire
 
 A folder can change far more often than a listing is worth re-fetching, and two
@@ -206,8 +220,9 @@ nothing polling to pick the file up. Writes that go through filex — the web
 app, the API, WebDAV, SFTP, FTPS, S3, NFS — all announce.
 
 **filex's own folders** never announce. A change inside `.filex-trash`,
-`.versions`, `.thumbs` or the desktop's `.filex-open` — a trash move, a
-version snapshot, a working copy being saved — and a change that names one
+`.versions`, `.thumbs`, the desktop's `.filex-open` or `.filex-drafts` — a
+trash move, a version snapshot, a working copy or a draft being saved — and a
+change that names one
 (the desktop creating `.filex-open` at the root) are dropped as the first
 thing `Hub.EmitChange` does, before any delivery: the one door the HTTP
 handlers, the protocol servers and the folder-size refresher all publish

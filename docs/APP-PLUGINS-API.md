@@ -300,6 +300,12 @@ of `[A-Za-z0-9]` plus `_.:@-` — and the host keeps at most one item per
 (app, key), so naming it again MOVES the item rather than adding another.
 `paths` are adapter-qualified, exactly as `state_list` answers them, at least
 one and all on one storage. `note` goes to the app's log ring.
+⚠ Every path must be a file **this app keeps state on** — one a person's job
+handed it earlier and the app recorded (the rows `state_list` returns). Any
+other path refuses the item (the reason is on the wake-up row), and an item
+whose state is gone by its due time is `skipped`, not run. The host's own
+parameter names (`__output`, `page_token_hash`, `share_id`) are dropped from
+an item's `params`.
 
 ### Manifest
 
@@ -369,9 +375,10 @@ is down at 03:00 finds the row still `due` when it comes back and runs it
 then — once, late rather than never.
 
 ⚠ A scheduled job has **no person behind it**, so no ACL is applied: it runs
-with the app's own grants on the files the app named. On a multi-tenant
-instance `schedule` is therefore an instance-wide grant, like the app's other
-permissions — the administrator granting it is granting unattended execution.
+with the app's own grants on the files the app named — and it may name only
+files it keeps state on, i.e. files people handed it before. Granting
+`schedule` is granting unattended execution on those files, not on every file
+of the instance.
 
 ### Switches
 
@@ -395,11 +402,12 @@ no wake-up is armed, no pass looks at a row, and `tick` answers `refused`.
      "permissions": ["files:read", …], "actions": 2, "views": 2, "public_pages": 1,
      "scheduled": true, "kind": "app" | "language-pack", "languages": [],
      "manifest_url": "", "compat": {"requires": ">=0.47.0", "ok": true, "filex": "0.47.0"},
-     "auto_update": true, "update_source": "github" | "url",
-     "update": {"checked_at": "…", "status": "current" | "available" | "needs_approval" | "incompatible" | "failed" | "check_failed",
+     "update_source": "github" | "url",
+     "update": {"checked_at": "…", "status": "current" | "available" | "needs_approval" | "incompatible" | "check_failed",
                 "version": "1.3.0", "ref": "v1.3.0", "added": ["mail:send"], "adds_module": false,
-                "requires": ">=0.48.0", "refusal": {"error": "…", "…": "…"},
-                "auto": {"from": "1.2.0", "to": "1.2.1", "at": "…"}},
+                "requires": ">=0.48.0", "refusal": {"error": "…", "…": "…"}, "notes": "…"},
+     "previous": {"version": "1.1.0", "replaced_at": "…", "ui": true},
+     "engine": true, "ui": {"sha256": "…", "files": 12, "bytes": 81920, "unpacked": 250000, "csp": [], "external": []},
      "created_at": "…", "updated_at": "…"}
   ]
 }
@@ -412,14 +420,22 @@ warning — it keeps running. `update_source` is absent for an app installed
 from a file (nothing to check). `update` is what the last update check found
 (absent before the first): `refusal` is an install refusal's body
 (`error`, `message`, `reason`, `where`, …), so the panel says it with the
-install wizard's sentences; `auto` is the last automatic update. The exact
-bytes: `backend/internal/api/handlers/testdata/wire/app-plugin-update-check.json`.
+install wizard's sentences; `notes` are the source's release notes for
+`version` (a GitHub release's body, plain text, up to 8 KiB). ⚠⚠ Nothing
+updates itself since 0.48: the check only records what it found. A row
+filex 0.47 wrote may still carry `status: "failed"` and `auto` (its
+automatic update); nothing writes them any more. `previous` is the version
+the last approval replaced, kept to go back to (`POST …/{id}/rollback`);
+absent when none is kept. `engine` is false for an app without a module;
+`ui` describes its own interface (absent without one). The exact bytes:
+`backend/internal/api/handlers/testdata/wire/app-plugin-update-check.json`.
 
 ### `POST /api/admin/app-plugins` — install
 Three bodies:
 1. multipart: `wasm` (file), `manifest` (file, filex-app.json), optional
-   `signature` (hex/base64 ed25519 over the wasm's sha256 hex), plus a JSON
-   field `grant` = `{"permissions": [...]}`.
+   `ui` (the interface bundle, a zip — [An app's own interface](#an-apps-own-interface-v4)),
+   optional `signature` (hex/base64 ed25519 over the wasm's sha256 hex), plus
+   a JSON field `grant` = `{"permissions": [...]}`.
 2. JSON `{"github_repo": "BRF-Tech/filex-sign", "ref": "v1.0.0", "permissions": [...]}` —
    filex fetches `filex-app.json` from the repo at `ref` (default branch when
    empty), then `wasm.url` (`{tag}` expands to `ref`), verifies `wasm.sha256`.
@@ -430,7 +446,25 @@ A **language pack** takes each body without its module: no `wasm` part, no
 (no module)* below). The manifest part is read up to 16 MiB and a larger one
 is refused `413 too_large` rather than truncated.
 
-`?dry_run=1` answers `200 {"manifest": {…}, "permissions": [{"id": "files:read", "label": "…", "reason": {"en": "…"}}], "wasm_sha256": "…", "wasm_bytes": N, "signed": bool, "kind": "app"|"language_pack", "manifest_sha256": "…", "languages": [{"code", "keys", "translated", "unknown", "total", "percent", "rtl"}], "compat": {"requires", "ok", "filex"}}` without installing — the wizard's permission-review step. `reason` is the manifest's `permission_reasons[id]` (may be absent). `compat` (absent without a range) with `ok: false` means the install will be refused `incompatible`. `…/{id}/upgrade?dry_run=1` answers the same shape plus `"upgrade": {"from": "1.1.0", "added": ["public_pages"], "removed": ["mail:send"], "adds_module": false}` — the version it leaves and how the grant changes (`added` is what the administrator approves).
+`?dry_run=1` answers `200 {"manifest": {…}, "permissions": [{"id": "files:read", "label": "…", "reason": {"en": "…"}}], "wasm_sha256": "…", "wasm_bytes": N, "signed": bool, "kind": "app"|"language_pack", "manifest_sha256": "…", "languages": [{"code", "keys", "translated", "unknown", "total", "percent", "rtl"}], "compat": {"requires", "ok", "filex"}}` without installing — the wizard's permission-review step. `reason` is the manifest's `permission_reasons[id]` (may be absent). `compat` (absent without a range) with `ok: false` means the install will be refused `incompatible`. `…/{id}/upgrade?dry_run=1` answers the same shape plus `"upgrade"` — the version it leaves, how the grant changes (`added` is what the administrator approves), and what else the version changes:
+
+```json
+"upgrade": {"from": "1.1.0", "added": ["public_pages"], "removed": ["mail:send"], "adds_module": false,
+            "module_from": "5f1c…", "module_to": "a995…",
+            "ui_from": "", "ui_to": "c0ff…",
+            "ui_files": {"added": ["index.html", "app.js"], "removed": [], "changed": [],
+                         "added_count": 2, "removed_count": 0, "changed_count": 0},
+            "filex_from": ">=0.45.0", "filex_to": ">=0.48.0",
+            "signed_from": true, "signed_to": false,
+            "notes": "Signers can now be reminded."}
+```
+
+`module_*` / `ui_*` are the SHA-256 of the module and of the interface bundle
+before and after (absent where there is none); `ui_files` compares the two
+bundles file by file (by CRC-32 and size), each list cut at 200 names with
+the counts whole; `filex_*` are the ranges as the review reads them; `notes`
+are the source's release notes (the `Review update` path; plain text, never
+markup). The exact bytes: `testdata/wire/app-plugin-upgrade-review.json`.
 
 `permissions` (granted) must equal the manifest's set exactly → else
 `400 {"error": "permissions_incomplete", "missing": [...]}`. Success `201` with
@@ -439,8 +473,7 @@ the row as in the list. Errors: `400 manifest_invalid`, `400 sha256_mismatch`,
 `409 incompatible` (the manifest's `filex` range leaves this filex out:
 `{"error": "incompatible", "requires": ">=0.48.0", "filex": "0.47.0"}`).
 
-A URL install whose request carries `sha256` starts with `auto_update: false`
-— the administrator pinned those bytes; every other install starts with it on.
+Nothing an install starts updates itself (0.48): there is no per-app switch.
 
 ⚠ The server COMPILES the module before it answers — tens of seconds for a
 large one (the 20 MB signing module: 23–33 s measured, 2026-09-21). The admin
@@ -503,7 +536,21 @@ while it was running. Every other row is one piece of work.
 Row + `manifest` + `granted` + `overrides` + `settings` (secret values masked
 as `"***"`) + `describe` (last answer).
 
-### `PATCH …/{id}` `{"enabled"?: bool, "auto_update"?: bool}` · `DELETE …/{id}` · `POST …/{id}/upgrade`
+### `PATCH …/{id}` `{"enabled": bool}` · `DELETE …/{id}` · `POST …/{id}/upgrade` · `POST …/{id}/rollback`
+`PATCH` with `auto_update` answers `400 bad_request` ("automatic updates were
+removed: every newer version waits for an administrator's approval").
+`POST …/{id}/rollback` puts back the version the last approval replaced
+(`previous` on the row) under the permissions it ran under — no new approval,
+and the version it replaces becomes `previous` in its turn. `404 not_found`
+when none is kept; `400 sha256_mismatch` when the kept files changed on disk
+since (the running version stays). Audited `app_plugin.rollback`; an upgrade
+is audited `app_plugin.upgrade` — both with the administrator, `from`, `to`,
+the permissions added and dropped, and the interface's hashes when they
+changed. Every approved change is also sent to every open explorer as the
+realtime frame `{"type": "app.updated", "app": "…", "version": "…"}` (an
+interface open on the old version offers to reload).
+
+`POST …/{id}/upgrade`
 (same bodies as install; a manifest that asks for permissions not yet granted
 answers `409 {"error": "permissions_changed", "missing": [...]}` until the body
 grants them). An upgrade may also take `{"from_source": true, "permissions":
@@ -513,14 +560,12 @@ newer, `409 incompatible` when the only newer version needs another filex,
 `400 manifest_invalid` for an app installed from a file (no source).
 
 ### `POST /api/admin/app-plugins/updates/check`
-Asks every app's source for a newer version now and installs what may be
-installed (a newer version whose permissions the app already holds, while
-its `auto_update` is on and the instance does not require signatures).
-Answers `200 {"report": {"checked_at", "checked": N, "updated": [names],
+Asks every app's source for a newer version now and records what it found —
+it installs nothing (0.48: every newer version waits for an administrator).
+Answers `200 {"report": {"checked_at", "checked": N, "updated": [] (always empty since 0.48),
 "available": [names], "needs_approval": [names], "failed": [names]},
 "runtime": {…}, "plugins": [...]}` — the list redrawn. One check runs at a
-time: a second caller waits for the one in flight and gets its answer. The
-request does not cut an update short when it is abandoned. `403
+time: a second caller waits for the one in flight and gets its answer. `403
 demo_refused` on a demo. The daily check (`FILEX_APP_PLUGIN_UPDATE_CHECK`)
 runs the same code; the rules are in [APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates).
 
@@ -596,6 +641,14 @@ whose meta carries `plugin`, `plugin_label_<lang>`, `title_<lang>`,
 `body_<lang>` — one per language the app wrote (`_en`/`_tr` always, at most 16
 more) — and `job` (notify:send). A reader sees the notice in their own
 language when the app wrote it in that language, else in English.
+⚠ **Whose people (multi-tenant).** A call reads the directory of the person it
+speaks for: the person who started it, or on a public page the person who sent
+the link. The wake-up and the work it schedules speak for nobody, so on a
+multi-tenant instance their `users_lookup` answers no one. `to_user_id` must
+name somebody whose tenant reaches the storage the call is about (for a call
+about no storage: somebody in the tenant of the person it speaks for); anyone
+else is `not_found`, the same answer as an id that does not exist. A
+single-tenant instance is unaffected.
 **v2:** `to_user_id` addresses ONE person (their bell, their push, their mail
 if they enabled it; `404` for an unknown id) instead of the instance feed;
 `target` makes the row clickable — `ref` (an input) or `path` (adapter-
@@ -617,8 +670,11 @@ server speaks it — else in the language the call runs in, and labels the mail
 with it; unavailable until SMTP
 is configured and verified) ·
 `http_request {method, url, headers, body_b64, timeout_s}` → `{status, headers,
-body_b64}` (host must match an `http:<host|*.domain>` grant; loopback/private/
-link-local addresses are refused even when a granted name resolves to one;
+body_b64}` (host must match an `http:<host|*.domain>` grant — a host name, an IP
+literal, or `*.` and a name of at least two labels; no port, no `*` alone, no
+wildcard over a whole top-level domain; loopback/private/link-local/shared
+(100.64.0.0/10)/reserved addresses, and NAT64/6to4 spellings of them, are
+refused even when a granted name resolves to one;
 8 MiB each way, 30 s, 5 redirects that must stay inside the grant; `Cookie`
 never sent, `Set-Cookie` never returned; Extism's own HTTP import is closed so
 this is the only network path). 
@@ -743,7 +799,13 @@ in*).
 
 `file_lock {ref | path, ttl_days (0 = 30, ≤ 365), reason | reason_key + reason_args}` → `{until}` and
 `file_unlock {ref | path}` → `{was_locked}`, jobs only, FILES only (a folder
-is refused as `invalid`). A lock freezes one
+is refused as `invalid`). ⚠ A `path` must name one of the job's inputs or a
+file this app keeps state on — the same rule for a notice's `target.path` and
+a page link's document — and anything else is `permission_denied` with one
+sentence whether or not the file exists or is locked; an app may always lift
+its OWN lock by path. The person the job runs for must also hold **editor** on
+the file (this app's own lock is waived); a job with nobody behind it (the
+wake-up's) may lock only its own inputs. A lock freezes one
 file for EVERYONE — owner and administrators included — until the plugin
 lifts it or `until` passes: every caller's effective level on that path is
 capped at viewer (uploads over it, saves, versions restore, sharing edits
@@ -951,7 +1013,7 @@ BACKEND.md:
 | `GET /api/public/s/{token}` | the link's state. `kind: "app"` carries `app: {plugin, page, title, files: [{ref, name, size, mime}]}`; `files` only once unlocked |
 | `POST …/s/{token}/pin` | `{"pin"}` → the same object plus the unlock cookie · `401 pin_wrong` · `429 locked` |
 | `POST …/s/{token}/event` | `{state, event, action_id, data}` → `{surface}`, or `202 {accepted, job_id}` when the surface asks for a job. An empty body means `{"event": "open"}` and counts a visit. A job the submit-time gate turns away answers `403`/`409`/`413` (below) |
-| `GET …/s/{token}/file/{ref}` | one exposed copy (`pub:N`), Range-capable, `inline`, behind the same gate |
+| `GET …/s/{token}/file/{ref}` | one exposed copy (`pub:N`), Range-capable, `inline`, behind the same gate. Always carries a `Content-Type` (the app's, else the one the name implies, else `application/octet-stream`). Every kind a browser does not simply show — HTML, SVG, XML, anything unknown — also carries `Content-Security-Policy: sandbox; default-src 'none'…`, so it can never run as a page of this filex; a PDF, a picture (not SVG), sound, video and plain text are shown as themselves |
 
 - ⚠ `expired` and `revoked` are different words for different things.
   `expired` is the clock — and an administrator's **Revoke** moves the expiry
@@ -1398,6 +1460,414 @@ A manifest with `ui_locales` and no `actions`, `views`, `public_pages`,
   The browser fetches the strings of the one language somebody picks, once
   (`packages/core/src/lib/uiLocales.ts`).
 
+## An app's own interface (v4)
+
+An app may bring its **own interface** — HTML, CSS and JavaScript it wrote —
+instead of (or beside) filex-drawn surfaces. filex serves it from the app's
+package and runs it in a sandboxed frame; the only way out of that frame is
+the bridge below, and filex decides every call. Operators read
+[APP-PLUGINS.md → An app's own interface](APP-PLUGINS.md#an-apps-own-interface);
+authors read [PLUGIN-KIT.md → Writing an interface](PLUGIN-KIT.md#writing-an-interface).
+Every rule below was measured in Chrome 153, Firefox 150 and WebKit 26.4
+(2026-09-27) before it was written.
+
+There are still exactly **two kinds of plugin**: storage plugins and apps. An
+app is a module (the wasm engine), an interface, or both:
+
+| The app has | Its manifest carries | Example |
+|---|---|---|
+| a module only | `wasm` | the converter, the signing app |
+| an interface only | `ui` | draw.io: the editor is JavaScript, there is nothing for a module to do |
+| both | `wasm` + `ui` | an interface that asks its module to do the heavy part (`engine.call`) |
+
+### Manifest
+
+```json
+{
+  "name": "drawio",
+  "version": "1.0.0",
+  "permissions": ["files:read", "files:write"],
+  "ui": {
+    "bundle": { "url": "https://github.com/<o>/<r>/releases/download/{tag}/ui.zip", "sha256": "<64 hex>" },
+    "csp": ["wasm-unsafe-eval"],
+    "external": [
+      { "url": "https://fonts.example.net/inter/", "as": "font", "reason": { "en": "The Inter typeface" } },
+      { "url": "https://cdn.example.net/katex@0.16.9/katex.min.css", "as": "style", "sha256": "<64 hex>", "reason": { "en": "Maths" } }
+    ]
+  },
+  "views": [
+    { "id": "editor", "placement": "viewer", "ui": "index.html",
+      "applies": { "ext": ["drawio", "dio"] }, "label": { "en": "draw.io" } }
+  ]
+}
+```
+
+- **`ui.bundle`** — a zip of the interface's files. `url` takes `{tag}` like
+  `wasm.url` (a relative address is read from the repository at that ref);
+  `sha256` pins the zip and is **required** for a GitHub or URL install. An
+  upload sends the zip as the multipart part `ui`.
+  - Checked at install, never at serving time: at most
+    `FILEX_APP_PLUGIN_MAX_UI_MB` (default 128) MiB zipped, 512 MiB unzipped,
+    20 000 files, 64 MiB per file; names are forward-slash relative paths with
+    no `..`, no `.` segment, no backslash, no drive or leading slash, no
+    duplicate (case-insensitively), no symbolic link; every file has an
+    extension on the served list (HTML, scripts, styles, JSON, source maps,
+    wasm, images, fonts, audio, video, text, XML) or none at all (`LICENSE`).
+  - The zip is kept as it is and served **from its own index**: nothing is
+    unpacked, so no request path is ever joined onto a directory.
+- **`ui.package_fetch`** — `true` lets the interface **read its own
+  package** with `fetch` / `XMLHttpRequest` (draw.io loads its stencils,
+  shapes and translations that way). Only THIS version's files: the page's
+  `connect-src` and Chrome's `Connection-Allowlist` name the package's own
+  path (`<P>`) and nothing else — not another version, not another app, not
+  filex's API or pages, not the network. A permission (`ui:package-fetch`),
+  on the review as "reads its own package". Without it, `connect-src 'none'`.
+- **`ui.download`** — `true` lets the interface hand the person a file to
+  keep on their own disk (`ui.download` in the bridge, `fx.download` in the
+  SDK): an export, a PNG of the drawing. filex does it — a sandboxed frame
+  cannot download — on a gesture in the frame or the person's yes, never
+  over 256 MiB. A permission (`ui:download`), on the review as "can save
+  files to your computer — each time you allow it".
+- **`ui.csp`** — exceptions to the interface's script policy:
+  `"unsafe-eval"` (`eval`, `new Function`) and `"wasm-unsafe-eval"`
+  (WebAssembly compiled in the page). Each is a permission (below). They open
+  no network channel (measured); they make a mistake inside the interface
+  easier to exploit.
+- **`ui.external`** — addresses outside the package the interface loads.
+  - `as` is `style`, `font`, `img` or `media`. **`script` is refused**: a
+    script from anywhere but the approved package would make the package's
+    sha256 meaningless. **`connect` is refused**: an interface that needs data
+    asks its module, which holds an `http:<host>` permission the
+    administrator approved, and every such request goes through the server's
+    guarded client.
+  - `url` is `https://`, a whole host (no wildcard), no query or fragment; a
+    full file, or a path prefix ending in `/`. It is written in ONE plain
+    form, because it goes as it is into the page's policy and into Chrome's
+    `Connection-Allowlist` (a URLPattern): a lower-case public host name (not
+    an IP address, not `.local`, `.internal`, `.corp`, `.home.arpa`, `.test`
+    and the like), an optional port, and a path of letters, digits,
+    `. _ ~ @ - /` and `%HH` escapes (never an escaped `/`, `\`, `.` or NUL).
+    Anything else — a quote, a backslash, a non-ASCII letter, `( ) { } + :`
+    — is refused at install, and a grant row holding one is not read.
+  - **With `sha256`, the file is mirrored**: filex downloads it once at
+    install, checks the hash and serves it from the package's own address as
+    `ext/<host>/<path>` — the interface refers to
+    `ext/cdn.example.net/katex@0.16.9/katex.min.css`, and no browser ever asks
+    `cdn.example.net`. Not a permission: nothing leaves the reader's browser.
+    Only a full file can be mirrored.
+  - **Without `sha256`, the address is live**: the reader's browser fetches
+    from it. That is a permission (`ui-net:<as>:<url>`), and the review says
+    what it means: the address's owner sees who uses the app and when, and
+    the interface can put data from the open file into those requests'
+    addresses. ⚠ A policy cannot stop that: measured, `lib.css?leak=<64 KB>`
+    reached an address allowed for exactly one file, in all three browsers.
+  - `reason` is shown beside the address at review, in every language the app
+    declares.
+- **`views[].ui`** — the file (in the bundle) a view opens. A view is drawn
+  EITHER by the app's surfaces (no `ui`) OR by its interface (`ui`), never
+  both. `placement` gains **`viewer`**: the interface opens a file the way
+  filex's own viewers do — clicking the file, *Open with* — and takes the
+  preview's place. ⚠ A viewer NAMES what it opens: its `applies` has a
+  non-empty `ext` or `mime` list (a family like `image/*` is fine, `*/*` is
+  not), `kind` is `file`, and each kind is a line of the review
+  (`ui-viewer:`, below). A viewer with no rule would have been the default
+  viewer of every file the person opened, so it is refused at install.
+- **`new_documents`** — rows the app adds to filex's **New document** menu
+  (below).
+- **No module.** A manifest with `ui` and no `wasm` is an app with an
+  interface and no engine. It may declare only views that have a `ui`,
+  actions that open such a view, settings, and the permissions the bridge
+  uses (`files:read`, `files:write`, `settings`). ⚠ Not `state`: that is the
+  module's per-file state (`state_set`); the interface's own small store
+  (`state.get` / `state.set`) needs no permission — it is the person's, kept
+  in their account preferences, 16 KiB per app. An action that
+  would run a module, a public page, a wake-up or a permission only a module
+  can use is refused at install, with the reason.
+
+### New documents
+
+```json
+"new_documents": [
+  { "ext": "drawio", "label": { "en": "draw.io diagram", "tr": "draw.io diyagramı" },
+    "view": "editor", "template": "filex/blank.xml" }
+]
+```
+
+A row of the **New document** dialog, under **Apps**, in the app's own
+words: the person names the file and picks the folder as for any new
+document, the file is made — a copy of `template` (a file of the interface's
+package), or empty — and opens in `view`. Where the server keeps drafts it is
+a draft until its first save (issue #71), like any other new document.
+
+- `ext` is the kind, lower-case, no dot; the file always carries it.
+- `view` is one of the app's `viewer` views, and it must open that kind.
+- `template` is a path inside the bundle, on the bundle's served list (a
+  blank diagram as `filex/blank.xml`, not `.drawio`), at most 16 MiB; a
+  bundle that does not hold it refuses the install.
+- `label` in every language the app declares. At most 8 rows, each kind
+  once. The app needs `files:write`: a new document is saved by it.
+- Each kind is a permission, `ui-new:.<ext>` (below): an update that adds a
+  kind asks again.
+- The explorer is told the rows in `capabilities.newdoc_types`
+  (`group` / `requires` `"app"`, `key` = `app:<plugin>:<ext>`, `app: {plugin,
+  view, label}`), a signed-in person only, and only while the app runs with
+  the kind granted; the create call names the row by its `key`
+  (`POST /api/files/manager?action=newfile` or `POST /api/files/drafts`,
+  `{path, name, type: "app:drawio:drawio", exact_name}`).
+
+### Permissions an interface adds
+
+Derived from the `ui` block — never written into `permissions` (listing one
+there is refused, so the manifest has ONE place that says it) — and part of
+the grant exactly like the others: the review lists them, the install must
+grant them, an upgrade that adds one answers `permissions_changed`.
+
+| Permission | Meaning at review |
+|---|---|
+| `ui` | Runs its own interface in your browser, in a sandbox |
+| `ui:eval` | Its interface may run code it builds while it runs (`unsafe-eval`) |
+| `ui:wasm-eval` | Its interface may compile WebAssembly in the page (`wasm-unsafe-eval`) |
+| `ui:package-fetch` | Its interface reads its own package — the files of this version, nothing else (`ui.package_fetch`) |
+| `ui:download` | Its interface can save files to your computer — each time you allow it (`ui.download`) |
+| `ui-net:<as>:<url>` | Your browser loads `<as>` from `<url>` while you use it (a live address) |
+| `ui-new:.<ext>` | Adds a new `.<ext>` file to the New menu; it opens in this app's interface (`new_documents`) |
+| `ui-viewer:.<ext>` / `ui-viewer:<type/subtype>` | Opens those files in its own interface, in place of filex's preview — one line per kind a `viewer` view names, so an update that makes the app the viewer of one more kind asks again |
+
+The bridge also answers to the ordinary permissions: `files:read` for
+`file.read`, `files:write` for `file.save` / `file.saveAs`, `settings` for the
+administrator's settings in the session.
+
+### Serving: `GET <base>/_appui/<app>/<bundle-sha[:16]>/<path>`
+
+Outside the SPA, unauthenticated and cookieless: it reads no session and sets
+no cookie, and a request carrying one is answered exactly like one that does
+not. The version is in the address, so a package file is `Cache-Control:
+public, max-age=31536000, immutable`; an upgrade opens a new address, and the
+previous version stays served for open tabs and a roll-back. ⚠ Except the
+**pages** (`.html`): their policy is built from the grant, so they are
+`no-cache` with an `ETag` over the page and its policy (`304` when it
+matches) and `Vary: Host` — a narrowed grant takes effect at the next
+opening. An error is `no-store`.
+
+- The path is decoded once and then checked: `..`, `.`, an empty segment, a
+  backslash, an encoded slash, a NUL — `404`. It is then looked up in the
+  zip's own index; it is never joined onto a directory.
+- `ext/<host>/<path>` is a mirrored external file (above).
+- **HTML** answers carry the policy **built from the grant** at the moment of
+  serving (`wasmplugin.UIPolicy`, one function), never from anything in the
+  package:
+
+  ```
+  Content-Security-Policy: default-src 'none'; script-src <P> 'sha256-<bootstrap>' [eval];
+    style-src <P> 'unsafe-inline' [live style]; img-src <P> data: blob: [live img];
+    font-src <P> [live font]; media-src <P> blob: [live media]; connect-src 'none' | <P>;
+    worker-src blob:; frame-src 'none'; child-src 'none'; object-src 'none';
+    form-action 'none'; base-uri 'none'; frame-ancestors *; sandbox allow-scripts
+  Connection-Allowlist: ("<P>*" [live addresses])
+  X-DNS-Prefetch-Control: off
+  Referrer-Policy: no-referrer
+  Permissions-Policy: every feature ()
+  ```
+
+  - `<P>` is the explicit origin and version path
+    (`https://files.example.com/_appui/drawio/3f9a…/`). ⚠ Never `'self'`:
+    WebKit reads `'self'` as the frame's opaque origin and refuses the app's
+    own scripts. Never the bare filex origin either: WebKit sends the session
+    cookie with a sandboxed frame's requests to its own site.
+  - `sandbox allow-scripts` is in the answer, not only on the frame: an
+    interface address opened directly in a tab would otherwise run with
+    filex's own origin (measured in all three browsers: localStorage and the
+    session cookie reachable).
+  - `Connection-Allowlist` makes Chrome refuse WebRTC and the frame's own
+    navigation away — the only measure that stops WebRTC there. It names the
+    package's own path (`<P>*`), not filex's whole origin; live addresses are
+    named in it too, or Chrome refuses them as well.
+  - `connect-src` is `'none'`, or `<P>` with `ui:package-fetch`.
+  - `X-DNS-Prefetch-Control: off`: Firefox resolves `<link rel=dns-prefetch>`
+    names despite the CSP.
+- filex puts its **bootstrap** first in every HTML file, before any of the
+  app's own code: a small inline script (allowed by its hash) that removes
+  the WebRTC constructors from the page and from every frame the page could
+  make. In Firefox it is the one measure against WebRTC, together with the
+  explorer page's own `frame-src`. It is a seat belt, not a wall: an embed on
+  a page with no CSP of its own does not have that `frame-src`. filex's own
+  pages name themselves in it BY PATH (`<host>/_appui/`, `<host>/z/`), never
+  `'self'`: an interface cannot navigate its frame to another page of filex
+  either.
+- **Other files** are served with their type from the extension (never
+  sniffed), `X-Content-Type-Options: nosniff` and
+  `Content-Security-Policy: default-src 'none'; sandbox` — an SVG or a JSON
+  file opened as a document runs nothing and bypasses no bootstrap.
+- `Access-Control-Allow-Origin: *` on every answer: a sandboxed frame's
+  origin is opaque, so a module script or a font it loads is a cross-origin
+  request with `Origin: null`. The files are public; no credentials are
+  involved.
+
+### How an interface is opened
+
+`GET /api/files/plugins/actions` → each `views[]` row, and each action row
+whose view has one, carries
+
+```json
+"ui": { "url": "/_appui/drawio/3f9a0c1e5b2d4f60/index.html", "grants": ["files:read", "files:write", "ui"] }
+```
+
+`url` is relative to the server's root (the client joins it with its API
+base, like every other relative address filex answers); it is absolute when
+the interfaces have an origin of their own (`FILEX_APP_UI_ORIGIN`). A `viewer`
+view is offered for the files its `applies` rule matches: the explorer opens
+it in the preview's place, and *Open with* lists it. ONE rule decides which
+app opens a file (`pickAppViewer`, packages/core `lib/appViewer`): *Open
+with*'s choice, else the first view in the list that matches. The standalone
+editor tab (`/files/edit`) uses it too, and *Open in new tab* carries the
+choice as `app=<plugin>/<view>` (`app=builtin` for filex's own viewer).
+
+The explorer draws the frame with ONE component (`AppFrame`,
+packages/core), the same in the web app, the desktop app and every embed:
+
+- `sandbox="allow-scripts"` is set **before** `src`, and before the element
+  is in the document — a sandbox added afterwards applies from the next
+  navigation, and the first document runs unsandboxed (measured: it read the
+  session token);
+- `referrerpolicy="no-referrer"`, no `allow` attribute (no camera, no
+  microphone, no clipboard, no fullscreen);
+- ONE bridge per element: when the frame loads a second time the port is
+  closed and no new hello is taken. To reload an interface (a new version was
+  approved), the explorer replaces the element.
+
+### The interface bridge
+
+The SDK is **`@brftech/filex-app-ui`** (`packages/app-ui`, a few KB, no
+dependency; an ES module and a classic-script build, `window.FilexAppUI`).
+The protocol is its `src/protocol.ts`, which filex's own frame imports too.
+
+```js
+import { connect } from '@brftech/filex-app-ui';
+
+const fx = await connect();
+const file = await fx.open();          // FileInfo + text() / bytes() / stream() / save()
+editor.load(await file.text());
+editor.on('change', () => fx.dirty(true));
+fx.onSave(() => editor.serialize());   // filex's Save, a draft's Save to disk, Ctrl+S
+```
+
+**Handshake.** The app posts `{type: "filex:hello", v: 1}` to
+`window.parent`. The host takes it only when `event.source` is the frame it
+drew — the origin is `"null"` for every sandboxed frame, so it cannot tell two
+of them apart (measured: a naive listener took a sibling frame's forged
+`save`) — and answers once with `{type: "filex:port", v: 1}` and a transferred
+`MessagePort`. The app takes the port only when `event.source` is its parent
+(and, where the browser offers `location.ancestorOrigins`, when the origin is
+the parent's). The trusted origin is never read from the frame's address.
+Everything after that goes through the port.
+
+**Requests** are `{id, method, params}`, answered `{id, result}` or
+`{id, error: {code, message}}`. `code` is one of `not_granted`, `not_found`,
+`read_only`, `invalid`, `too_large`, `failed`, `cancelled`, `unavailable`,
+`unknown_method`. ⚠ When the server refused, `message` is at most its short
+code (`quota_exceeded`, `locked`, `encrypted`, `not_applicable`), never its
+sentence; anything else that failed is `failed` with the word `failed`. An
+interface is told what went wrong, not a path on the server's disk or a
+driver's words.
+
+| Method | Params → result | Needs |
+|---|---|---|
+| `session.get` | → `{v, app: {name, version}, view: {id, placement}, locale, dir, theme: {mode, tokens}, user: {name}, files: [{index, name, ext, size, mime, readOnly}], grants, settings?}` | — |
+| `file.read` | `{index?, as: stream / bytes / text}` → `{name, size, mime, stream / bytes / text}`. A stream is transferred (`ReadableStream<Uint8Array>`); text is UTF-8 and refused over 32 MiB. | `files:read` |
+| `file.save` | `{index?, data: ReadableStream / ArrayBuffer / string, mime?}` → `{saved: true, size}`. Only over a file the interface was opened with — a new version of it, or the draft it is. | `files:write` |
+| `file.saveAs` | `{name, data, mime?}` → `{saved: true, name, size}`. A NEW file, in a folder the person picks in filex's own dialog (`cancelled` when they close it). | `files:write` |
+| `ui.dirty` | `{dirty: bool}` | — |
+| `ui.title` | `{text}` — the frame's title | — |
+| `ui.toast` | `{text, tone?: info / success / warning / error}` — drawn by filex, prefixed with the app's name | — |
+| `ui.confirm` | `{text, title?, confirm?, cancel?, danger?}` → `bool` — drawn by filex, its title prefixed with the app's name | — |
+| `ui.close` | — filex asks first when there are unsaved changes | — |
+| `ui.download` | `{name, data: ReadableStream / ArrayBuffer / string, mime?}` → `{saved: true, size}` — a file for the person's own disk. `name` is a file name (no folder). **The person's call** (below). Chromium: File System Access — the person picks where, and a stream is written as it is read, never whole in the page; elsewhere a Blob the browser downloads. At most `LIMITS.maxDownloadBytes` (256 MiB), streamed or not: past it `too_large` and nothing is kept (a picked file is aborted). `cancelled` when the person says no or closes the picker | `ui:download` |
+| `clipboard.write` | `{text}` — the host writes it, the same in every browser (Chrome refuses a sandboxed frame; Firefox and WebKit let it). **The person's call:** on a gesture in the frame, or filex asks (`cancelled` on "no") | — |
+| `engine.call` | `{method, params}` → the module's answer | a module with a `ui_call` export |
+| `job.submit` | `{action, params?}` → `{op}` — one of the app's actions on the opened files, through the ordinary submit checks. **The person's call**, like `clipboard.write` | a module |
+| `state.get` / `state.set` | `{key}` → value / `{key, value}` — this person's small store for this app (JSON, 8 KiB a value, 16 KiB an app), kept in the account's preferences | — |
+
+There is no `fetch`, no storage and no cookie in the frame: an interface that
+needs to keep something asks `state.set`; one that needs data from elsewhere
+asks its module.
+
+**The person's call.** A call marked so above goes ahead only on a
+**gesture** — the person clicked or typed in the frame a moment ago, which
+the browser tells filex's page too (`navigator.userActivation`, about five
+seconds) — and ONE gesture stands for one such call. A click, a key or a
+touch on filex's OWN page does not count for five seconds (the page sees
+those, never the frame's): not the double-click that opened the app, not a
+click on filex's Save. Otherwise filex asks,
+above the frame, naming the app ("Sketch wants to copy text to your
+clipboard", *Allow* / *Don't allow*); "no" answers `cancelled`. An interface
+cannot start a job, fill the clipboard or hand over a download on its own.
+*Allow* answers only once the question has been on screen a moment (0.6 s; *Don't allow* at once): the app decides when it
+asks, so it could ask right under a click it invited. Where the browser
+refuses filex's page the clipboard on a gesture in the frame (WebKit), the
+person is asked and their click on *Allow* is the gesture.
+
+**Who is speaking.** Everything filex draws for an interface carries the
+app's name: the view's label, and the app's installed name too when the label
+does not already say it (a label cannot pass itself off as filex).
+
+**How much.** One frame has at most 32 calls unanswered at once and 400
+requests in any 10 seconds; past either a request is answered `unavailable`
+with the message `busy`.
+
+**Events** (host → app, `{event, data}`): `theme` (`{mode, tokens}` — the
+SDK paints `--fe-*` onto `<html>` by itself), `locale` (`{locale, dir}`),
+`file.changed`, `close.request`, `app.updated` (an administrator approved a
+new version; reload to use it).
+
+**The host's own requests** (`{hid, request, params}`, answered
+`{hid, result}` or `{hid, error}`): `save` — filex's Save button and a
+draft's *Save to disk* ask the app for its document; the SDK calls the
+`onSave` handler and saves what it returns. A draft (issue #71) is invisible
+to the app: `file.save` writes into the draft, and the host's close question
+takes it from there.
+
+**Keys are not forwarded.** Ctrl+S inside the frame is handled by the SDK and
+runs the app's own save handler; nothing the frame does can press filex's
+shortcuts.
+
+### `PUT /api/files/plugins/ui/{plugin}/{view}/save`
+
+The server half of `file.save` and `file.saveAs`, with the person's session
+(the frame calls it; the interface cannot). Every check is made again here:
+the app is running, the view is its interface, the app holds `files:write`,
+the file is of a type the view `applies` to, and the person may write it —
+confinement, ACL editor (or the file is the caller's OWN draft, issue #71),
+the write gate (locks, filex's own folders, somebody else's draft refused),
+not a read-only storage, not in an encrypted folder, and the person's quota
+(`507 quota_exceeded`, before a byte is written). A NEW file ("save as") is
+held to the same rules: its name must be of a kind the view applies to
+(`422 not_applicable` — a diagram editor never saves an `.html`), and never
+into an encrypted folder (`403 encrypted`). A failed write answers
+`500 save_failed` with a sentence of filex's own; the error itself is in the
+server's log.
+
+- `?path=<qualified>` — a new version of that file (versioning keeps the
+  previous one) → `200 {saved, path, name, size}`; audit `app_plugin.ui_save`.
+- `?dir=<qualified folder>&name=<file name>` — a NEW file there, under a free
+  name beside anything that is there → `201`.
+- The body is the content, as it is. Up to `FILEX_APP_PLUGIN_MAX_OUTPUT_MB`.
+- **Chunked**, for anything over 8 MiB (the explorer does it by itself): the
+  first chunk with `&chunk=start` → `202 {session, received}`; the next ones
+  with `&session=<id>&offset=<received>`; the last one adds `&final=1` and is
+  answered like a one-shot save. Each chunk is at most 8 MiB, so a reverse
+  proxy's body limit never trips; the file is written once, at the end. A
+  chunk at the wrong offset answers `409 {received}`; a session is the
+  person's, for that app, view and file — any other request naming it is
+  `404`; an abandoned one is removed after 30 minutes.
+
+### `POST /api/files/plugins/ui/{plugin}/{view}/call`
+
+`{method, params, paths}` → the module's `ui_call` answer (`200 {result}`).
+The paths are the files the interface was opened with; each is checked for
+the person asking exactly like a view's (confinement, ACL viewer, not in an
+encrypted folder) and handed to the module as `context.inputs` (file refs,
+never paths). A module without `ui_call` answers `404 unsupported`.
+
 ## Interface preferences
 
 Not an app-plugin route, but the one a surface's theming rides on:
@@ -1611,7 +2081,8 @@ served at `/s/` and `/d/`, and it talks to `/api/public/*`. Where a rule says
      whatever the plugin happens to default to.
    - `src.ref` resolves through the page's `fileUrl` (rule 5); `src.path`
      through the manager's authenticated preview route (M2 rule 7);
-     `src.url` is fetched as given with same-origin credentials. A document
+     `src.url` is **dropped by the host** (a screen may not make the viewer's
+     browser fetch an address of the app's choosing). A document
      that cannot be loaded renders as "the document could not be loaded"
      inside the surface — never a blank, never a failed surface.
 8. **`surface.errors[id]`** on a `signature-pad` / `pdf-fields` node draws

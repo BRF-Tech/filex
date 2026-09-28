@@ -4,6 +4,7 @@
     "ok": false,
     "requires": ">=0.48.0"
   },
+  "engine": false,
   "kind": "app",
   "manifest": {
     "actions": [
@@ -133,10 +134,27 @@
     "added": [
       "public_pages"
     ],
+    "filex_from": ">=0.45.0",
+    "filex_to": ">=0.48.0",
     "from": "1.1.0",
+    "module_from": "5f1c0de900000000000000000000000000000000000000000000000000000000",
+    "module_to": "a9950e0d84a62a1b30c952736b097e5f3cde019564724dc3c0432a36f7c0d091",
+    "notes": "Signers can now be reminded.\n\nNeeds filex 0.48.",
     "removed": [
       "mail:send"
-    ]
+    ],
+    "signed_from": true,
+    "signed_to": false,
+    "ui_files": {
+      "added": [
+        "index.html",
+        "app.js"
+      ],
+      "added_count": 2,
+      "changed_count": 0,
+      "removed_count": 0
+    },
+    "ui_to": "c0ffee0011111111111111111111111111111111111111111111111111111111"
   },
   "wasm_bytes": 5242880,
   "wasm_sha256": "a9950e0d84a62a1b30c952736b097e5f3cde019564724dc3c0432a36f7c0d091"

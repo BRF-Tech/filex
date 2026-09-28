@@ -11,6 +11,7 @@
 package thumb
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -60,13 +61,35 @@ func (p *Pipeline) AttachBody(b *filebody.Resolver) { p.body = b }
 // Generators must not call drv.Read directly — that is what made them blind to
 // staged uploads, and a per-generator exception is how one file starts
 // behaving differently depending on which thumbnailer picked it up.
+//
+// wiring:e2 fxe — and it is where ciphertext is caught: a file that starts
+// with either encrypted magic (a file of an encrypted folder that escaped
+// the marker walk, or a single encrypted file under any name) answers
+// errEncryptedContent, which GenerateThumb records as `skipped`. One sniff
+// here covers every generator, present and future.
 func (p *Pipeline) openSource(ctx context.Context, drv storage.Driver, node *model.Node) (io.ReadCloser, error) {
 	src, err := p.body.Resolve(ctx, drv, node.StorageID, node.Path, node)
 	if err != nil {
 		return nil, err
 	}
-	return src.Open(ctx)
+	rc, err := src.Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	head := make([]byte, len(e2e.MagicPrefix))
+	n, _ := io.ReadFull(rc, head)
+	if n == len(head) && e2e.HasEncryptedPrefix(head) {
+		_ = rc.Close()
+		return nil, errEncryptedContent
+	}
+	return struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(head[:n]), rc), rc}, nil
 }
+
+// errEncryptedContent: the source is end-to-end encrypted (see openSource).
+var errEncryptedContent = errors.New("thumb: end-to-end encrypted content")
 
 // Capabilities indicates which thumbnail backends are available at runtime.
 type Capabilities struct {
@@ -126,6 +149,15 @@ func (p *Pipeline) GenerateThumb(ctx context.Context, node *model.Node) error {
 		})
 		return ErrSkipped
 	}
+	/* wiring:e2 fxe — a single encrypted file: skipped by its name before a
+	   byte is read (the generic card would otherwise be drawn for it). Under
+	   any other name the content sniff in openSource catches it. */
+	if e2e.LooksEncryptedFile(node.Name) {
+		_ = p.store.UpsertThumbnail(ctx, &model.Thumbnail{
+			NodeID: node.ID, State: "skipped", Error: "e2e-encrypted file",
+		})
+		return ErrSkipped
+	}
 	/* /wiring:e2 */
 	t := &model.Thumbnail{NodeID: node.ID, State: "pending"}
 	_ = p.store.UpsertThumbnail(ctx, t)
@@ -161,6 +193,10 @@ func (p *Pipeline) GenerateThumb(ctx context.Context, node *model.Node) error {
 		// views still show *something* legible. Cheap to render —
 		// pure Go image stdlib, no external binary.
 		err = p.generateGeneric(ctx, node)
+	}
+	if errors.Is(err, errEncryptedContent) {
+		_ = p.store.SetThumbnailState(ctx, node.ID, "skipped", "e2e-encrypted content")
+		return ErrSkipped
 	}
 	if err != nil {
 		_ = p.store.SetThumbnailState(ctx, node.ID, "failed", err.Error())

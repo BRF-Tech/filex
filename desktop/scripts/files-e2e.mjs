@@ -16,12 +16,17 @@
 // Hence the blanket assertion below: NOTHING the window asks its server for may
 // come back 401.
 //
+// ⚠ Since v0.42.0 a file opens in a WINDOW OF ITS OWN (the server's
+// /files/edit page, src/main.ts openViewerWindow), not in a preview over the
+// list; the checks follow it there (openFile). Rewritten 2026-09-27: until
+// then ten checks were red on every run, still looking for the old modal.
+//
 // Run: node scripts/files-e2e.mjs
 // Env: FILEX_SERVER, FILEX_EMAIL, FILEX_PASSWORD, FILEX_STORAGE
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { SHOTS, SERVER, STORAGE, api, check, finish, launchApp, signIn, skipTour, tickRow } from './lib/harness.mjs';
+import { SHOTS, SERVER, STORAGE, api, arrived, check, finish, launchApp, signIn, skipTour, tickRow } from './lib/harness.mjs';
 
 fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -46,28 +51,43 @@ async function upload(name, body, type) {
   if (!res.ok) throw new Error(`seeding ${name} failed (${res.status})`);
 }
 
-/** Clicks the first VISIBLE match.
- *
- *  ⚠ Two traps, both met the hard way. The toolbar renders every action a
- *  second time inside an aria-hidden measuring strip (visibility:hidden, so it
- *  still has client rects) and those clones carry no click handler. And every
- *  label is prefixed by an icon glyph in the same text node — `^Sil$` matches
- *  nothing, because the button actually reads "🗑Sil". */
-async function clickText(win, re) {
-  return win.evaluate((src) => {
-    const rx = new RegExp(src, 'i');
-    const visible = (e) => e.getClientRects().length > 0 && !e.closest('[aria-hidden="true"]');
-    const label = (e) => (e.textContent ?? '').replace(/[\p{Extended_Pictographic}\p{So}️]/gu, '').trim();
-    const el = [...document.querySelectorAll('button, li, [role="menuitem"], a')]
-      .filter(visible)
-      .find((x) => rx.test(label(x)));
-    el?.click();
-    return !!el;
-  }, re.source);
+// The checkbox is the click that selects (issue #26); a click on the row opens it.
+//
+// ⚠ A tick TOGGLES. Opening a file selects its row on the way (the double
+// click's first click), and whether that selection outlives the document
+// window depends on the server's timing — against a fresh server the row was
+// still selected, the tick below turned it OFF, and "download" found no
+// selection bar at all. So: clear what is selected, tick this one row, and
+// say how many are selected (the bar's own count).
+//
+// ⚠ And a tick can land on a row that is being replaced: against a server
+// whose storage is still on its first sync the listing re-renders under the
+// pointer, and one run in three the tick hit a row that was gone a moment
+// later (nothing selected, no bar). The tick is repeated until the bar says
+// ONE item is selected — what is measured afterwards is unchanged.
+async function selectOnly(win, name) {
+  let count = '';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await clearSelection(win);
+    await tickRow(win, name);
+    count = await win.evaluate(() => document.querySelector('[data-testid="selection-count"]')?.textContent?.trim() ?? '');
+    const one = await win.evaluate((n) => {
+      const sel = [...document.querySelectorAll('[data-fe-path][aria-selected="true"]')];
+      return sel.length === 1 && (sel[0].getAttribute('data-fe-path') ?? '').endsWith(`/${n}`);
+    }, name);
+    if (one) return count;
+    await win.waitForTimeout(700);
+  }
+  return count;
 }
 
-// The checkbox is the click that selects (issue #26); a click on the row opens it.
-const selectRow = tickRow;
+async function clearSelection(win) {
+  const clear = win.locator('[data-testid="selection-bar"] [aria-label="Seçimi temizle"], [data-testid="selection-bar"] [aria-label="Clear selection"]').first();
+  if (await clear.isVisible().catch(() => false)) {
+    await clear.click().catch(() => {});
+    await win.waitForTimeout(300);
+  }
+}
 
 async function openRow(win, name) {
   return win.evaluate((n) => {
@@ -77,9 +97,31 @@ async function openRow(win, name) {
   }, name);
 }
 
-async function closeModal(win) {
-  await win.keyboard.press('Escape').catch(() => {});
-  await win.waitForTimeout(600);
+/**
+ * Opens a FILE and returns the window it opens in.
+ *
+ * ⚠⚠ Since v0.42.0 every file opens in a window of its own (`openInHost`: the
+ * explorer emits `file-opened`, the main process opens the server's
+ * `/files/edit` page in a frameless document window — src/main.ts
+ * openViewerWindow). This suite still looked for an in-page preview modal on
+ * the main window, and ten of its checks went red on every run since — a
+ * suite that fails for a reason nobody reads anymore protects nothing.
+ */
+async function openFile(app, win, name) {
+  // ⚠ Twice at most, for the same reason as selectOnly: a double click on a
+  // row the listing replaced a moment later opens nothing. The window that
+  // does open is still checked for being this server's editor on this file.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const next = app.waitForEvent('window', { timeout: attempt === 0 ? 12_000 : 20_000 }).catch(() => null);
+    await openRow(win, name);
+    const doc = await next;
+    if (doc) return arrived(doc, /\/files\/edit\?/);
+  }
+  return null;
+}
+
+async function closeDoc(doc) {
+  await doc?.close().catch(() => {});
 }
 
 // ⚠ Turkish on purpose. The window follows the OS language now, and the bug
@@ -156,57 +198,84 @@ try {
   check('the explorer lists the folder contents',
     ['notes.md', 'data.csv', 'pixel.png', 'rapor.txt'].every((f) => listed.includes(f)));
 
-  // ── image preview: the <img> the page cannot put a header on ──────
-  await openRow(win, 'pixel.png');
-  await win.waitForTimeout(2500);
-  const img = await win.evaluate(() => {
-    const el = document.querySelector('.fe-preview__image');
-    return el ? { complete: el.complete, w: el.naturalWidth, src: el.src.slice(0, 60) } : null;
-  });
+  // ── image preview: in its own window, the <img> the page cannot put a
+  //    header on ─────────────────────────────────────────────────────
+  const imgDoc = await openFile(app, win, 'pixel.png');
+  // ⚠ The document window loads the SERVER's own editor page (a real URL,
+  // never app://): that is where the old "open in new tab" check's promise now
+  // lives — the file opens on the server, in a window of its own.
+  // The app asks for `<server>/files/edit`; the server answers from its web
+  // app's base (`/admin/files/edit`). Either way: THIS server, the editor
+  // route, and exactly this file.
+  const docUrl = imgDoc ? new URL(imgDoc.url()) : null;
+  check('a file opens in a window of its own, on the server',
+    !!docUrl && docUrl.origin === new URL(SERVER).origin && /^(\/admin)?\/files\/edit$/.test(docUrl.pathname) &&
+      docUrl.searchParams.get('path') === `${REMOTE}/pixel.png`,
+    docUrl ? `${docUrl.pathname} path=${docUrl.searchParams.get('path')}` : 'no document window');
+  let img = null;
+  if (imgDoc) {
+    await imgDoc.waitForSelector('.fe-preview__image', { timeout: 15_000 }).catch(() => {});
+    await imgDoc.waitForFunction(() => (document.querySelector('.fe-preview__image')?.naturalWidth ?? 0) > 0, null, { timeout: 10_000 }).catch(() => {});
+    img = await imgDoc.evaluate(() => {
+      const el = document.querySelector('.fe-preview__image');
+      return el ? { w: el.naturalWidth, src: el.src.slice(0, 60) } : null;
+    });
+    await imgDoc.screenshot({ path: path.join(SHOTS, '29-image-window.png'), timeout: 20000 }).catch(() => {});
+  }
   check('an image preview actually loads its bytes', !!img && img.w > 0,
     img ? `naturalWidth=${img.w}` : 'no <img> rendered');
-
-  // ── open in new tab goes to the BROWSER, on the server ────────────
-  await clickText(win, /Yeni Sekmede Aç|Open in New Tab/);
-  await win.waitForTimeout(1200);
-  const external = await app.evaluate(() => globalThis.__external);
-  check('"open in new tab" hands the browser a real https URL',
-    external.some((u) => u.startsWith(`${SERVER}/files/edit`)),
-    external.join(' | ') || 'nothing was opened');
-  check('"open in new tab" never asks the OS to open app://',
-    !external.some((u) => u.startsWith('app://')), external.join(' | '));
+  await closeDoc(imgDoc);
 
   // ── download reaches the session that holds the credential ────────
-  await clickText(win, /^İndir$|^Download$/);
+  // From the file list, the way a person downloads without opening: tick the
+  // row, press the selection bar's Download.
+  const dlSel = await selectOnly(win, 'pixel.png');
+  await win.waitForTimeout(400);
+  const dlClicked = await win.evaluate(() => {
+    const visible = (e) => e.getClientRects().length > 0 && !e.closest('[aria-hidden="true"]');
+    const b = [...document.querySelectorAll('button')].filter(visible)
+      .find((x) => /^(İndir|Download)\b/i.test(x.getAttribute('aria-label') ?? x.title ?? ''));
+    b?.click();
+    return !!b;
+  });
   await win.waitForTimeout(2500);
   const downloads = await app.evaluate(() => globalThis.__downloads);
-  check('the download button starts a real download', downloads.length > 0,
-    downloads.join(' | ') || 'nothing downloaded');
-  await closeModal(win);
+  check('the download button starts a real download', dlClicked && downloads.length > 0,
+    downloads.join(' | ') || (dlClicked ? 'nothing downloaded' : `no Download button on the selection bar (selection: "${dlSel}")`));
+  await clearSelection(win);
 
   // ── text + markdown ───────────────────────────────────────────────
-  await openRow(win, 'notes.md');
-  await win.waitForTimeout(3500);
+  const mdDoc = await openFile(app, win, 'notes.md');
   // ⚠ The editor half is a <textarea>, whose value is NOT in innerText — an
-  // assertion on the modal's text alone reports an empty document for a file
+  // assertion on the page's text alone reports an empty document for a file
   // that loaded perfectly. Read both halves: the raw bytes that arrived, and
   // the rendered preview beside them.
-  const md = await win.evaluate(() => ({
-    raw: document.querySelector('.fe-preview__md-split-input')?.value ?? '',
-    rendered: document.querySelector('.fe-preview__md-split-output')?.innerText ?? '',
-  }));
+  let md = { raw: '', rendered: '' };
+  if (mdDoc) {
+    await mdDoc.waitForFunction(() => (document.querySelector('.fe-preview__md-split-input')?.value ?? '').length > 0, null, { timeout: 15_000 }).catch(() => {});
+    // The rendered half arrives after the source: the markdown renderer is a
+    // chunk of its own, loaded on first use.
+    await mdDoc.waitForFunction(() => (document.querySelector('.fe-preview__md-split-output')?.textContent ?? '').trim().length > 0, null, { timeout: 15_000 }).catch(() => {});
+    md = await mdDoc.evaluate(() => ({
+      raw: document.querySelector('.fe-preview__md-split-input')?.value ?? '',
+      rendered: document.querySelector('.fe-preview__md-split-output')?.innerText ?? '',
+    }));
+  }
   check('a markdown file opens with its content', /filex desktop e2e/.test(md.raw),
-    md.raw.slice(0, 40).replace(/\n/g, ' '));
+    md.raw.slice(0, 40).replace(/\n/g, ' ') || (mdDoc ? 'empty' : 'no document window'));
   check('markdown renders beside the source', /Başlık/.test(md.rendered),
     md.rendered.slice(0, 40).replace(/\n/g, ' '));
-  await closeModal(win);
+  await closeDoc(mdDoc);
 
-  await openRow(win, 'data.csv');
-  await win.waitForTimeout(2500);
-  const csv = await win.evaluate(() => document.querySelector('.fe-modal, [class*="modal"]')?.innerText ?? '');
-  check('a csv file opens in the table viewer', /a\b[\s\S]*b/.test(csv) && !/401/.test(csv),
-    csv.slice(0, 60).replace(/\n/g, ' '));
-  await closeModal(win);
+  const csvDoc = await openFile(app, win, 'data.csv');
+  let csv = '';
+  if (csvDoc) {
+    await csvDoc.waitForFunction(() => /\ba\b[\s\S]*\bb\b/.test(document.body?.innerText ?? ''), null, { timeout: 15_000 }).catch(() => {});
+    csv = await csvDoc.evaluate(() => document.body?.innerText ?? '');
+  }
+  check('a csv file opens in the table viewer', /\ba\b[\s\S]*\bb\b/.test(csv) && !/401/.test(csv),
+    csv.slice(0, 60).replace(/\n/g, ' ') || (csvDoc ? 'empty' : 'no document window'));
+  await closeDoc(csvDoc);
 
   // ── the office document that started this ─────────────────────────
   const officePath = process.env.FILEX_OFFICE_FILE;
@@ -229,12 +298,12 @@ try {
     check('an office fixture is available', copy.ok && arrived, `copy → ${copy.status}, listed=${arrived}`);
     await win.evaluate(() => document.querySelector('.fe-toolbar button[title="Yenile"], .fe-toolbar button[title="Refresh"]')?.click());
     await win.waitForTimeout(2500);
-    await openRow(win, name);
-    await win.waitForTimeout(9000);
-    const office = await win.evaluate(() => {
-      const m = document.querySelector('.fe-modal, [class*="modal"]');
+    // In its own window, like every file (see openFile).
+    const officeDoc = await openFile(app, win, name);
+    await (officeDoc ?? win).waitForTimeout(9000);
+    const office = await (officeDoc ?? win).evaluate(() => {
       return {
-        text: m?.innerText ?? '',
+        text: document.body?.innerText ?? '',
         // ⚠ Do not look for the mount id. DocsAPI REPLACES the element it is
         // given with an iframe of its own naming, so both `#fe-onlyoffice-mount
         // iframe` and `iframe#fe-onlyoffice-mount` find nothing while a fully
@@ -246,97 +315,127 @@ try {
     check('an office document opens instead of reporting 401',
       office.frame && !/Config fetch|401/.test(office.text),
       office.frame ? office.text.slice(0, 60).replace(/\n/g, ' ') : 'no editor frame');
-    await win.screenshot({ path: path.join(SHOTS, '30-office.png'), animations: 'disabled', timeout: 20000 }).catch(() => {});
-    await closeModal(win);
+    await (officeDoc ?? win).screenshot({ path: path.join(SHOTS, '30-office.png'), animations: 'disabled', timeout: 20000 }).catch(() => {});
+    await closeDoc(officeDoc);
+  }
+
+  // ── the selection bar, the way a person uses it ───────────────────
+  // ⚠ Its actions are ICONS (data-testid `selbar-<key>`, the name in
+  // aria-label), and what does not fit folds into "More actions"
+  // (`selbar-more`, a real menu of role=menuitem rows). The old text matching
+  // — "Yeniden Adlandır", "⋯" — found nothing on any run, so rename and delete
+  // were never exercised at all.
+  const listNames = () => win.evaluate(() =>
+    [...document.querySelectorAll('[data-fe-path]')]
+      .filter((e) => e.getClientRects().length > 0)
+      .map((e) => e.querySelector('.fe-list__name, .fe-grid__label')?.getAttribute('title') ?? ''));
+  const remoteNames = async () => {
+    const r = await api(`/api/files/manager?action=index&path=${encodeURIComponent(REMOTE)}`, {}, token);
+    return ((await r.json()).files ?? []).map((f) => f.basename);
+  };
+  /** Runs a selection action: its icon when the bar has room, else the row
+   *  of the same name under "More actions". */
+  async function selAction(key, label) {
+    const icon = win.locator(`[data-testid="selection-bar"] [data-testid="selbar-${key}"]`);
+    if (await icon.isVisible().catch(() => false)) {
+      await icon.click();
+      return 'icon';
+    }
+    const more = win.locator('[data-testid="selection-bar"] [data-testid="selbar-more"]');
+    if (!(await more.isVisible().catch(() => false))) return null;
+    await more.click();
+    const row = win.getByRole('menuitem', { name: label }).first();
+    if (!(await row.waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false))) return null;
+    await row.click();
+    return 'menu';
   }
 
   // ── starring: one of the features that was silently 401 ───────────
-  await selectRow(win, 'rapor.txt');
-  await win.waitForTimeout(400);
-  const starred = await win.evaluate(() => {
-    const visible = (e) => e.getClientRects().length > 0 && !e.closest('[aria-hidden="true"]');
-    const b = [...document.querySelectorAll('button')].filter(visible)
-      .find((x) => /★|☆/.test(x.textContent ?? '') || /yıldız|star/i.test(x.title ?? ''));
-    b?.click();
-    return !!b;
-  });
-  await win.waitForTimeout(1500);
-  const starList = await api('/api/files/manager/star/list?limit=500', {}, token);
-  check('starring a file reaches the server', starList.status === 200, `star/list → ${starList.status}`);
-  if (!starred) console.log('  (no star control on screen — list view may hide it at this width)');
-
-  // ── search ────────────────────────────────────────────────────────
-  await win.evaluate(() => {
-    const i = document.querySelector('.fe-toolbar input[type="text"], .fe-toolbar input[type="search"]');
-    if (i) {
-      i.value = 'rapor';
-      i.dispatchEvent(new Event('input', { bubbles: true }));
+  // Measured by the file appearing in the server's starred list — a 200 from
+  // that list alone says nothing about the click.
+  await selectOnly(win, 'rapor.txt');
+  const starredVia = await selAction('star', /Yıldız|Star/i);
+  const starredOnServer = await (async () => {
+    for (let i = 0; i < 20; i++) {
+      const r = await api('/api/files/manager/star/list?limit=500', {}, token);
+      const nodes = r.ok ? ((await r.json()).nodes ?? []) : [];
+      if (JSON.stringify(nodes).includes(`${DIR}/rapor.txt`)) return true;
+      await win.waitForTimeout(500);
     }
-  });
-  await win.waitForTimeout(2500);
-  const searched = await win.evaluate(() => document.body.innerText);
-  check('the filter box narrows the listing', searched.includes('rapor.txt') && !searched.includes('pixel.png'),
-    'rapor.txt shown, pixel.png hidden');
-  await win.evaluate(() => {
-    const i = document.querySelector('.fe-toolbar input[type="text"], .fe-toolbar input[type="search"]');
-    if (i) { i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); }
-  });
+    return false;
+  })();
+  check('starring a file reaches the server', !!starredVia && starredOnServer,
+    `${starredVia ?? 'no star action on the selection bar'}, listed=${starredOnServer}`);
+  await clearSelection(win);
+  await win.waitForTimeout(400);
+
+  // ── the folder filter ─────────────────────────────────────────────
+  // "Bu klasörde filtrele…" (FilterBar, data-testid filter-find). The search
+  // box in the toolbar searches the whole storage; it is not this.
+  const find = win.locator('[data-testid="filter-find"]').first();
+  const findShown = await find.isVisible().catch(() => false);
+  if (findShown) await find.fill('rapor');
+  await win.waitForTimeout(1500);
+  const filtered = await listNames();
+  check('the filter box narrows the listing',
+    findShown && filtered.includes('rapor.txt') && !filtered.includes('pixel.png') && !filtered.includes('notes.md'),
+    findShown ? filtered.join(', ') : 'no folder filter box on screen');
+  if (findShown) await find.fill('');
   await win.waitForTimeout(1200);
 
   // ── grid view: thumbnails are fetched, not linked ─────────────────
-  await win.evaluate(() => document.querySelector('.fe-toolbar button[title="Izgara"], .fe-toolbar button[title="Grid"]')?.click());
-  await win.waitForTimeout(3000);
+  // The 1×1 PNG has a picture; its card must show it (fetched with the
+  // account's credential — an <img> cannot carry one).
+  const gridBtn = win.locator('[data-testid="view-grid"]').first();
+  const gridShown = await gridBtn.isVisible().catch(() => false);
+  if (gridShown) await gridBtn.click();
+  await win.waitForFunction(() => [...document.querySelectorAll('.fe-grid__thumb img')].some((i) => i.naturalWidth > 0), null, { timeout: 15_000 }).catch(() => {});
   const thumbs = await win.evaluate(() =>
-    [...document.querySelectorAll('.fe-grid img, .fe-grid__thumb img')].map((i) => ({ w: i.naturalWidth, src: i.src.slice(0, 12) })));
-  check('grid thumbnails load', thumbs.length === 0 || thumbs.some((t) => t.w > 0),
-    thumbs.length ? JSON.stringify(thumbs.slice(0, 3)) : 'no thumbnails on this storage');
+    [...document.querySelectorAll('.fe-grid__thumb img')].map((i) => ({ w: i.naturalWidth, src: i.src.slice(0, 24) })));
+  check('grid thumbnails load', gridShown && thumbs.some((t) => t.w > 0),
+    gridShown ? (thumbs.length ? JSON.stringify(thumbs.slice(0, 3)) : 'no <img> in any card') : 'no grid switch on screen');
   await win.screenshot({ path: path.join(SHOTS, '31-grid.png'), animations: 'disabled', timeout: 20000 }).catch(() => {});
-  await win.evaluate(() => document.querySelector('.fe-toolbar button[title="Liste"], .fe-toolbar button[title="List"]')?.click());
+  await win.locator('[data-testid="view-list"]').first().click().catch(() => {});
   await win.waitForTimeout(1500);
 
   // ── rename ────────────────────────────────────────────────────────
-  await selectRow(win, 'rapor.txt');
-  await win.waitForTimeout(300);
-  win.once('dialog', (d) => d.accept('rapor-yeni.txt'));
-  if (!(await clickText(win, /Yeniden Adlandır|^Rename$/))) {
-    await clickText(win, /^⋯$/);
-    await win.waitForTimeout(400);
-    await clickText(win, /Yeniden Adlandır|^Rename$/);
+  await selectOnly(win, 'rapor.txt');
+  const renameVia = await selAction('rename', /Yeniden adlandır|Rename/i);
+  // The explorer's own dialog (RenameModal): one text box holding the name.
+  const renameBox = win.locator('.fe-modal input.fe-input, [role="dialog"] input.fe-input').first();
+  const renameOpen = await renameBox.waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false);
+  if (renameOpen) {
+    await renameBox.fill('rapor-yeni.txt');
+    await renameBox.press('Enter');
   }
-  await win.waitForTimeout(1200);
-  await win.evaluate((name) => {
-    const input = [...document.querySelectorAll('input')].find((i) => i.value?.includes(name));
-    if (!input) return;
-    input.value = 'rapor-yeni.txt';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    const form = input.closest('form');
-    form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  }, 'rapor.txt');
-  await win.waitForTimeout(2500);
-  const afterRename = await api(`/api/files/manager?action=index&path=${encodeURIComponent(REMOTE)}`, {}, token);
-  const names = ((await afterRename.json()).files ?? []).map((f) => f.basename);
-  check('renaming a file changes it on the server', names.includes('rapor-yeni.txt'), names.join(', '));
+  let names = [];
+  for (let i = 0; i < 20; i++) {
+    names = await remoteNames();
+    if (names.includes('rapor-yeni.txt')) break;
+    await win.waitForTimeout(500);
+  }
+  check('renaming a file changes it on the server', !!renameVia && renameOpen && names.includes('rapor-yeni.txt') && !names.includes('rapor.txt'),
+    `${renameVia ?? 'no rename action'}, dialog=${renameOpen} → ${names.join(', ')}`);
 
   // ── delete → trash ────────────────────────────────────────────────
-  await win.evaluate(() => document.querySelector('.fe-toolbar button[title="Yenile"], .fe-toolbar button[title="Refresh"]')?.click());
-  await win.waitForTimeout(1500);
-  await selectRow(win, 'data.csv');
-  await win.waitForTimeout(300);
-  if (!(await clickText(win, /^Sil$|^Delete$/))) {
-    await clickText(win, /^⋯$/);
-    await win.waitForTimeout(400);
-    await clickText(win, /^Sil$|^Delete$/);
-  }
-  await win.waitForTimeout(1000);
-  // Deleting asks first, in the explorer's own modal — "Çöpe At" / "Move to
+  await win.waitForTimeout(800);
+  await selectOnly(win, 'data.csv');
+  const deleteVia = await selAction('delete', /^Sil$|^Delete$/i);
+  // Deleting asks first, in the explorer's own modal — "Çöpe at" / "Move to
   // trash", not a browser confirm().
-  const confirmed = await clickText(win, /^Çöpe At$|^Move to trash$|^Delete$/);
-  check('deleting asks for confirmation first', confirmed, 'confirm button found');
-  await win.waitForTimeout(2500);
-  const afterDelete = await api(`/api/files/manager?action=index&path=${encodeURIComponent(REMOTE)}`, {}, token);
-  const left = ((await afterDelete.json()).files ?? []).map((f) => f.basename);
-  check('deleting a file removes it from the listing', !left.includes('data.csv'), left.join(', '));
+  const confirmBtn = win.getByRole('button', { name: /^Çöpe at$|^Move to trash$/i }).first();
+  const confirmed = await confirmBtn.waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false);
+  const leftBefore = await remoteNames();
+  check('deleting asks for confirmation first', !!deleteVia && confirmed && leftBefore.includes('data.csv'),
+    `${deleteVia ?? 'no delete action'}, confirm=${confirmed}, still there before confirming=${leftBefore.includes('data.csv')}`);
+  if (confirmed) await confirmBtn.click();
+  let left = [];
+  for (let i = 0; i < 20; i++) {
+    left = await remoteNames();
+    if (!left.includes('data.csv')) break;
+    await win.waitForTimeout(500);
+  }
+  check('deleting a file removes it from the listing', confirmed && !left.includes('data.csv'), left.join(', '));
 
   await win.screenshot({ path: path.join(SHOTS, '32-files.png'), animations: 'disabled', timeout: 20000 }).catch(() => {});
 

@@ -132,6 +132,13 @@ func TestStateList_APersonIsStillNarrowedAndAVisitorStillSeesNothing(t *testing.
 // author had no way to tell.
 func TestPermissions_TheKitKnowsEveryNameTheHostAccepts(t *testing.T) {
 	for p := range bare {
+		if isUIPerm(p) {
+			// `ui`, `ui:eval`, `ui:wasm-eval` are DERIVED from a manifest's
+			// `ui` block and granted, never named in `permissions` (the host
+			// refuses a manifest that does): the kit must not accept them.
+			assert.Falsef(t, plugintest.Permissions[string(p)], "%q is derived; a manifest may not name it", p)
+			continue
+		}
 		assert.Truef(t, plugintest.Permissions[string(p)],
 			"the host accepts %q and the kit refuses it: add it to plugintest.Permissions", p)
 	}

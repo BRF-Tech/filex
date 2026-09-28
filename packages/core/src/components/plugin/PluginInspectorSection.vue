@@ -11,6 +11,10 @@
  * conversation the modal holds (`usePluginSurface`), and a `{op}` answer
  * goes up for the host to register in the tray, exactly as M1's modal does.
  * A new selection resets the section to closed-and-unloaded.
+ *
+ * v4 — a view that is the app's OWN interface (`view.ui`) is drawn by
+ * AppFrame instead, opened with the selected file; nothing is asked of the
+ * server but the interface's own files.
  */
 import { computed, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../../types/ExplorerConfig';
@@ -21,6 +25,8 @@ import { usePluginSurface } from '../../composables/usePluginSurface';
 import { labelOf } from '../../lib/pluginLabel';
 import SurfaceConversation from './SurfaceConversation.vue';
 import SurfaceFooterButtons from './SurfaceFooterButtons.vue';
+import AppFrame from './AppFrame.vue';
+import type { FileNode } from '../../types/FileNode';
 
 const props = defineProps<{
   api: FileApi;
@@ -30,6 +36,10 @@ const props = defineProps<{
   locale: LocaleCode;
   theme?: ThemeMode;
   storages?: string[];
+  /** The selected row itself — what an app's own interface is opened with. */
+  node?: FileNode;
+  /** This person may change the selected row (the explorer's write gate). */
+  writable?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -84,8 +94,22 @@ async function load() {
   }
 }
 
+/** The file an app's own interface is opened with (a folder: none). */
+const appFiles = computed(() =>
+  props.node && props.node.type === 'file'
+    ? [{
+        path: props.node.path,
+        name: props.node.basename,
+        size: props.node.size,
+        mime: props.node.mime_type,
+        readOnly: props.writable === false || !!props.node.read_only,
+      }]
+    : [],
+);
+
 function toggle() {
   expanded.value = !expanded.value;
+  if (props.view.ui) return;
   if (expanded.value && !conv.current.value && !loading.value) void load();
 }
 
@@ -127,7 +151,24 @@ watch(
         <span>{{ label }}</span>
       </button>
     </h3>
-    <div v-if="expanded" :id="sectionId" class="fe-pinsp__body">
+    <div v-if="expanded && view.ui" :id="sectionId" class="fe-pinsp__body">
+      <AppFrame
+        :key="path"
+        :api="api"
+        :app="view.plugin"
+        :version="view.ui.version"
+        :view="view.id"
+        placement="inspector"
+        :ui="view.ui"
+        :files="appFiles"
+        :locale="locale"
+        :theme="theme"
+        :title="label"
+        @toast="(m) => emit('toast', m.text)"
+        @op="(op) => emit('op', op)"
+      />
+    </div>
+    <div v-else-if="expanded" :id="sectionId" class="fe-pinsp__body">
       <p v-if="loading" class="fe-inspector__empty">{{ t('plugin.view.loading') }}</p>
       <p v-else-if="loadError" class="fe-surface__error" role="alert">{{ loadError }}</p>
       <template v-else-if="conv.current.value">

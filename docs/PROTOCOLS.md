@@ -130,10 +130,12 @@ is not affected by it.
 > you are not allowed answers **AccessDenied**, because a client told "no such key" would
 > retry forever against a permission problem.
 
-filex's own bookkeeping trees — `.versions/`, `.thumbs/`, `.filex-trash/` and
-the desktop app's open-with working area `.filex-open/` — are **not** exposed
-here, at any depth, on any verb: not listed, not readable by known key, and not
-writable. Every protocol judges this by the same list (`backend/internal/syspath`);
+filex's own bookkeeping trees — `.versions/`, `.thumbs/`, `.filex-trash/`,
+the desktop app's open-with working area `.filex-open/` and the people's
+[drafts](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save)
+`.filex-drafts/` — are **not** exposed here, at any depth, on any verb: not
+listed, not readable by known key, and not writable. A draft is not shown even
+to its owner over a protocol: it is not a file yet. Every protocol judges this by the same list (`backend/internal/syspath`);
 before it existed each carried its own three-name copy and all of them listed
 `.filex-open/`. Every other protocol has always hidden the first three;
 the S3 gateway is the one that had to catch up, and it matters most here

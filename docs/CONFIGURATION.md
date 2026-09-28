@@ -33,6 +33,7 @@ are **file‑only** (noted below). Individual storages are **not** configured he
 - [Queue](#queue)
 - [Notifications](#notifications)
 - [CORS](#cors)
+- [Security headers and framing](#security-headers-and-framing)
 - [Error reporting (Sentry/GlitchTip)](#error-reporting)
 - [Updates](#updates)
 - [Demo mode](#demo-mode)
@@ -422,13 +423,14 @@ so are configured in [Authentication](#authentication), not here.)
 | `FILEX_SMTP_FROM` | From address on outbound mail. |
 | `FILEX_SMTP_TLS` | `starttls` · `tls` · `none`. |
 
-**Branding & trash:**
+**Branding, trash & drafts:**
 
 | Env var | Description |
 |---|---|
 | `FILEX_SITE_NAME` | Instance display name shown in the UI. |
 | `FILEX_TRASH_RETENTION_DAYS` | Days to keep trashed items before purge (see [TRASH-VERSIONING.md](TRASH-VERSIONING.md)). |
 | `FILEX_SHARE_MAX_TTL` | Longest life a **new** share link may be given — `7`, `7d` or `168h`; `0` = no ceiling. Seeds `share.max_ttl_days` (default 7) once; afterwards the admin **Protection** page owns it. Existing links are never changed (see [SHARING.md](SHARING.md)). |
+| `FILEX_DRAFTS_LIMIT` | How many drafts (new documents not saved yet) one person may keep, `1`–`1000`. Seeds `drafts.limit` (default 50) once; afterwards the admin **Protection** page owns it (see [PROTECTION.md → Drafts](PROTECTION.md#drafts)). |
 
 **Default storage** — seeds one initial storage when **no storage exists yet**, so
 a fresh install already has a working place for files. Leave
@@ -472,7 +474,6 @@ labels them.
 | `FILEX_ONLYOFFICE_JWT` | Shared JWT secret — must match the Document Server |
 | `FILEX_ONLYOFFICE_CALLBACK_URL` | Address the Document Server uses to reach filex; empty means `FILEX_PUBLIC_URL`. Only needed when the browser's address and the container's address differ |
 | `FILEX_DRAWIO_URL` | Drawio embed URL (diagram editing) |
-| `FILEX_CONVERT_URL` | External universal converter URL |
 
 > **Mermaid needs no service.** Mermaid diagrams render entirely client‑side in
 > the browser via a bundled `mermaid` library — there is nothing to deploy and no
@@ -527,7 +528,9 @@ Drivers that live outside the binary — see [PLUGINS.md](PLUGINS.md).
 | `FILEX_APP_PLUGIN_MAX_INPUT_MB` | `256` | Per-file ceiling on what one app job may read. |
 | `FILEX_APP_PLUGIN_MAX_OUTPUT_MB` | `512` | Per-file ceiling on what one app job may produce. |
 | `FILEX_APP_PLUGIN_MAX_WASM_MB` | `64` | Largest module an app install accepts. `FILEX_PLUGIN_TRUSTED_KEYS` applies to app modules too. |
-| `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every installed app's source (its GitHub repository or address) for a newer version the running filex can run, and installs the ones that ask for no new permission ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). `0` = no request leaves the server for it — what an air-gapped install wants; **Check for updates** on the Apps tab still asks when pressed. A demo never checks. The time of the last check is stored, so a restart neither skips a day nor checks at every boot. YAML: `app_plugin_update_check`. |
+| `FILEX_APP_UI_ORIGIN` | — | Serves apps' own interfaces from an [origin of their own](APP-PLUGINS.md#an-origin-of-their-own), e.g. `https://apps.example-usercontent.com` (a scheme and a host; another registrable domain than filex's). The proxy sends that host to filex too; filex answers only the interface route there and refuses it on its own host. Empty (the default): interfaces are served from filex's origin, opaque by sandbox. A value that is not an origin, or filex's own, stops the server. YAML: `app_ui_origin`. |
+| `FILEX_APP_PLUGIN_MAX_UI_MB` | `128` | Largest [interface package](APP-PLUGINS.md#an-apps-own-interface) (the app's `ui` zip) an install accepts; the files inside it are capped too (512 MiB unpacked, 20 000 files, 64 MiB per file). |
+| `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every installed app's source (its GitHub repository or address) for a newer version the running filex can run, and **tells the administrators** — it installs nothing: every newer version waits for an administrator's approval ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). The same switch covers the storage plugins' [update sources](PLUGINS.md#updates-from-a-source). `0` = no request leaves the server for it — what an air-gapped install wants; **Check for updates** on the Apps tab still asks when pressed. A demo never checks. The time of the last check is stored, so a restart neither skips a day nor checks at every boot. YAML: `app_plugin_update_check`. |
 | `FILEX_SECRET_KEY` | — | Also seals a **remote** plugin's bearer token. Without it, registering a remote plugin is refused rather than stored in plaintext (binary plugins get a token minted per start, which is never stored). |
 
 Installed binaries live in `<data-dir>/plugins/<name>/` (with the detached
@@ -983,6 +986,62 @@ deployment is unaffected.
 
 ---
 
+## Security headers and framing
+
+filex itself sends these on its answers, so every install has them whether or
+not a reverse proxy adds anything:
+
+| Header | Value | On |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | every answer |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | every answer |
+| `Content-Security-Policy` | `frame-ancestors 'self'` + `FILEX_FRAME_ANCESTORS`; `frame-src` filex's own `/_appui/` and `/z/` + the editors below | filex's own pages (HTML) |
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_FRAME_ANCESTORS` | *(empty: filex only)* | The pages, besides filex itself, that may show filex's pages inside a frame — a home dashboard such as Homarr or Organizr. Origins separated by commas or spaces: `https://home.example.com`, `http://10.0.0.5:7575`, `https://*.example.com` for every subdomain, or `*` for any page (the protection is then off). `frame_ancestors` in `config.yaml`. |
+
+⚠ A value that is not an origin (`home.example.com` with no scheme, a path, a
+quote) stops the server at startup with a message saying what to write; the
+startup log names the origins in force.
+
+What it does and does not touch:
+
+- **A dashboard that shows filex in an `<iframe>`** now needs its origin in
+  `FILEX_FRAME_ANCESTORS`; without it the browser shows its own "refused to
+  connect" page in the frame. The same applies to a share link (`/s/…`)
+  shown inside another site's frame.
+- **The web component is not a frame.** `<filex-explorer>` embedded in another
+  site ([INTEGRATION.md](INTEGRATION.md)) runs in the host's page and is not
+  affected, and neither is what it shows from filex there — a PDF, an image, a
+  download: `frame-ancestors` is sent on filex's pages, not on a file's own
+  bytes.
+- **The desktop app** opens filex in its own window, not in a frame, and is
+  not affected.
+- `Content-Security-Policy` here is `frame-ancestors` and `frame-src`; a
+  handler that sets a policy of its own keeps it, and gets `frame-ancestors`
+  added when it names none (never `frame-src`: that could only widen it).
+
+**What filex's pages may frame (`frame-src`).** Two paths of filex itself —
+the app interfaces (`<host>/_appui/`, left out when they have an origin of
+their own) and the frame a download starts in (`<host>/z/`), named for the
+host the page was asked on and for the host of `FILEX_PUBLIC_URL` when it is
+set — and the origin of each editor that is switched on under *Admin →
+External services* (draw.io, ONLYOFFICE) — read live, so an edit there
+applies to the next page without a restart. Not `'self'`: an app's
+interface could otherwise navigate its own frame to any page of filex.
+An editor served from filex's own origin (a proxy path such as
+`/onlyoffice/`) is named by its origin, which frames filex whole again —
+give editors a host of their own. Nothing else: not another site, not a
+`data:` or `blob:` document. This is what keeps an [app's
+interface](APP-PLUGINS.md#an-apps-own-interface) inside its frame: a
+sandboxed interface that tries to navigate itself to its author's server, or
+to a document of its own making, is refused by the page around it. An editor
+served from another address than the one configured (a proxy that rewrites
+it) is refused too — configure the address the browser uses.
+
+---
+
 ## Error reporting
 
 Optional Sentry‑wire reporting (works with self‑hosted GlitchTip). Empty DSN =
@@ -1119,6 +1178,7 @@ cors:
   allowed_origins: ["*"]
   allowed_methods: [GET, POST, PUT, DELETE, PATCH, OPTIONS]
   allowed_headers: [Authorization, Content-Type, X-Filex-Pin]
+frame_ancestors: []                # FILEX_FRAME_ANCESTORS — pages that may frame filex's pages
 queue:  { driver: sqlite, dsn: "", workers: 4, enabled: true }
 ops:    { delete_workers: 4 }        # items of one delete job trashed at once
 notify: { enabled: true, webhook_url: "", webhook_token: "" }

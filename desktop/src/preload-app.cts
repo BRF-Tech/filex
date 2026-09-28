@@ -30,8 +30,9 @@ contextBridge.exposeInMainWorld('filexApp', {
    *  accepting this account's token. Keeps the account's folders. */
   reconnect: (id: string) => ipcRenderer.invoke('auth:reconnect', id),
   switchAccount: (id: string) => ipcRenderer.invoke('auth:switch', id),
-  /** Opens the SERVER's admin panel in the system browser, not in here. */
-  openAdmin: (id: string) => ipcRenderer.invoke('account:openAdmin', id),
+  /** Opens the SERVER's admin panel in the system browser, not in here —
+   *  `page: 'notifications'` for the bell's "Manage notifications" door. */
+  openAdmin: (id: string, page?: 'notifications') => ipcRenderer.invoke('account:openAdmin', id, page),
 
   // files
   /** Host-owned open: open a remote file in its OWN editor/viewer window, one
@@ -98,6 +99,13 @@ contextBridge.exposeInMainWorld('filexApp', {
   // not work out where "it" is. One resolver, three surfaces.
   onNotificationOpen: (fn: (p: unknown) => void) =>
     ipcRenderer.on('notify:open', (_e, p) => fn(p)),
+  /** The unread count the main process just read from the bell (it polls for
+   *  the OS notifications and the badge) — handed to the window's own bell
+   *  instead of the window asking the server a second time. */
+  onNotificationUnread: (fn: (p: { accountId: string; count: number }) => void) =>
+    ipcRenderer.on('notify:unread', (_e, p) => fn(p)),
+  /** The window's bell marked something read — the badge should move now. */
+  notifyRefresh: () => ipcRenderer.invoke('notify:refresh'),
 
   // drag-out — handing real files to the OS. Two calls on purpose: the bytes
   // must be on disk before the drag can start (see src/dragout.ts), so the

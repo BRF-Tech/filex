@@ -17,6 +17,9 @@
  */
 
 export { default as FileExplorer } from './FileExplorer.vue';
+/* wiring:e2 names — the bell names an item inside an unlocked encrypted
+ * folder through the mounted explorer (lib/e2eNameRegistry). */
+export { resolveE2eName, registerE2eNameResolver, type E2eNameResolver } from './lib/e2eNameRegistry';
 
 // PreviewModal is exposed so embedders can mount their own
 // fullscreen editor route (e.g. /files/edit) without re-implementing
@@ -63,6 +66,111 @@ export {
 // DataTable owns the scroll and the frozen edges itself.
 export { default as RowActions } from './components/RowActions.vue';
 export type { ContextAction } from './components/ContextMenu.vue';
+/* The bell, its row, the unread count, the full list and the account menu —
+ * ONE of each, here. They lived in web/src until 2026-09-27; the desktop app
+ * mounts `<filex-explorer>` and could not reach them, so it raised an OS
+ * notification for every row and had nowhere to read one. The web app mounts
+ * these same components (its own files are thin bindings to its store, router
+ * and language), and the explorer draws them itself for a host that asks
+ * through `config.notifications` / `config.account`. */
+export { default as NotificationBell } from './components/NotificationBell.vue';
+export { default as NotificationRow } from './components/NotificationRow.vue';
+export { default as NotificationsPanel } from './components/NotificationsPanel.vue';
+export { default as UnreadBadge } from './components/UnreadBadge.vue';
+export { default as AccountMenu } from './components/AccountMenu.vue';
+export {
+  createNotificationFeed,
+  notificationsTransport,
+  FEED_LIMIT,
+  NOTIFY_POLL_MS,
+  type NotificationFeed,
+  type NotificationFeedOptions,
+  type NotificationRowData,
+  type NotificationsTransport,
+} from './composables/useNotificationFeed';
+export { useNotificationText, NOTIFICATION_EVENT_LABEL } from './composables/useNotificationText';
+export {
+  TRASH_VIEW_PATH,
+  explorerHashPath,
+  explorerPathOf,
+  isNotificationClickable,
+  notificationHref,
+  notificationRoute,
+  qualifiedFromHash,
+  resolveNotificationTarget,
+  sameRowPath,
+  shareHref,
+  type NotificationDestination,
+  type NotificationOpen,
+  type NotificationTarget,
+  type NotificationTargetKind,
+} from './lib/notificationTarget';
+export {
+  NOTIFICATION_PHRASES,
+  fillTemplate,
+  notificationVars,
+  renderNotification,
+  type NotificationLike,
+  type NotificationText,
+  type NotifyLocale,
+  type RenderOptions,
+} from './lib/notificationText';
+export { UNREAD_BADGE_MAX, unreadBadgeCount, unreadBadgeLabel } from './lib/unreadBadge';
+export {
+  anchorUnderEndEdge,
+  refElement,
+  type AnchorOptions,
+  type AnchoredPanelPosition,
+} from './lib/anchoredPanel';
+/* The user settings dialog — ONE, here, since 2026-09-27 (it was the admin
+ * app's UserSettingsModal). The admin app mounts it through a thin binding to
+ * its stores; the explorer opens it from its own avatar for a host that asks
+ * (`config.account.settings` — the desktop app). What it needs from a host is
+ * lib/userSettingsHost's `UserSettingsHost`. */
+export { default as UserSettingsDialog } from './components/UserSettingsDialog.vue';
+export {
+  userSettingsApi,
+  type BrowserNotifyPermission,
+  type SettingsCapabilities,
+  type SettingsNotificationPrefs,
+  type SettingsQuota,
+  type SettingsThemeMode,
+  type SettingsUser,
+  type UserSettingsApi,
+  type UserSettingsHost,
+} from './lib/userSettingsHost';
+export {
+  WEBHOOK_EVENTS,
+  eventOffReason,
+  eventPossible,
+  eventSlug,
+  userEventKey,
+  webhookEventKey,
+  type EventPossibility,
+  type WebhookEvent,
+} from './lib/webhookEvents';
+export {
+  RESERVED_USERNAMES,
+  USERNAME_MAX,
+  USERNAME_MIN,
+  accountProblemKey,
+  emailProblem,
+  normalizeUsername,
+  refusalField,
+  usernameProblem,
+  type AccountProblem,
+} from './lib/accountRules';
+export { downscaleImageToDataURL, type DownscaleOptions } from './lib/imageDownscale';
+export { DENSITY_KEY, applyAccountDensity, getDensity, setDensity, type Density } from './lib/density';
+export {
+  EXPLORER_DRAWN_ROWS,
+  EXPLORER_ROW_PREFIX,
+  accountMenuRows,
+  explorerRowKey,
+  type AccountAction,
+  type AccountPerson,
+  type ExplorerMenuRow,
+} from './lib/accountMenu';
 export { default as RecentlyOpened } from './components/RecentlyOpened.vue';
 // belge:n1 — the "New document" picker. Exported because the entry belongs
 // on every surface, not just the admin app: a host that draws its own
@@ -97,6 +205,9 @@ export type { DestinationRow } from './lib/destinationTree';
 export { usePluginActions, invalidatePluginActions, PLUGIN_ACTIONS_TTL_MS } from './composables/usePluginActions';
 export type { PluginActionsStore } from './composables/usePluginActions';
 export { appliesMatches, appliesToNodes, appliesItemOf } from './lib/pluginApplies';
+/* Which app's own interface opens a file — one rule for the preview, "Open
+ * with" and the standalone editor tab. */
+export { pickAppViewer, appViewersFor, viewerViews, BUILTIN_VIEWER } from './lib/appViewer';
 export { labelOf as pluginLabelOf, labelIn as pluginLabelIn, appTextOr as pluginTextOr } from './lib/pluginLabel';
 /* The public page's three card widths, and which kind gets which. */
 export { publicLayoutFor } from './lib/publicLayout';
@@ -328,7 +439,7 @@ export {
   statusWords,
 } from './lib/errorWords';
 export type { JobErrorCode, RequestFailure, SaidFailure } from './lib/errorWords';
-export { legacyConvertGate, gateOnService } from './lib/serviceGate';
+export { gateOnService } from './lib/serviceGate';
 export type { AppLock, LockedRefusal, LockWordsHost } from './lib/appLock';
 /* issue #34 — a symlink the server will NOT follow: what it is, why it will
    not open, and the rule that every surface refuses it out loud. */
@@ -615,6 +726,7 @@ export {
   TIMEZONE_ACCOUNT_LS_KEY,
   setAccountTimeZone,
   accountTimeZoneOf,
+  accountZoneControl,
   rememberedAccountTimeZone,
   releaseTimeZoneOwner,
   deviceTimeZone,
@@ -726,6 +838,11 @@ export type {
 export { default as EncryptedFolderModal } from './components/EncryptedFolderModal.vue';
 export { default as RecoveryKeyModal } from './components/RecoveryKeyModal.vue';
 export { default as E2eRecoveryUnlockModal } from './components/E2eRecoveryUnlockModal.vue';
+/* wiring:e2 fxe — single encrypted files, for embedders (a desktop app that
+   opens a `.fxe` natively) and for end-to-end tests that need a real one
+   without driving a browser. docs/E2E-ENCRYPTION.md → "Single encrypted files". */
+export { createFxe, readFxe, unlockFxe, decryptFxeBody } from './lib/e2efile';
+export type { FxeHeader, FxeKey, FxeCredential, CreateFxeOptions } from './lib/e2efile';
 /* /wiring:e2 */
 
 /* ── connections ────────────────────────────────────────────────────

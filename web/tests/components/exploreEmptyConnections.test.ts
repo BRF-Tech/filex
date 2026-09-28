@@ -54,7 +54,8 @@ import path from 'node:path';
 // test is "the shared set draws this key", and that lives in the source.
 import { actionIconSvg } from '@brftech/filex-core/src/lib/actionIcons';
 
-import AccountMenu, { type AccountAction } from '@/components/AccountMenu.vue';
+import AccountMenu from '@/components/AccountMenu.vue';
+import type { AccountAction } from '@brftech/filex-core';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 

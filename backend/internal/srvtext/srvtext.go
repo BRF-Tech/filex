@@ -359,7 +359,7 @@ func fits(s, key, lang string) bool {
 // lookup is one language's value for one key: a running pack first (it may
 // overlay a shipped language), then the built-in table.
 func lookup(lang, key string) (string, bool) {
-	if p := currentPacks(); p != nil {
+	if p := currentPacks(); p != nil && packMayWrite(lang, key) {
 		if v, ok := p.UIString(lang, key); ok && strings.TrimSpace(v) != "" && fits(v, key, lang) {
 			return v, true
 		}
@@ -368,6 +368,20 @@ func lookup(lang, key string) (string, bool) {
 		return v, true
 	}
 	return "", false
+}
+
+// packMayWrite answers whether a running pack's text may stand in for key in
+// lang.
+//
+// ⚠⚠ The permission sentences are the CONSENT an administrator gives — the
+// install review of every app (and of every upgrade) prints them — so in a
+// language filex ships they are filex's own and no pack overlays them; a pack
+// still writes them for a language it adds (there is nothing else to read).
+func packMayWrite(lang, key string) bool {
+	if _, shipped := builtin[lang]; !shipped {
+		return true
+	}
+	return !strings.HasPrefix(key, Prefix+"perm.")
 }
 
 // wrote reports whether any language in lang's fallback chain has a usable

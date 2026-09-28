@@ -175,9 +175,10 @@ Concretely:
   back short from a network filesystem). The folder records `held_back`, is
   listed from disk until a later reconcile clears it, and the admin page counts
   it. A handful of files deleted outside filex is ordinary life and goes through.
-- A removed row is soft-deleted **in place** (the tombstone pass's own
-  `tombstone`), so the trash purge never touches bytes at that path
-  (`trash.ownsBytesAt`).
+- A removed row is **dropped from the catalogue** through the tombstone pass's
+  own `dropRows` — deepest first, a folder only once nothing names it as its
+  parent — and never put in the trash, which holds none of its bytes (issue
+  #74). The storage is never touched.
 - An fsnotify event saying a watched folder itself went away does **not** delete
   it: the watch is dropped and the parent's next reconcile decides.
 

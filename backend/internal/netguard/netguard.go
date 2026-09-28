@@ -32,9 +32,92 @@ var ErrPrivateTarget = errors.New("resolves to a private or local address")
 // and the unspecified address.
 //
 // A nil IP counts as refused: "we could not tell" is not permission.
+//
+// ⚠⚠ Not only RFC 1918. net.IP.IsPrivate calls the shared address space
+// 100.64.0.0/10 public, and that is where overlay meshes live (Cloudflare
+// WARP 100.96/12, Tailscale, carrier-grade NAT). The other ranges below
+// are not routable destinations either, and the IPv6 spellings that wrap an
+// IPv4 address (NAT64, 6to4) are judged by the address they wrap.
 func Refused(ip net.IP) bool {
-	return ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+	if ip == nil {
+		return true
+	}
+	if refusedBasic(ip) || inRefusedNets(ip) {
+		return true
+	}
+	if v4 := embeddedIPv4(ip); v4 != nil {
+		return refusedBasic(v4) || inRefusedNets(v4)
+	}
+	return false
+}
+
+func refusedBasic(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
 		ip.IsPrivate() || ip.IsMulticast() || ip.IsUnspecified() || ip.IsInterfaceLocalMulticast()
+}
+
+func inRefusedNets(ip net.IP) bool {
+	for _, n := range refusedNets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// refusedNets are the non-public ranges net.IP's own predicates do not cover.
+var refusedNets = func() []*net.IPNet {
+	cidrs := []string{
+		"0.0.0.0/8",      // "this network"
+		"100.64.0.0/10",  // shared address space: CGNAT, WARP, Tailscale
+		"192.0.0.0/24",   // IETF protocol assignments
+		"192.88.99.0/24", // deprecated 6to4 relay anycast
+		"198.18.0.0/15",  // benchmarking
+		"240.0.0.0/4",    // reserved, and 255.255.255.255
+		"::/96",          // IPv4-compatible (deprecated); :: and ::1 fall in it too
+		"100::/64",       // discard-only
+		"2001::/32",      // Teredo: tunnels to an IPv4 endpoint nobody can vet
+		"2001:db8::/32",  // documentation
+		"64:ff9b:1::/48", // local-use NAT64: the site's own translator
+	}
+	out := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			panic("netguard: " + c + ": " + err.Error())
+		}
+		out = append(out, n)
+	}
+	return out
+}()
+
+// embeddedIPv4 is the IPv4 address an IPv6 address stands for: the last four
+// bytes of a well-known-prefix NAT64 address (64:ff9b::/96, RFC 6052), or the
+// 6to4 gateway of a 2002::/16 address (RFC 3056). nil for anything else.
+func embeddedIPv4(ip net.IP) net.IP {
+	if ip.To4() != nil {
+		return nil
+	}
+	ip16 := ip.To16()
+	if ip16 == nil {
+		return nil
+	}
+	if ip16[0] == 0x00 && ip16[1] == 0x64 && ip16[2] == 0xff && ip16[3] == 0x9b && isZero(ip16[4:12]) {
+		return net.IPv4(ip16[12], ip16[13], ip16[14], ip16[15])
+	}
+	if ip16[0] == 0x20 && ip16[1] == 0x02 {
+		return net.IPv4(ip16[2], ip16[3], ip16[4], ip16[5])
+	}
+	return nil
+}
+
+func isZero(b []byte) bool {
+	for _, c := range b {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // Private says whether an address is inside the private network — loopback,

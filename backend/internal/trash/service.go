@@ -215,6 +215,12 @@ func (s *Service) Restore(ctx context.Context, nodeID int64) error {
 	if n.DeletedAt == nil {
 		return nil // already live
 	}
+	// A row deleted where it stood has nothing in the trash to bring back
+	// (Vanished): restoring it only made a live row for a file that is not
+	// there, which the next sync put back where it came from (issue #74).
+	if Vanished(n) {
+		return ErrNotInTrash
+	}
 	origPath := n.StorageKey
 	if origPath == "" {
 		// Pre-rename row (legacy) — just clear the flag and leave
@@ -342,6 +348,7 @@ func (s *Service) List(ctx context.Context, storageID *int64, limit, offset int)
 		// original path keeps its trash key here — see OriginalPath for why
 		// the handler must not authorise on it.
 		entry.Path, _ = OriginalPath(n)
+		entry.Vanished = Vanished(n)
 		if n.StorageKey != "" {
 			entry.Name = path.Base(n.StorageKey)
 		}
@@ -432,6 +439,17 @@ type TrashEntry struct {
 	DeletedByID   *int64 `json:"deleted_by_id,omitempty"`
 	DeletedByName string `json:"deleted_by_name,omitempty"`
 	DeletedBySelf bool   `json:"deleted_by_self,omitempty"`
+	// Draft is set by the handler on a discarded draft of the asker's own
+	// (issue #71): it came from their Drafts, not from a folder, and Path is
+	// then just its name — the drafts area is never named to a client.
+	Draft bool `json:"draft,omitempty"`
+	// E2eRoot is the end-to-end encrypted folder the item was deleted from
+	// (a wire path), set by the handler; absent otherwise.
+	E2eRoot string `json:"e2e_root,omitempty"`
+	// Vanished: the row was deleted where it stood and nothing of it is in the
+	// trash (see Vanished). Not a trash entry: the listing leaves it out and a
+	// restore refuses it. Never sent — a client is never shown one.
+	Vanished bool `json:"-"`
 }
 
 // RunDailyLoop ticks PurgeExpired every interval until ctx is cancelled.
@@ -620,6 +638,24 @@ func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 // destroy a file nobody deleted; for a folder, recursively. Before this check
 // the purge did exactly that, 30 days after the tombstone was written.
 func ownsBytesAt(p string) bool { return IsTrashPath(p) }
+
+// Vanished reports whether a deleted row is one whose bytes were never put in
+// the trash: it was soft-deleted WHERE IT STOOD, its path still the file's own
+// rather than a key inside `.filex-trash/` (ownsBytesAt). The storage sync did
+// that to every file it found gone from the storage up to 0.47, and so did the
+// branches that delete bytes outright.
+//
+// ⚠⚠ Such a row is NOT a trash entry (issue #74). The Trash is where deleted
+// bytes are kept and can be brought back; a vanished row has none, so listing
+// it offered a Restore that could only make a live row for a file that is not
+// there. The trash listing leaves it out, Restore refuses it (ErrNotInTrash),
+// and the storage sync drops it from the catalogue for good (the retention
+// purge would too: purgeOne never touches the backend for it).
+//
+// A live row is never vanished.
+func Vanished(n *model.Node) bool {
+	return n != nil && n.DeletedAt != nil && !ownsBytesAt(n.Path)
+}
 
 // purgeDirDescendants hard-purges every trashed row still parked under a
 // trashed directory's `.filex-trash/...` path (SoftDeleteAndRetag rewrites

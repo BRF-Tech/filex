@@ -7,6 +7,7 @@ import { i18n, applyStoredLocale } from './i18n';
 import { applyStoredTheme } from './lib/theme';
 import { applyPalette } from './lib/palette';
 import {
+  NOTIFICATION_EVENT_LABEL,
   configurePrefs,
   hasSession,
   isolateLtrRuns,
@@ -14,6 +15,7 @@ import {
   sealSessionless,
   syncDocumentDir,
 } from '@brftech/filex-core';
+import { userEventKey } from '@brftech/filex-core';
 import { loadCustomCss } from './lib/customCss';
 import { AppearanceApi } from './api/appearance';
 import { applyInstanceThemes, primeInstanceDefault } from './lib/instanceThemes';
@@ -139,6 +141,15 @@ app.use(i18n);
 i18n.global.setPostTranslationHandler((str) =>
   typeof str === 'string' && localeDir(i18n.global.locale.value) === 'rtl' ? isolateLtrRuns(str) : str,
 );
+// The bell's rows are core's (NotificationRow) and say an event in core's
+// renderer; the one thing only this app has is the settings dialog's NAME for
+// each kind of event, which the renderer falls back on for an event its
+// phrasebook does not know yet. Provided app-wide so every bell — the admin
+// nav's, the explorer header's, the full list's — reads the same labels.
+app.provide(NOTIFICATION_EVENT_LABEL, (event: string) => {
+  const key = userEventKey(event);
+  return i18n.global.te(key) ? i18n.global.t(key) : undefined;
+});
 
 // Wire axios -> router (401 redirect) and toast (network error surfacing)
 // after Pinia + Router are attached so stores resolve.

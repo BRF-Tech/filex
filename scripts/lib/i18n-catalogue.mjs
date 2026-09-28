@@ -13,7 +13,7 @@
  *             separates plural forms, `@` starts a linked message, and a
  *             literal `@ { } | %{` is written `{'@'}` etc.
  *   server    backend/internal/srvtext/locales/en.json + the notification
- *             phrases of web/src/lib/notificationText.ts — every key under
+ *             phrases of packages/core/src/lib/notificationText.ts — every key under
  *             `server.`: the emails, the no-JavaScript public pages, the
  *             install review's permission sentences and the notifications.
  *             `{name}` and `<key>_<category>` plurals, nothing else.
@@ -91,7 +91,7 @@ const BARE_PLACEHOLDER = /^\s*\{[A-Za-z0-9_]+\}\s*$/;
 /**
  * The notification phrases as server keys, per language.
  *
- * ⚠ Their source stays web/src/lib/notificationText.ts: the bell, the
+ * ⚠ Their source stays packages/core/src/lib/notificationText.ts: the bell, the
  * browser pop-up and the desktop app render them from there (one renderer,
  * three surfaces — see that file). They are keys of the SERVER table
  * (`server.notify.<event>.title|body`, a phrase's `one` → `title_one` /
@@ -125,6 +125,8 @@ export function loadNotifyTables(file) {
       say(lang, `${base}.title`, p.title);
       say(lang, `${base}.body`, p.body);
       for (const [f, v] of Object.entries(p.one ?? {})) say(lang, `${base}.${f}_one`, v);
+      // A single encrypted file's wording of the same event (notificationText.ts `file`).
+      for (const [f, v] of Object.entries(p.file ?? {})) say(lang, `${base}.${f}_file`, v);
     }
   }
   return out;
@@ -140,7 +142,7 @@ export function loadCatalogue(root) {
   const core = path.join(root, 'packages', 'core', 'src', 'locales');
   const web = path.join(root, 'web', 'src', 'locales');
   const srv = path.join(root, 'backend', 'internal', 'srvtext', 'locales');
-  const notify = loadNotifyTables(path.join(root, 'web', 'src', 'lib', 'notificationText.ts'));
+  const notify = loadNotifyTables(path.join(root, 'packages', 'core', 'src', 'lib', 'notificationText.ts'));
   return {
     explorer: loadCoreTable(path.join(core, 'en.ts')),
     explorerTr: loadCoreTable(path.join(core, 'tr.ts')),

@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/share"
@@ -212,18 +213,35 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 	tok := pathParam(r, "token")
 	pin := h.extractPIN(r)
 
-	resolved, err := h.Service.Resolve(r.Context(), tok, pin)
-	switch {
-	case errors.Is(err, share.ErrBadPIN):
-		http.Error(w, "pin required", http.StatusUnauthorized)
-		return
-	case err != nil:
+	resolved, err := h.Store.GetShareByToken(r.Context(), strings.ToLower(tok))
+	if err != nil || resolved == nil || resolved.IsExpired(time.Now()) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	if resolved.IsDrop() {
+	// ⚠⚠ Only a FOLDER SHARE is browsed. An app page's node is the ANCHOR its
+	// state and follow-up job hang on, never a download (HandleDownload says
+	// so), and a file request is a blind drop and lists nothing.
+	if resolved.IsDrop() || resolved.IsApp() {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
+	}
+	// ⚠⚠ The ONE PIN gate, with its five-strikes lock — the gate
+	// HandleDownload uses (Service.Resolve compares the hash and counts
+	// nothing). The unlock cookie the gate mints counts as an answer, as it
+	// does there.
+	if resolved.PinHash != "" && !shareUnlocked(h.Service, r, resolved) {
+		if pin == "" {
+			http.Error(w, "pin required", http.StatusUnauthorized)
+			return
+		}
+		switch err := h.Service.CheckPIN(r.Context(), resolved, pin); {
+		case errors.Is(err, share.ErrLocked):
+			http.Error(w, "pin locked, try again later", http.StatusTooManyRequests)
+			return
+		case err != nil:
+			http.Error(w, "pin required", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	node, err := h.Store.GetNode(r.Context(), resolved.NodeID)
@@ -306,12 +324,11 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 	if kind == share.EntryImage || kind == share.EntryVideo || r.URL.Query().Get("inline") == "1" {
 		disposition = "inline"
 	}
-	w.Header().Set("Content-Type", share.MimeForName(obj.Name))
+	httpx.ProtectServedFile(w.Header(), share.MimeForName(obj.Name))
 	w.Header().Set("Content-Disposition", httpx.ContentDisposition(disposition, obj.Name))
 	if obj.Size > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(obj.Size, 10))
 	}
-	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if thumb {
 		w.Header().Set("Cache-Control", "private, max-age=3600")
 	}

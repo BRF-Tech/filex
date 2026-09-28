@@ -102,15 +102,6 @@ describe('explorer feedback wiring', () => {
     expect(del.indexOf('deleteReq.end(ticket);')).toBeLessThan(del.indexOf('else await load();'));
   });
 
-  it('says a conversion’s result arrived after its window was closed', () => {
-    // The converter's × at the save stage says the file still arrives; the
-    // upload is the explorer's, and it says so once the window is gone.
-    const save = fn('saveConverted');
-    expect(save).toMatch(/if \(windowGone\(\)\) onConvertDone\(file\.name\);/);
-    expect(save).toMatch(/if \(windowGone\(\)\) showToast\(\{ message: t\('convert\.save_failed'\) \}, ERROR_TOAST_MS\);/);
-    expect(explorer).toMatch(/<ConvertModal[\s\S]*?:upload="saveConverted"/);
-  });
-
   it('keeps "preparing the archive" up until the download starts, once', () => {
     const download = fn('downloadSelection');
     expect(download).toMatch(/if \(archivePreparing\.value\) return;/);

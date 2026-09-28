@@ -107,11 +107,15 @@ const NON_ADMIN: User = {
  */
 const live: VueWrapper[] = [];
 
+/* The binding sends the dialog to <body> (see its template and the test at
+   the end of this file); here it is drawn in place, so `find` reaches it. */
+const inPlace = { teleport: true };
+
 function mountModal(): VueWrapper {
   const i18n = createI18n({ legacy: false, locale: 'en', fallbackLocale: 'en', messages: { en } });
   const w = mount(UserSettingsModal, {
     props: { modelValue: true },
-    global: { plugins: [i18n] },
+    global: { plugins: [i18n], stubs: inPlace },
     attachTo: document.body,
   });
   live.push(w);
@@ -528,7 +532,7 @@ describe('UserSettingsModal', () => {
     registerLocale({ code: 'es', source: 'plugin', plugin: 'lang-es' });
     try {
       const i18n = createI18n({ legacy: false, locale: 'es', fallbackLocale: 'en', messages: { en } });
-      const w = mount(UserSettingsModal, { props: { modelValue: true }, global: { plugins: [i18n] }, attachTo: document.body });
+      const w = mount(UserSettingsModal, { props: { modelValue: true }, global: { plugins: [i18n], stubs: inPlace }, attachTo: document.body });
       live.push(w);
       await w.vm.$nextTick();
       await w.find('[data-testid="user-settings-tab-preferences"]').trigger('click');
@@ -540,5 +544,29 @@ describe('UserSettingsModal', () => {
     } finally {
       resetLocales();
     }
+  });
+
+  /* ⚠ TopNav mounts this inside its sticky header, and that header's
+     backdrop-filter makes it the containing block of anything `fixed` in
+     it. While the dialog was a native <dialog> in the browser's top layer
+     that did not matter; as core's Modal (a fixed layer in the page, which
+     is what keeps the desktop app's title bar clickable) it would be laid
+     out inside a 56px bar. */
+  it('sends the dialog to <body>, out of whatever its opener sits in', async () => {
+    const auth = useAuthStore();
+    auth.user = NON_ADMIN;
+    const i18n = createI18n({ legacy: false, locale: 'en', fallbackLocale: 'en', messages: { en } });
+    const holder = document.createElement('header');
+    holder.style.backdropFilter = 'blur(8px)';
+    document.body.appendChild(holder);
+    const w = mount(UserSettingsModal, { props: { modelValue: true }, global: { plugins: [i18n] }, attachTo: holder });
+    live.push(w);
+    await w.vm.$nextTick();
+    const dialog = document.querySelector('[data-testid="user-settings-dialog"]');
+    expect(dialog, 'the dialog is drawn').not.toBeNull();
+    expect(holder.contains(dialog), 'drawn inside its opener').toBe(false);
+    expect(dialog!.closest('header'), 'still inside the opener’s header').toBeNull();
+    expect(document.body.contains(dialog)).toBe(true);
+    holder.remove();
   });
 });

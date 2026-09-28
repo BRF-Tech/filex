@@ -62,6 +62,20 @@ export interface FileNode {
   /* wiring:e2 — dir rows: true when the folder is E2E-encrypted (carries a
    * `.filex-e2e.json` marker). Drives the 🔒 badge in the listings. */
   e2e?: boolean;
+  /* wiring:e2 names — set by the name view (composables/useE2eNames) on a
+   * row inside an encrypted folder whose NAMES are encrypted. `basename` is
+   * then the plaintext; `e2e_stored` is what the server stores and the only
+   * form that may be sent back to it. `e2e_root` also arrives from the server
+   * on rows outside a folder listing (Recent, Starred, tags, search, trash). */
+  e2e_root?: string;
+  e2e_stored?: string;
+  e2e_name_state?: 'enc' | 'plain' | 'unreadable' | 'locked';
+  e2e_display_dir?: string;
+  /* wiring:e2 fxe — a single encrypted file (`.fxe`) opened in this tab: its
+   * ORIGINAL name, which the header carries sealed. Shown instead of the
+   * stored name (useLocale `nodeDisplayName`); `basename` stays the stored
+   * name, and it is the only one ever sent to the server. */
+  fxe_name?: string;
   /** An app plugin holds this file read-only (docs/APP-PLUGINS-API.md →
    *  "File locks"). `perm` already arrives capped at `viewer` for everyone,
    *  administrators included — the flag is what the badge and the details
@@ -137,13 +151,22 @@ export interface ExternalServiceStatus {
  * source of truth, and the one that rots first.
  */
 export interface NewDocType {
-  /** Extension without the dot, lowercase. Also the key the create call sends. */
+  /** Extension without the dot, lowercase. The key the create call sends,
+   *  unless `key` says otherwise. */
   ext: string;
-  /** Coarse family, used for the picker's section headings. */
-  group: 'document' | 'text' | 'diagram';
+  /** What the create call names when it is not `ext`: an app's row
+   *  (`app:<plugin>:<ext>`), whose extension a built-in kind may share. */
+  key?: string;
+  /** Coarse family, used for the picker's section headings (`app`: a row an
+   *  installed app adds, `new_documents`). */
+  group: 'document' | 'text' | 'diagram' | 'app';
   mime: string;
-  /** External service the editor for this type needs; absent = built-in. */
-  requires?: 'onlyoffice' | 'drawio';
+  /** External service the editor for this type needs; absent = built-in;
+   *  `app` = an app's interface (listed only while it runs). */
+  requires?: 'onlyoffice' | 'drawio' | 'app';
+  /** An app's row: the app, the `viewer` view that opens the new file, and
+   *  the app's own words for it. */
+  app?: { plugin: string; view: string; label: Record<string, string> };
   /**
    * Must the file carry this extension? (#56) `true` for the containers — an
    * office document or a diagram, which its editor finds by extension; `false`
@@ -157,15 +180,27 @@ export interface NewDocType {
 export type ArchiveCreateFormat = 'zip' | '7z' | 'tar' | 'tar.gz' | 'tar.bz2' | 'tar.xz';
 
 export interface Capabilities {
+  /** Which filex answered (`0.47.0`) — the line the account menu ends with. */
+  version?: string;
+  /** The public demo: nothing a visitor changes may be saved (the settings
+   *  dialog greys its saves). */
+  demo_mode?: boolean;
+  /** Virus scanning is on (the settings dialog offers the "virus found"
+   *  notification only then — lib/webhookEvents eventOffReason). */
+  antivirus?: boolean;
   /** Document types this build can create. Absent on a server older than the
    *  "New document" feature — hosts must treat that as "offer nothing". */
   newdoc_types?: NewDocType[];
+  /** Drafts (issue #71): present when the server keeps drafts for THIS caller
+   *  (a person acting for themselves — not an app token, not a caller
+   *  confined to one folder). New document then makes a draft; absent, it
+   *  creates the file directly. `limit` is how many one person may keep. */
+  drafts?: { limit: number };
   ffmpeg?: boolean;
   ghostscript?: boolean;
   libreoffice?: boolean;
   onlyoffice_url?: string | null;
   drawio_url?: string | null;
-  convert_url?: string | null;
   max_chunk_mb?: number;
   upload_limit_mb?: number;
   /** Longest life a new share link may be given, in days (0 = no ceiling).
@@ -188,7 +223,7 @@ export interface Capabilities {
    *  token split, which is why every reader treats "missing" as a person. */
   caller_kind?: 'user' | 'app';
   /** Could this caller set up a missing optional service (ONLYOFFICE,
-   *  draw.io, the converter…)? An administrator who can reach the instance
+   *  draw.io…)? An administrator who can reach the instance
    *  settings — not a tenant admin, not an API token. Decides between "greyed
    *  with where to fix it" and "not offered" (lib/serviceGate). Absent on an
    *  older server, which reads as "no". */
@@ -204,9 +239,6 @@ export interface Capabilities {
     onlyoffice?: ExternalServiceStatus;
     drawio?: ExternalServiceStatus;
     mermaid?: ExternalServiceStatus;
-    /** The file converter. ⚠ `convert_url` is filled whenever the service is
-     *  ENABLED, healthy or not — the menu reads this for health. */
-    convert?: ExternalServiceStatus;
   };
   /** Can outgoing mail be sent right now (SMTP configured AND verified)?
    *  Absent on an older server or one with no mailer wired — read as "yes",
@@ -288,4 +320,7 @@ export interface TrashEntry {
   deleted_by_name?: string;
   /** The asker's own delete ("You"). */
   deleted_by_self?: boolean;
+  /** One of the asker's own drafts (#71), discarded: it came from Drafts,
+   *  and Restore puts it back there. `path` is then just its name. */
+  draft?: boolean;
 }

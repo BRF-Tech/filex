@@ -1,12 +1,15 @@
 // Native OS notifications for the desktop app.
 //
 // The web bell raises a browser `Notification` while its tab is open. The
-// desktop window has no bell in it at all — it is the explorer and nothing
-// else — so without this the one client that is ALWAYS running was the one
-// client that never told you anything.
+// desktop app is the one client that is ALWAYS running, so it raises a native
+// one — from the main process, which runs with the window closed (tray).
+// Since 2026-09-27 the window also draws the web's bell itself (the explorer's
+// `config.notifications`, packages/core NotificationBell): this poll hands it
+// the unread count (`onUnread` → main.ts → the page), so the window does not
+// ask the server a second time every 15 s.
 //
 // ⚠⚠ Where a click goes is NOT decided here. It comes from
-// `web/src/lib/notificationTarget.ts`, the same module the browser bell
+// `packages/core/src/lib/notificationTarget.ts`, the same module the browser bell
 // imports, which is what makes "one resolver, three surfaces" a fact rather
 // than a promise. Nothing in this file may decide a destination on its own.
 //
@@ -23,17 +26,17 @@ import {
   resolveNotificationTarget,
   type NotificationDestination,
   type NotificationTarget,
-} from '../../web/src/lib/notificationTarget.ts';
-// ⚠⚠ Same reason, same boundary: the SENTENCE also comes from the web package,
+} from '../../packages/core/src/lib/notificationTarget.ts';
+// ⚠⚠ Same reason, same boundary: the SENTENCE also comes from the core package,
 // because a row's stored title is written once on the server in one language
 // and for most file events is not written at all (Send substitutes the event
 // id, which is how a native toast once read `file.uploaded`). One catalogue for
-// the bell, the browser toast and this one — see web/src/lib/notificationText.ts.
+// the bell, the browser toast and this one — see packages/core/src/lib/notificationText.ts.
 import {
   renderNotification,
   type NotificationText,
   type NotifyLocale,
-} from '../../web/src/lib/notificationText.ts';
+} from '../../packages/core/src/lib/notificationText.ts';
 
 /** The bell's own cadence. Do not lower it — see the note above. */
 export const NOTIFY_POLL_MS = 15_000;
@@ -88,6 +91,17 @@ export interface DesktopNotifierOptions {
   enabled: () => boolean;
   /** Where a click goes. Handed the resolved destination, never a raw target. */
   onOpen: (accountId: string, dest: NotificationDestination) => void;
+  /**
+   * Marks one row read on the server (`POST /api/notifications/{id}/read`).
+   * main.ts passes Electron's `net.fetch` with the account's token.
+   *
+   * ⚠ A click on a toast that GOES somewhere marks its row read, as the web's
+   * browser toast does on the same click (useNotificationWatcher) — before
+   * 2026-09-27 the desktop's did not, and the row stayed unread in the bell
+   * the window now draws. A toast with nowhere to go is not marked: the web
+   * gives that one no click at all (rule 1, docs/NOTIFICATIONS.md).
+   */
+  markRead?: (acc: NotifyAccount, id: number) => Promise<void>;
   /** Reads the bell. main.ts passes Electron's `net.fetch`; tests pass rows. */
   fetchRows: (acc: NotifyAccount, limit: number) => Promise<NotificationPage>;
   /**
@@ -161,10 +175,36 @@ export function isUnauthorized(err: unknown): boolean {
  * wherever it was.
  */
 export function opensInWindow(dest: NotificationDestination): boolean {
-  return dest.kind === 'folder' || dest.kind === 'trash';
+  // ⚠ `app` too since 2026-09-27: the explorer carries out every destination
+  // its own bell can land on (FileExplorer `revealNotification`), an app's
+  // home view included — before that the window came forward and stopped.
+  return dest.kind === 'folder' || dest.kind === 'trash' || dest.kind === 'app';
 }
 
 export class DesktopNotifier {
+  /**
+   * A toast was clicked: mark the row read when it goes somewhere, ask the bell
+   * again (the badge and the window's bell move now, not in 15 s), then land.
+   *
+   * ⚠ The mark is awaited BEFORE the landing: the window's bell refreshes its
+   * list when the count it is handed changes, and a list fetched before the
+   * server stored the read would show the row unread under the reader's
+   * cursor. A mark that fails still lands — the destination is what was asked
+   * for, and the row stays honestly unread.
+   */
+  async clicked(acc: NotifyAccount, row: NotificationRow): Promise<void> {
+    const dest = resolveNotificationTarget(row.target);
+    if (dest.kind !== 'none' && this.opts.markRead) {
+      try {
+        await this.opts.markRead(acc, row.id);
+        void this.poll();
+      } catch (err) {
+        this.opts.log?.('notifications: mark read failed', { id: row.id, err: String(err) });
+      }
+    }
+    this.opts.onOpen(acc.id, dest);
+  }
+
   private timer: ReturnType<typeof setInterval> | null = null;
   private since: number | null = null;
   private watching: string | null = null;
@@ -237,9 +277,7 @@ export class DesktopNotifier {
       const lang: NotifyLocale = this.opts.locale?.() ?? 'en';
       for (const row of fresh) {
         const text = renderNotification(row, lang);
-        this.opts.show(row, text, () =>
-          this.opts.onOpen(acc.id, resolveNotificationTarget(row.target)),
-        );
+        this.opts.show(row, text, () => this.clicked(acc, row));
       }
     } catch (err) {
       // A server that is asleep, no network: the app keeps working and says

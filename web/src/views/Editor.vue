@@ -17,10 +17,20 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
-import { PreviewModal, isExternalUsable, type FileNode, type ExternalServiceStatus } from '@brftech/filex-core';
+import {
+  PreviewModal,
+  isExternalUsable,
+  pickAppViewer,
+  useFileApi,
+  type ExplorerConfig,
+  type FileNode,
+  type ExternalServiceStatus,
+  type PluginViewRow,
+} from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
 import { effectiveTheme } from '@/lib/theme';
 import { getServerRoot } from '@/api/runtimeConfig';
+import { explorerAuth } from '@/lib/explorerConfig';
 
 const { locale } = useI18n();
 const route = useRoute();
@@ -94,6 +104,31 @@ async function loadCapabilities(): Promise<void> {
   }
 }
 
+/**
+ * An app's own interface for this file (Burak, 2026-09-27 — one surface):
+ * the explorer's rule (lib/appViewer `pickAppViewer`) over the server's list
+ * of views, and "Open with"'s choice when the tab was opened from one
+ * (`app=plugin/view`, or `builtin`). The same default plugin endpoints the
+ * explorer derives its own from.
+ */
+const fileApi = useFileApi({ apiBase: getServerRoot(), auth: explorerAuth() } as ExplorerConfig);
+const appViews = ref<PluginViewRow[]>([]);
+/** The viewer waits for the list too: an app's file must not flash in
+ *  filex's own viewer first. */
+const appsLoaded = ref(false);
+async function loadAppViews(): Promise<void> {
+  try {
+    const list = await fileApi.pluginActions();
+    appViews.value = list.views ?? [];
+  } catch {
+    /* apps off, or not reachable: filex's own viewer */
+  } finally {
+    appsLoaded.value = true;
+  }
+}
+const appChoice = computed(() => (typeof route.query.app === 'string' && route.query.app ? route.query.app : null));
+const appViewer = computed(() => pickAppViewer(appViews.value, node.value, appChoice.value));
+
 const node = computed<FileNode | null>(() => {
   const rawPath = route.query.path;
   if (typeof rawPath !== 'string' || !rawPath) return null;
@@ -136,6 +171,24 @@ const openAs = computed<string | null>(() => {
 
 const open = ref(true);
 
+/**
+ * Drafts (issue #71): the draft this tab was editing was saved — it is a file
+ * where it belongs now. The address and the tab's name follow it, so a reload
+ * opens the saved document rather than a draft that is gone. `replaceState`,
+ * not the router: a route change would remount the viewer and close the
+ * editor that is still open on the document.
+ */
+function onDraftSaved(saved: { path: string; name: string }) {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set('path', saved.path);
+    window.history.replaceState(window.history.state, '', url.toString());
+  } catch {
+    /* an address the browser would not take — the reload is the only loss */
+  }
+  document.title = saved.name;
+}
+
 function closeWindow() {
   try {
     window.close();
@@ -161,6 +214,7 @@ onMounted(() => {
   // no " — filex" suffix, so all three surfaces read the same.
   if (n) document.title = n.basename;
   void loadCapabilities();
+  void loadAppViews();
   htmlObserver = new MutationObserver(() => {
     currentTheme.value = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
   });
@@ -176,7 +230,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="editor-host">
     <PreviewModal
-      v-if="node && capsLoaded"
+      v-if="node && capsLoaded && appsLoaded"
       :open="open"
       :file="node"
       :open-mode="mode"
@@ -189,10 +243,14 @@ onBeforeUnmount(() => {
       :can-configure="callerAdmin"
       :drawio-url="drawioUrl"
       :save-text-endpoint="api('/api/files/save-text')"
+      :drafts-endpoint="api('/api/files/drafts')"
+      :app-viewer="appViewer"
+      :api="fileApi"
       :auth-headers="authHeaders"
       :auth-credentials="'same-origin'"
       :locale="locale"
       chromeless
+      @draft-saved="onDraftSaved"
       @close="closeWindow"
     />
     <div v-else-if="!node" class="empty">

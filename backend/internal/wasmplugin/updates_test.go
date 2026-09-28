@@ -57,75 +57,104 @@ func auditActions(t *testing.T, o Options) []string {
 	return out
 }
 
-// ⭐ The case Burak asked about: a translator pushes a new version of a pack
-// to its branch, and the installed pack moves to it by itself — logged,
-// audited, and said once in the administrators' bell.
-func TestUpdates_APackOnABranchMovesToItsNewVersionByItself(t *testing.T) {
+// ⭐⭐ Owner's rule (2026-09-27): NOTHING updates itself. A translator pushes
+// a new version of a pack; the check SAYS so (list + bell, once) and moves
+// nothing. An administrator approves it: everybody moves, the audit row names
+// who approved, the bell says it, and the version it replaced is KEPT — "back
+// to 0.1.3" puts it back without a new approval.
+func TestUpdates_ANewPackVersionWaitsForAnAdministratorAndCanBeUndone(t *testing.T) {
 	withHost(t, "0.47.0")
 	web := &fakeWeb{ok: map[string]string{packRaw("main"): string(packWithRange(t, "lang-es", "0.1.3", "", ""))}}
 	reg, o := newPackRegistry(t, withWeb(web))
 	nf := &fakeNotify{}
 	reg.SetNotify(nf)
+	var heard []string
+	reg.SetUpgradeListener(func(app, version string) { heard = append(heard, app+"@"+version) })
 	st := installPackFromGitHub(t, reg, "main")
-	assert.True(t, st.AutoUpdate, "on by default")
 	assert.Equal(t, "github", st.UpdateSource)
+	assert.Nil(t, st.Previous, "nothing kept yet")
 
-	// Nothing new yet: a check says so and rings nothing.
 	rep, err := reg.CheckUpdates(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, 1, rep.Checked)
-	assert.Empty(t, rep.Updated)
 	assert.Empty(t, nf.events)
 
 	web.ok[packRaw("main")] = string(packWithRange(t, "lang-es", "0.1.4", "", ""))
-	rep, err = reg.CheckUpdates(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, []string{"lang-es"}, rep.Updated)
-
+	for i := 0; i < 2; i++ {
+		rep, err = reg.CheckUpdates(context.Background())
+		require.NoError(t, err)
+		assert.Empty(t, rep.Updated, "the check installs nothing")
+		assert.Equal(t, []string{"lang-es"}, rep.Available)
+	}
 	p, ok := reg.ByName("lang-es")
 	require.True(t, ok)
 	st = reg.StatusOf(p)
-	assert.Equal(t, "0.1.4", st.Version)
-	assert.Equal(t, StateRunning, st.State)
-	require.NotNil(t, st.Update)
-	assert.Equal(t, UpdateCurrent, st.Update.Status)
-	require.NotNil(t, st.Update.Auto)
-	assert.Equal(t, "0.1.3", st.Update.Auto.From)
-	assert.Equal(t, "0.1.4", st.Update.Auto.To)
+	assert.Equal(t, "0.1.3", st.Version, "nothing moved by itself")
+	assert.Equal(t, UpdateAvailable, st.Update.Status)
+	assert.Equal(t, "0.1.4", st.Update.Version)
+	require.Len(t, nf.events, 1, "announced once, not every day")
+	assert.Equal(t, notify.EventAppUpdateAvailable, nf.events[0].Event)
+	assert.Empty(t, heard)
 
-	require.Len(t, nf.events, 1)
-	ev := nf.events[0]
-	assert.Equal(t, notify.EventAppUpdated, ev.Event)
-	assert.Equal(t, "lang-es", ev.Meta["plugin"])
-	assert.Equal(t, "Spanish", ev.Meta["plugin_label_en"])
-	assert.Equal(t, "İspanyolca", ev.Meta["plugin_label_tr"])
-	assert.Equal(t, "0.1.4", ev.Meta["version"])
-	assert.Equal(t, "0.1.3", ev.Meta["from"])
-	assert.Nil(t, ev.UserID, "a broadcast; notify keeps operator alarms to administrators")
-
-	assert.Contains(t, auditActions(t, o), "app_plugin.update", "an automatic change is in the audit log")
-	lines, _ := p.logs.after(0)
-	var logged bool
-	for _, l := range lines {
-		logged = logged || l.Msg == "updated automatically from 0.1.3 to 0.1.4"
-	}
-	assert.True(t, logged, "and in the app's own log")
-
-	// The next check finds nothing and says nothing again.
-	_, err = reg.CheckUpdates(context.Background())
+	// The administrator approves (Review update → Upgrade).
+	u, err := o.Store.CreateUser(context.Background(), "approver@local", "x", "admin", "en", "UTC")
 	require.NoError(t, err)
-	assert.Len(t, nf.events, 1, "announced once")
-	st = reg.StatusOf(p)
-	require.NotNil(t, st.Update.Auto, "the last automatic update is remembered")
+	admin := u.ID
+	in, err := reg.FetchUpdate(context.Background(), st.ID)
+	require.NoError(t, err)
+	in.ActorID = &admin
+	st, _, err = reg.Upgrade(context.Background(), st.ID, in)
+	require.NoError(t, err)
+	assert.Equal(t, "0.1.4", st.Version)
+	assert.Equal(t, UpdateCurrent, st.Update.Status)
+	require.NotNil(t, st.Previous)
+	assert.Equal(t, "0.1.3", st.Previous.Version, "the replaced version is kept")
+	assert.Equal(t, []string{"lang-es@0.1.4"}, heard, "the open explorers are told")
+	require.Len(t, nf.events, 2)
+	assert.Equal(t, notify.EventAppUpdated, nf.events[1].Event)
+	assert.Equal(t, "0.1.4", nf.events[1].Meta["version"])
+	assert.Equal(t, "0.1.3", nf.events[1].Meta["from"])
+	rows, err := o.Store.ListAuditRecent(context.Background(), 20)
+	require.NoError(t, err)
+	var audited bool
+	for _, r := range rows {
+		if r.Action == "app_plugin.upgrade" && r.UserID != nil && *r.UserID == admin {
+			audited = r.Metadata["from"] == "0.1.3" && r.Metadata["to"] == "0.1.4"
+		}
+	}
+	assert.True(t, audited, "the audit row names the administrator who approved, from and to")
+
+	// Back to 0.1.3: no approval asked, and 0.1.4 is kept in its turn.
+	st, err = reg.Rollback(context.Background(), st.ID, &admin, "en")
+	require.NoError(t, err)
+	assert.Equal(t, "0.1.3", st.Version)
+	assert.Equal(t, StateRunning, st.State)
+	require.NotNil(t, st.Previous)
+	assert.Equal(t, "0.1.4", st.Previous.Version)
+	assert.Contains(t, auditActions(t, o), "app_plugin.rollback")
+	assert.Equal(t, []string{"lang-es@0.1.4", "lang-es@0.1.3"}, heard)
+
+	// A restart keeps all of it.
+	reg.Close(context.Background())
+	again, err := New(o)
+	require.NoError(t, err)
+	t.Cleanup(func() { again.Close(context.Background()) })
+	require.NoError(t, again.Load(context.Background()))
+	p, _ = again.ByName("lang-es")
+	got := again.StatusOf(p)
+	assert.Equal(t, "0.1.3", got.Version)
+	require.NotNil(t, got.Previous)
+	assert.Equal(t, "0.1.4", got.Previous.Version)
 }
 
-// An app installed at a version TAG follows the releases, and takes the
-// newest one THIS filex can run — stepping over one that needs a newer filex.
+// An app installed at a version TAG follows the releases, and announces the
+// newest one THIS filex can run — stepping over one that needs a newer filex
+// — with the release's notes for the review.
 func TestUpdates_ReleasesAreFollowedToTheNewestCompatibleOne(t *testing.T) {
 	withHost(t, "0.47.0")
 	releases := []map[string]any{
-		{"tag_name": "v0.3.0", "draft": false, "prerelease": false},
-		{"tag_name": "v0.2.1", "draft": false, "prerelease": false},
+		{"tag_name": "v0.3.0", "draft": false, "prerelease": false, "body": "needs 0.48"},
+		{"tag_name": "v0.2.1", "draft": false, "prerelease": false, "body": "Fixes the plural of *archivo*."},
 		{"tag_name": "v0.2.5-rc.1", "draft": false, "prerelease": true},
 		{"tag_name": "v0.2.9", "draft": true, "prerelease": false},
 		{"tag_name": "v0.1.0", "draft": false, "prerelease": false},
@@ -140,14 +169,22 @@ func TestUpdates_ReleasesAreFollowedToTheNewestCompatibleOne(t *testing.T) {
 		releasesURL(packRepo):  string(rel),
 	}}
 	reg, _ := newPackRegistry(t, withWeb(web))
-	installPackFromGitHub(t, reg, "v0.1.0")
+	st := installPackFromGitHub(t, reg, "v0.1.0")
 
 	rep, err := reg.CheckUpdates(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"lang-es"}, rep.Updated)
+	assert.Equal(t, []string{"lang-es"}, rep.Available)
 	p, _ := reg.ByName("lang-es")
-	st := reg.StatusOf(p)
-	assert.Equal(t, "0.2.1", st.Version, "0.3.0 needs filex 0.48; the draft and the pre-release are not releases")
+	got := reg.StatusOf(p)
+	assert.Equal(t, "0.1.0", got.Version, "announced, not installed")
+	assert.Equal(t, "0.2.1", got.Update.Version, "0.3.0 needs filex 0.48; the draft and the pre-release are not releases")
+	assert.Equal(t, "Fixes the plural of *archivo*.", got.Update.Notes)
+
+	in, err := reg.FetchUpdate(context.Background(), st.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Fixes the plural of *archivo*.", in.Notes, "the review gets the notes")
+	st, _, err = reg.Upgrade(context.Background(), st.ID, in)
+	require.NoError(t, err)
 	assert.Equal(t, "https://github.com/"+packRepo+"@v0.2.1", st.SourceURL, "the next check follows the releases from here")
 }
 
@@ -173,41 +210,6 @@ func TestUpdates_OnlyNewerVersionsThisFilexCannotRun(t *testing.T) {
 	assert.Equal(t, "0.2.0", st.Update.Version)
 	assert.Equal(t, ">=0.48.0", st.Update.Requires)
 	assert.Empty(t, nf.events)
-}
-
-// With the switch off a newer version is only announced — once — and waits.
-func TestUpdates_SwitchedOffItIsOnlyAnnounced(t *testing.T) {
-	withHost(t, "0.47.0")
-	web := &fakeWeb{ok: map[string]string{packRaw("main"): string(packWithRange(t, "lang-es", "0.1.0", "", ""))}}
-	reg, _ := newPackRegistry(t, withWeb(web))
-	nf := &fakeNotify{}
-	reg.SetNotify(nf)
-	st := installPackFromGitHub(t, reg, "main")
-	st, err := reg.SetAutoUpdate(context.Background(), st.ID, false)
-	require.NoError(t, err)
-	assert.False(t, st.AutoUpdate)
-	web.ok[packRaw("main")] = string(packWithRange(t, "lang-es", "0.1.1", "", ""))
-
-	for i := 0; i < 2; i++ {
-		rep, err := reg.CheckUpdates(context.Background())
-		require.NoError(t, err)
-		assert.Equal(t, []string{"lang-es"}, rep.Available)
-	}
-	p, _ := reg.ByName("lang-es")
-	st = reg.StatusOf(p)
-	assert.Equal(t, "0.1.0", st.Version, "nothing moved")
-	assert.Equal(t, UpdateAvailable, st.Update.Status)
-	assert.Equal(t, "0.1.1", st.Update.Version)
-	require.Len(t, nf.events, 1, "announced once, not every day")
-	assert.Equal(t, notify.EventAppUpdateAvailable, nf.events[0].Event)
-
-	// An administrator's own upgrade to it settles the finding.
-	in, err := reg.FetchGitHub(context.Background(), GitHubInput{Repo: packRepo, Ref: "main"})
-	require.NoError(t, err)
-	st, _, err = reg.Upgrade(context.Background(), st.ID, in)
-	require.NoError(t, err)
-	assert.Equal(t, UpdateCurrent, st.Update.Status)
-	assert.Empty(t, st.Update.Version)
 }
 
 // A language pack that now brings a module is code that runs where there was
@@ -272,29 +274,6 @@ func TestUpdates_AnUploadedAppHasNoSource(t *testing.T) {
 	assert.Zero(t, rep.Checked)
 }
 
-// A URL install whose SHA-256 the administrator typed is pinned to those
-// bytes: it starts with automatic updates off.
-func TestUpdates_AHashPinnedURLInstallStartsWithUpdatesOff(t *testing.T) {
-	manifest := packWithRange(t, "lang-es", "0.1.0", "", "")
-	web := &fakeWeb{ok: map[string]string{"https://example.test/filex-app.json": string(manifest)}}
-	reg, _ := newPackRegistry(t, withWeb(web))
-	in, err := reg.FetchURL(context.Background(), URLInput{ManifestURL: "https://example.test/filex-app.json"})
-	require.NoError(t, err)
-	in.Granted = []string{}
-	st, _, err := reg.Install(context.Background(), in)
-	require.NoError(t, err)
-	assert.True(t, st.AutoUpdate)
-	assert.Equal(t, "url", st.UpdateSource)
-	require.NoError(t, reg.Remove(context.Background(), st.ID))
-
-	in, err = reg.FetchURL(context.Background(), URLInput{ManifestURL: "https://example.test/filex-app.json", SHA256: sha256Hex(manifest)})
-	require.NoError(t, err)
-	in.Granted = []string{}
-	st, _, err = reg.Install(context.Background(), in)
-	require.NoError(t, err)
-	assert.False(t, st.AutoUpdate, "pinned by hash: an automatic update may not overrule it")
-}
-
 // Demo: no check, no background loop.
 func TestUpdates_TheDemoNeverChecks(t *testing.T) {
 	reg, _ := newPackRegistry(t, func(o *Options) { o.Demo = true })
@@ -302,8 +281,8 @@ func TestUpdates_TheDemoNeverChecks(t *testing.T) {
 	assert.Equal(t, ErrCodeDemo, installError(t, err).Code)
 	reg.StartUpdater(context.Background(), true)
 	assert.False(t, reg.BackgroundUpdates())
-	_, err = reg.SetAutoUpdate(context.Background(), 1, false)
-	assert.Equal(t, ErrCodeDemo, installError(t, err).Code)
+	_, err = reg.Rollback(context.Background(), 1, nil, "en")
+	assert.Error(t, err)
 }
 
 // blockingWeb holds every request until released, counting them.
@@ -461,9 +440,7 @@ func echoFromURL(t *testing.T) (*harness, *fakeWeb, *Status) {
 	}}
 	h := newHarness(t, withWeb(web))
 	// The echo manifest carries no wasm.sha256, so the module is pinned here
-	// the way an administrator installing it by address would — which starts
-	// it with updates off; they are switched back on below, since they are
-	// what these tests are about.
+	// the way an administrator installing it by address would.
 	in, err := h.reg.FetchURL(context.Background(), URLInput{
 		URL: "https://apps.example.test/echo/plugin.wasm", ManifestURL: "https://apps.example.test/echo/filex-app.json",
 		SHA256: sha256Hex(wasm),
@@ -473,8 +450,6 @@ func echoFromURL(t *testing.T) (*harness, *fakeWeb, *Status) {
 	require.NoError(t, json.Unmarshal(raw, &m.Manifest))
 	in.Granted = m.Permissions
 	st, _, err := h.reg.Install(context.Background(), in)
-	require.NoError(t, err)
-	st, err = h.reg.SetAutoUpdate(context.Background(), st.ID, true)
 	require.NoError(t, err)
 	return h, web, st
 }
@@ -524,42 +499,25 @@ func TestUpdates_ANewPermissionWaitsForApproval(t *testing.T) {
 	assert.Contains(t, nf.events[0].Title, "new permission http:example.org")
 }
 
-// ⚠⚠ An automatic update whose module fails its proof is undone — and STAYS
-// undone after a restart. The failed compile used to write the new version
-// into the row it shared with the old entry, so the database said 0.0.2 while
-// the disk held 0.0.1 again, and the next start refused the app for a hash
-// mismatch.
-func TestUpdates_AFailedAutomaticUpdateIsUndoneAndStaysUndone(t *testing.T) {
+// A newer MODULE that asks for nothing new is not installed by itself either:
+// the grant says what a module may reach, not what new code does with it.
+func TestUpdates_ANewModuleIsNeverInstalledByTheCheck(t *testing.T) {
 	withHost(t, "0.47.0")
 	h, web, st := echoFromURL(t)
 	nf := &fakeNotify{}
 	h.reg.SetNotify(nf)
-	// Same permissions, so it is applied by itself — but the module still
-	// describes itself as 0.0.1.
 	nextEcho(t, web, "0.0.2", nil)
 
 	rep, err := h.reg.CheckUpdates(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"echo"}, rep.Failed)
+	assert.Equal(t, []string{"echo"}, rep.Available)
+	assert.Empty(t, rep.Updated)
 	p, _ := h.reg.ByID(st.ID)
 	got := h.reg.StatusOf(p)
 	assert.Equal(t, "0.0.1", got.Version)
-	assert.Equal(t, StateRunning, got.State, "the old version kept running")
-	assert.Equal(t, UpdateFailed, got.Update.Status)
-	assert.Equal(t, ErrCodeDescribeMismatch, got.Update.Refusal.Code)
+	assert.Equal(t, UpdateAvailable, got.Update.Status)
 	require.Len(t, nf.events, 1)
-	assert.Equal(t, notify.EventAppUpdateFailed, nf.events[0].Event)
-
-	// A restart finds what was left.
-	again, err := New(h.reg.opts)
-	require.NoError(t, err)
-	t.Cleanup(func() { again.Close(context.Background()) })
-	require.NoError(t, again.Load(context.Background()))
-	p, ok := again.ByID(st.ID)
-	require.True(t, ok)
-	got = again.StatusOf(p)
-	assert.Equal(t, "0.0.1", got.Version)
-	assert.Equal(t, StateRunning, got.State, "not refused for a hash mismatch")
+	assert.Equal(t, notify.EventAppUpdateAvailable, nf.events[0].Event)
 }
 
 func sha256Hex(b []byte) string {

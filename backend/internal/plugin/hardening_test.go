@@ -124,7 +124,10 @@ func TestRefusedAndPrivateHost(t *testing.T) {
 		{"0.0.0.0", true, false},
 		{"224.0.0.1", true, false},
 		{"203.0.113.10", false, false},
-		{"2001:db8::10", false, false},
+		// 2001:db8::/32 is the IPv6 documentation range: not routable, so
+		// netguard refuses it (7d7da2a3). A public IPv6 address stands in.
+		{"2001:db8::10", true, false},
+		{"2606:4700:4700::1111", false, false},
 	}
 	for _, c := range cases {
 		ip := net.ParseIP(c.ip)

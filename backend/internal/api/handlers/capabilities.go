@@ -10,6 +10,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/multioidc"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/drafts"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/newdoc"
@@ -37,6 +38,10 @@ type Capabilities struct {
 	// is on). While false — the default — the capabilities payload carries NO
 	// cloud field at all, keeping the flag-off wire format byte-identical.
 	CloudEnabled bool
+	// AppDocs lists the rows the running apps add to the "New" menu
+	// (`new_documents`). Told to a signed-in person only: which apps an
+	// instance runs is not a property of the build. Nil = none.
+	AppDocs func() []newdoc.Type
 	/* wiring:e2 */
 	// E2EEscrow is the installation escrow PUBLIC key, or nil when escrow is
 	// off. It is published deliberately: the browser needs it to wrap a new
@@ -96,7 +101,6 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 		}(),
 		"onlyoffice_url": "",
 		"drawio_url":     "",
-		"convert_url":    "",
 	}
 	if c.ChunkSize > 0 {
 		flat["max_chunk_mb"] = c.ChunkSize / mb
@@ -106,9 +110,6 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	if dr, ok := c.External["drawio"]; ok && dr.Enabled {
 		flat["drawio_url"] = dr.URL
-	}
-	if cv, ok := c.External["convert"]; ok && cv.Enabled {
-		flat["convert_url"] = cv.URL
 	}
 
 	// Marshal the rich snapshot to a generic map so we can layer the
@@ -132,8 +133,8 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	//
 	// The endpoint stays public on purpose (docs/INTEGRATION.md: embedders
 	// probe it before they log in), and every consumer that needs a HOST is
-	// behind a login already — the drawio iframe and the convert modal only
-	// open on a file the caller can already read, and OnlyOffice's real host
+	// behind a login already — the drawio iframe only opens on a file the
+	// caller can already read, and OnlyOffice's real host
 	// arrives from the authenticated POST /api/files/onlyoffice/config
 	// (`documentServerUrl`), never from here. So the hostnames travel with the
 	// credential and the booleans travel without one.
@@ -245,7 +246,20 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	//
 	// Published to anonymous callers too. It is a static property of the
 	// build, identical on every install of this version, and names no host.
-	merged["newdoc_types"] = newdoc.Types()
+	types := newdoc.Types()
+	if h.AppDocs != nil && auth.UserFrom(r.Context()) != nil && callerKind == model.TokenKindUser {
+		types = append(types, h.AppDocs()...)
+	}
+	merged["newdoc_types"] = types
+
+	// Drafts (issue #71): New document makes a draft rather than the file,
+	// for a caller who may keep them (draftsFor — a person acting for
+	// themselves: not an app, not confined to a folder). Absent otherwise,
+	// and absent on a server from before drafts: the explorer then creates
+	// the file directly (action=newfile), as it always did.
+	if h.Store != nil && draftsFor(r) {
+		merged["drafts"] = map[string]any{"limit": drafts.Limit(r.Context(), h.Store)}
+	}
 
 	// The address a client PROGRAM should be pointed at — the WebDAV URL, the
 	// `filex mount` / rclone lines in the connection guides.
@@ -333,7 +347,7 @@ func anonymousCaller(r *http.Request) bool {
 // embedder legitimately asks "can this instance preview a .docx", and that is
 // answered without naming a host.
 func redactExternalHosts(merged map[string]any) {
-	for _, alias := range []string{"onlyoffice_url", "drawio_url", "convert_url"} {
+	for _, alias := range []string{"onlyoffice_url", "drawio_url"} {
 		if _, ok := merged[alias]; ok {
 			merged[alias] = ""
 		}

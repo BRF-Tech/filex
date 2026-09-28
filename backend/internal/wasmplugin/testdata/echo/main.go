@@ -112,7 +112,10 @@ var manifest = wire.Manifest{
 	}},
 	PublicPages: []wire.PublicPage{{ID: "signer", Label: wire.Text{"en": "Sign the document", "tr": "Belgeyi imzala"}, PIN: "optional", DefaultTTLDays: 7, MaxTTLDays: 30}},
 	Views: []wire.View{{ID: "hello", Placement: "modal", Label: wire.Text{"en": "Hello", "tr": "Hello"}}, {ID: "wizard", Placement: "page", Label: wire.Text{"en": "Wizard", "tr": "Wizard"}},
-		{ID: "picks", Placement: "modal", Label: wire.Text{"en": "Picks", "tr": "Seçilenler"}}},
+		{ID: "picks", Placement: "modal", Label: wire.Text{"en": "Picks", "tr": "Seçilenler"}},
+		// stall never answers: what the host's ceiling on concurrent screen
+		// calls is measured with (a public page event needs only a link).
+		{ID: "stall", Placement: "modal", Label: wire.Text{"en": "Stall", "tr": "Bekle"}}},
 	// held: the lock reason `lock` names when asked (params.msg), which filex
 	// says in each reader's language.
 	Messages: map[string]wire.Text{"held": {"en": "held for {who}", "tr": "{who} için tutuluyor"}},
@@ -620,7 +623,48 @@ func init() {
 				}, nil
 			},
 		},
+		// The app's own interface asking its module (`ui_call`). The tests
+		// install this module with a widened manifest that has a `ui` block
+		// and an interface view; describe stays a subset.
+		UI: map[string]pluginkit.UICallFunc{
+			// echo: what the call carried — the view, the method, the params
+			// and the files the interface was opened with, read through their
+			// refs (never a path).
+			"echo": func(in *wire.UICallInput) (any, error) {
+				var params any
+				_ = json.Unmarshal(in.Params, &params)
+				first := ""
+				if len(in.Context.Inputs) > 0 {
+					if data, err := pluginkit.ReadInput(in.Context.Inputs[0].Ref); err == nil {
+						first = string(data)
+					}
+				}
+				return map[string]any{"view": in.ViewID, "method": in.Method, "params": params,
+					"inputs": len(in.Context.Inputs), "first": first, "locale": in.Context.Locale}, nil
+			},
+			// refuse: an app's own words, in every language it speaks.
+			"refuse": func(in *wire.UICallInput) (any, error) {
+				return nil, &pluginkit.UIError{Text: wire.Text{"en": "Not today", "tr": "Bugün olmaz"}}
+			},
+			// stall never answers: what the host's ceiling on concurrent screen
+			// calls is measured against, for calls from an interface.
+			"stall": func(*wire.UICallInput) (any, error) {
+				for {
+					time.Sleep(50 * time.Millisecond)
+				}
+			},
+			// write: a screen-mode call may not write a file.
+			"write": func(in *wire.UICallInput) (any, error) {
+				_, err := pluginkit.WriteOutput("x.txt", []byte("x"))
+				return nil, err
+			},
+		},
 		Views: map[string]pluginkit.ViewFunc{
+			"stall": func(*wire.ViewEventInput) (*wire.Surface, error) {
+				for {
+					time.Sleep(50 * time.Millisecond)
+				}
+			},
 			"wizard": func(in *wire.ViewEventInput) (*wire.Surface, error) {
 				// Echoes what a home page's frame and a signed-in person's
 				// request hand a view (v3.1): the section asked for and the

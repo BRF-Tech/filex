@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -197,6 +199,7 @@ func (s *service) Send(ctx context.Context, e Event) (int64, error) {
 		e.Title = string(e.Event)
 	}
 	e.Target = s.resolveTarget(ctx, e)
+	e = s.stampE2eRoot(ctx, e)
 	metaJSON, err := marshalMeta(e)
 	if err != nil {
 		return 0, fmt.Errorf("notify: marshal meta: %w", err)
@@ -214,6 +217,52 @@ func (s *service) Send(ctx context.Context, e Event) (int64, error) {
 	}
 	s.dispatch(id, e)
 	return id, nil
+}
+
+// stampE2eRoot marks a row about an item INSIDE an end-to-end encrypted folder
+// with `meta.e2e_root` ("<storage>://<root>", the wire form listings use).
+//
+// wiring:e2 names — in a folder whose names are encrypted (level 2), the path
+// and name this row carries are ciphertext; the server has nothing else. The
+// mark is what lets the bell (web and desktop) show "🔒 Encrypted item" — or
+// the real name, where the reader's explorer has the folder unlocked —
+// instead of printing ciphertext. One place for every emitter: they all come
+// through Send with a Node.
+//
+// A row about the encrypted folder ITSELF (the password-change and escrow
+// events) is not marked: the root is not inside itself, and its name is
+// plaintext.
+func (s *service) stampE2eRoot(ctx context.Context, e Event) Event {
+	if s.store == nil || e.Node == nil || e.Node.StorageID == 0 || strings.Trim(e.Node.Path, "/") == "" {
+		return e
+	}
+	if _, set := e.Meta["e2e_root"]; set {
+		return e
+	}
+	dir := path.Dir("/" + strings.Trim(e.Node.Path, "/"))
+	root, ok := e2e.FindRoot(ctx, s.store, e.Node.StorageID, dir)
+	if !ok {
+		return e
+	}
+	storageName := ""
+	if e.Target != nil {
+		storageName = e.Target.Storage
+	}
+	if storageName == "" {
+		if st, err := s.store.GetStorage(ctx, e.Node.StorageID); err == nil && st != nil {
+			storageName = st.Name
+		}
+	}
+	if storageName == "" {
+		return e
+	}
+	m := make(map[string]any, len(e.Meta)+1)
+	for k, v := range e.Meta {
+		m[k] = v
+	}
+	m["e2e_root"] = storageName + "://" + root
+	e.Meta = m
+	return e
 }
 
 // marshalMeta folds the structured Node/Share/Actor refs into the

@@ -1,5 +1,5 @@
 // Package external is the one place the runtime asks "how is OnlyOffice /
-// drawio / the converter configured right now?".
+// drawio configured right now?".
 //
 // # Why this exists
 //
@@ -44,7 +44,6 @@ import (
 const (
 	OnlyOffice = "onlyoffice"
 	Drawio     = "drawio"
-	Convert    = "convert"
 )
 
 // Settings is one service's live configuration.
@@ -190,7 +189,7 @@ func (r *Resolver) Get(ctx context.Context, name string) Settings {
 }
 
 // URL is the convenience form for the services that need nothing but the base
-// URL (drawio, the converter). Empty when the service is not usable.
+// URL (drawio). Empty when the service is not usable.
 func (r *Resolver) URL(ctx context.Context, name string) string {
 	return r.Get(ctx, name).URL
 }

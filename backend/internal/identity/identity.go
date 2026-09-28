@@ -102,7 +102,7 @@ type Problem struct {
 // it has always accepted the full alphabet.
 //
 // ⚠ The browser checks the same rules while a person types
-// (web/src/lib/accountRules.ts); this is the authority, that is the mirror.
+// (packages/core/src/lib/accountRules.ts); this is the authority, that is the mirror.
 // A rule added here must be added there, or the form lets through a name the
 // save then refuses.
 func Check(username string) *Problem {

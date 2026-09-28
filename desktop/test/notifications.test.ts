@@ -15,8 +15,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { DesktopNotifier, isUnauthorized, newRows, opensInWindow, type NotificationRow } from '../src/notifications.ts';
-import type { NotificationDestination } from '../../web/src/lib/notificationTarget.ts';
-import type { NotificationText } from '../../web/src/lib/notificationText.ts';
+import type { NotificationDestination } from '../../packages/core/src/lib/notificationTarget.ts';
+import type { NotificationText } from '../../packages/core/src/lib/notificationText.ts';
 
 const ACC = { id: 'a1', serverUrl: 'https://files.example.com', token: 't' };
 
@@ -255,14 +255,97 @@ test('a trashed-file toast opens the Trash view in the window, selecting the ite
   assert.equal(opensInWindow(opened[0] as NotificationDestination), true);
 });
 
-test('the window carries out folders and the Trash view, nothing else', () => {
+test('the window carries out folders, the Trash view and an app home view — nothing else', () => {
   assert.equal(opensInWindow({ kind: 'folder', storage: 'qldemo', folder: 'Documents' }), true);
   assert.equal(opensInWindow({ kind: 'trash' }), true);
   assert.equal(opensInWindow({ kind: 'share', token: 'abc' }), false, 'a share goes to the system browser');
-  // An app's home page (feat/043-signing): the desktop has no such page, so
-  // the window comes forward and stops (docs/NOTIFICATIONS.md).
-  assert.equal(opensInWindow({ kind: 'app', plugin: 'sign', view: 'envelopes' }), false);
+  // An app's home view (feat/043-signing). Until 2026-09-27 the window came
+  // forward and stopped: it had no bell and nothing to carry the view out.
+  // The explorer now carries out every destination its own bell can land on
+  // (FileExplorer revealNotification → the app's home view), so the toast
+  // lands where the in-window row does.
+  assert.equal(opensInWindow({ kind: 'app', plugin: 'sign', view: 'envelopes' }), true);
   assert.equal(opensInWindow({ kind: 'none' }), false);
+});
+
+// ── a click marks the row read ───────────────────────────────────────────
+//
+// 2026-09-27: the window got the web's bell, and a toast that was clicked
+// stayed UNREAD in it — the web's browser toast marks its row read on the
+// same click (useNotificationWatcher), the desktop's did not. Same rule on
+// both: a notification you followed is a notification you read.
+
+function clickRig(target: NotificationRow['target']) {
+  const order: string[] = [];
+  const marked: Array<{ acc: string; id: number }> = [];
+  let polls = 0;
+  const n = new DesktopNotifier({
+    account: () => ACC,
+    enabled: () => true,
+    onOpen: () => order.push('open'),
+    fetchRows: async () => {
+      polls++;
+      return page(polls === 1 ? [] : [{ id: 9, event: 'file.uploaded', title: 'a', target }]);
+    },
+    markRead: async (acc, id) => {
+      order.push('read');
+      marked.push({ acc: acc.id, id });
+    },
+    show: (_row, _text, onClick) => {
+      order.push('show');
+      void onClick();
+    },
+  });
+  return { n, order, marked, polls: () => polls };
+}
+
+test('clicking a toast that goes somewhere marks THAT row read, then opens it', async () => {
+  const r = clickRig({ kind: 'file', storage: 'qldemo', path: 'Documents/a.txt' });
+  await r.n.poll();
+  await r.n.poll();
+  await new Promise((done) => setTimeout(done, 0));
+  assert.deepEqual(r.marked, [{ acc: 'a1', id: 9 }]);
+  assert.deepEqual(r.order, ['show', 'read', 'open']);
+});
+
+test('…and the bell is asked again at once, so the badge does not wait 15 s', async () => {
+  const r = clickRig({ kind: 'file', storage: 'qldemo', path: 'Documents/a.txt' });
+  await r.n.poll();
+  await r.n.poll();
+  await new Promise((done) => setTimeout(done, 0));
+  assert.equal(r.polls(), 3);
+});
+
+test('a toast with nowhere to go is not marked read by a click', async () => {
+  // Rule 1 (docs/NOTIFICATIONS.md): a notification is clickable exactly when
+  // it has somewhere to go. The browser toast gives such a row no onClick at
+  // all; here the click only brings the window forward, and reading the
+  // sentence in the OS is not reading the row.
+  const r = clickRig(undefined);
+  await r.n.poll();
+  await r.n.poll();
+  await new Promise((done) => setTimeout(done, 0));
+  assert.deepEqual(r.marked, []);
+  assert.deepEqual(r.order, ['show', 'open']);
+});
+
+test('a mark that fails still opens the destination', async () => {
+  const opened: unknown[] = [];
+  let polls = 0;
+  const n = new DesktopNotifier({
+    account: () => ACC,
+    enabled: () => true,
+    onOpen: (_id, dest) => opened.push(dest),
+    fetchRows: async () => page(++polls === 1 ? [] : [{ id: 3, event: 'file.uploaded', title: 'a', target: { kind: 'dir', storage: 's', path: 'x' } }]),
+    markRead: async () => {
+      throw new Error('offline');
+    },
+    show: (_row, _text, onClick) => void onClick(),
+  });
+  await n.poll();
+  await n.poll();
+  await new Promise((done) => setTimeout(done, 0));
+  assert.deepEqual(opened, [{ kind: 'folder', storage: 's', folder: 'x' }]);
 });
 
 // ── a token the server no longer accepts ─────────────────────────────────

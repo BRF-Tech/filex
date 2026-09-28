@@ -75,8 +75,9 @@ func TestShareCreate_AnInputTheCatalogueHasNotSeenGetsItsNode(t *testing.T) {
 }
 
 // ⚠ Only the job's INPUTS. A `path` the plugin merely names is a string it
-// chose; the person's ACL was never checked against it, so a missing row
-// stays "no such file" — and the catalogue is not even consulted.
+// chose; the person's ACL was never checked against it, so it is refused
+// before the catalogue is even consulted (see also
+// TestShareCreate_APageLinkAnchorsOnlyOnAFileTheCallWasHanded).
 func TestShareCreate_APathThatIsNotAnInputIsNotCatalogued(t *testing.T) {
 	h := newHarness(t, nil)
 	cat := h.withCatalogue()
@@ -87,7 +88,7 @@ func TestShareCreate_APathThatIsNotAnInputIsNotCatalogued(t *testing.T) {
 
 	_, err := shareCreate(t, s, map[string]any{"page_id": "signer", "path": "private/salaries.txt"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no such file")
+	assert.Equal(t, errPathNotHanded, err)
 	assert.Empty(t, cat.asked, "a path outside the job's inputs must not reach the catalogue")
 	node, _ := h.store.GetNodeByPath(context.Background(), h.st.ID, pathkey.Hash(h.st.ID, "/private/salaries.txt"))
 	assert.Nil(t, node)

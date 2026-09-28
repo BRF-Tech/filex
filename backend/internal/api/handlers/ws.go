@@ -358,6 +358,7 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 			client.ConfineRel = ticket.ConfineRel
 		}
 	}
+	h.Hub.Connect(client)
 	defer h.Hub.Unsubscribe(client)
 
 	go h.writePump(connCtx, cancel, conn, client)

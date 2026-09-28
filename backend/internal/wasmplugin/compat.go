@@ -249,6 +249,20 @@ func compatOf(m *Manifest) *Compat {
 	return &Compat{Requires: rng.text, OK: !enforced || rng.admits(host), Filex: FilexVersion()}
 }
 
+// JudgeFilexRange reads a bare `filex` range the way an app's is read and
+// judges it against the running filex — for a storage plugin's feed
+// (plugin/updates.go), so there is one range grammar in filex, not two. ok is
+// true on a development build (ranges are not enforced there) and for an
+// empty range; err when the range does not parse.
+func JudgeFilexRange(rng string) (ok bool, requires, filex string, err error) {
+	r, err := parseFilexRange(rng)
+	if err != nil {
+		return false, strings.TrimSpace(rng), FilexVersion(), err
+	}
+	host, enforced := hostRelease()
+	return !enforced || r.admits(host), r.text, FilexVersion(), nil
+}
+
 // refuseIncompatible is the install and upgrade gate: an app whose range
 // leaves the running filex out is not installed.
 func refuseIncompatible(m *Manifest) error {

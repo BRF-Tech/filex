@@ -1411,6 +1411,16 @@ func hasView(m wire.Manifest, id string) bool {
 	return false
 }
 
+// findView is the view of m with id, if there is one.
+func findView(m wire.Manifest, id string) (*wire.View, bool) {
+	for i := range m.Views {
+		if m.Views[i].ID == id {
+			return &m.Views[i], true
+		}
+	}
+	return nil, false
+}
+
 func pageByID(m wire.Manifest, id string) (wire.PublicPage, bool) {
 	for _, p := range m.PublicPages {
 		if p.ID == id {

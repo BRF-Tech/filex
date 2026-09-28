@@ -74,6 +74,10 @@ type Status struct {
 	// how often callers have had to wait or been refused a slot. A plugin
 	// that is merely SLOW shows up here long before it shows up as an error.
 	Load Stats `json:"load"`
+	// Update is what the last check of the plugin's source found
+	// (updates.go); absent for a plugin without a source, or before the
+	// first check.
+	Update *UpdateInfo `json:"update,omitempty"`
 }
 
 // Options configure a Manager.
@@ -103,6 +107,9 @@ type Options struct {
 	// binary is refused at install: the sha256 only proves the file has not
 	// changed since it arrived, never that it came from someone you trust.
 	TrustedKeys []string
+	// Platform is the GOOS/GOARCH key a source's build is chosen by
+	// (updates.go). Empty = the running one; tests set it.
+	Platform string
 }
 
 // Manager owns every plugin's lifecycle and its place in the storage
@@ -123,6 +130,9 @@ type Manager struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// updates: the source check's wiring and schedule (updates.go).
+	updates updateState
 
 	mu      sync.Mutex
 	entries map[int64]*entry
@@ -219,6 +229,7 @@ func New(o Options) (*Manager, error) {
 		conf: o.Conformance, maxInFlight: o.MaxInFlight, trusted: trusted, guardDownloads: guardDownloads,
 		ctx: ctx, cancel: cancel,
 		entries: map[int64]*entry{}, drivers: map[string]int64{},
+		updates: updateState{platform: o.Platform},
 	}, nil
 }
 
@@ -990,6 +1001,12 @@ func (m *Manager) checkSignature(sha, signature string) error {
 // lost plugin. filename is accepted for the caller's convenience and not
 // used: the file keeps the name it was installed under (see the note inside).
 func (m *Manager) Upgrade(ctx context.Context, id int64, filename string, r io.Reader, signature string) (*Status, error) {
+	return m.upgrade(ctx, id, r, signature, "")
+}
+
+// upgrade is Upgrade with the bytes held to wantSHA when it is set (an
+// upgrade from the plugin's source: the feed names the hash, updates.go).
+func (m *Manager) upgrade(ctx context.Context, id int64, r io.Reader, signature, wantSHA string) (*Status, error) {
 	e, err := m.entryFor(ctx, id)
 	if err != nil {
 		return nil, err
@@ -1024,6 +1041,11 @@ func (m *Manager) Upgrade(ctx context.Context, id int64, filename string, r io.R
 	sum, err := writeBinary(staged, r, m.maxB)
 	if err != nil {
 		return m.statusOf(ctx, e), err
+	}
+	if wantSHA != "" && !strings.EqualFold(sum, wantSHA) {
+		// Wrong bytes: nothing was stopped or swapped yet.
+		_ = os.Remove(staged)
+		return m.statusOf(ctx, e), reject("sha256 mismatch: downloaded %s, the source names %s", sum[:12], wantSHA[:min(12, len(wantSHA))])
 	}
 	if err := m.checkSignature(sum, signature); err != nil {
 		_ = os.Remove(staged)
@@ -1136,7 +1158,22 @@ func (m *Manager) InstallFromURL(ctx context.Context, name, rawURL, sha, signatu
 	if _, err := hex.DecodeString(sha); err != nil {
 		return nil, errors.New("sha256 is required (64 hex characters) when installing from a URL")
 	}
-	u, err := checkDownloadURL(strings.TrimSpace(rawURL), m.guardDownloads)
+	resp, err := m.download(ctx, strings.TrimSpace(rawURL))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	filename := filepath.Base(resp.Request.URL.Path)
+	// The sha256 is compared BEFORE anything is started — see install.
+	return m.install(ctx, name, filename, resp.Body, signature, sha)
+}
+
+// download GETs rawURL through the guarded download client — the one
+// address check and the one client every plugin download uses (an install
+// by address, a source's feed, a source's build). The caller closes the
+// body of a 200; anything else is an error.
+func (m *Manager) download(ctx context.Context, rawURL string) (*http.Response, error) {
+	u, err := checkDownloadURL(rawURL, m.guardDownloads)
 	if err != nil {
 		return nil, err
 	}
@@ -1155,13 +1192,11 @@ func (m *Manager) InstallFromURL(ctx context.Context, name, rawURL, sha, signatu
 		}
 		return nil, fmt.Errorf("download: %w", err)
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		return nil, fmt.Errorf("download: http %d", resp.StatusCode)
 	}
-	filename := filepath.Base(req.URL.Path)
-	// The sha256 is compared BEFORE anything is started — see install.
-	return m.install(ctx, name, filename, resp.Body, signature, sha)
+	return resp, nil
 }
 
 // InstallRemote registers a plugin filex connects to rather than runs.
@@ -1317,6 +1352,7 @@ func (m *Manager) statusOf(ctx context.Context, e *entry) *Status {
 	}
 	st.Conformance = e.report
 	st.Load = e.lim.stats()
+	st.Update = updateInfoOf(&rowCopy)
 	driver := rowCopy.Driver
 	e.mu.Unlock()
 	if driver != "" {

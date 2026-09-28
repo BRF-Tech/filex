@@ -46,6 +46,15 @@ type Plugin struct {
 	// LastError is the last start/validation failure, cleared on success.
 	LastError string `json:"last_error,omitempty"`
 
+	// Source is where newer versions of a binary plugin are published:
+	// `owner/name` (the filex-storage.json attached to the repository's
+	// latest release) or the https address of a filex-storage.json feed.
+	// Empty = none (plugin/updates.go).
+	Source string `json:"source,omitempty"`
+	// UpdateJSON is what the last update check found (plugin.UpdateInfo);
+	// the admin reads it as Status.Update.
+	UpdateJSON string `json:"-"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

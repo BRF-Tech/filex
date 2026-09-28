@@ -896,9 +896,9 @@ func (h *PublicAPI) serveExposed(w http.ResponseWriter, r *http.Request, sh *mod
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return
 	}
-	if pf.Mime != "" {
-		w.Header().Set("Content-Type", pf.Mime)
-	}
+	// The type, nosniff and — for an active kind — a script-less sandbox: the
+	// copy is served from filex's own origin (httpx/inline.go).
+	httpx.ProtectServedFile(w.Header(), httpx.ServedType(pf.Mime, pf.Name))
 	// ⚠ Through httpx, never hand-built: a Turkish or CJK name puts bytes
 	// above 127 into the header and a strict client (Electron's undici)
 	// throws inside the response event, where the caller cannot catch it.
@@ -913,7 +913,6 @@ func (h *PublicAPI) serveExposed(w http.ResponseWriter, r *http.Request, sh *mod
 		disposition = "attachment"
 	}
 	w.Header().Set("Content-Disposition", httpx.ContentDisposition(disposition, pf.Name))
-	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// Counted once per download, not per piece: a download manager may fetch
 	// the same file in several Range requests, and only the one that starts
 	// at the beginning (or asks for the whole) is a new download. Not capped:

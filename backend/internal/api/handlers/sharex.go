@@ -60,7 +60,7 @@ const shareXDefaultDir = "sharex"
 // must be non-nil for sharing to work — it is the same *share.Service the rest
 // of the app uses.
 func NewShareX(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string) *ShareX {
-	ops := newAIOps(store, resolver, shareSvc, publicURL, nil)
+	ops := newAIOps(store, resolver, shareSvc, publicURL)
 	// Same aiOps core, distinct writehook origin — ShareX captures stamp
 	// their file events (and AV scans) as origin "sharex", not "ai".
 	ops.origin = writehook.OriginShareX

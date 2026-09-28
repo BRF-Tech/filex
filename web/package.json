@@ -1,7 +1,7 @@
 {
   "name": "@brftech/filex-admin",
   "private": true,
-  "version": "0.47.0",
+  "version": "0.48.0",
   "type": "module",
   "description": "filex web app — the Vue 3 SPA behind both /admin and the end-user /drive, embedded into the Go binary via go:embed",
   "scripts": {
@@ -42,6 +42,7 @@
     "eslint": "^9.13.0",
     "eslint-plugin-vue": "^9.29.0",
     "happy-dom": "^15.7.4",
+    "jsdom": "^25.0.1",
     "postcss": "^8.4.47",
     "rimraf": "^6.0.1",
     "tailwindcss": "^3.4.14",

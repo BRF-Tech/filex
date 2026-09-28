@@ -28,6 +28,11 @@ features degrade gracefully if missing:
 | `markdown-it` | Markdown preview |
 | `codemirror` + `@codemirror/lang-*` | Lighter-weight editor alternative |
 
+Every preview that draws a file as HTML (Markdown, notebooks, highlighted
+code, Mermaid, KaTeX) sanitizes it with
+[DOMPurify](https://github.com/cure53/DOMPurify), a regular dependency of this
+package (bundled unmodified; licensed Apache-2.0 OR MPL-2.0 at your choice).
+
 ## Use
 
 ```vue

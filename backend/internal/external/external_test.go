@@ -49,13 +49,13 @@ func TestGet_DisabledOrURLlessRowsReadAsNotConfigured(t *testing.T) {
 
 	require.NoError(t, store.UpsertExternalService(ctx, external.Drawio,
 		false, "https://draw.example", "", "{}", time.Time{}, "disabled"))
-	require.NoError(t, store.UpsertExternalService(ctx, external.Convert,
+	require.NoError(t, store.UpsertExternalService(ctx, external.OnlyOffice,
 		true, "   ", "", "{}", time.Time{}, "unconfigured"))
 	r.Invalidate()
 
 	require.False(t, r.Get(ctx, external.Drawio).Enabled, "an operator turned it off")
-	require.False(t, r.Get(ctx, external.Convert).Enabled, "a blank URL is not a URL")
-	require.Empty(t, r.URL(ctx, external.Convert))
+	require.False(t, r.Get(ctx, external.OnlyOffice).Enabled, "a blank URL is not a URL")
+	require.Empty(t, r.URL(ctx, external.OnlyOffice))
 }
 
 // ⚠ A database blip must not report a configured editor as unconfigured: that

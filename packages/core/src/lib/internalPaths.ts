@@ -21,7 +21,11 @@
  */
 
 /** The internal directory names, in syspath.go's order. */
-export const INTERNAL_DIR_NAMES = ['.filex-trash', '.versions', '.thumbs', '.filex-open'] as const;
+export const INTERNAL_DIR_NAMES = ['.filex-trash', '.versions', '.thumbs', '.filex-open', '.filex-drafts'] as const;
+
+/** The drafts area (issue #71, syspath.Drafts): where a new document lives
+ *  until its first save, `.filex-drafts/<user id>/<key>/<name>`. */
+export const DRAFTS_DIR_NAME = '.filex-drafts';
 
 /** The zero-byte file that keeps an empty folder alive on a blob store. */
 export const KEEP_MARKER_NAME = '.keepdir';
@@ -74,4 +78,24 @@ export function listingAddress(wire: string): string {
   if (!isInternalPath(w)) return w;
   const at = w.indexOf('://');
   return at >= 0 ? w.slice(0, at + 3) : '';
+}
+
+/**
+ * The key of the draft `path` is — `<storage>://.filex-drafts/<user id>/<key>/
+ * <name>` — or '' when it is not one (issue #71).
+ *
+ * ⚠ This is how an EDITOR knows it is on a draft, whoever opened it: the
+ * explorer's New document, the Drafts view, a reload of the standalone
+ * editor tab, a desktop document window. Each of them hands the viewer a path
+ * and nothing else, so the path is the one thing all of them agree on; the
+ * draft itself (where it is meant to go) is then asked of the server by this
+ * key. The shape is the server's (syspath.IsDraftOf): exactly four segments,
+ * a key of lowercase hex.
+ */
+export function draftKeyOf(path: string): string {
+  const segs = segments(path);
+  if (segs.length !== 4 || segs[0] !== DRAFTS_DIR_NAME) return '';
+  if (!/^[1-9][0-9]*$/.test(segs[1])) return '';
+  if (!/^[0-9a-f]{8,32}$/.test(segs[2])) return '';
+  return isInternalName(segs[3]) ? '' : segs[2];
 }

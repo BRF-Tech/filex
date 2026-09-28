@@ -3,6 +3,7 @@ package wasmplugin
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -14,8 +15,12 @@ import (
 // Manifest is a validated filex-app.json.
 type Manifest struct {
 	wire.Manifest
-	// Perms is Permissions parsed and validated.
+	// Perms is Permissions parsed and validated, followed by the permissions
+	// the `ui` block derives (uimanifest.go).
 	Perms []Permission
+	// uiReasons are the reasons of the derived `ui-net:` permissions — each
+	// live address's own `reason` (PermissionRows).
+	uiReasons map[Permission]wire.Text
 }
 
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
@@ -84,12 +89,26 @@ func (m *Manifest) Validate() error {
 	if m.Label["en"] == "" {
 		return fmt.Errorf("manifest: label.en is required")
 	}
+	// ⚠ The homepage is drawn as a link on the app's page in the admin panel,
+	// so anything but an http(s) address is DROPPED rather than refused: the
+	// field is only ever shown, and an installed app is parsed again at every
+	// start — a harmless "github.com/x" must not stop it from loading.
+	if h := strings.TrimSpace(m.Homepage); h != "" {
+		u, err := url.Parse(h)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			m.Homepage = ""
+		}
+	}
 	m.Perms = m.Perms[:0]
 	seen := map[Permission]bool{}
 	for _, raw := range m.Permissions {
 		p, err := ParsePermission(raw)
 		if err != nil {
 			return fmt.Errorf("manifest: %w", err)
+		}
+		if isUIPerm(p) {
+			// ONE place says what the interface loads: its `ui` block.
+			return fmt.Errorf("manifest: permission %q is derived from the ui block — leave it out of permissions", raw)
 		}
 		if !seen[p] {
 			seen[p] = true
@@ -165,16 +184,27 @@ func (m *Manifest) Validate() error {
 		viewIDs[v.ID] = true
 		switch v.Placement {
 		case "modal", "page", "inspector", "home":
+		case "viewer":
+			// A viewer opens a FILE in the preview's place: only an
+			// interface can be one — a Surface has no way to show a file.
+			if v.UI == "" {
+				return fmt.Errorf("manifest: views[%d] (%s): placement viewer is for the app's own interface — give it a ui file", i, v.ID)
+			}
 		case "":
 			v.Placement = "modal"
 		default:
-			return fmt.Errorf("manifest: views[%d]: placement %q must be modal, page, inspector or home", i, v.Placement)
+			return fmt.Errorf("manifest: views[%d]: placement %q must be modal, page, inspector, home or viewer", i, v.Placement)
 		}
 		if v.Label["en"] == "" {
 			return fmt.Errorf("manifest: views[%d]: label.en is required", i)
 		}
 		if err := validateApplies(&v.Applies); err != nil {
 			return fmt.Errorf("manifest: views[%d]: %w", i, err)
+		}
+		if v.Placement == "viewer" {
+			if err := checkViewerApplies(&v.Applies); err != nil {
+				return fmt.Errorf("manifest: views[%d] (%s): %w", i, v.ID, err)
+			}
 		}
 	}
 	actionIDs := map[string]bool{}
@@ -227,6 +257,9 @@ func (m *Manifest) Validate() error {
 		if a.Output.Mode == "sibling" && a.Output.Name == "" {
 			a.Output.Name = "{stem}-" + a.ID + "{ext}"
 		}
+	}
+	if err := m.checkUI(); err != nil {
+		return err
 	}
 	for i := range m.PublicPages {
 		p := &m.PublicPages[i]

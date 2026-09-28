@@ -26,10 +26,13 @@ import (
 //  1. Open a sync_runs row (status=running)
 //  2. Recursively walk the backend, upserting nodes and updating seen_at
 //  3. Reconcile the trash bucket: nothing may be live in there. Then drop
-//     every row an older walk minted inside `.versions/` and `.thumbs/`.
-//  4. Tombstone-pass: any node whose seen_at < runStart is soft-deleted —
+//     every row an older walk minted inside `.versions/` and `.thumbs/`, and
+//     every row an older version deleted where it stood (dropVanished).
+//  4. Tombstone-pass: any node whose seen_at < runStart and whose object is
+//     confirmed gone is dropped from the catalogue (dropRows, issue #74) —
 //     but only if seen_count >= 0.7 * lastSeenCount (false-positive guard),
-//     and never a row inside filex's own trees.
+//     never a row inside filex's own trees, and never a row below a folder
+//     the walk could not list.
 //  5. Close the sync_runs row with the final status.
 //
 // ⚠ Step 2 skips filex's own trees entirely (`.filex-trash/`, `.versions/`,
@@ -118,11 +121,23 @@ func (s *storageSyncer) run(ctx context.Context) error {
 
 	s.reconcileTrash(ctx)
 	s.reconcileInternalTrees(ctx)
+	s.dropVanished(ctx)
 
 	deleted := 0
 	if guardOK(seen, prevSeen) {
 		stale, err := s.store.ListStaleNodes(ctx, s.storage.ID, runStart)
 		if err == nil {
+			// Below a folder whose listing failed, every row looks unseen
+			// and none of them is known to be gone: not candidates.
+			if len(c.unlisted) > 0 {
+				kept := stale[:0:0]
+				for _, n := range stale {
+					if !belowAny(n.Path, c.unlisted) {
+						kept = append(kept, n)
+					}
+				}
+				stale = kept
+			}
 			deleted = s.tombstone(ctx, stale)
 		}
 	} else {
@@ -214,6 +229,10 @@ type walkCounts struct {
 	// listed, or was left uncatalogued: the walk carries on past it, and
 	// everything under it looks unseen without being gone.
 	partial bool
+	// unlisted names those directories, so a full pass can leave what is
+	// below them out of its tombstone candidates (a folder rescan removes
+	// nothing at all when partial is set).
+	unlisted []string
 }
 
 // dirLister answers "what is in directory p" for one walk — the driver's List,
@@ -303,6 +322,7 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *wa
 	})
 	if errors.Is(err, errAbandoned) {
 		c.partial = true
+		c.unlisted = append(c.unlisted, p)
 		return 0, nil
 	}
 	count := 0
@@ -326,6 +346,7 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *wa
 			count += cn
 		} else {
 			c.partial = true
+			c.unlisted = append(c.unlisted, e.obj.Path)
 		}
 	}
 	return count, nil
@@ -347,13 +368,17 @@ var errRetryOutsideTx = errors.New("sync: a catalogue write failed inside the di
 
 // entryBatch is what the entries applied in one transaction still owe the rest
 // of filex once it commits: rows for the search index, files for the
-// antivirus, and rows tombstoned whose documents leave the index.
+// antivirus, and rows dropped whose documents leave the index and whose cached
+// files are released.
 type entryBatch struct {
 	// inTx: the entries run inside Store.WithTx.
 	inTx    bool
 	index   []*model.Node
 	scan    []*model.Node
 	unindex []int64
+	// reclaim: rows dropped for good (dropRows), whose per-node caches go
+	// (Worker.AttachReclaim).
+	reclaim []int64
 }
 
 // listedEntry is one entry of a directory's listing as applyListing left it.
@@ -482,6 +507,11 @@ func (s *storageSyncer) handOff(ctx context.Context, b *entryBatch) {
 	for _, n := range b.scan {
 		s.enqueueScan(ctx, n)
 	}
+	if s.reclaim != nil {
+		for _, id := range b.reclaim {
+			s.reclaim(ctx, id)
+		}
+	}
 }
 
 // markerFirst moves the encrypted-folder marker to the front of a listing.
@@ -529,8 +559,8 @@ func (s *storageSyncer) catalogueEntry(ctx context.Context, p string, parent *in
 	// ⚠⚠ There may still be a TRASHED row at this path -- not the
 	// everyday deletion (that row was retagged into `.filex-trash`,
 	// which we no longer walk), but the rows soft-deleted where they
-	// stood: the tombstone pass's own SoftDeleteNode, and the error
-	// branches in applyDBMove / SyncHardDelete.
+	// stood: the tombstone pass's own up to 0.47 (it drops the row now,
+	// and dropVanished drops those), and SyncHardDelete's.
 	//
 	// This used to clear deleted_at and carry on, on the theory that
 	// UNIQUE(storage_id, path_hash) left no other way to catalogue the
@@ -543,9 +573,11 @@ func (s *storageSyncer) catalogueEntry(ctx context.Context, p string, parent *in
 	// and -- because nothing downstream sees a new file -- means
 	// nothing ever looks at them again.
 	//
-	// So: leave the trashed row in the trash (still restorable, still
-	// on the retention clock) and catalogue what is really there as a
-	// NEW node, which is indexed and treated as new everywhere else.
+	// So: leave the trashed row where it is (a real trash entry stays
+	// restorable and on the retention clock; a row deleted where it
+	// stood is dropped by dropVanished) and catalogue what is really
+	// there as a NEW node, which is indexed and treated as new
+	// everywhere else.
 	if trashed, _ := s.store.GetNodeByPathIncludingDeleted(ctx, s.storage.ID, hash); trashed != nil && trashed.DeletedAt != nil {
 		slog.Info("sync: an object reappeared where a trashed row still sits; catalogueing it as a new file",
 			slog.Int64("trashed_node", trashed.ID),
@@ -927,23 +959,22 @@ func (s *storageSyncer) settleTransfer(ctx context.Context, n *model.Node, obj s
 	return true
 }
 
-// tombstone moves the stale candidates that are really gone into the trash
-// and returns how many it moved.
+// tombstone drops from the catalogue the stale candidates that are really
+// gone (dropRows; issue #74: not into the trash) and returns how many it
+// dropped.
 //
 // ⚠⚠ A row inside one of filex's own trees is NEVER a candidate, whatever
 // else went wrong. The walk does not look in there, so such a row is always
-// "unseen"; for a directory row confirmGone has no object to Stat and says
-// yes; and the trash then holds a folder whose purge deletes its prefix on the
-// backend — `.versions/` is every version of every file. The reconcile passes
-// that run before this one are what clears those rows up; this refusal is
-// what makes their failure harmless.
+// "unseen". Up to 0.47 a directory row there was trashed on that alone, and
+// the trash then held a folder whose purge deletes its prefix on the backend
+// — `.versions/` is every version of every file. The reconcile passes that run
+// before this one are what clears those rows up; this refusal is what makes
+// their failure harmless.
 //
 // ⚠⚠ Nor is a row the storage's scan exclusions cover (issue #44), for the
 // same reason: the walk does not look there, so "unseen" says nothing about
 // it. Such a row was catalogued before its pattern was added, or written
-// through filex since; it stays as it is. Trashing it would be worse than
-// wrong — a folder row in the trash is purged by deleting its prefix on the
-// backend, and the folder is still there.
+// through filex since; it stays as it is — the folder is still there.
 func (s *storageSyncer) tombstone(ctx context.Context, stale []*model.Node) int {
 	b := &entryBatch{}
 	deleted := s.tombstoneRows(ctx, stale, b)
@@ -951,11 +982,11 @@ func (s *storageSyncer) tombstone(ctx context.Context, stale []*model.Node) int 
 	return deleted
 }
 
-// tombstoneRows is tombstone with the search-index deletions left in b, for a
-// caller running inside a transaction (the lazy delete pass): the documents
-// leave the index only once the soft deletes have committed.
+// tombstoneRows is tombstone with the search-index deletions and the cache
+// releases left in b, for a caller running inside a transaction (the lazy
+// delete pass): they happen only once the drops have committed.
 func (s *storageSyncer) tombstoneRows(ctx context.Context, stale []*model.Node, b *entryBatch) int {
-	deleted := 0
+	var gone []*model.Node
 	for _, n := range stale {
 		if s.rule.Skips(n.Path) {
 			continue
@@ -963,16 +994,13 @@ func (s *storageSyncer) tombstoneRows(ctx context.Context, stale []*model.Node, 
 		if !s.confirmGone(ctx, n) {
 			continue
 		}
-		if err := s.store.SoftDeleteNode(ctx, n.ID); err == nil {
-			deleted++
-			b.unindex = append(b.unindex, n.ID)
-		}
+		gone = append(gone, n)
 	}
-	return deleted
+	return s.dropRows(ctx, gone, b)
 }
 
-// confirmGone decides whether a node the walk did not see may be moved to
-// trash.
+// confirmGone decides whether a node the walk did not see is gone from the
+// storage, and may be dropped from the catalogue (dropRows).
 //
 // ⚠⚠ Absence from a listing is NOT proof that the user's file was deleted, and
 // answering it with "move to trash" is how a bug in an unrelated part of filex
@@ -1001,6 +1029,13 @@ func (s *storageSyncer) tombstoneRows(ctx context.Context, stale []*model.Node, 
 //     opinion and it only runs for candidates. Only a definite ErrNotFound is
 //     taken as deletion; any other error (permissions, timeout, 503) keeps the
 //     node, because "I could not check" must never read as "it is gone".
+//
+// Folders are asked too (issue #74). A folder row used to be taken as gone on
+// the listing alone ("most drivers have no object to Stat"), which was
+// tolerable while the answer was the trash. The answer is now a drop, and every
+// shipped driver answers Stat for a folder (the S3 driver by the prefix still
+// having objects under it), exactly as the lazy catalogue's delete pass has
+// always asked it.
 func (s *storageSyncer) confirmGone(ctx context.Context, n *model.Node) bool {
 	if n.TransferState != "" && n.TransferState != model.TransferStateStored {
 		slog.Info("sync: keeping unstored node out of the tombstone pass",
@@ -1009,12 +1044,6 @@ func (s *storageSyncer) confirmGone(ctx context.Context, n *model.Node) bool {
 			slog.String("transfer_state", n.TransferState),
 			slog.String("storage", s.storage.Name))
 		return false
-	}
-	if n.Type != model.NodeTypeFile {
-		// A directory is an artefact of the listing on most drivers (S3 has no
-		// such thing), so there is no object to Stat. The seen_at rule is all
-		// there is, and a directory carries no bytes of its own.
-		return true
 	}
 	key := n.StorageKey
 	if key == "" {

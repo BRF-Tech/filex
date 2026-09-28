@@ -93,7 +93,7 @@ import { DesktopNotifier, opensInWindow, type NotificationRow } from './notifica
 // destination (notificationTarget) and the sentence (notificationText) do:
 // "exact to 99, `99+` above" is a product rule, and a counter written twice is
 // a counter that disagrees with itself. Same boundary, same reason.
-import { unreadBadgeCount, unreadBadgeLabel } from '../../web/src/lib/unreadBadge.ts';
+import { unreadBadgeCount, unreadBadgeLabel } from '../../packages/core/src/lib/unreadBadge.ts';
 import {
   OFFICE_EXTENSIONS,
   OpeningDocs,
@@ -589,7 +589,7 @@ function route(): void {
 // ─────────────────────── native notifications ───────────────────────
 //
 // ⚠ The DESTINATION of a click is not decided here. It is resolved by
-// web/src/lib/notificationTarget.ts — the same module the browser bell uses —
+// packages/core/src/lib/notificationTarget.ts — the same module the browser bell uses —
 // and handed to the page as a structured destination. That is what stops the
 // desktop notification from opening one place while the bell opens another.
 
@@ -599,11 +599,12 @@ function route(): void {
 // lives ON the icon* — in the explorer, in the desktop app, and on mobile when
 // it comes; exact to 99 and `99+` above that; the SAME rule on every surface.
 //
-// ⚠⚠ The desktop window is the explorer and has no bell in it, so there is
-// no button here to draw a badge on. The icon this app has is the one in the
-// dock / taskbar and the one in the tray, and that is where the number goes.
-// Until now it went nowhere at all: the app polled the bell every 15 s, raised
-// a toast, and then showed no trace that anything was waiting — a person who
+// ⚠⚠ The number goes on the app's own icons — the dock / taskbar and the
+// tray — AND, since 2026-09-27, into the window: the explorer draws the web's
+// bell in its header (`config.notifications`), and this poll hands it the
+// same count (`notify:unread`) instead of the window asking the server a
+// second time every 15 s. Before either, the app polled the bell, raised a
+// toast, and then showed no trace that anything was waiting — a person who
 // missed the toast had no way to learn they had 40 unread rows.
 //
 // ⚠ The `99+` ceiling is the WEB badge's, not this one's: it is about how
@@ -619,6 +620,9 @@ let unreadByAccount: Record<string, number> = {};
 function applyUnreadBadge(accountId: string, count: number): void {
   unreadByAccount = { ...unreadByAccount, [accountId]: count };
   paintUnread();
+  // The window's bell (the explorer's header). The page keeps ONE subscriber
+  // and ignores a count for an account it is not showing.
+  mainWindow?.webContents.send('notify:unread', { accountId, count });
 }
 
 function paintUnread(): void {
@@ -689,6 +693,16 @@ function startNotifier(): void {
       return { items, total: typeof body.total === 'number' ? body.total : items.length };
     },
     onUnread: (accountId, count) => applyUnreadBadge(accountId, count),
+    // A clicked toast that goes somewhere marks its row read (DesktopNotifier
+    // .clicked) — the same rule as the web's browser toast.
+    markRead: async (acc, id) => {
+      const url = serverUrl(acc.serverUrl, `/api/notifications/${encodeURIComponent(String(id))}/read`);
+      const res = await net.fetch(url.toString(), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${acc.token}` },
+      });
+      if (!res.ok) throw Object.assign(new Error(`server said ${res.status}`), { status: res.status });
+    },
     onUnauthorized: (accountId) => markSignedOut(accountId, 'the bell was refused twice in a row (HTTP 401)'),
     // The reader's language, read per row — see DesktopNotifierOptions.locale.
     locale: () => effectiveLocale(),
@@ -696,7 +710,7 @@ function startNotifier(): void {
       if (!Notification.isSupported()) return;
       const n = new Notification({
         // ⚠ Composed from the row's event + metadata by the SHARED renderer
-        // (web/src/lib/notificationText.ts), in this window's language — not
+        // (packages/core/src/lib/notificationText.ts), in this window's language — not
         // taken from the server's `title`, which is written once in whatever
         // language the server was configured with and, for most file events,
         // is not written at all (`row.title` is then the literal event id).
@@ -724,8 +738,9 @@ function startNotifier(): void {
       // user clicks has to be able to bring the app back, not silently do
       // nothing. openMainWindow() shows and focuses an existing one.
       openMainWindow();
-      // A folder or the Trash view (opensInWindow); anything else has nothing
-      // to open beyond the window.
+      // A folder, the Trash view or an app's home view (opensInWindow) — the
+      // explorer carries it out in place (revealNotification); anything else
+      // has nothing to open beyond the window.
       if (!opensInWindow(dest)) return;
       const send = () => mainWindow?.webContents.send('notify:open', { accountId, dest });
       if (mainWindow && mainWindow.webContents.isLoading()) {
@@ -2092,6 +2107,14 @@ const OPEN_WITH_STRINGS: Bilingual = {
     'Right-click any .docx → Get Info → "Open with" → filex → Change All…',
     'Herhangi bir .docx dosyasına sağ tıkla → Bilgi Al → “Şununla aç” → filex → Tümünü Değiştir…',
   ],
+  // Drafts (issue #71) — a draft's document window closing with edits in it.
+  draftLeaveMessage: ['Close this draft?', 'Bu taslak kapatılsın mı?'],
+  draftLeaveDetail: [
+    'What was typed stays in Drafts, where it can be opened or saved later.',
+    'Yazılanlar Taslaklar’da kalır; daha sonra açılabilir ya da kaydedilebilir.',
+  ],
+  draftLeave: ['Close', 'Kapat'],
+  draftStay: ['Keep editing', 'Düzenlemeye devam et'],
 };
 
 function openText(key: string, vars: Record<string, string> = {}): string {
@@ -2485,6 +2508,23 @@ function makeDocumentWindow(
     void win.webContents
       .executeJavaScript(extra + docChromeScript(), true)
       .catch(() => undefined);
+  });
+  // Drafts (issue #71): a draft's editor asks before its page goes away while
+  // it holds edits not yet saved where they belong (PreviewModal's
+  // `beforeunload`). A browser draws that question itself; Electron does not —
+  // it only reports it here, and without an answer the window would simply
+  // refuse to close. The same question, as the OS's own dialog. Leaving loses
+  // nothing: the draft keeps what was typed, and stays in Drafts.
+  win.webContents.on('will-prevent-unload', (e) => {
+    const leave = dialog.showMessageBoxSync(win, {
+      type: 'question',
+      buttons: [openText('draftLeave'), openText('draftStay')],
+      defaultId: 1,
+      cancelId: 1,
+      message: openText('draftLeaveMessage'),
+      detail: openText('draftLeaveDetail'),
+    });
+    if (leave === 0) e.preventDefault();
   });
   void win.loadURL(url);
   return win;
@@ -2992,10 +3032,19 @@ function wireIpc(): void {
   // The server's own admin panel opens in the BROWSER. It is a web console, it
   // wants the user's real session, and burying it inside a desktop file manager
   // is how the file manager stops looking like a file manager.
-  ipcMain.handle('account:openAdmin', (_e, id: string) => {
+  ipcMain.handle('account:openAdmin', (_e, id: string, page?: string) => {
     const acc = state.accounts.find((a) => a.id === id);
     if (!acc) throw new Error('unknown account');
-    void shell.openExternal(serverUrl(acc.serverUrl, '/admin/').toString());
+    // ⚠ One named page (the bell's "Manage notifications" door), never a path
+    // the page hands over: this opens the system browser.
+    const sub = page === 'notifications' ? 'notifications' : '';
+    void shell.openExternal(serverUrl(acc.serverUrl, `/admin/${sub}`).toString());
+  });
+
+  // The window's bell marked something read: ask the bell again now, so the
+  // dock / tray badge moves with it instead of on the next 15 s tick.
+  ipcMain.handle('notify:refresh', () => {
+    void notifier?.poll();
   });
 
   ipcMain.handle('auth:add', () => {

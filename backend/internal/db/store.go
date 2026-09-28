@@ -115,6 +115,14 @@ type Store interface {
 	HardDeleteNode(ctx context.Context, id int64) error
 	MoveNode(ctx context.Context, id int64, parentID *int64, name, path, pathHash string) error
 	ListStaleNodes(ctx context.Context, storageID int64, before time.Time) ([]*model.Node, error)
+	// ListVanishedNodeIDs returns, above afterID and in id order, the ids of a
+	// storage's rows soft-deleted WHERE THEY STOOD (deleted, path outside
+	// `.filex-trash/`): rows whose bytes were never parked in the trash, which
+	// the storage sync drops for good (issue #74). See VanishedSQL.
+	ListVanishedNodeIDs(ctx context.Context, storageID, afterID int64, limit int) ([]int64, error)
+	// CountChildRows counts the rows, live or deleted, whose parent_id is
+	// parentID: what the parent_id cascade would take with that row.
+	CountChildRows(ctx context.Context, parentID int64) (int, error)
 	// ListStaleNodesUnder is ListStaleNodes bounded to the rows strictly BELOW
 	// dir (the folder's own row excluded), matched exactly as ListNodesUnder
 	// matches — the tombstone candidates of a folder rescan.
@@ -319,6 +327,10 @@ type Store interface {
 	// DeleteAppPlugin removes the row and everything keyed on it (settings,
 	// overrides, state, jobs).
 	DeleteAppPlugin(ctx context.Context, id int64) error
+	// App versions an upgrade replaced (migration 00066), newest first.
+	CreateAppPluginVersion(ctx context.Context, v *model.AppPluginVersion) (*model.AppPluginVersion, error)
+	ListAppPluginVersions(ctx context.Context, pluginID int64) ([]*model.AppPluginVersion, error)
+	DeleteAppPluginVersion(ctx context.Context, id int64) error
 	GetAppPluginSettings(ctx context.Context, pluginID int64) (map[string]string, error)
 	// PutAppPluginSettings replaces the whole set.
 	PutAppPluginSettings(ctx context.Context, pluginID int64, values map[string]string) error
@@ -813,6 +825,26 @@ type Store interface {
 	ListNodeComments(ctx context.Context, nodeID int64) ([]*model.NodeComment, error)
 	SoftDeleteNodeComment(ctx context.Context, id int64) error
 	DeleteNodeCommentsByNode(ctx context.Context, nodeID int64) error
+
+	// Drafts (migration 00064, issue #71) — a new document before its first
+	// save. The rows are read joined to the draft file's node row: Path, Size,
+	// Mime, Mtime and NodeLive come from there. A draft whose node is trashed
+	// is kept (a restore brings it back); a draft whose node is purged goes
+	// with it (FK CASCADE).
+	CreateDraft(ctx context.Context, d *model.Draft) (*model.Draft, error)
+	// GetDraftByKey returns the draft with that key whatever its node's state,
+	// sql.ErrNoRows when there is none.
+	GetDraftByKey(ctx context.Context, key string) (*model.Draft, error)
+	// GetDraftByNode returns the draft whose file is that node, live or
+	// trashed, sql.ErrNoRows when there is none.
+	GetDraftByNode(ctx context.Context, nodeID int64) (*model.Draft, error)
+	// ListLiveDrafts returns a person's drafts whose file is live, the most
+	// recently made first.
+	ListLiveDrafts(ctx context.Context, userID int64) ([]*model.Draft, error)
+	// CountLiveDrafts is len(ListLiveDrafts) without reading the rows — the
+	// limit check and the navigation panel's badge.
+	CountLiveDrafts(ctx context.Context, userID int64) (int, error)
+	DeleteDraft(ctx context.Context, id int64) error
 
 	// Providers (tenants). See docs/MULTI-TENANCY.md. Inert while multi-tenant
 	// mode is off; a single "default" provider always exists (migration 00014).

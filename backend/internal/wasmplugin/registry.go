@@ -64,8 +64,16 @@ type Options struct {
 	MaxWasmBytes   int64
 	MaxInputBytes  int64
 	MaxOutputBytes int64
+	// MaxUIBytes caps an interface bundle, zipped (FILEX_APP_PLUGIN_MAX_UI_MB).
+	MaxUIBytes int64
 	// PerPluginJobs bounds concurrent action_run calls per plugin (default 2).
 	PerPluginJobs int
+	// PerPluginCalls bounds concurrent SCREEN calls per plugin — view and
+	// public page events (default 8). Each is a fresh instance with up to
+	// the manifest's memory ceiling (256 MiB at most), and a public page
+	// event is answered for an anonymous visitor: without a ceiling, a burst
+	// of events on one link held that much memory per request.
+	PerPluginCalls int
 }
 
 const (
@@ -92,15 +100,46 @@ type Installed struct {
 
 	mu       sync.RWMutex
 	compiled *Compiled
+	// ui is the loaded interface (uibundle.go); nil when the app has none.
+	ui *uiBundle
+	// prev is the version an upgrade replaced, kept to go back to
+	// (versions.go).
+	prev     *prevState
 	state    string
 	stateErr string
 	logs     *logRing
 	sem      chan struct{}
+	// calls bounds the plugin's concurrent screen calls (Options.PerPluginCalls).
+	calls    chan struct{}
 	mailRate rateWindow
 	signRate minuteWindow
 }
 
 func (p *Installed) log(level, msg string) { p.logs.add(level, msg) }
+
+// UI is the app's loaded interface, nil when it has none (or it failed to
+// load — the state says why).
+func (p *Installed) UI() *uiBundle {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.ui
+}
+
+// UIBundle is the interface version an address names (its bundle sha256's
+// first 16 hex digits); nil when this app serves no such version.
+func (p *Installed) UIBundle(short string) *uiBundle {
+	if b := p.UI(); b != nil && b.short == short {
+		return b
+	}
+	return nil
+}
+
+// HasModule reports whether the app runs a wasm module: every app but a
+// language pack and an app that is only an interface (its row has no module
+// file).
+func (p *Installed) HasModule() bool {
+	return p.Row.WasmPath != ""
+}
 
 // State returns the live state and its error.
 func (p *Installed) State() (string, string) {
@@ -176,7 +215,21 @@ type Registry struct {
 	closing   bool
 	// updates is the update check's own state (updates.go).
 	updates updateState
+
+	// uiOriginURL is where interfaces are served when they have an origin of
+	// their own (FILEX_APP_UI_ORIGIN): their addresses are then absolute.
+	// "" = filex's own origin, relative addresses.
+	uiOriginURL string
+	// upgraded hears every approved version change (versions.go).
+	upgraded UpgradeListener
 }
+
+// SetUIOrigin sets the separate origin interfaces are served from
+// (FILEX_APP_UI_ORIGIN, with its base path, no trailing slash); "" for filex's
+// own.
+func (r *Registry) SetUIOrigin(origin string) { r.uiOriginURL = strings.TrimRight(origin, "/") }
+
+func (r *Registry) uiOrigin() string { return r.uiOriginURL }
 
 // New prepares the registry (no plugin is loaded until Load).
 func New(o Options) (*Registry, error) {
@@ -204,8 +257,14 @@ func New(o Options) (*Registry, error) {
 	if o.MaxOutputBytes <= 0 {
 		o.MaxOutputBytes = defaultMaxOutput
 	}
+	if o.MaxUIBytes <= 0 {
+		o.MaxUIBytes = DefaultMaxUIBytes
+	}
 	if o.PerPluginJobs <= 0 {
 		o.PerPluginJobs = 2
+	}
+	if o.PerPluginCalls <= 0 {
+		o.PerPluginCalls = 8
 	}
 	for _, sub := range []string{"", "cache", "spool", "public"} {
 		if err := os.MkdirAll(filepath.Join(o.Dir, sub), 0o700); err != nil {
@@ -241,6 +300,15 @@ func New(o Options) (*Registry, error) {
 }
 
 func (r *Registry) spoolRoot() string { return filepath.Join(r.opts.Dir, "spool") }
+
+func (r *Registry) maxUIBytes() int64 { return r.opts.MaxUIBytes }
+
+// MaxOutputBytes is the ceiling on one file an app writes (a job's output, an
+// interface's save).
+func (r *Registry) MaxOutputBytes() int64 { return r.opts.MaxOutputBytes }
+
+// MaxUIBytes is the interface bundle's ceiling, zipped.
+func (r *Registry) MaxUIBytes() int64 { return r.opts.MaxUIBytes }
 
 // Dir is where modules live.
 func (r *Registry) Dir() string { return r.opts.Dir }
@@ -303,6 +371,7 @@ func (r *Registry) Load(ctx context.Context) error {
 			continue
 		}
 		r.put(p)
+		r.loadPrevious(ctx, p)
 		r.upgradeLegacyOverrides(ctx, p)
 		if row.Enabled {
 			r.compile(ctx, p)
@@ -443,7 +512,7 @@ func (r *Registry) entryFor(row *model.AppPlugin) (*Installed, error) {
 	sort.Slice(perms, func(i, j int) bool { return perms[i] < perms[j] })
 	return &Installed{
 		Row: row, Manifest: m, Grants: NewGrants(perms), Perms: perms,
-		state: StateDisabled, sem: make(chan struct{}, r.opts.PerPluginJobs), logs: &logRing{},
+		state: StateDisabled, sem: make(chan struct{}, r.opts.PerPluginJobs), calls: make(chan struct{}, r.opts.PerPluginCalls), logs: &logRing{},
 	}, nil
 }
 
@@ -471,6 +540,37 @@ func (r *Registry) compile(ctx context.Context, p *Installed) {
 		p.log("info", "language pack "+p.Row.Name+" "+p.Row.Version+" serves "+strings.Join(sortedTags(p.Manifest.UILocales), ", ")+" — no module, nothing runs")
 		return
 	}
+	// The interface first (uibundle.go): an app whose interface does not load
+	// — its bundle gone, or no longer the bytes that were approved — is not
+	// running, exactly like a module that no longer hashes to its row.
+	if err := r.loadUI(p); err != nil {
+		p.setState(StateFailed, err.Error())
+		r.persistError(ctx, p, err.Error())
+		return
+	}
+	if !p.HasModule() {
+		// ⚠ An app that is ONLY an interface (draw.io's editor): no module,
+		// no runtime instance, nothing to describe. "Running" means its
+		// interface is served.
+		if p.Manifest.UI == nil {
+			msg := "the app has neither a module nor an interface"
+			p.setState(StateFailed, msg)
+			r.persistError(ctx, p, msg)
+			return
+		}
+		p.mu.Lock()
+		if p.compiled != nil {
+			_ = p.compiled.Close(ctx)
+			p.compiled = nil
+		}
+		p.mu.Unlock()
+		p.setState(StateRunning, "")
+		if p.Row.LastError != "" {
+			r.persistError(ctx, p, "")
+		}
+		p.log("info", "loaded "+p.Row.Name+" "+p.Row.Version+" — an interface, no module")
+		return
+	}
 	wasmPath := filepath.Join(r.opts.Dir, p.Row.Name, p.Row.WasmPath)
 	c, err := r.rt.Compile(ctx, wasmPath, p.Row.SHA256, p.Manifest, nil, p.log)
 	if err != nil {
@@ -478,13 +578,20 @@ func (r *Registry) compile(ctx context.Context, p *Installed) {
 		r.persistError(ctx, p, err.Error())
 		return
 	}
-	if _, err := c.Describe(ctx, ""); err != nil {
+	described, err := c.Describe(ctx, "")
+	if err != nil {
 		_ = c.Close(ctx)
 		state := StateFailed
 		if IsCode(err, CodeRefused) {
 			state = StateRefused
 		}
 		p.setState(state, err.Error())
+		r.persistError(ctx, p, err.Error())
+		return
+	}
+	if err := r.checkDescribedUI(p.Manifest, described); err != nil {
+		_ = c.Close(ctx)
+		p.setState(StateRefused, err.Error())
 		r.persistError(ctx, p, err.Error())
 		return
 	}
@@ -512,6 +619,21 @@ func (r *Registry) compile(ctx context.Context, p *Installed) {
 	// Arming here covers every way a plugin becomes runnable — load,
 	// install, upgrade, enable — with one line instead of four.
 	r.armWakeup(ctx, p)
+}
+
+// loadUI loads (or drops) the app's interface from its directory.
+func (r *Registry) loadUI(p *Installed) error {
+	var b *uiBundle
+	if p.Manifest.UI != nil {
+		var err error
+		if b, err = loadUIBundle(filepath.Join(r.opts.Dir, p.Row.Name), p.Row.Name, p.Row.UISHA256, p.Manifest); err != nil {
+			return err
+		}
+	}
+	p.mu.Lock()
+	p.ui = b
+	p.mu.Unlock()
+	return nil
 }
 
 // exportProbe is all checkTickExport needs of a compiled module — which is
@@ -634,16 +756,21 @@ type Status struct {
 	// (compat.go); absent when it names none. `ok: false` on an installed app
 	// is a warning, not a stop: it keeps running (Load says why).
 	Compat *Compat `json:"compat,omitempty"`
-	// AutoUpdate: newer versions are installed by themselves when they ask
-	// for nothing more (updates.go).
-	AutoUpdate bool `json:"auto_update"`
 	// UpdateSource is where newer versions are looked for: github | url, or
 	// absent when there is nowhere to ask (an uploaded app).
 	UpdateSource string `json:"update_source,omitempty"`
 	// Update is what the last check found; absent before the first one.
-	Update    *UpdateInfo `json:"update,omitempty"`
-	CreatedAt time.Time   `json:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at"`
+	Update *UpdateInfo `json:"update,omitempty"`
+	// Engine: the app runs a WebAssembly module. False for a language pack
+	// and for an app that is only an interface.
+	Engine bool `json:"engine"`
+	// UI describes the app's own interface; absent when it has none.
+	UI *UIInfo `json:"ui,omitempty"`
+	// Previous is the version an upgrade replaced, kept to go back to
+	// (versions.go); absent when none is kept.
+	Previous  *PreviousVersion `json:"previous,omitempty"`
+	CreatedAt time.Time        `json:"created_at"`
+	UpdatedAt time.Time        `json:"updated_at"`
 }
 
 // StatusOf builds the list row. ⚠ Nil-safe receiver: the wire-fixture test
@@ -667,7 +794,8 @@ func (r *Registry) StatusOf(p *Installed) *Status {
 		Permissions: perms, Scheduled: p.Grants.Has(PermSchedule),
 		Actions: len(p.Manifest.Actions), Views: len(p.Manifest.Views), PublicPages: len(p.Manifest.PublicPages),
 		Kind: kindOf(p.Manifest), Languages: r.LanguageRows(p.Manifest),
-		Compat: compatOf(p.Manifest), AutoUpdate: p.Row.AutoUpdate, UpdateSource: src.Kind, Update: upd,
+		Compat: compatOf(p.Manifest), UpdateSource: src.Kind, Update: upd,
+		Engine: p.HasModule(), UI: p.uiInfo(), Previous: p.previousInfo(),
 		CreatedAt: p.Row.CreatedAt, UpdatedAt: p.Row.UpdatedAt,
 	}
 }
@@ -683,7 +811,11 @@ type PermissionRow struct {
 func PermissionRows(m *Manifest, lang string) []PermissionRow {
 	out := make([]PermissionRow, 0, len(m.Perms))
 	for _, p := range m.Perms {
-		out = append(out, PermissionRow{ID: string(p), Label: p.Label(lang), Reason: m.PermissionReasons[string(p)]})
+		reason := m.PermissionReasons[string(p)]
+		if len(reason) == 0 {
+			reason = m.uiReasons[p]
+		}
+		out = append(out, PermissionRow{ID: string(p), Label: p.Label(lang), Reason: reason})
 	}
 	return out
 }
@@ -773,6 +905,9 @@ type InstallInput struct {
 	Manifest []byte
 	// Wasm is the module; Reader is consumed, capped at MaxWasmBytes.
 	Wasm io.Reader
+	// UI is the interface bundle (a zip) when the manifest has a `ui` block;
+	// consumed, capped at MaxUIBytes.
+	UI io.Reader
 	// SHA256 (lower hex) the module must match; "" skips (upload only).
 	SHA256    string
 	Signature string
@@ -790,6 +925,21 @@ type InstallInput struct {
 	Granted []string
 	DryRun  bool
 	Lang    string
+	// ActorID is the administrator who approved this (the audit row names
+	// them); nil for the system.
+	ActorID *int64
+	// Rollback: this is "Back to <version>" (versions.go) — the kept files,
+	// under the grant they ran with.
+	Rollback bool
+	// UIPin pins the interface bundle when the manifest does not (a kept
+	// version is held to the hash recorded when it was replaced).
+	UIPin string
+	// Mirrors are mirrored external files already at hand, by sha256 (a kept
+	// version's): used instead of downloading them again.
+	Mirrors map[string][]byte
+	// Notes are the source's release notes for this version, as plain text,
+	// for the review (a GitHub release's body).
+	Notes string
 }
 
 // DryRunAnswer is what a dry run returns for the review step.
@@ -829,6 +979,13 @@ type DryRunAnswer struct {
 	// Upgrade is what an upgrade's review shows on top of an install's: the
 	// version it replaces and how the grant changes. Nil on an install.
 	Upgrade *DryRunUpgrade `json:"upgrade,omitempty"`
+	// Engine: the app brings a WebAssembly module (false: a language pack, or
+	// an app that is only an interface).
+	Engine bool `json:"engine"`
+	// UI is the app's own interface: the bundle, its script-policy
+	// exceptions, and every external address — mirrored or live. The review
+	// draws it as its own group, with what a live address means.
+	UI *UIInfo `json:"ui,omitempty"`
 }
 
 // DryRunUpgrade is the jump an upgrade makes. Added are the permissions the
@@ -841,7 +998,34 @@ type DryRunUpgrade struct {
 	Added      []string `json:"added,omitempty"`
 	Removed    []string `json:"removed,omitempty"`
 	AddsModule bool     `json:"adds_module,omitempty"`
+	// What else the version changes, for the review (upgradeReview): the
+	// module (its hash), the interface (added, removed, its files), the filex
+	// range, the signature, and the source's own notes. The approval rule
+	// itself is Added/AddsModule and nothing else.
+	ModuleFrom string      `json:"module_from,omitempty"`
+	ModuleTo   string      `json:"module_to,omitempty"`
+	UIFrom     string      `json:"ui_from,omitempty"`
+	UITo       string      `json:"ui_to,omitempty"`
+	UIFiles    *UIFileDiff `json:"ui_files,omitempty"`
+	FilexFrom  string      `json:"filex_from,omitempty"`
+	FilexTo    string      `json:"filex_to,omitempty"`
+	SignedFrom bool        `json:"signed_from"`
+	SignedTo   bool        `json:"signed_to"`
+	Notes      string      `json:"notes,omitempty"`
 }
+
+// UIFileDiff is how an upgrade's interface files differ, by name. Each list
+// is cut at maxUIFileDiff names; the counts are whole.
+type UIFileDiff struct {
+	Added        []string `json:"added,omitempty"`
+	Removed      []string `json:"removed,omitempty"`
+	Changed      []string `json:"changed,omitempty"`
+	AddedCount   int      `json:"added_count"`
+	RemovedCount int      `json:"removed_count"`
+	ChangedCount int      `json:"changed_count"`
+}
+
+const maxUIFileDiff = 200
 
 // upgradeOf compares a staged manifest with the installed app: the version it
 // leaves, the permissions it adds to and drops from the grant, and whether a
@@ -865,6 +1049,73 @@ func upgradeOf(p *Installed, m *Manifest) *DryRunUpgrade {
 	return u
 }
 
+// upgradeReview fills what the review shows beyond the grant: the module and
+// interface hashes, the interface's files, the filex range, the signature and
+// the source's notes.
+func upgradeReview(u *DryRunUpgrade, p *Installed, st *staged, notes string) {
+	if p.HasModule() {
+		u.ModuleFrom = p.Row.SHA256
+	}
+	if st.wasm != nil {
+		u.ModuleTo = st.sum
+	}
+	u.UIFrom, u.UITo = p.Row.UISHA256, st.uiSum()
+	u.SignedFrom, u.SignedTo = p.Row.Signed, st.signd
+	u.FilexFrom, u.FilexTo = rangeText(p.Manifest), rangeText(st.m)
+	u.Notes = notes
+	var before, after map[string]uiEntry
+	if b := p.UI(); b != nil {
+		before = b.idx.files
+	}
+	if st.ui != nil {
+		after = st.ui.idx.files
+	}
+	if before == nil && after == nil {
+		return
+	}
+	d := &UIFileDiff{}
+	for name, e := range after {
+		old, ok := before[name]
+		switch {
+		case !ok:
+			d.AddedCount++
+			if len(d.Added) < maxUIFileDiff {
+				d.Added = append(d.Added, name)
+			}
+		case old.crc != e.crc || old.usize != e.usize:
+			d.ChangedCount++
+			if len(d.Changed) < maxUIFileDiff {
+				d.Changed = append(d.Changed, name)
+			}
+		}
+	}
+	for name := range before {
+		if _, ok := after[name]; !ok {
+			d.RemovedCount++
+			if len(d.Removed) < maxUIFileDiff {
+				d.Removed = append(d.Removed, name)
+			}
+		}
+	}
+	sort.Strings(d.Added)
+	sort.Strings(d.Removed)
+	sort.Strings(d.Changed)
+	u.UIFiles = d
+}
+
+// rangeText is a manifest's filex range as compatRange reads it ("" for
+// none).
+func rangeText(m *Manifest) string {
+	if m == nil {
+		return ""
+	}
+	rng, err := compatRange(m)
+	if err != nil {
+		return ""
+	}
+	return rng.text
+}
+
 // DryRunInstalled names the installed app a new install would collide with.
 type DryRunInstalled struct {
 	ID      int64  `json:"id"`
@@ -882,7 +1133,7 @@ type DryRunEngine struct {
 // may do, and — because the dry run already knows — whether an app of that
 // name is installed (installing only) and which engines it asks for that
 // this server lacks.
-func (r *Registry) dryRun(ctx context.Context, st *staged, lang string, upgrading *Installed) *DryRunAnswer {
+func (r *Registry) dryRun(ctx context.Context, st *staged, lang string, upgrading *Installed, notes string) *DryRunAnswer {
 	installing := upgrading == nil
 	ans := &DryRunAnswer{
 		Manifest: &st.m.Manifest, Permissions: PermissionRows(st.m, lang), Signed: st.signd,
@@ -890,11 +1141,16 @@ func (r *Registry) dryRun(ctx context.Context, st *staged, lang string, upgradin
 	}
 	if upgrading != nil {
 		ans.Upgrade = upgradeOf(upgrading, st.m)
+		upgradeReview(ans.Upgrade, upgrading, st, notes)
 	}
 	if st.wasm == nil {
 		ans.ManifestSHA256 = st.sum
 	} else {
 		ans.WasmSHA256, ans.WasmBytes = st.sum, int64(len(st.wasm))
+	}
+	ans.Engine = st.wasm != nil
+	if st.m.UI != nil {
+		ans.UI = st.ui.info(st.m)
 	}
 	if installing {
 		if p, ok := r.ByName(st.m.Name); ok {
@@ -914,14 +1170,17 @@ func (r *Registry) dryRun(ctx context.Context, st *staged, lang string, upgradin
 
 type staged struct {
 	m     *Manifest
-	wasm  []byte // nil for a language pack
-	sum   string // the module's sha256 — the manifest's for a language pack
+	wasm  []byte // nil for a language pack and for an app that is only an interface
+	sum   string // the module's sha256 — the manifest's when there is no module
 	signd bool
+	// ui is the checked interface bundle and its mirrored files; nil when the
+	// manifest has no `ui` block.
+	ui *stagedUI
 }
 
-// stage validates the manifest and the module bytes, without touching disk
-// or the database.
-func (r *Registry) stage(in *InstallInput) (*staged, error) {
+// stage validates the manifest, the module bytes and the interface bundle,
+// without touching disk or the database.
+func (r *Registry) stage(ctx context.Context, in *InstallInput) (*staged, error) {
 	if r.opts.Demo {
 		return nil, installErr(ErrCodeDemo, "installing app plugins is disabled on the demo instance")
 	}
@@ -936,10 +1195,36 @@ func (r *Registry) stage(in *InstallInput) (*staged, error) {
 		return nil, installErr(ErrCodeManifestInvalid, err.Error())
 	}
 	if m.IsLanguagePack() {
+		if in.UI != nil {
+			return nil, installErr(ErrCodeManifestInvalid, "an interface bundle was supplied, but this manifest is a language pack and has no ui block")
+		}
 		return r.stagePack(m, in)
 	}
+	var ui *stagedUI
+	switch {
+	case m.UI != nil:
+		if ui, err = r.stageUI(ctx, m, in); err != nil {
+			return nil, err
+		}
+	case in.UI != nil:
+		return nil, installErr(ErrCodeManifestInvalid, "an interface bundle was supplied, but the manifest has no ui block")
+	}
 	if in.Wasm == nil {
-		return nil, installErr(ErrCodeManifestInvalid, "no module supplied — an app with actions, screens, public pages, settings or permissions needs its WebAssembly module (only a manifest that adds languages and nothing else installs without one)")
+		if m.UI != nil && !m.NeedsModule() {
+			// ⚠ An app that is ONLY an interface: as for a language pack,
+			// the pin and the signature move to the manifest — and the
+			// manifest pins the bundle (ui.bundle.sha256), so they reach it.
+			sum, signd, err := r.checkIntegrity("manifest", in.Manifest, in.SHA256, in.Signature)
+			if err != nil {
+				return nil, err
+			}
+			return &staged{m: m, sum: sum, signd: signd, ui: ui}, nil
+		}
+		why := "an app with actions, screens, public pages, settings or permissions needs its WebAssembly module (only a manifest that adds languages, or one that is only an interface, installs without one)"
+		if m.UI != nil {
+			why = "this app has an interface, but it also needs a module: " + m.moduleOnlyReason()
+		}
+		return nil, installErr(ErrCodeManifestInvalid, "no module supplied — "+why)
 	}
 	lr := io.LimitReader(in.Wasm, r.opts.MaxWasmBytes+1)
 	wasm, err := io.ReadAll(lr)
@@ -956,7 +1241,7 @@ func (r *Registry) stage(in *InstallInput) (*staged, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &staged{m: m, wasm: wasm, sum: sum, signd: signd}, nil
+	return &staged{m: m, wasm: wasm, sum: sum, signd: signd, ui: ui}, nil
 }
 
 // checkIntegrity hashes the payload an install stands on — the module, or a
@@ -1001,12 +1286,12 @@ func (r *Registry) checkGrant(m *Manifest, granted []string, code string) error 
 
 // Install stages, reviews and installs a plugin.
 func (r *Registry) Install(ctx context.Context, in *InstallInput) (*Status, *DryRunAnswer, error) {
-	st, err := r.stage(in)
+	st, err := r.stage(ctx, in)
 	if err != nil {
 		return nil, nil, err
 	}
 	if in.DryRun {
-		return nil, r.dryRun(ctx, st, in.Lang, nil), nil
+		return nil, r.dryRun(ctx, st, in.Lang, nil, ""), nil
 	}
 	if err := refuseIncompatible(st.m); err != nil {
 		return nil, nil, err
@@ -1035,8 +1320,8 @@ func (r *Registry) Install(ctx context.Context, in *InstallInput) (*Status, *Dry
 	permsJSON := permsJSONOf(st.m)
 	row, err := r.opts.Store.CreateAppPlugin(ctx, &model.AppPlugin{
 		Name: st.m.Name, Version: st.m.Version, LabelJSON: jsonOf(st.m.Label), ManifestJSON: string(in.Manifest),
-		WasmPath: st.wasmPath(), SHA256: st.sum, Source: sourceOr(in.Source), SourceURL: in.SourceURL, Signed: st.signd,
-		ManifestURL: in.ManifestURL, PermissionsJSON: permsJSON, Enabled: true, AutoUpdate: !in.Pinned,
+		WasmPath: st.wasmPath(), SHA256: st.sum, UISHA256: st.uiSum(), Source: sourceOr(in.Source), SourceURL: in.SourceURL, Signed: st.signd,
+		ManifestURL: in.ManifestURL, PermissionsJSON: permsJSON, Enabled: true, AutoUpdate: false, Signature: in.Signature,
 	})
 	if err != nil {
 		_ = os.RemoveAll(filepath.Join(r.opts.Dir, st.m.Name))
@@ -1069,7 +1354,7 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 	if !ok {
 		return nil, nil, installErr(ErrCodeNotFound, "no such plugin")
 	}
-	st, err := r.stage(in)
+	st, err := r.stage(ctx, in)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1077,7 +1362,7 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 		return nil, nil, installErr(ErrCodeManifestInvalid, "the new manifest names "+st.m.Name+", the installed plugin is "+p.Row.Name)
 	}
 	if in.DryRun {
-		return nil, r.dryRun(ctx, st, in.Lang, p), nil
+		return nil, r.dryRun(ctx, st, in.Lang, p, in.Notes), nil
 	}
 	if err := refuseIncompatible(st.m); err != nil {
 		return nil, nil, err
@@ -1105,6 +1390,9 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 	if err := r.checkGrant(st.m, granted, ErrCodePermissionsChanged); err != nil {
 		return nil, nil, err
 	}
+	// What the version change is, against the grant it leaves — for the
+	// audit row (afterUpgrade).
+	up := upgradeOf(p, st.m)
 	// ⚠ As in Install: an upgrade swaps files and compiles; a client that
 	// leaves in the middle must not leave the app half-replaced.
 	ctx = context.WithoutCancel(ctx)
@@ -1129,7 +1417,9 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 	// manifest rather than staying what the old row said.
 	p.Row.WasmPath = st.wasmPath()
 	p.Row.SHA256 = st.sum
+	p.Row.UISHA256 = st.uiSum()
 	p.Row.Signed = st.signd
+	p.Row.Signature = in.Signature
 	p.Row.Source = sourceOr(in.Source)
 	p.Row.SourceURL = in.SourceURL
 	p.Row.ManifestURL = in.ManifestURL
@@ -1179,13 +1469,21 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 		p.compiled = nil
 	}
 	p.mu.Unlock()
-	_ = os.RemoveAll(backup)
+	// The version this one replaced is KEPT (versions.go): "Back to …" puts
+	// it back without a new approval.
+	r.keepPrevious(ctx, &oldRow, backup, in.ActorID)
 	r.put(np)
+	r.loadPrevious(ctx, np)
 	if !np.Row.Enabled {
 		// Proven, and still off: what the administrator switched off stays off.
 		r.unload(ctx, np)
 	}
-	np.log("info", "upgraded to "+st.m.Version)
+	if in.Rollback {
+		np.log("info", "back to "+st.m.Version+" (from "+oldRow.Version+")")
+	} else {
+		np.log("info", "upgraded to "+st.m.Version)
+	}
+	r.afterUpgrade(ctx, np, &oldRow, in, up)
 	return r.StatusOf(np), nil, nil
 }
 
@@ -1202,7 +1500,7 @@ func (r *Registry) writeFiles(name string, st *staged, manifest []byte) error {
 	if err := os.WriteFile(filepath.Join(dir, "filex-app.json"), manifest, 0o600); err != nil {
 		return fmt.Errorf("app-plugins: write manifest: %w", err)
 	}
-	return nil
+	return writeUI(dir, st.ui)
 }
 
 // SetEnabled flips a plugin on or off, loading or unloading it.
@@ -1259,6 +1557,8 @@ func (r *Registry) Remove(ctx context.Context, id int64) error {
 	_ = os.RemoveAll(filepath.Join(r.opts.Dir, p.Row.Name))
 	// Its downloads go with it (asset_fetch).
 	_ = os.RemoveAll(r.assetDir(p.Row.Name))
+	// ...and so do the versions it kept to go back to.
+	_ = os.RemoveAll(r.versionsRoot(p.Row.Name))
 	return nil
 }
 

@@ -20,6 +20,11 @@
  *   - a type switch keeps the stem; an empty `.docx` made as Plain text is
  *     refused in the dialog;
  *   - the dialog fits at 1280 and 390 px wide, light and dark.
+ *
+ * ⚠ Since drafts (issue #71) Create makes a DRAFT: nothing is in the folder
+ * until the editor's Save puts it there (`saveDraft`). What this spec pins —
+ * the name, the type, the editor — is unchanged; each file is saved before it
+ * is looked for in the listing. The drafts journey itself is 172-drafts.
  */
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { loginAs } from '../helpers/auth';
@@ -80,6 +85,12 @@ async function createAs(page: Page, type: string, name: string) {
   await expect(page.getByTestId('newdoc-modal')).toHaveCount(0);
 }
 
+/** #71 — the draft's Save: the document goes where it was asked for. */
+async function saveDraft(page: Page) {
+  await page.getByTestId('draft-save').click();
+  await expect(page.getByTestId('draft-saved-note')).toBeVisible();
+}
+
 async function closeViewer(page: Page) {
   await page.locator('.fe-viewer__close').first().click();
   await expect(page.locator('.fe-viewer__close')).toHaveCount(0);
@@ -124,6 +135,9 @@ test.describe('New document — any file name (#56)', () => {
     await expect(page.getByTestId('newdoc-modal')).toHaveCount(0);
 
     await expect(page.locator('.fe-preview__code-lang')).toHaveText('plaintext');
+    // #71: a draft — the folder has nothing until it is saved.
+    expect(await names(api)).not.toContain('draft.txt');
+    await saveDraft(page);
     expect(await names(api)).toContain('draft.txt');
     await closeViewer(page);
   });
@@ -132,8 +146,6 @@ test.describe('New document — any file name (#56)', () => {
     await openStorage(page);
     await createAs(page, 'txt', 'LICENSE');
 
-    expect(await names(api)).toContain('LICENSE');
-    expect(await names(api)).not.toContain('LICENSE.txt');
     // The name picks no viewer; the type it was made as does.
     await expect(page.locator('.fe-preview__code-wrap')).toBeVisible();
     await expect(page.locator('.fe-preview__code-lang')).toHaveText('plaintext');
@@ -144,10 +156,13 @@ test.describe('New document — any file name (#56)', () => {
     await expect(editor, 'the editor mounts').toBeVisible({ timeout: 20_000 });
     await editor.click();
     await page.keyboard.type('MIT License');
+    // #71: the draft's Save sends what the editor holds, then puts the file
+    // where it was asked for.
     const saved = page.waitForResponse((r) => r.url().includes('/api/files/save-text'));
-    await page.locator('.fe-preview__code-toolbar .fe-btn--primary').click();
+    await saveDraft(page);
     expect((await saved).status(), 'save-text accepts the file it just opened').toBe(200);
-    await expect(page.locator('.fe-preview__code-status--ok')).toBeVisible();
+    expect(await names(api)).toContain('LICENSE');
+    expect(await names(api)).not.toContain('LICENSE.txt');
 
     const prev = await api.get(
       `/api/files/manager?action=preview&path=${encodeURIComponent(`${STORE}://LICENSE`)}`,
@@ -170,10 +185,12 @@ test.describe('New document — any file name (#56)', () => {
     await createAs(page, 'txt', 'test.conf');
     await expect(page.locator('.fe-preview__code-wrap')).toBeVisible();
     await expect(page.locator('.fe-preview__code-lang'), 'Plain text is what was asked for').toHaveText('plaintext');
+    await saveDraft(page);
     await closeViewer(page);
 
     await createAs(page, 'md', 'notes.md');
     await expect(page.locator('.fe-preview__md-split'), 'the markdown editor, split view').toBeVisible();
+    await saveDraft(page);
     await closeViewer(page);
 
     const listed = await names(api);

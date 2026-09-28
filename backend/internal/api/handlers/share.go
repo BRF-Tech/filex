@@ -885,7 +885,10 @@ func appLinkEnded(ctx context.Context, reg *wasmplugin.Registry, sh *model.Share
 func (h *Share) HandleMetadata(w http.ResponseWriter, r *http.Request) {
 	tok := pathParam(r, "token")
 	sh, err := h.Store.GetShareByToken(r.Context(), tok)
-	if err != nil {
+	// ⚠ An app link's node is the ANCHOR its app hangs state on, not
+	// something the link hands out: nothing about it is answered here, the
+	// same 404 as an unknown token.
+	if err != nil || sh == nil || sh.IsApp() {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
@@ -899,11 +902,16 @@ func (h *Share) HandleMetadata(w http.ResponseWriter, r *http.Request) {
 		"download_count": sh.DownloadCount,
 		"max_downloads":  sh.MaxDownloads,
 	}
-	if node, err := h.Store.GetNode(r.Context(), sh.NodeID); err == nil {
-		resp["filename"] = node.Name
-		resp["size"] = node.Size
-		resp["mime"] = node.Mime
-		resp["is_directory"] = node.Type == "dir"
+	if node, err := h.Store.GetNode(r.Context(), sh.NodeID); err == nil && node != nil {
+		// ⚠⚠ The file's name is BEHIND the PIN, like its bytes — the rule the
+		// public surface keeps (PublicAPI.describe), kept by this older door
+		// too.
+		if sh.PinHash == "" || shareUnlocked(h.Service, r, sh) {
+			resp["filename"] = node.Name
+			resp["size"] = node.Size
+			resp["mime"] = node.Mime
+			resp["is_directory"] = node.Type == "dir"
+		}
 		if sh.MaxDownloads != nil {
 			remaining := *sh.MaxDownloads - sh.CappedCount()
 			if remaining < 0 {
@@ -1104,10 +1112,11 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	if mime == "" {
 		mime = "application/octet-stream"
 	}
-	w.Header().Set("Content-Type", mime)
+	// ?inline=1 shows the file from filex's own origin: an active kind is
+	// answered sandboxed, with no scripts (httpx/inline.go).
+	httpx.ProtectServedFile(w.Header(), mime)
 	w.Header().Set("Content-Disposition", httpx.ContentDisposition(disposition, node.Name))
 	declareBodyLength(r.Context(), w, src, node)
-	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// The slot is already claimed; a transfer that dies half-way still counts
 	// (the visitor got bytes, and a refund here would reopen the very gap this
 	// claim closes).

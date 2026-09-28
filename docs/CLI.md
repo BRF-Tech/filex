@@ -8,10 +8,13 @@ installed server-side — the CLI only uses endpoints the web UI already uses.
 filex client login | ls | upload | download | mkdir | rm | mv | search | share
 ```
 
-The same binary also carries two commands that are not part of `client`:
-[`filex sync`](SYNC.md), which keeps a local folder in step with the server, and
+The same binary also carries three commands that are not part of `client`:
+[`filex sync`](SYNC.md), which keeps a local folder in step with the server,
 [`filex mount`](#filex-mount--the-server-as-a-folder), which attaches the server
-as a folder (or a drive letter on Windows) without copying anything.
+as a folder (or a drive letter on Windows) without copying anything, and
+[`filex decrypt`](#filex-decrypt--an-encrypted-folder-offline), which turns a
+downloaded end-to-end encrypted folder — or a single encrypted `.fxe` file —
+back into plain files, offline.
 
 ## Installation
 
@@ -317,6 +320,98 @@ disk; copying it in and out is not.
 
 Full protocol picture: [PROTOCOLS.md](PROTOCOLS.md).
 
+## `filex decrypt` — an encrypted folder, offline
+
+An [end-to-end encrypted folder](E2E-ENCRYPTION.md) is decrypted in the browser
+while you use it. `filex decrypt` is the way out of filex: it takes the folder
+as you downloaded it and writes a plain folder with the real file and folder
+names — with **no server, no config and no network**. It is the tool to reach
+for when you want your files back in the clear, when the server is gone, or to
+check that a backup of an encrypted folder really opens.
+
+```bash
+filex decrypt ~/Downloads/Kasa.zip                  # → ~/Downloads/Kasa-decrypted/
+filex decrypt ./Kasa -o ./Kasa-plain                # a folder copied off the storage
+filex decrypt ./Kasa --recovery-key                 # lost the password
+filex decrypt ~/Downloads/one-file --marker ./Kasa/.filex-e2e.json
+pass show kasa | filex decrypt ./Kasa --password-stdin
+filex decrypt ~/Downloads/Rapor.pdf.fxe             # → ~/Downloads/Rapor.pdf
+filex decrypt ./encrypted-3fa2c1d0.fxe -o ./x.pdf   # a hidden-name file, to a name you pick
+```
+
+**What it takes.** The encrypted folder itself, a `.zip` of it (download the
+folder from its parent in the web UI — the archive carries the folder's key
+file, `.filex-e2e.json`), or a single encrypted file. A subfolder or a single
+file downloaded on its own has no key file of its own: pass the encrypted
+folder's with `--marker`.
+
+**The password is never an argument.** It is asked for on the terminal without
+echo; with `--password-stdin` (or when stdin is a pipe) it is read as one line.
+There is no flag and no environment variable for it on purpose — both end up in
+shell history, `ps` output and CI logs. `--recovery-key` asks for the recovery
+key shown when the folder was created instead; case, spaces and dashes do not
+matter.
+
+**All or nothing.** The output is assembled in `<out>.partial-*` next to the
+target and renamed into place only when every name and every file decrypted. A
+wrong password, a wrong recovery key or one damaged file leaves **no output at
+all** — a half-decrypted folder cannot be mistaken for a whole one. An existing
+output directory is refused rather than merged into.
+
+**What it reads.** Every folder format filex has written: folders from before
+v0.31 (password only), folders with a recovery key, and folders whose file and
+folder names are encrypted, including one that is half-way through being
+switched to encrypted names. Large files (over 200 MB, the STREAM format,
+header version `0x02`) are decrypted as a stream — memory stays flat whatever
+their size — and a truncated, reordered or extended one is damage like any
+other. A folder that needs a feature this build does not know is refused with
+the feature named and exit status `7` — update filex.
+
+### A single encrypted file (`.fxe`)
+
+A file encrypted on its own from the web UI (*Encrypt with E2EE…*) carries its
+own password slot and recovery key, so it needs no key file:
+
+- **Output**: the file's ORIGINAL name, sealed inside it, next to the input —
+  `Rapor.pdf.fxe` and `encrypted-3fa2c1d0.fxe` both come out as `Rapor.pdf`.
+  With `-o` it goes to the path you name instead. Either must not exist yet:
+  an existing file is never overwritten.
+- **All or nothing**, as for a folder: the plaintext is written into a hidden
+  `.<name>.partial-*` file next to the target and renamed into place only when
+  its last chunk verified. A wrong password (exit `5`), a damaged, truncated or
+  extended file (exit `6`) leave nothing behind.
+- **One at a time.** Every `.fxe` has its own password, so a folder that
+  merely holds `.fxe` files is not something one password opens; the command
+  says so instead of looking for a key file. Loop over them in the shell:
+  `for f in *.fxe; do filex decrypt "$f"; done`.
+- A `.fxe` found **inside** an encrypted folder is copied into the output as
+  it is, with a warning: its password is its own.
+
+**What it tells you.** A summary line (files, folders, warnings) on stdout, and
+one warning on stderr for everything that was not what an encrypted folder
+should contain but is not damage either: a file that was never encrypted
+(written into the folder over WebDAV, say) is copied as it is; a name that was
+never encrypted is kept; a name that is not valid on this computer (`a:b.txt`
+on Windows) or that clashes with another ignoring case is written under a safe
+variant. `--quiet` drops the warnings, not the summary.
+
+| Flag | What it does |
+|---|---|
+| `-o`, `--output` | output directory (default `<input>-decrypted`, `.zip` dropped); for a `.fxe`, the file to write (default: its original name next to it); must not exist |
+| `--marker` | the encrypted folder's `.filex-e2e.json`, for an input that does not carry it |
+| `--recovery-key` | unlock with the recovery key instead of the password |
+| `--password-stdin` | read the password (or recovery key) as one line from stdin |
+| `-q`, `--quiet` | print only the summary |
+
+> ⚠ **The operator's escrow key is not accepted.** Escrow use in the web UI
+> notifies the folder's owner before it opens anything; an offline tool cannot,
+> so filex does not ship one. What escrow can and cannot promise is spelled out
+> in [E2E-ENCRYPTION.md](E2E-ENCRYPTION.md#what-escrow-can-and-cannot-do).
+
+> ⚠ The decrypted files are plaintext on your disk. They are written readable
+> by you only (`0600`, folders `0700`), and nothing else about them is
+> protected any more.
+
 ## JSON output
 
 Every command accepts `--json` and then prints the server's raw JSON response
@@ -343,3 +438,12 @@ filex: HTTP 401: unauthorized — token missing/expired; run `filex client login
 |---|---|
 | `3` | The server refused the token (HTTP 401): sign in again rather than retry. |
 | `4` | At least one pair was skipped because another filex on this computer is syncing it; the other pairs ran. `--watch` never exits with it — it waits and takes the pair over. |
+
+`filex decrypt` has three, so a script can tell a typo from a broken folder
+([above](#filex-decrypt--an-encrypted-folder-offline)):
+
+| Status | Meaning |
+|---|---|
+| `5` | Wrong password or recovery key. Nothing was written. |
+| `6` | A damaged file or name (or a key file that is not one). Nothing was written. |
+| `7` | The folder or `.fxe` needs a newer filex (an unknown required feature, or a format version this build does not know). |

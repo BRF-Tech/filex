@@ -17,7 +17,7 @@ import {
   notificationVars,
   renderNotification,
   type NotificationLike,
-} from '@/lib/notificationText';
+} from '@brftech/filex-core/src/lib/notificationText';
 
 /** A row shaped the way the server really stores a file event. */
 const uploaded: NotificationLike = {
@@ -364,14 +364,16 @@ describe('an app update notice', () => {
     },
   });
 
-  it('says an automatic update in each reader language', () => {
+  // ⚠⚠ Nothing updates itself since 0.48: the notice is an administrator's
+  // approved change, and must never say "by itself".
+  it('says an approved change in each reader language', () => {
     expect(renderNotification(row('app_updated', {}), 'en')).toEqual({
-      title: 'Spanish language pack updated to 0.1.4',
-      body: 'It moved from 0.1.3 by itself.',
+      title: 'Spanish language pack is now 0.1.4',
+      body: 'An administrator approved it; it was 0.1.3.',
     });
     expect(renderNotification(row('app_updated', {}), 'tr')).toEqual({
-      title: 'İspanyolca dil paketi 0.1.4 sürümüne güncellendi',
-      body: '0.1.3 sürümünden kendiliğinden geçti.',
+      title: 'İspanyolca dil paketi artık 0.1.4 sürümünde',
+      body: 'Bir yönetici onayladı; önceki sürüm 0.1.3.',
     });
   });
 
@@ -381,11 +383,136 @@ describe('an app update notice', () => {
     expect(r.body).toBe('mail:send, http:freetsa.org');
   });
 
+  it('says a storage plugin’s newer version by the plugin’s name, and where it waits', () => {
+    const r = renderNotification(
+      { event: 'plugin_update_available', title: 'myfs 1.1.0 is available', meta: { plugin: 'myfs', plugin_label_en: 'myfs', version: '1.1.0' } },
+      'tr',
+    );
+    expect(r).toEqual({ title: 'myfs depo eklentisinin 1.1.0 sürümü yayında', body: 'Eklentiler → Depolama altında sizi bekliyor.' });
+  });
+
   it('says an available and a failed update without the server’s English', () => {
     expect(renderNotification(row('app_update_available', {}), 'tr').title).toBe('İspanyolca dil paketi 0.1.4 yayında');
     const failed = renderNotification(row('app_update_failed', { error: 'describe: version mismatch' }), 'tr');
     expect(failed.title).toBe('İspanyolca dil paketi 0.1.4 kurulamadı');
     expect(failed.body).toBe('Önceki sürüm 0.1.3 çalışmaya devam ediyor.');
     expect(failed.body).not.toContain('describe');
+  });
+});
+
+// wiring:e2 fxe — the escrow key and password events are ONE event for an
+// encrypted folder and for a single encrypted file (a webhook routing security
+// events must see both), told apart by meta.kind. The bell says which: telling
+// the owner a FOLDER was opened when it was their file is the wrong fact.
+describe('the e2e events about a single encrypted file', () => {
+  const fileRow = (event: string): NotificationLike => ({
+    event,
+    title: event,
+    meta: { kind: 'file', file: 'Arşiv/Rapor 2027.pdf.fxe', storage: 'docs', node: { path: 'Arşiv/Rapor 2027.pdf.fxe', name: 'Rapor 2027.pdf.fxe' } },
+  });
+  const folderRow = (event: string): NotificationLike => ({
+    event,
+    title: event,
+    meta: { folder: 'Kasa', storage: 'docs', node: { path: 'Kasa', name: 'Kasa' } },
+  });
+
+  it('says "file" for a file and "folder" for a folder, in both languages', () => {
+    expect(renderNotification(fileRow('e2e.escrow_used'), 'en')).toEqual({
+      title: 'Encrypted file opened with the escrow key',
+      body: 'Arşiv/Rapor 2027.pdf.fxe',
+    });
+    expect(renderNotification(fileRow('e2e.escrow_used'), 'tr').title).toBe('Şifreli dosya emanet anahtarıyla açıldı');
+    expect(renderNotification(fileRow('e2e.password_changed'), 'en').title).toBe('Encrypted file password changed');
+    expect(renderNotification(fileRow('e2e.password_changed'), 'tr').title).toBe('Şifreli dosyanın parolası değişti');
+    expect(renderNotification(folderRow('e2e.escrow_used'), 'en').title).toBe('Encrypted folder opened with the escrow key');
+    expect(renderNotification(folderRow('e2e.password_changed'), 'tr').title).toBe('Şifreli klasörün parolası değişti');
+  });
+
+  it('a language pack’s folder sentence is never used for a file; its _file key is', () => {
+    const strings = {
+      'server.notify.e2e.escrow_used.title': 'Verschlüsselter Ordner mit dem Treuhandschlüssel geöffnet',
+    };
+    expect(renderNotification(fileRow('e2e.escrow_used'), 'en', { strings, lang: 'de' }).title).toBe(
+      'Encrypted file opened with the escrow key',
+    );
+    const withFile = { ...strings, 'server.notify.e2e.escrow_used.title_file': 'Verschlüsselte Datei mit dem Treuhandschlüssel geöffnet' };
+    expect(renderNotification(fileRow('e2e.escrow_used'), 'en', { strings: withFile, lang: 'de' }).title).toBe(
+      'Verschlüsselte Datei mit dem Treuhandschlüssel geöffnet',
+    );
+    expect(renderNotification(folderRow('e2e.escrow_used'), 'en', { strings: withFile, lang: 'de' }).title).toBe(
+      'Verschlüsselter Ordner mit dem Treuhandschlüssel geöffnet',
+    );
+  });
+});
+
+describe('a row inside an encrypted folder (meta.e2e_root)', () => {
+  const S = 'cnCYVvOrMoH0uQKjxUUeYr9h7KREShFsI3Y';
+  const DIR = 'CiGQLHEtou8eDKjFPpDgRJ_zFRPkQ-q1qiCsooM.U1LSU6ksO0TVNYdn3zrSjQ';
+  const inside = (p: string, extra: Record<string, unknown> = {}): NotificationLike => ({
+    event: 'file.uploaded',
+    title: 'file.uploaded',
+    body: p,
+    meta: {
+      node: { storage_id: 3, path: p, name: p.slice(p.lastIndexOf('/') + 1) },
+      target: { kind: 'file', storage: 'team', path: p },
+      e2e_root: 'team://Kasa',
+      ...extra,
+    },
+  });
+
+  it('never prints a ciphertext name — it says the item is encrypted', () => {
+    const row = inside(`Kasa/${DIR}/${S}`);
+    expect(renderNotification(row, 'en')).toEqual({
+      title: 'New file: 🔒 Encrypted item',
+      body: 'Kasa/…/🔒 Encrypted item',
+    });
+    expect(renderNotification(row, 'tr')).toEqual({
+      title: 'Yeni dosya: 🔒 Şifreli öğe',
+      body: 'Kasa/…/🔒 Şifreli öğe',
+    });
+    for (const lang of ['en', 'tr'] as const) {
+      const t = renderNotification(row, lang);
+      expect(`${t.title} ${t.body}`).not.toContain(S);
+      expect(`${t.title} ${t.body}`).not.toContain(DIR);
+    }
+  });
+
+  it('names it where the reader has the folder unlocked', () => {
+    const asked: string[] = [];
+    const t = renderNotification(inside(`Kasa/${DIR}/${S}`), 'en', {
+      e2eName: (wire, root) => {
+        asked.push(`${wire} @ ${root}`);
+        return { name: 'Rapor.docx', path: 'Kasa/Sözleşmeler/Rapor.docx' };
+      },
+    });
+    expect(t).toEqual({ title: 'New file: Rapor.docx', body: 'Kasa/Sözleşmeler/Rapor.docx' });
+    expect(asked[0]).toBe(`team://Kasa/${DIR}/${S} @ team://Kasa`);
+  });
+
+  it('falls back to the locked label while the explorer cannot name it', () => {
+    const t = renderNotification(inside(`Kasa/${S}`), 'en', { e2eName: () => null });
+    expect(t).toEqual({ title: 'New file: 🔒 Encrypted item', body: 'Kasa/🔒 Encrypted item' });
+  });
+
+  it('leaves a folder with readable names (level 1) as it is', () => {
+    const t = renderNotification(inside('Kasa/rapor.pdf'), 'en');
+    expect(t).toEqual({ title: 'New file: rapor.pdf', body: 'Kasa/rapor.pdf' });
+  });
+
+  it('hides both ends of a move', () => {
+    const row: NotificationLike = {
+      ...inside(`Kasa/${DIR}/${S}`, { from: `Kasa/${S}`, to: `Kasa/${DIR}/${S}` }),
+      event: 'file.moved',
+    };
+    const t = renderNotification(row, 'en');
+    expect(t.title).toBe('Moved: 🔒 Encrypted item');
+    expect(t.body).toBe('Kasa/🔒 Encrypted item → Kasa/…/🔒 Encrypted item');
+  });
+
+  it('the locked word is the catalogue word, and a pack can translate it', () => {
+    const t = renderNotification(inside(`Kasa/${S}`), 'en', {
+      strings: { 'server.notify.word.locked': '🔒 Verschlüsseltes Element' },
+    });
+    expect(t.title).toBe('New file: 🔒 Verschlüsseltes Element');
   });
 });

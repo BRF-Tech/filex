@@ -798,8 +798,12 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 
 		// The last moment at which the bytes we are about to replace still
 		// exist. A refusal here is a refusal to overwrite -- see
-		// writehook/overwrite.go.
-		if err := writehook.BeforeOverwrite(r.Context(), current.ID, fullRel); err != nil {
+		// writehook/overwrite.go. wiring:e2 convert — unless this is an
+		// in-place E2E conversion write, whose replaced bytes are the
+		// plaintext being removed (e2e_convert.go checks that it is one).
+		guardCtx := e2eConversionContext(r.Context(), h.Store, drv, current.ID, fullRel,
+			r.FormValue("e2e_convert") == "1", sniff[:n])
+		if err := writehook.BeforeOverwrite(guardCtx, current.ID, fullRel); err != nil {
 			_ = src.Close()
 			slog.Warn("upload refused: snapshot",
 				slog.Int64("storage", current.ID),

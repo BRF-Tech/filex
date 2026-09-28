@@ -909,8 +909,11 @@ five jobs):
   *Settings → Updates* **Download** button points into it. Put
   `filex-desktop-portable-x64.exe` there with the installer, or that button
   leads to a file that is not on the server.
-- `npm` (needs `test`, nothing else) — publishes `@brftech/filex-core`,
-  `@brftech/filex`, `@brftech/filex-react`.
+- `npm` (needs `test`, nothing else) — publishes every package under
+  `packages/`: `@brftech/filex-core`, `@brftech/filex`, `@brftech/filex-react`
+  and (since 0.48) `@brftech/filex-app-ui`, the SDK an app's own interface
+  bundles. ⚠ The core package depends on the SDK at run time, so a release
+  whose npm job cannot publish it leaves `@brftech/filex-core` uninstallable.
 
 9. **Publish the two update feeds, then prove they moved.** CI attaches every
    artifact to the GitHub Release; it publishes **neither feed**, and a feed is

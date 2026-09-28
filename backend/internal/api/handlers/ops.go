@@ -198,6 +198,15 @@ type perVerbReq struct {
 	Source    []string `json:"source"`
 	Target    string   `json:"target,omitempty"`
 	SourceDir string   `json:"sourceDir,omitempty"`
+	// Name, for a copy or move of ONE source, is the name it gets in the
+	// target folder: the move and the rename are one step of the queue (one
+	// driver Move/Copy onto the literal destination), so nothing can stop
+	// half-way between them. Encrypted-names folders need exactly this: a
+	// name is sealed for the folder it is in, so an item moved to another
+	// folder must arrive under a name sealed for that folder
+	// (docs/E2E-ENCRYPTION.md → "Folder ids"). A taken name is refused, never
+	// suffixed.
+	Name string `json:"name,omitempty"`
 }
 
 func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string) {
@@ -280,6 +289,23 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 			dest = raw + "/"
 		}
 	}
+	// One source moved or copied under a name of the caller's choosing: the
+	// destination becomes the literal path (joinIntoDir's "no trailing slash"
+	// form), so the queue does both in one driver call.
+	if req.Name != "" {
+		if kind == "delete" || len(sources) != 1 || dest == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name needs a copy or move of exactly one source into a target"})
+			return
+		}
+		if bad := badTransferName(req.Name); bad != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": bad})
+			return
+		}
+		dest = strings.TrimRight(dest, "/") + "/" + req.Name
+		if dest[0] == '/' {
+			dest = strings.TrimLeft(dest, "/")
+		}
+	}
 
 	// Which storage does the TARGET live in? For a paste inside one depo this
 	// is the source's storage; for a paste into another depo it is a second
@@ -349,6 +375,20 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"op": op})
+}
+
+// badTransferName says what is wrong with a caller-chosen transfer name, or ""
+// when it is a single path segment.
+func badTransferName(name string) string {
+	switch {
+	case name == "." || name == "..":
+		return "name must not be . or .."
+	case strings.ContainsAny(name, "/\\\x00"):
+		return "name must be a single path segment"
+	case len(name) > 255:
+		return "name is longer than 255 bytes"
+	}
+	return ""
 }
 
 // bareRel is a path of POST /api/files/ops as the storage-relative path the

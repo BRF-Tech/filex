@@ -40,6 +40,14 @@ func sortedTags(m map[string]map[string]string) []string {
 	return out
 }
 
+// uiSum is the interface bundle's sha256; "" when there is none.
+func (s *staged) uiSum() string {
+	if s.ui == nil {
+		return ""
+	}
+	return s.ui.idx.sum
+}
+
 // wasmPath is the module file a staged install writes; "" when there is none.
 func (s *staged) wasmPath() string {
 	if s.wasm == nil {

@@ -4,19 +4,22 @@
  * update". Pure, so the words and the decisions are tested without a table.
  *
  * The facts are the server's (wasmplugin.Status: `update`, `update_source`,
- * `compat`, `auto_update`); nothing here decides what an update IS — only how
+ * `compat`, `previous`); nothing here decides what an update IS — only how
  * it is said:
  *
- *   · `available`      a newer version waits (automatic updates are off)
+ *   · `available`      a newer version waits for an administrator
  *   · `needs_approval` it asks for new permissions, or a pack brings a module
- *   · `failed`         the automatic update was tried and undone
+ *   · `failed`         (a row filex 0.47 wrote) its automatic update was
+ *                      tried and undone
  *   · `check_failed`   the source could not be read
  *   · `incompatible`   only newer versions that need a newer filex
- *   · the last automatic update, for a week after it happened
  *   · an app with no source says so — an uploaded app is never checked
- *   · automatic updates switched off, said under whatever else is said
+ *   · the version the last approval replaced, when one is kept to go back to
  *   · `compat.ok === false`: the installed version is outside its own range
  *     for THIS filex (it keeps running; the badge is the warning)
+ *
+ * ⚠⚠ Nothing updates itself (filex 0.48, owner's rule): there is no
+ * "updated automatically" to say and no switch to say it is off.
  */
 import { refusalOf, type AppPlugin } from '@/api/appPlugins';
 import { refusalSentence } from '@/lib/appPluginRefusal';
@@ -43,9 +46,6 @@ export interface UpdateView {
   reviewable: boolean;
 }
 
-/** How long "Updated automatically" stays on a row. */
-export const AUTO_UPDATED_SHOWN_MS = 7 * 24 * 60 * 60 * 1000;
-
 const RANK: Record<string, number> = {
   needs_approval: 0,
   failed: 1,
@@ -60,13 +60,13 @@ export function updateRank(p: AppPlugin): number {
   return RANK[p.update?.status ?? ''] ?? 9;
 }
 
-export function updateView(p: AppPlugin, t: Translate, locale: string, now = Date.now()): UpdateView {
-  const view = updateFacts(p, t, locale, now);
-  if (p.update_source && p.auto_update === false) view.lines.push(t('appPlugins.update.autoOff'));
+export function updateView(p: AppPlugin, t: Translate, locale: string): UpdateView {
+  const view = updateFacts(p, t);
+  if (p.previous) view.lines.push(t('appPlugins.update.previous', { version: p.previous.version, when: formatDate(p.previous.replaced_at, locale) }));
   return view;
 }
 
-function updateFacts(p: AppPlugin, t: Translate, locale: string, now: number): UpdateView {
+function updateFacts(p: AppPlugin, t: Translate): UpdateView {
   const view: UpdateView = { badges: [], lines: [], reviewable: false };
   if (p.compat && !p.compat.ok) {
     view.badges.push({
@@ -124,12 +124,6 @@ function updateFacts(p: AppPlugin, t: Translate, locale: string, now: number): U
     case 'incompatible':
       view.lines.push(t('appPlugins.update.needsNewerFilex', { version: u.version ?? '', requires: u.requires ?? '' }));
       return view;
-  }
-  const auto = u?.auto;
-  if (auto && auto.to === p.version && now - Date.parse(auto.at) < AUTO_UPDATED_SHOWN_MS) {
-    view.badges.push({ tone: 'emerald', label: t('appPlugins.update.updated'), testid: `app-plugin-update-auto-${p.name}` });
-    view.lines.push(t('appPlugins.update.autoFrom', { from: auto.from, when: formatDate(auto.at, locale) }));
-    return view;
   }
   view.lines.push(u?.status === 'current' ? t('appPlugins.update.upToDate') : t('appPlugins.update.notChecked'));
   return view;

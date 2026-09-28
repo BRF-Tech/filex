@@ -1,6 +1,7 @@
 package wasmplugin
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
@@ -89,10 +90,44 @@ func pruneNodes(nodes []wire.Node, depth int, budget *int) []wire.Node {
 			continue
 		}
 		*budget--
+		scrubProps(n.Props)
 		if len(n.Children) > 0 {
 			n.Children = pruneNodes(n.Children, depth+1, budget)
 		}
 		out = append(out, n)
 	}
 	return out
+}
+
+// cssColorRe is a colour a node may paint with: hex, or an rgb()/hsl() of
+// numbers — never a CSS value that could carry url() or another declaration.
+var cssColorRe = regexp.MustCompile(`^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla)\([0-9.,%\s/]+\))$`)
+
+// scrubProps removes what a node's props may not carry, whatever its type.
+//
+// ⚠⚠ Props are free-form, and two of them would reach the viewer's NETWORK:
+//
+//   - `src.url` (pdf-fields) would be fetched by the browser of every person
+//     who opened the screen, an anonymous visitor's included — a network path
+//     beside the one the `http:` permission guards. A document is `src.ref`
+//     (a copy this call exposes) or `src.path` (fetched with the viewer's own
+//     rights).
+//   - a signer's `color` becomes a CSS custom property painted as a
+//     background, where `url(…)` is a request too.
+func scrubProps(props map[string]any) {
+	if props == nil {
+		return
+	}
+	if src, ok := props["src"].(map[string]any); ok {
+		delete(src, "url")
+	}
+	if signers, ok := props["signers"].([]any); ok {
+		for _, raw := range signers {
+			if sg, ok := raw.(map[string]any); ok {
+				if c, ok := sg["color"].(string); ok && !cssColorRe.MatchString(strings.TrimSpace(c)) {
+					delete(sg, "color")
+				}
+			}
+		}
+	}
 }

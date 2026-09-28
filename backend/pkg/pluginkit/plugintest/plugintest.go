@@ -54,7 +54,9 @@
 package plugintest
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/brf-tech/filex/backend/pkg/pluginkit"
@@ -285,6 +287,48 @@ func (h *Harness) View(viewID string, ev *wire.ViewEventInput) (*wire.Surface, e
 		s = &wire.Surface{Done: true}
 	}
 	return s, nil
+}
+
+// UICall is the app's own interface calling its module (`fx.call(method,
+// params)`): the handler registered in Plugin.UI, in screen mode, with the
+// current selection as the interface's files. The answer is what the
+// interface would receive — the result, or the error it rejects with.
+func (h *Harness) UICall(viewID, method string, params any, files ...File) (*wire.UICallOutput, error) {
+	v, ok := findView(h.Manifest(), viewID)
+	if !ok {
+		return nil, errors.New("plugintest: the manifest declares no view " + viewID)
+	}
+	if v.UI == "" {
+		return nil, errors.New("plugintest: view " + viewID + " is not the app's own interface (it has no ui file)")
+	}
+	fn := h.Plugin.UI[method]
+	if fn == nil {
+		return nil, errors.New("plugintest: no ui_call handler registered as " + method)
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+	ev := h.Event("open", files...)
+	in := &wire.UICallInput{ViewID: viewID, Method: method, Params: raw, Context: ev.Context}
+	h.Host.EnterScreen()
+	out, err := fn(in)
+	if err != nil {
+		var ue *pluginkit.UIError
+		if errors.As(err, &ue) {
+			return &wire.UICallOutput{Error: ue.Text}, nil
+		}
+		return &wire.UICallOutput{Error: wire.Text{"en": err.Error()}}, nil
+	}
+	// Through JSON, as the wire carries it: a result that does not encode is
+	// a bug the author sees here, not in the browser.
+	b, err := json.Marshal(wire.UICallOutput{Result: out})
+	if err != nil {
+		return nil, fmt.Errorf("plugintest: the %s answer does not encode as JSON: %w", method, err)
+	}
+	var back wire.UICallOutput
+	_ = json.Unmarshal(b, &back)
+	return &back, nil
 }
 
 // Open is View with an `open` event.

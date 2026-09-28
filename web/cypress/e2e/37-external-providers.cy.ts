@@ -10,7 +10,7 @@ describe('external services', () => {
     // ⚠ The slot names are READ from the capability probe, never spelled out
     // here. This case used to assert a literal ['drawio', 'mermaid',
     // 'onlyoffice'] and there has been no `mermaid` slot for a long time: the
-    // baseline is convert / drawio / onlyoffice. It passed anyway, because the
+    // baseline is drawio / onlyoffice. It passed anyway, because the
     // suite only ever ran against production — whose `external` table still
     // holds a leftover `mermaid` ROW from an older build. Against a fresh
     // instance it failed on the first try. A literal list turns a rename into a

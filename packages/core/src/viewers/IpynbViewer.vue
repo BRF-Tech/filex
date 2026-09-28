@@ -8,8 +8,10 @@ import { sayFailure } from '../lib/errorWords';
  *   - markdown cells → markdown-it when available, plain `<pre>` otherwise
  *   - output cells   → text (stream / display_data 'text/plain'),
  *                      images (display_data 'image/png' base64),
- *                      HTML (display_data 'text/html', sanitized via
- *                      element-only insertion — no script tags)
+ *                      HTML (display_data 'text/html')
+ *
+ * Every piece of markup (highlighted code, rendered Markdown, an HTML output)
+ * goes through the one preview sanitizer (lib/sanitizeHtml.ts) before v-html.
  *
  * Source list / output count counters at the top so a 200-cell
  * notebook doesn't surprise the user.
@@ -18,6 +20,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 import { fetchViewerText } from '../composables/useViewerFetch';
+import { sanitizeHtml } from '../lib/sanitizeHtml';
 import { ensureHighlight } from '../composables/useMonacoLoader';
 
 const props = defineProps<{
@@ -116,7 +119,7 @@ async function load(): Promise<void> {
           const result = langOk
             ? hljs.highlight(text, { language: langOk, ignoreIllegals: true })
             : hljs.highlightAuto(text);
-          renderedSources.value.set(idx, result.value);
+          renderedSources.value.set(idx, sanitizeHtml(result.value, 'code'));
         } catch {
           /* leave unrendered */
         }
@@ -130,7 +133,7 @@ async function load(): Promise<void> {
     cells.value.forEach((cell, idx) => {
       if (cell.cell_type === 'markdown') {
         try {
-          renderedMarkdown.value.set(idx, md.render(joinSource(cell.source)));
+          renderedMarkdown.value.set(idx, sanitizeHtml(md.render(joinSource(cell.source)), 'document'));
         } catch {
           /* leave plain */
         }
@@ -173,9 +176,9 @@ function outputImage(out: any): string | null {
 function outputHtml(out: any): string | null {
   if (!out?.data) return null;
   if (out.data['text/html']) {
-    const html = joinSource(out.data['text/html']);
-    // Strip <script> for safety — outputs from arbitrary notebooks.
-    return html.replace(/<script[\s\S]*?<\/script>/gi, '');
+    // An output from an arbitrary notebook: drawn only after the document
+    // sanitizer has taken out everything that could run, fetch or submit.
+    return sanitizeHtml(joinSource(out.data['text/html']), 'document');
   }
   return null;
 }

@@ -343,18 +343,83 @@ type Action struct {
 	Hidden bool `json:"hidden,omitempty"`
 }
 
-// View is a declarative screen the plugin can be asked to draw.
+// View is a screen the plugin can be asked to draw — with filex's own
+// components (a Surface its module answers), or with the app's own interface
+// (UI names a file of the `ui` bundle).
 //
 // Placement: `modal` opens over the explorer; `page` opens as a full page
 // in a new tab (a wizard with a document beside it — anything a modal's
 // double scroll would cramp); `inspector` is a section of the details
-// panel; `home` is a standalone screen listed under Apps.
+// panel; `home` is a standalone screen listed under Apps; `viewer` (an
+// interface only) opens a file the way filex's own viewers do, in the
+// preview's place.
 type View struct {
 	ID        string  `json:"id"`
-	Placement string  `json:"placement"` // modal | page | inspector | home
+	Placement string  `json:"placement"` // modal | page | inspector | home | viewer
 	Label     Text    `json:"label"`
 	Applies   Applies `json:"applies,omitempty"`
 	Size      string  `json:"size,omitempty"`
+	// UI is the bundle file this view opens ("index.html", "editor/main.html"):
+	// the view is the app's own interface, served by filex in a sandboxed
+	// frame (docs/APP-PLUGINS-API.md → An app's own interface). Empty: the
+	// view is a Surface the module draws.
+	UI string `json:"ui,omitempty"`
+}
+
+// UISpec is the `ui` block: the app's own interface.
+type UISpec struct {
+	// Bundle is the zip of the interface's files.
+	Bundle UIBundle `json:"bundle"`
+	// CSP names the exceptions to the interface's script policy:
+	// "unsafe-eval" and "wasm-unsafe-eval". Each is a permission.
+	CSP []string `json:"csp,omitempty"`
+	// External are the addresses outside the package the interface loads.
+	External []UIExternal `json:"external,omitempty"`
+	// PackageFetch lets the interface READ its own package with fetch/XHR
+	// (an editor that loads its stencils or translations at run time, as
+	// draw.io does). Only this version's files: connect-src and the
+	// Connection-Allowlist name the package's own path and nothing else. A
+	// permission (`ui:package-fetch`), derived like the rest of this block.
+	PackageFetch bool `json:"package_fetch,omitempty"`
+	// Download lets the interface hand the person a file to keep on their
+	// own disk (`ui.download` in the SDK): through filex, each time on the
+	// person's gesture or their yes, never over the limit. A permission
+	// (`ui:download`), derived like the rest of this block.
+	Download bool `json:"download,omitempty"`
+}
+
+// NewDocument is one row of the "New" menu an app adds. Ext is the kind
+// (lower-case, no dot); View is the app's `viewer` view that opens it — it
+// must open that kind; Template, when given, is a file of the interface's
+// package the new file is a copy of (else the file is empty).
+type NewDocument struct {
+	Ext      string `json:"ext"`
+	Label    Text   `json:"label"`
+	View     string `json:"view"`
+	Template string `json:"template,omitempty"`
+}
+
+// UIBundle says where the interface's zip is and what it hashes to. URL takes
+// `{tag}` like WasmSource.URL; an upload carries the zip itself.
+type UIBundle struct {
+	URL    string `json:"url,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
+}
+
+// UIExternal is one address outside the package.
+//
+// With SHA256 the file is MIRRORED: filex downloads it once, at install,
+// checks the hash and serves it from the package's own address as
+// `ext/<host>/<path>`, so no browser asks the address. Without it the address
+// is LIVE — the reader's browser fetches it — and that is a permission
+// (`ui-net:<as>:<url>`) the administrator approves.
+type UIExternal struct {
+	URL string `json:"url"`
+	// As is what the file is: style | font | img | media. Never script, never
+	// connect.
+	As     string `json:"as"`
+	SHA256 string `json:"sha256,omitempty"`
+	Reason Text   `json:"reason,omitempty"`
 }
 
 // PublicPage is a flow an outside participant reaches through a share link,
@@ -439,6 +504,14 @@ type Manifest struct {
 	PublicPages       []PublicPage                 `json:"public_pages,omitempty"`
 	Limits            Limits                       `json:"limits,omitempty"`
 	Wasm              *WasmSource                  `json:"wasm,omitempty"`
+	// UI is the app's own interface (HTML/JS/CSS in a zip), served by filex
+	// in a sandboxed frame. An app may have a module, an interface, or both.
+	UI *UISpec `json:"ui,omitempty"`
+	// NewDocuments are rows the app adds to filex's "New" menu: a file of
+	// that kind, empty or made from a template in the interface's package,
+	// opened in one of the app's `viewer` views. Each kind is a permission
+	// (`ui-new:.<ext>`), derived like the interface's own.
+	NewDocuments []NewDocument `json:"new_documents,omitempty"`
 	// Messages are texts FILEX says on the app's behalf, long after the call
 	// that caused them — today the reason beside a file lock ("signatures
 	// are being collected"), shown in the admin panel, the details panel
@@ -557,6 +630,31 @@ type ViewEventInput struct {
 	State    map[string]any `json:"state,omitempty"`
 	Data     map[string]any `json:"data,omitempty"`
 	Context  CallContext    `json:"context"`
+}
+
+// UICallInput is what the host hands `ui_call`: one call an app's OWN
+// interface made to its module over the bridge (`engine.call`,
+// docs/APP-PLUGINS-API.md → An app's own interface). Method and Params are
+// the interface's; Context is the same a screen gets — the files the
+// interface was opened with as refs, the person, the language, the settings.
+//
+// It runs in SCREEN mode: it may read its inputs and settings, look people
+// up, keep state; it may not write files, take locks or run engines — a
+// write is the interface's own save, or a job (`job.submit`).
+type UICallInput struct {
+	ViewID  string          `json:"view_id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+	Context CallContext     `json:"context"`
+}
+
+// UICallOutput is what `ui_call` answers: any JSON value for the interface.
+// Error, when set, refuses the call with a sentence in every language the app
+// speaks (the interface's promise rejects with code `failed` and the text in
+// the reader's language).
+type UICallOutput struct {
+	Result any  `json:"result,omitempty"`
+	Error  Text `json:"error,omitempty"`
 }
 
 // CallContext is the shared context of a view or page call.

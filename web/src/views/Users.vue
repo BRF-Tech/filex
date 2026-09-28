@@ -9,7 +9,7 @@ import { useCapabilitiesStore } from '@/stores/capabilities';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { User, UserRole } from '@/api/types';
-import { emailProblem, refusalField } from '@/lib/accountRules';
+import { emailProblem, refusalField } from '@brftech/filex-core';
 import { formatRelative } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';

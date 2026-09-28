@@ -34,8 +34,10 @@ import (
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 	"github.com/brf-tech/filex/backend/internal/writegate"
@@ -53,6 +55,9 @@ type AppPlugins struct {
 	StorageResolver func(int64) (storage.Driver, error)
 	Index           *search.Index
 	Thumbs          *thumb.Pipeline
+	// Quota is the per-person ceiling an interface's save is held to, like
+	// every other write (security review UI-7). Nil = no ceiling.
+	Quota *quota.Service
 }
 
 // NewAppPlugins constructs the handler and wires it as the registry's sink.
@@ -182,6 +187,15 @@ func (h *AppPlugins) checkOutputFolder(w http.ResponseWriter, r *http.Request, q
 	if gate(w, r, h.ACL, st.ID, writegate.Writes(rel)) {
 		return nil, false
 	}
+	// ⚠ An encrypted folder holds only what the person's browser encrypted:
+	// the server has no key, so an app's plaintext never goes in (security
+	// review UI-9 — for "save as" and a job's chosen folder alike).
+	if lk, ok := h.Store.(e2e.NodeByPathLookup); ok {
+		if _, enc := e2e.FindRoot(r.Context(), lk, st.ID, rel); enc {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "encrypted", "message": "an app cannot write into an encrypted folder"})
+			return nil, false
+		}
+	}
 	return &outputFolder{storage: st, rel: rel}, true
 }
 
@@ -271,9 +285,10 @@ func jobOutputMode(action *wire.Action, out *wire.Output) (mode string, writes b
 // parameters may still have made a choice; a nil choice leaves the manifest's
 // output to speak.
 func applyJobOutput(params map[string]any, out *wire.Output) map[string]any {
-	if params == nil {
-		params = map[string]any{}
-	}
+	// ⚠⚠ The host's own parameter names (__output, the page door's stamps)
+	// are dropped from whatever came in with the caller's or the surface's
+	// params; only the choice validated at submit (authorise) is stamped.
+	params = wasmplugin.StripHostParams(params)
 	if out != nil {
 		wasmplugin.SetOutputOverride(params, out)
 	}
@@ -584,6 +599,9 @@ func (h *AppPlugins) callFail(w http.ResponseWriter, err error) {
 			code = http.StatusForbidden
 		case wasmplugin.CodeTimeout:
 			code = http.StatusGatewayTimeout
+		case wasmplugin.CodeBusy:
+			code = http.StatusServiceUnavailable
+			w.Header().Set("Retry-After", "2")
 		}
 		writeJSON(w, code, map[string]string{"error": ce.Code, "message": ce.Message})
 		return
@@ -686,6 +704,11 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 			}
 			rels = append(rels, rel)
 		}
+	} else if req.StorageID > 0 && !ownsStorage(w, r, req.StorageID, "storage") {
+		// A screen opened on no file (a home page) still names a storage, and
+		// the call's scope opens its driver and tells the app its name: the
+		// same tenant check the path branch makes.
+		return
 	}
 	// ⚠⚠ The HOST half of show_when / required_when (surface_conditions.go).
 	// Before the plugin is told what was pressed, the values are measured
@@ -802,7 +825,17 @@ func (h *AppPlugins) CommitVersion(ctx context.Context, storageID int64, rel str
 	// that is what the freeze is for, and writegate lets the lock holder
 	// through (the job runner tells it who is writing, WithApp). Another
 	// app's output landing on it is refused, whoever queued the job.
-	if err := writegate.Check(h.ACL.Locks(ctx, storageID), writegate.AppFrom(ctx), writegate.Writes(rel)); err != nil {
+	//
+	// An app's editor may also be working on a DRAFT (issue #71): a new
+	// document of a type the app edits lives in its owner's drafts area until
+	// its first save, and a new version of it is that person's own save
+	// (syspath.OwnDraft) — for the person who queued the job, nobody else.
+	var person int64
+	if actor != nil {
+		person = *actor
+	}
+	if err := writegate.Check(h.ACL.Locks(ctx, storageID), writegate.AppFrom(ctx),
+		writegate.Writes(rel).As(syspath.OwnDraft).By(person)); err != nil {
 		return err
 	}
 	if err := storage.EnsureFileTarget(ctx, drv, rel); err != nil {

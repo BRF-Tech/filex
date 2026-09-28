@@ -91,3 +91,29 @@ func TestFindRootAtStorageRoot(t *testing.T) {
 		t.Fatal("file at marked storage root must be under encryption")
 	}
 }
+
+// wiring:e2 fxe — a single encrypted file is recognised by its own magic and
+// by its name; either magic is "encrypted" to the pipelines that read content.
+func TestHasEncryptedPrefixAndFxeNames(t *testing.T) {
+	for _, b := range [][]byte{[]byte("filexe2e\x01..."), []byte("filexe2e\x02..."), []byte("filexfxe\x01{...")} {
+		if !HasEncryptedPrefix(b) {
+			t.Fatalf("%q must count as encrypted", b)
+		}
+	}
+	for _, b := range [][]byte{[]byte("filexfx"), []byte("PK\x03\x04...."), []byte("%PDF-1.7")} {
+		if HasEncryptedPrefix(b) {
+			t.Fatalf("%q must not count as encrypted", b)
+		}
+	}
+	if HasMagicPrefix([]byte("filexfxe\x01")) {
+		t.Fatal("HasMagicPrefix stays the folder-file magic only")
+	}
+	for name, want := range map[string]bool{
+		"Rapor.pdf.fxe": true, "encrypted-3fa2c1d0.fxe": true, "A.FXE": true,
+		".fxe": false, "a.fxe.txt": false, "fxe": false,
+	} {
+		if got := LooksEncryptedFile(name); got != want {
+			t.Fatalf("LooksEncryptedFile(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

@@ -146,6 +146,8 @@ type Hub struct {
 	// watches are the recursive, presence-less subscriptions (watch.go), by
 	// storage id.
 	watches map[int64][]*watch
+	// connected is every open socket, for instance-wide notices (apps.go).
+	connected map[*Client]struct{}
 
 	// Coalescing window bounds — see room. Fields rather than constants so the
 	// tests can shrink them and stay fast; nothing outside this package sets
@@ -247,6 +249,7 @@ func (h *Hub) Subscribe(c *Client, storageID int64, dir, displayPath string) {
 // refreshes presence for the room it left.
 func (h *Hub) Unsubscribe(c *Client) {
 	h.mu.Lock()
+	delete(h.connected, c)
 	h.unwatchLocked(c)
 	oldKey := c.room
 	if oldKey != "" {

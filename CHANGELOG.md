@@ -7,8 +7,341 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-09-28
+
+Apps can bring an interface of their own, a new document stays a draft until
+its first save, encrypted folders can hide their names too and be made from a
+folder you already have — or from a single file — and the desktop app gets the
+notification bell and the account menu in its window. Every newer version of
+an app now waits for an administrator, and the iframe converter is gone.
+
+> ⚠ **Nothing updates itself any more** ([Changed](#changed)): 0.47 installed
+> a newer version of an app by itself when it asked for no new permission.
+> Now every version waits for an administrator's **Review update**; the
+> per-app automatic-update switch is gone and `PATCH …/app-plugins/{id}` with
+> `auto_update` answers `400`.
+
+> ⚠ **filex in someone else's frame** ([Changed](#changed)): a dashboard that
+> shows filex in an `<iframe>` (Homarr, Organizr and the like) needs its
+> origin in the new `FILEX_FRAME_ANCESTORS`; otherwise the browser refuses the
+> frame. The embedded explorer is not a frame and is not affected.
+
+> ⚠ **The iframe converter is removed** ([Removed](#removed)): conversion is
+> the Convert app. `FILEX_CONVERT_URL`, the compose `convert` profile and the
+> Helm `convert` values are gone; a server that still sets the variable says
+> so once, at start.
+
+> ⚠ **For app authors** ([Changed](#changed)): the app platform API is
+> narrower — paths an app passes must be the call's inputs or files it keeps
+> state on, `share_create` and `file_lock` need **editor**, an `http:`
+> permission names a host, and screen calls are capped per app. The two
+> published apps are unaffected.
+
+> ⚠ **For integrators** ([Changed](#changed)): `@brftech/filex-core` now
+> depends on `@headlessui/vue`, `lucide-vue-next` and the new
+> `@brftech/filex-app-ui`.
+
+> ⚠ **Encrypted folders get a level, and level 2 is refused by older filex**
+> ([Added](#added)): level 1 (contents only) stays the default and keeps its
+> v2 key file, which every filex since 0.31 opens. Level 2 (contents and
+> names) — chosen in the create dialog, or later in the folder's settings —
+> writes marker v3, which filex 0.47 and older will not open: on purpose,
+> because they would upload files under their plaintext names next to the
+> encrypted ones. Every folder that already exists stays at level 1.
+
+> ⚠ **Large and single encrypted files need filex 0.48** ([Added](#added)): a
+> file over 200 MB in an encrypted folder is now written as a stream (header
+> `0x02`) and a single encrypted file is a `.fxe`; filex 0.47 and older open
+> neither. The folder, and its files up to 200 MB, still open there.
+
 ### Added
 
+- **An app may bring its own interface**
+  ([docs/APP-PLUGINS.md](docs/APP-PLUGINS.md#an-apps-own-interface)). Besides
+  the screens filex draws, an app can ship HTML, CSS and JavaScript of its
+  own — an editor, a viewer — and an app can be only that, with no
+  WebAssembly module at all.
+  - filex serves the interface from the app's package (a zip pinned by its
+    SHA-256, checked once at install and never unpacked) and runs it in a
+    sandboxed frame whose policy allows no connection, no storage, no cookie
+    and no reach into the page around it. The page policy is built from what
+    you approved, never from the package: scripts only from the package,
+    `connect-src 'none'`.
+  - Everything the interface does goes through filex over one checked
+    channel: reading the files it was opened with, saving over them (a new
+    version, or the draft it is), a new file where the person picks, asking
+    the app's own module (`ui_call`), a toast, a question. The server checks
+    every save again.
+  - A new placement, **viewer**: an app opens a file type the way filex's
+    own viewers do, and the file menu gets **Open with <app>**. Unsaved
+    changes are asked about before the interface closes; drafts (#71) work
+    unchanged.
+  - The install review has an **Interface** group: the package, every
+    address outside it — **mirrored** (filex downloads it once and serves it
+    itself) or **live** (the reader's browser fetches it; a permission, in
+    yellow, with what that means) — the script-policy exceptions, and a
+    plain note that a browser cannot fully stop a page sending data out
+    (WebRTC). An upgrade that adds an address asks again.
+  - An interface may **read its own package** at run time
+    (`ui.package_fetch`, permission `ui:package-fetch`, on the review as
+    "reads its own package") — what an editor that loads its own shape
+    libraries and translations needs. Only that version's files: the page's `connect-src` and
+    Chrome's `Connection-Allowlist` name the package's own path; another
+    app, filex's API and the network stay closed. Every interface's
+    allowlist now names its package path instead of filex's whole origin.
+  - **New document** can make an app's kind of file (`new_documents`,
+    [docs/APP-PLUGINS-API.md](docs/APP-PLUGINS-API.md#new-documents)): a row
+    in the app's own words under **Apps**, made from the app's template (or
+    empty) and opened in the app's viewer — a draft until its first save.
+    Each kind is on the install review (`ui-new:.<ext>`); the rows are told
+    to signed-in people only, while the app runs.
+  - An interface may **hand you a file for your own disk** (`ui.download` in
+    the manifest, `fx.download` in the SDK, permission `ui:download`): filex
+    does it, on your click in the interface or your yes, never over 256 MiB —
+    in Chromium streamed into the file you pick, elsewhere a download.
+  - **The editor tab** (`/files/edit`, *Open in new tab*) opens a file in the
+    app that views it, by the explorer's own rule (*Open with*'s choice
+    travels as `app=<plugin>/<view>`); before, the tab showed filex's own
+    viewer.
+  - What holds an interface in: an address outside its package is a plain
+    public https address — no IP, no internal name; its page is revalidated
+    at every opening, so a narrowed grant takes effect at once; a signed
+    app's module must describe the same interface as its manifest, and a
+    mirrored file is served only as the kind it was declared; a viewer names
+    the file types it opens, each a line of the review (`ui-viewer:.md`), so
+    an update that widens them asks again; a save counts against the quota,
+    and "save as" keeps to the view's file type and never writes into an
+    encrypted folder; the interface is told an error code, never the
+    server's text; a job or a clipboard write needs a gesture in its frame or
+    the person's yes, and everything filex draws for it names the app; one
+    frame's calls are capped, and its calls to the module share the app's
+    screen-call ceiling; filex's pages frame interfaces by path
+    (`<host>/_appui/`), so an interface cannot send its frame to another
+    filex page; and the interface's page switches off every powerful browser
+    feature (devices, sensors, credentials, ads).
+  - For authors: the `@brftech/filex-app-ui` SDK (a few KB, no
+    dependency), `pluginkit` `Plugin.UI` + `plugintest` `Harness.UICall`,
+    and [Writing an interface](docs/PLUGIN-KIT.md#writing-an-interface).
+    `FILEX_APP_PLUGIN_MAX_UI_MB` (128) caps a package; migration `00065`
+    adds `app_plugins.ui_sha256`.
+- **A new document is a draft until its first save**
+  ([#71](https://github.com/BRF-Tech/filex/issues/71)). Choosing New
+  document, naming it and closing the editor used to leave an empty file in
+  the folder. Now Create makes a draft — a real file with the name and type
+  you chose, kept in your own drafts area of that storage — and the folder
+  gets nothing until you press **Save**
+  ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save)).
+  - The editor opens on the draft under a bar that says where it will go,
+    and every editor writes into it as you type: the text, code and Markdown
+    editors every few seconds, the document server and the diagram editor
+    through their own saves. The browser asks before a tab with unsaved
+    changes is closed, and so does the desktop app's document window.
+  - **Save** puts it in its folder. If a file has taken the name meanwhile,
+    filex asks — *save as `report (2).txt` instead?* — and nothing moves
+    before the answer; a save never replaces a file.
+  - Closing a draft that was never saved asks **Save to disk**, **Keep in
+    Drafts** (the default) or **Discard**, which moves it to the Trash;
+    restoring it from there puts it back in Drafts.
+  - **Drafts**, in the navigation panel beside Recent, Starred and Trash,
+    lists your drafts from every storage in the explorer's own table — name,
+    where it will be saved, storage, modified — with Open, Save to disk and
+    Delete, and the panel shows how many there are. No notifications.
+  - A draft is its owner's alone: not in any listing, search, share, WebDAV,
+    S3, SFTP, FTPS or NFS view, desktop sync, storage usage figure or version
+    history, and not shown to anybody else — administrators included. On
+    disk it is `.filex-drafts/<user id>/<key>/<name>`, one of the names filex
+    keeps for itself.
+  - At most **50 drafts per person** by default: *Admin → Protection →
+    Drafts* (1–1000), or `FILEX_DRAFTS_LIMIT` on a fresh install. At the limit
+    New document says so and offers Drafts; it never creates the file in the
+    folder instead.
+  - For integrators: `POST /api/files/drafts` takes `newfile`'s body, with
+    `GET`, `…/count`, `…/{key}`, `POST …/{key}/save` (`409 TARGET_TAKEN` with
+    a `suggested` name) and `DELETE …/{key}`
+    ([docs/BACKEND.md](docs/BACKEND.md#drafts)). Drafts belong to a person, so
+    an app token and an embed confined to one folder by its host keep
+    creating the file directly; `capabilities.drafts` is present exactly when
+    the caller's New document makes drafts. Migration `00064` adds the
+    `drafts` table.
+- **Encryption levels, and encrypted file and folder names.** An encrypted
+  folder has a level: **1 · Contents only** (the default) or **2 · Contents
+  and names**, chosen in the create dialog, shown in the strip, changed in the
+  folder's new **Encryption settings…** (which also hold the password and the
+  escrow slot). At level 2 the names are encrypted in the browser too —
+  AES-SIV (RFC 5297) under a name key sealed by the folder key, with the id of
+  the folder a name is in as associated data, so the same name in two folders
+  is two different stored names; base64url on the server, a folder's id
+  carried in its own name, long names shortened with a sidecar. The server
+  stores and indexes only ciphertext names; every surface of the explorer —
+  listing, split pane, breadcrumb, tabs, destination picker, Recent, Starred,
+  tags, Home, trash, search, the details panel, uploads, downloads — shows the
+  plaintext while the folder is unlocked and "🔒 Encrypted item" while it is
+  not. The vault level is designed, not built, and not offered.
+  [E2E-ENCRYPTION.md → Encryption levels and names](docs/E2E-ENCRYPTION.md#encryption-levels-and-names)
+- **Encrypt a single file.** Right-click any file and choose *Encrypt with
+  E2EE…*: it becomes one self-contained `<name>.fxe`, encrypted in the browser
+  under a password of its own, with a recovery key shown once and — where the
+  installation has key escrow — an escrow slot, said up front. Open, preview
+  and download decrypt in the browser; *Change password…* rewrites the header
+  only; *Remove encryption…* puts the plaintext back. The name can be hidden
+  too (`encrypted-<hex>.fxe`). The dialog says what the server already saw of
+  the original (the trash, its versions, a thumbnail, backups) before
+  anything happens.
+  [E2E-ENCRYPTION.md → Single encrypted files](docs/E2E-ENCRYPTION.md#single-encrypted-files-fxe)
+- **Desktop app: the notification bell and your account menu in the top bar.**
+  The app raised a native notification for everything new and had nowhere in
+  its window to read one, mark it read or follow it — and no account menu at
+  all. The top bar now ends as the web app's does: the **bell** (the unread
+  count on it, the newest fifteen, *Mark all read*, *View all* with pages and
+  *Unread only*) and the **avatar**, which holds your settings as a person:
+  *User settings* opens the web app's settings dialog **inside the window**
+  (profile, time zone, appearance, compact list, default folder view,
+  notification switches, password, two-factor sign-in), *Admin panel ↗* for an
+  administrator, and the file list's shortcut and tour rows that sat behind
+  the "…". A click on a notification lands in the window: the folder with the
+  file selected, the Trash with the item selected, or an app's home view. They
+  are the web app's own components, not a second copy — see *Changed*.
+  Signing out stays where the app's own settings are, *Settings → Accounts*,
+  with the language, sync and the other accounts.
+  ([docs/DESKTOP.md → Notifications and your account](docs/DESKTOP.md#notifications-and-your-account))
+- **Encrypt a folder you already have, in place.** Right-click a folder →
+  **Encrypt with E2EE…**: the same dialog as creating one (level 1 by
+  default), and every file is encrypted where it is, resumably; at level 2 the
+  names follow. The server keeps no plaintext version of those writes, and
+  when it finishes drops the thumbnails and extracted text it held for the
+  folder and — the owner's choice, on by default — its older versions and
+  trash entries (`POST /api/files/e2e/cleanup`). The key file carries the new
+  required feature `conv` while it runs, which filex 0.47 and older refuse.
+  [E2E-ENCRYPTION.md → Encrypting a folder you already have](docs/E2E-ENCRYPTION.md#encrypting-a-folder-you-already-have)
+- **Raise a folder you already have to level 2.** **Encryption settings… →
+  Change level…**, after saying what changes; nothing is proposed on unlock.
+  It renames only (no content is touched), writes the key file first, and an
+  interrupted run continues where it stopped. **Fix names** in the same place
+  renames stray plaintext names written later over WebDAV or the CLI, and
+  repairs names moved in from another folder outside filex.
+- **Change an encrypted folder's password.** **Encryption settings… → Change
+  password…**, proved with the current password or the recovery key. A
+  folder created since v0.31 rewrites only its key file — no file is touched,
+  the recovery key, escrow and encrypted names keep working. A folder from
+  before v0.31, whose key comes from its password, is re-keyed: a new folder
+  key, every file's key re-wrapped (the contents are not re-encrypted),
+  resumable, with a new recovery key; any folder can be re-keyed on purpose
+  ("Also replace the folder key"), which is also how a leaked recovery key is
+  revoked. Opening a folder with its recovery key now asks for a new password
+  straight away. Every change is recorded in the audit log and the folder's
+  owner is notified (`e2e.password_changed`, subscribable by webhook).
+  [E2E-ENCRYPTION.md → Changing the password](docs/E2E-ENCRYPTION.md#changing-the-password)
+- **No size limit in encrypted folders.** A file over 200 MB is encrypted in
+  the browser as a STREAM (chunked AES-256-GCM, 1 MiB chunks, truncation and
+  reordering detected) while it uploads, and decrypted as it downloads —
+  nothing is held in memory. These files use header version `0x02`, which
+  filex 0.47 and older refuse (the folder and its smaller files still open
+  there); files up to 200 MB are written exactly as before.
+  [E2E-ENCRYPTION.md → Streaming content](docs/E2E-ENCRYPTION.md#streaming-content-stream)
+- **Download an encrypted folder decrypted.** Downloading an unlocked
+  encrypted folder, a subfolder or a selection inside one now gives a zip with
+  the real names and the decrypted content, made in the browser as it is
+  saved; *Download encrypted copy* keeps the server's ciphertext zip. Chrome,
+  Edge and the desktop app save it straight to disk at any size; Firefox and
+  Safari up to 1 GB, and say so above that.
+  [E2E-ENCRYPTION.md → Downloading a decrypted copy](docs/E2E-ENCRYPTION.md#downloading-a-decrypted-copy)
+- **The escrow key opens a single encrypted file — and its owner is told.**
+  On an installation with key escrow, the unlock dialog of a `.fxe` sealed to
+  its key offers *Use the escrow key*: the same flow as an encrypted folder's,
+  the browser proving it holds the private key and the server notifying the
+  file's owner before anything is decrypted. `/api/files/e2e/escrow/challenge`
+  and `/used` accept a `.fxe` path.
+  [E2E-ENCRYPTION.md → Key escrow](docs/E2E-ENCRYPTION.md#key-escrow-optional-operator-recovery)
+- **A `.fxe` password change is announced, and the server sees it too.** The
+  owner is notified and the audit log records `e2e.password_change`, as for a
+  folder; independently, every rewrite of a `.fxe` on any surface is audited
+  by the server as `e2e.fxe_header_rewritten` (password, recovery key, escrow,
+  content…), and a changed password deletes the versions that would still
+  open the file's current contents with the old one.
+  [E2E-ENCRYPTION.md → Who is told](docs/E2E-ENCRYPTION.md#who-is-told)
+- **Delete the original for good while encrypting it (administrators).** The
+  encrypt dialog offers an administrator to delete the original's versions and
+  its trash entry as soon as the encrypted copy is saved; for someone else's
+  file it names the owner and asks a second, explicit confirmation.
+  [E2E-ENCRYPTION.md → What the server already saw](docs/E2E-ENCRYPTION.md#what-the-server-already-saw-of-the-original)
+- **Over 1 GB in Firefox or Safari, the decrypted download says so and hands
+  over the way out.** Instead of an error line, a dialog — before the password
+  is asked, for a `.fxe` — with *Download encrypted file* (or the encrypted
+  folder as a zip) and the `filex decrypt` command to copy. Chrome, Edge and
+  the desktop app still stream it to disk at any size.
+  [E2E-ENCRYPTION.md → Where a decrypted download goes](docs/E2E-ENCRYPTION.md#where-a-decrypted-download-goes)
+- **`filex decrypt`** — decrypts a downloaded encrypted folder (or its zip, or
+  one file) on your own machine, with the folder password or the recovery
+  key, offline, into a folder with the original names. The password is read
+  from the terminal or standard input, never from an argument; a wrong password
+  or a damaged file stops it with no partial output. Reads every marker version.
+  [CLI.md → filex decrypt](docs/CLI.md#filex-decrypt--an-encrypted-folder-offline)
+- **`filex decrypt file.fxe`** writes a single encrypted file back under its
+  original name (or `-o`), and `filex decrypt` streams `0x02` folder files; a
+  wrong password (exit 5) or a damaged, truncated or extended file (exit 6)
+  leaves nothing behind.
+  [CLI.md → A single encrypted file](docs/CLI.md#a-single-encrypted-file-fxe)
+- **The server records every rewrite of an encrypted folder's key file** — an
+  audit row `e2e.key_file_rewritten` with which slots changed (`password`,
+  `recovery_key`, `escrow`, `level`, `rekey`) and the surface it came from,
+  whether or not the client announced it. When the password or recovery slot
+  changed, the key file's earlier versions are deleted: each of them still
+  opened the folder with the old password.
+  [E2E-ENCRYPTION.md → Who is told](docs/E2E-ENCRYPTION.md#who-is-told)
+- **Notifications never print an encrypted name.** A row about an item inside
+  an encrypted folder carries `meta.e2e_root`; the bell, the notifications
+  page, the browser toast and the desktop app show "🔒 Encrypted item" — or
+  the real name, where this tab's explorer has the folder unlocked — instead
+  of the ciphertext the server stores.
+  [NOTIFICATIONS.md](docs/NOTIFICATIONS.md)
+- **The split pane has the lock screen too.** Standing inside a locked
+  encrypted folder it shows the same password prompt as the main pane (and
+  the way to the recovery key), and one unlock opens the folder in both.
+- **Search inside an encrypted folder** runs in the browser when its names are
+  encrypted — the server cannot match names it cannot read.
+- **A format reference for encrypted folders** — every parameter (PBKDF2,
+  AES-GCM, the recovery-key alphabet and HKDF slot, escrow, file header, names,
+  re-key) in one normative list, for anything else that reads or writes them.
+  [E2E-ENCRYPTION.md → Format reference](docs/E2E-ENCRYPTION.md#format-reference)
+- **Move or copy under a new name, in one step.** `POST /api/files/move` and
+  `/copy` take `name` for a single source: the item lands under that name as
+  one job of the queue. The explorer uses it to re-seal a name when an item
+  changes folders inside a level-2 folder.
+- **Apps' interfaces can have an origin of their own**
+  ([docs/APP-PLUGINS.md](docs/APP-PLUGINS.md#an-origin-of-their-own)).
+  `FILEX_APP_UI_ORIGIN` (`app_ui_origin`) names a second host the proxy sends
+  to filex: filex answers only the interface route there, refuses it on its
+  own host, frames it from its pages and names it in every interface's
+  policy — a second wall besides the sandbox, which stays. The bundled
+  Caddyfile has the block, commented; a value that is not an origin, or
+  filex's own, stops the server.
+- **Going back to the previous version of an app**
+  ([docs/APP-PLUGINS.md](docs/APP-PLUGINS.md#going-back)). The version an
+  approval replaced is kept — module, manifest, interface, mirrored files and
+  the permissions it ran under — and **Actions → Back to *version*** puts it
+  back for everybody without asking to approve its permissions again (they
+  were approved when it was installed); the version it replaces is kept in
+  turn. Held to the hashes recorded when it was replaced. `POST
+  /api/admin/app-plugins/{id}/rollback`, audited `app_plugin.rollback`;
+  migration `00066` adds `app_plugin_versions` (and `app_plugins.signature`).
+- **People using an app hear when its version changes.** An interface that is
+  open when a version is approved says so with **Reload** (asking about
+  unsaved changes first) — the realtime frame `app.updated`
+  ([docs/REALTIME.md](docs/REALTIME.md)) — and the first opening after an
+  approval says *"… was updated to 1.3.0"*, once per person.
+- **A storage plugin can follow a source — and waits for you**
+  ([docs/PLUGINS.md](docs/PLUGINS.md#updates-from-a-source)). A binary
+  plugin may name an update source: a GitHub repository (the
+  `filex-storage.json` attached to its latest release) or the https address
+  of one. filex checks it daily and says when a newer version for this
+  server's platform is there (the row, and the bell once per version);
+  **Review update** shows the jump, the build's SHA-256 and the notes, and
+  only **Upgrade** installs it — held to that hash, then the ordinary upgrade
+  with its conformance gate and roll-back. Install **From its source**, name
+  or clear a source later, **Check for updates**. `POST
+  /api/admin/plugins/updates/check`, `{"from_source": true}` on
+  `…/{id}/upgrade`, `{"source"}` on `PATCH`; migration `00067` adds
+  `plugins.source` and `plugins.update_json`.
 - **Store badges.** The README, the desktop documentation and filex.sh show
   the Microsoft Store's and the Snap Store's own badges, each linking to the
   app's listing and switching with the reader's colour scheme. The files live
@@ -20,14 +353,209 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release has attached; on macOS it offers the Homebrew tap after the `.dmg`
   (`brew upgrade` is what keeps a Mac copy current).
 
+### Changed
+
+- **Nothing updates itself any more — every newer version of an app waits for
+  an administrator** ([docs/APP-PLUGINS.md](docs/APP-PLUGINS.md#updates)).
+  0.47 installed a newer version by itself when it asked for no new
+  permission. An app's interface is code that runs in every person's
+  browser, and "it asks for nothing new" says nothing about what new code
+  does with what it already has, so the daily check now only says what it
+  found — an app with or without a module, with or without an interface, a
+  language pack — and **Review update** is where every version is approved.
+  Everybody uses the version approved.
+  - The per-app switch is gone: **Turn off / Turn on automatic updates** is no
+    longer in the menu, and `PATCH /api/admin/app-plugins/{id}` with
+    `auto_update` answers `400`. `POST …/updates/check` installs nothing (its
+    report's `updated` is always empty).
+  - The review of a newer version says what it changes beyond the grant: the
+    module's and the interface's SHA-256 before and after, which interface
+    files were added, removed and changed, the filex range, the signature,
+    and the source's release notes (as plain text).
+  - The audit row of an approval is `app_plugin.upgrade`, naming the
+    administrator, with `from`, `to` and what the grant gained and lost.
+- **filex's pages are shown in a frame only by filex itself, unless you name
+  the site.** A dashboard that shows filex in an `<iframe>` (Homarr, Organizr
+  and the like) needs its origin in the new `FILEX_FRAME_ANCESTORS`
+  (`frame_ancestors`), for example `https://home.example.com`; otherwise the
+  browser refuses the frame. The embedded explorer (`<filex-explorer>`, the
+  React and Vue components) is not a frame and is not affected, nor is what it
+  shows from filex on the host page, nor the desktop app
+  ([docs/CONFIGURATION.md](docs/CONFIGURATION.md#security-headers-and-framing)).
+- **filex's pages say what they may frame.** Besides filex itself, only the
+  editors switched on under *Admin → External services* (draw.io and
+  ONLYOFFICE), read live: `frame-src` on every page filex
+  draws. Never another site and never a `data:` or `blob:` document — this is
+  the wall that keeps an app's interface in its frame
+  ([docs/CONFIGURATION.md](docs/CONFIGURATION.md#security-headers-and-framing)).
+- **App platform API (narrower).** See
+  [docs/APP-PLUGINS-API.md](docs/APP-PLUGINS-API.md). The two published apps
+  (e-Signature, Converter) are unaffected.
+  - A `path` an app passes to `file_lock`, `file_unlock`, `notify_send`'s
+    `target` or `share_create` (with a page), and every path in a scheduled
+    item, must name one of the call's inputs or a file the app already keeps
+    state on; anything else is `permission_denied`. An app that addressed
+    other files by path must work from its inputs or from `state_list`.
+  - `share_create` and `file_lock` ask the person a job runs for to hold
+    **editor** on the file, the bar the Share dialog already sets for a link.
+  - An `http:` permission names a host, an IP, or `*.` and a name of at least
+    two labels; a bare `*`, a whole top-level domain, a port or user-info is
+    refused. An installed app whose grant no longer parses stops as `refused`
+    until an administrator reviews it.
+  - At most 8 screen calls (views and public page events) run at once per
+    app; a call that finds no slot within 3 s answers `503 busy`.
+- **For integrators:** the bell, its row, the unread badge, the full list and
+  the account menu moved from the admin app into `@brftech/filex-core`
+  (`NotificationBell`, `NotificationRow`, `UnreadBadge`, `NotificationsPanel`,
+  `AccountMenu`), with the feed logic (`createNotificationFeed`), the click
+  resolver (`resolveNotificationTarget` and friends) and the renderer
+  (`renderNotification`). The admin app draws the same ones; nothing changes on
+  screen there. `@headlessui/vue` is now a dependency of the core package.
+- **For integrators:** the user settings dialog moved the same way
+  (`UserSettingsDialog`, with what it needs from its host written down as
+  `UserSettingsHost`), and with it the account rules, the webhook event list,
+  the density preference and the avatar downscaler. The admin app mounts the
+  same dialog; nothing changes on screen there. `lucide-vue-next` is now a
+  dependency of the core package.
+- **For integrators:** a host that mounts `<filex-explorer>` can ask for the
+  bell and the avatar in the explorer's own header with `config.notifications`
+  and `config.account` — a slot cannot be filled in a custom element — and for
+  the settings dialog with `config.account.settings`. The element now exposes
+  `revealNotification(dest)`, `openAppTarget(…)` and `reload()`. ([docs/INTEGRATION.md → 4f](docs/INTEGRATION.md#4f-the-notification-bell-and-the-account-menu-host-hooks))
+- The server treats a single encrypted file (`filexfxe`) like a file of an
+  encrypted folder (`filexe2e`): no content indexing, OnlyOffice answers
+  `415`, and the thumbnail pipeline skips a `.fxe` by name and any file that
+  starts with either magic whatever it is called.
+- A download inside an unlocked encrypted folder is decrypted as it arrives
+  (it used to be read whole into memory first), and a re-key re-wraps a large
+  file from its header alone.
+- Inside an encrypted folder whose names are encrypted, a copy or move onto a
+  name that is already taken is refused (409) instead of being given a `-copy`
+  name the server made up, which nothing could decrypt.
+- Rows outside a folder listing — Recent, Starred, tags, the trash, search
+  hits — carry `e2e_root` when they sit inside an encrypted folder. Opening
+  such a row now goes into its folder (the lock screen, or the decrypted
+  preview) instead of handing a viewer ciphertext.
+- The explorer's presence focus and `selection-change` event send the stored
+  name (`basename`); a row with an encrypted name adds `display_name`.
+
+### Removed
+
+- **The iframe converter.** Conversion is the Convert app
+  ([docs/APP-PLUGINS.md](docs/APP-PLUGINS.md#converting-files)); the
+  p2r3/convert side-car it replaced since 0.43 is gone: the legacy *Convert*
+  menu row and dialog, the *Converter* row of External services (migration
+  `00068` deletes it), `FILEX_CONVERT_URL` (a server that still sets it says
+  so once, at start), the `convert_url` capability alias, the
+  `convertBase` embed option, `file_root`'s converter address, the compose
+  `convert` profile and the Helm `convert` values, and
+  docs/CONVERT-INTEGRATION.md.
+
 ### Fixed
 
+- **An item deleted outside filex no longer appears in the Trash (#74).** When
+  a scan finds that a file or folder is gone from the storage (deleted in a
+  shell, by another program or in the bucket), it now removes the item from
+  the catalogue, together with its search entry, thumbnail, shares, comments
+  and tags, and releases its quota. Until now the scan listed such an item in
+  the Trash with a Restore that could bring nothing back, since nothing of it
+  had ever been in the trash. Items deleted in filex are unchanged: they go to
+  the Trash and can be restored. Entries an earlier version left in the Trash
+  this way are no longer listed, restoring one by id answers `404`, and the
+  next full scan of their storage removes them; nothing on the storage is
+  touched. Because a removal cannot be undone, a scan now confirms that a
+  missing folder is gone (as it already did for files), removes a folder only
+  once nothing is left under it, and removes nothing below a folder it could
+  not list. The 30 % guard is unchanged, and an item that comes back is
+  catalogued as a new file
+  ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md#what-the-trash-holds)).
+- Desktop: the title bar works with a dialog open. The share dialog covered it
+  (minimise, maximise and close were under its backdrop), and so would the
+  new in-window user settings; every dialog and screen of the file list now
+  opens below the bar, so its buttons answer the first click and the window
+  still drags. For hosts: `--fe-overlay-top` ([docs/INTEGRATION.md → 4g](docs/INTEGRATION.md#4g-a-host-title-bar-above-the-explorer)).
+- Desktop: clicking a native notification now marks it read, as clicking the
+  browser's does — it stayed unread.
+- Desktop: a notification that asked for an app's screen on a file opened only
+  the folder. The page called `openAppTarget` on the element, which a custom
+  element never had (it exposes its own setup, not the explorer's).
+- Desktop: a notification about an app's home view now opens it; the window
+  used to come forward and stop.
+- `?settings=1` opens the settings dialog on Home and Files too, for every role
+  — it worked only in the admin panel, so the address bounced an ordinary
+  person.
+- **A draw.io diagram can be saved.** The draw.io viewer saves through the
+  text-save endpoint, which did not accept `.drawio` / `.dio`, and a new
+  diagram's catalogue type (`application/vnd.jgraph.mxfile`) was not taken
+  for text either: every Save in draw.io answered 415 "extension not allowed".
 - The README, the desktop documentation and the CLI page gave `winget install`
   as a working command. The winget packages are submitted with every release
   and are still waiting for their first review by the winget moderators; until
   that is approved, winget does not find them, and the pages now say so.
 - The install offer gave the Windows installer and portable `.exe` as ~92 MB;
   they are ~125 MB.
+- **New document** and **Request files** are no longer offered inside an
+  encrypted folder: the server wrote the template, or a visitor's upload, in
+  the clear.
+- Dragging a row of an encrypted folder out to the desktop no longer hands the
+  operating system ciphertext under the plaintext name.
+- Stepping from one unlocked encrypted folder into another no longer keeps the
+  first folder's key file and open offers on screen; the preview's next and
+  previous arrows decrypt before they show a file inside an encrypted folder.
+- A right password with a damaged key file is no longer reported as "Wrong
+  password"; a key file asking for an absurd number of key-derivation rounds is
+  refused instead of hanging the tab; a decrypted name that is a path (`../x`)
+  is shown as unreadable instead of becoming a download name.
+
+### Security
+
+- Harden the app platform's tenant boundary: on a multi-tenant instance an
+  app's people search and its notifications stay inside the tenant of the
+  person a call acts for; a call with nobody behind it (the hourly wake-up
+  and the work it schedules) looks up no one, and a screen opened on no file
+  is held to its storage's tenant. Single-tenant instances are unaffected.
+- Harden how files are shown inline from filex's own address: the explorer's
+  preview, `/api/files/read`, the AI download, a share opened with
+  `?inline=1`, a shared folder's entries and the copies an app's public page
+  exposes. Every kind a browser does not simply display (HTML, SVG, XML and
+  anything unrecognised) is served sandboxed, with no scripts, and every
+  answer names its type. PDFs, pictures, sound, video and plain text are
+  shown as before.
+- Harden the public link doors: a shared folder's entries answer only for a
+  folder share and go through the same PIN gate, with its lock, as the link
+  itself; the older metadata endpoint keeps a PIN-protected file's name
+  behind the PIN and says nothing about an app link.
+- Harden where an app job writes its result: only the output choice and the
+  link stamps the host itself validated are kept.
+- Harden outbound addresses: the shared range 100.64.0.0/10 and the other
+  non-public ranges (and their NAT64/6to4 spellings) are refused for app
+  requests, asset downloads and plugin downloads.
+- Harden what an app's screen may carry: document addresses the host did not
+  issue and colours that are not colours are dropped; an app's homepage is
+  shown only when it is an http(s) address.
+- Harden the install review: a language an app adds cannot rewrite the
+  permission sentences of a language filex ships.
+- Harden the browser-facing headers, whatever proxy is in front:
+  `X-Content-Type-Options: nosniff` and
+  `Referrer-Policy: strict-origin-when-cross-origin` on every answer, and
+  `Content-Security-Policy: frame-ancestors 'self'` (plus
+  `FILEX_FRAME_ANCESTORS`) on filex's pages.
+- Harden the previews that draw a file as HTML: the Markdown preview (inline
+  HTML included), a notebook's cells and HTML outputs, highlighted code,
+  Mermaid diagrams and KaTeX formulas all pass through one sanitizer
+  (DOMPurify, dual-licensed Apache-2.0 / MPL-2.0, now a dependency of
+  `@brftech/filex-core`) with a narrow allow-list: no scripts, event
+  attributes, `javascript:` or `data:` links, forms, frames, objects or
+  `url()` in styles. Headings, tables, code blocks, pictures, links and
+  `<details>` look as before, on the web, in the desktop app and in every
+  embed.
+- Harden the draw.io editor's messages: filex takes them only from the
+  editor's frame at the configured service's origin, and sends them only
+  there.
+- Document that the Document Server is trusted like filex's own pages: its
+  editor API script runs inside the filex page, so point filex only at a
+  Document Server run or trusted as fully as filex
+  ([docs/ONLYOFFICE.md → Security notes](docs/ONLYOFFICE.md#security-notes)).
 
 ## [0.47.0] - 2026-09-26
 

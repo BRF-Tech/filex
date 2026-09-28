@@ -27,8 +27,10 @@ const props = defineProps<{
   folderName?: string;
   /** Set when this installation holds an escrow key for the folder too. */
   escrowKid?: string | null;
-  /** 'created' = a new folder; 'upgraded' = an existing folder gained recovery. */
-  variant?: 'created' | 'upgraded';
+  /** 'created' = a new folder; 'upgraded' = an existing folder gained recovery;
+   *  'replaced' = a re-key issued a new one and the old one stopped working;
+   *  'file' = a single encrypted file (.fxe) was just made (wiring:e2 fxe). */
+  variant?: 'created' | 'upgraded' | 'replaced' | 'file';
 }>();
 
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -48,7 +50,18 @@ watch(
 );
 
 const title = computed(() =>
-  props.variant === 'upgraded' ? t('e2e.recovery.title_upgraded') : t('e2e.recovery.title'),
+  props.variant === 'upgraded' || props.variant === 'replaced'
+    ? t('e2e.recovery.title_upgraded')
+    : t('e2e.recovery.title'),
+);
+const lead = computed(() =>
+  props.variant === 'upgraded'
+    ? t('e2e.recovery.lead_upgraded')
+    : props.variant === 'replaced'
+      ? t('e2e.recovery.lead_replaced')
+      : props.variant === 'file'
+        ? t('e2e.recovery.lead_file')
+        : t('e2e.recovery.lead'),
 );
 
 async function copy() {
@@ -64,13 +77,15 @@ async function copy() {
 }
 
 function download() {
-  const name = props.folderName || 'folder';
+  /* wiring:e2 fxe — the same card for a single encrypted file. */
+  const what = props.variant === 'file' ? 'file' : 'folder';
+  const name = props.folderName || what;
   const body =
     `filex recovery key\n` +
-    `folder: ${name}\n` +
+    `${what}: ${name}\n` +
     `\n${props.recoveryKey}\n\n` +
-    `This key opens the encrypted folder without its password.\n` +
-    `Anyone holding it can read the folder. Store it like a password.\n` +
+    `This key opens the encrypted ${what} without its password.\n` +
+    `Anyone holding it can read the ${what}. Store it like a password.\n` +
     `filex does not keep a copy and cannot show it again.\n`;
   const url = URL.createObjectURL(new Blob([body], { type: 'text/plain' }));
   const a = document.createElement('a');
@@ -94,7 +109,7 @@ function done() {
   <Modal :open="open" :title="title" size="sm" :close-on-backdrop="false" @close="done">
     <div class="fe-e2e-rk">
       <p class="fe-e2e-rk__lead">
-        {{ variant === 'upgraded' ? t('e2e.recovery.lead_upgraded') : t('e2e.recovery.lead') }}
+        {{ lead }}
       </p>
 
       <output class="fe-e2e-rk__key" :aria-label="t('e2e.recovery_key_aria')">{{ recoveryKey }}</output>
@@ -110,12 +125,12 @@ function done() {
 
       <div class="fe-e2e-warn" role="alert">
         <strong>{{ t('e2e.recovery.warn_title') }}</strong>
-        <p>{{ t('e2e.recovery.warn_body') }}</p>
+        <p>{{ variant === 'file' ? t('e2e.recovery.warn_body_file') : t('e2e.recovery.warn_body') }}</p>
       </div>
 
       <div v-if="escrowKid" class="fe-e2e-rk__escrow" role="note">
         <strong>{{ t('e2e.recovery.escrow_title') }}</strong>
-        <p>{{ t('e2e.recovery.escrow_body') }}</p>
+        <p>{{ variant === 'file' ? t('e2e.fxe.escrow_body') : t('e2e.recovery.escrow_body') }}</p>
         <p class="fe-e2e-rk__kid">{{ t('e2e.recovery.escrow_kid') }}: <code>{{ escrowKid }}</code></p>
       </div>
 

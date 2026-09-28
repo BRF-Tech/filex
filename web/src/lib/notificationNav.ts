@@ -1,18 +1,18 @@
 // Turning a resolved destination into an actual navigation, for the web.
 //
-// The RULE of where a click goes lives in `notificationTarget.ts` (shared with
-// the desktop main process). This file is the web's half of the answer only:
+// The RULE of where a click goes lives in core's `lib/notificationTarget.ts`
+// (shared with the explorer and the desktop main process). This file is the web's half of the answer only:
 // how that destination is reached inside a Vue SPA.
 
 import type { Router } from 'vue-router';
-import { appBase } from '@brftech/filex-core';
-import { useAuthStore } from '@/stores/auth';
 import {
+  appBase,
   notificationRoute,
   resolveNotificationTarget,
   shareHref,
   type NotificationTarget,
-} from './notificationTarget';
+} from '@brftech/filex-core';
+import { useAuthStore } from '@/stores/auth';
 
 /**
  * Navigate to whatever a notification is about.

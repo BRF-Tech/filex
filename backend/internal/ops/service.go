@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/trash"
@@ -1330,6 +1331,36 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 // (sweep-2026-05-09 bug 25 — "Kopyasını Oluştur" (Duplicate) was sending
 // source == destination and the S3 driver was 400ing the self-copy.)
 func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string, taken ...Taken) (string, error) {
+	return uniqueDest(ctx, drv, src, dst, copyName, taken...)
+}
+
+// namer spells the i-th name offered beside a taken one (i counts from 1):
+// what the stem (`report`) and extension (`.docx`, or "") become.
+type namer func(stem, ext string, i int) string
+
+// copyName is the copy's spelling: `report-copy.docx`, `report-copy-2.docx`,
+// … — what a copy, a move and an app's output get.
+func copyName(stem, ext string, i int) string {
+	if i == 1 {
+		return stem + "-copy" + ext
+	}
+	return fmt.Sprintf("%s-copy-%d%s", stem, i, ext)
+}
+
+// numberedName is a SECOND DOCUMENT's spelling: `report (2).docx`,
+// `report (3).docx`, … — the numbering the New document dialog suggests
+// (packages/core lib/newDocName suggestDocName) and the one a draft is saved
+// under beside a file that already has its name (UniqueDestNumbered). A draft
+// is not a copy of what is there, so it is not called one.
+func numberedName(stem, ext string, i int) string {
+	return fmt.Sprintf("%s (%d)%s", stem, i+1, ext)
+}
+
+// uniqueDest is uniqueCopyDest with the spelling of the alternatives named:
+// every rule about what counts as taken, the case-only rename and the
+// saturation error is this one function's, whichever way the names are
+// spelled — only `name` differs between the callers.
+func uniqueDest(ctx context.Context, drv storage.Driver, src, dst string, name namer, taken ...Taken) (string, error) {
 	occupied := func(p string) bool {
 		if storage.Exists(ctx, drv, p) {
 			return true
@@ -1363,6 +1394,16 @@ func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string, ta
 		dir = dst[:idx+1] // keep trailing slash
 		base = dst[idx+1:]
 	}
+	// wiring:e2 names — inside an end-to-end encrypted folder whose names are
+	// encrypted, a name the server makes up (`<ciphertext>-copy`) is a name
+	// nobody can ever decrypt: the item would sit there as "unreadable". The
+	// server cannot make a decryptable one either — it has no key. So a
+	// collision there is a conflict for the person to resolve, never a new
+	// name. Checked only on a collision, and only for a name shaped like
+	// ours, so every other paste behaves exactly as before.
+	if e2e.LooksEncryptedName(base) && encryptedDirOnDriver(ctx, drv, dir) {
+		return "", fmt.Errorf("%w: %s", ErrEncryptedNameTaken, dst)
+	}
 	stem := base
 	ext := ""
 	if dotIdx := strings.LastIndex(base, "."); dotIdx > 0 {
@@ -1370,12 +1411,7 @@ func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string, ta
 		ext = base[dotIdx:]
 	}
 	for i := 1; i <= 100; i++ {
-		var candidate string
-		if i == 1 {
-			candidate = dir + stem + "-copy" + ext
-		} else {
-			candidate = fmt.Sprintf("%s%s-copy-%d%s", dir, stem, i, ext)
-		}
+		candidate := dir + name(stem, ext, i)
 		if candidate != src && !occupied(candidate) {
 			return candidate, nil
 		}
@@ -1391,6 +1427,45 @@ func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string, ta
 // ErrNoFreeName means every name a move or copy would give an item beside a
 // taken destination is taken as well. Nothing was written.
 var ErrNoFreeName = errors.New("no free name left beside the destination")
+
+// ErrEncryptedNameTaken means the destination, inside an end-to-end encrypted
+// folder whose names are encrypted, already holds an item with this name —
+// and the server, holding no key, cannot pick another name that would still
+// decrypt. Nothing was written. Wraps ErrNoFreeName, so every caller that
+// answers "name taken" for that answers it for this too.
+var ErrEncryptedNameTaken = fmt.Errorf("%w: an item with this name already exists in this encrypted folder, and the server cannot choose another name for it", ErrNoFreeName)
+
+// encryptedDirOnDriver reports whether dir (a destination folder, in the
+// driver's own path form, trailing slash allowed) is inside an end-to-end
+// encrypted folder: it or an ancestor holds the `.filex-e2e.json` marker.
+// Asked of the driver, not the catalogue, because the ops worker has only
+// the driver — and only after a collision, so the walk is rare. A driver
+// that cannot answer counts as "yes" (storage.Exists fails closed): refusing
+// a new name is the safe side of that error.
+func encryptedDirOnDriver(ctx context.Context, drv storage.Driver, dir string) bool {
+	lead := ""
+	if strings.HasPrefix(dir, "/") {
+		lead = "/"
+	}
+	rel := strings.Trim(dir, "/")
+	for {
+		marker := lead + e2e.MarkerName
+		if rel != "" {
+			marker = lead + rel + "/" + e2e.MarkerName
+		}
+		if storage.Exists(ctx, drv, marker) {
+			return true
+		}
+		if rel == "" {
+			return false
+		}
+		if i := strings.LastIndex(rel, "/"); i >= 0 {
+			rel = rel[:i]
+		} else {
+			rel = ""
+		}
+	}
+}
 
 // Taken is an extra "is this name taken?" a caller can add to a destination
 // check — the catalogue's live rows, which the driver cannot see when a row's

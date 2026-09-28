@@ -89,6 +89,10 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	s.StorageOrderSQL = &db.StorageOrderSQL{Pool: sqlDB}
 	// Who put a row in the trash (00061), the same way.
 	s.NodeDeletedBySQL = &db.NodeDeletedBySQL{Pool: sqlDB}
+	// Drafts (00064), the same way.
+	s.DraftSQL = &db.DraftSQL{Pool: sqlDB}
+	// Rows deleted where they stood (issue #74), the same way.
+	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB}
 	return s
 }
 
@@ -105,6 +109,10 @@ type Store struct {
 	*db.StorageOrderSQL
 	// SetNodeDeletedBy (internal/db node_deleted_by_sql.go).
 	*db.NodeDeletedBySQL
+	// The drafts methods (internal/db drafts_sql.go).
+	*db.DraftSQL
+	// ListVanishedNodeIDs, CountChildRows (internal/db vanished_sql.go).
+	*db.VanishedSQL
 }
 
 // upsertClause matches SQLite's upsert tail so it can be swapped for MySQL's.
@@ -1034,7 +1042,7 @@ func (s *Store) StorageStats(ctx context.Context, storageID int64) (int64, int64
 	)
 	err := s.conn(ctx).QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM nodes
-		   WHERE storage_id=? AND type='file' AND deleted_at IS NULL`,
+		   WHERE storage_id=? AND type='file' AND deleted_at IS NULL AND `+db.NotInDraftsSQL("path"),
 		storageID,
 	).Scan(&count, &size)
 	if err != nil {
@@ -4841,12 +4849,12 @@ func scanNodeComment(rs interface {
 
 // ─────────────────── Storage plugins (migration 00029) ───────────────────
 
-const pluginCols = `id, name, kind, binary_path, sha256, address, token_sealed, enabled, version, driver, last_error, created_at, updated_at`
+const pluginCols = `id, name, kind, binary_path, sha256, address, token_sealed, enabled, version, driver, last_error, source, update_json, created_at, updated_at`
 
 func scanPlugin(r rowScanner) (*model.Plugin, error) {
 	p := &model.Plugin{}
 	if err := r.Scan(&p.ID, &p.Name, &p.Kind, &p.Binary, &p.SHA256, &p.Address, &p.TokenSealed,
-		&p.Enabled, &p.Version, &p.Driver, &p.LastError, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.Enabled, &p.Version, &p.Driver, &p.LastError, &p.Source, &p.UpdateJSON, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -4854,9 +4862,9 @@ func scanPlugin(r rowScanner) (*model.Plugin, error) {
 
 func (s *Store) CreatePlugin(ctx context.Context, p *model.Plugin) (*model.Plugin, error) {
 	res, err := s.conn(ctx).ExecContext(ctx,
-		`INSERT INTO plugins (name, kind, binary_path, sha256, address, token_sealed, enabled, version, driver, last_error)
-		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		p.Name, p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError)
+		`INSERT INTO plugins (name, kind, binary_path, sha256, address, token_sealed, enabled, version, driver, last_error, source, update_json)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		p.Name, p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError, p.Source, p.UpdateJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -4891,9 +4899,9 @@ func (s *Store) ListPlugins(ctx context.Context) ([]*model.Plugin, error) {
 
 func (s *Store) UpdatePlugin(ctx context.Context, p *model.Plugin) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
-		`UPDATE plugins SET kind=?, binary_path=?, sha256=?, address=?, token_sealed=?, enabled=?, version=?, driver=?, last_error=?, updated_at=CURRENT_TIMESTAMP
+		`UPDATE plugins SET kind=?, binary_path=?, sha256=?, address=?, token_sealed=?, enabled=?, version=?, driver=?, last_error=?, source=?, update_json=?, updated_at=CURRENT_TIMESTAMP
 		 WHERE id=?`,
-		p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError, p.ID)
+		p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError, p.Source, p.UpdateJSON, p.ID)
 	return err
 }
 
@@ -4924,13 +4932,13 @@ func nullTime(t time.Time) any {
 // inside one transaction), and the `key` column is backtick-quoted because it
 // is a reserved word on MySQL — SQLite accepts the backticks too.
 
-const appPluginCols = `id, name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error, manifest_url, auto_update, update_json, created_at, updated_at`
+const appPluginCols = `id, name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error, manifest_url, auto_update, update_json, ui_sha256, signature, created_at, updated_at`
 
 func scanAppPlugin(r rowScanner) (*model.AppPlugin, error) {
 	p := &model.AppPlugin{}
 	if err := r.Scan(&p.ID, &p.Name, &p.Version, &p.LabelJSON, &p.ManifestJSON, &p.WasmPath, &p.SHA256,
 		&p.Source, &p.SourceURL, &p.Signed, &p.PermissionsJSON, &p.Enabled, &p.LastError,
-		&p.ManifestURL, &p.AutoUpdate, &p.UpdateJSON, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.ManifestURL, &p.AutoUpdate, &p.UpdateJSON, &p.UISHA256, &p.Signature, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -4938,11 +4946,11 @@ func scanAppPlugin(r rowScanner) (*model.AppPlugin, error) {
 
 func (s *Store) CreateAppPlugin(ctx context.Context, p *model.AppPlugin) (*model.AppPlugin, error) {
 	res, err := s.conn(ctx).ExecContext(ctx,
-		`INSERT INTO app_plugins (name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error, manifest_url, auto_update, update_json)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO app_plugins (name, version, label_json, manifest_json, wasm_path, sha256, source, source_url, signed, permissions_json, enabled, last_error, manifest_url, auto_update, update_json, ui_sha256, signature)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.Name, p.Version, orJSON(p.LabelJSON, "{}"), orJSON(p.ManifestJSON, "{}"), p.WasmPath, p.SHA256,
 		p.Source, p.SourceURL, p.Signed, orJSON(p.PermissionsJSON, "[]"), p.Enabled, p.LastError,
-		p.ManifestURL, p.AutoUpdate, p.UpdateJSON)
+		p.ManifestURL, p.AutoUpdate, p.UpdateJSON, p.UISHA256, p.Signature)
 	if err != nil {
 		return nil, err
 	}
@@ -4978,10 +4986,10 @@ func (s *Store) ListAppPlugins(ctx context.Context) ([]*model.AppPlugin, error) 
 func (s *Store) UpdateAppPlugin(ctx context.Context, p *model.AppPlugin) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE app_plugins SET version=?, label_json=?, manifest_json=?, wasm_path=?, sha256=?, source=?, source_url=?, signed=?, permissions_json=?, enabled=?, last_error=?,
-		 manifest_url=?, auto_update=?, update_json=?, updated_at=CURRENT_TIMESTAMP
+		 manifest_url=?, auto_update=?, update_json=?, ui_sha256=?, signature=?, updated_at=CURRENT_TIMESTAMP
 		 WHERE id=?`,
 		p.Version, orJSON(p.LabelJSON, "{}"), orJSON(p.ManifestJSON, "{}"), p.WasmPath, p.SHA256, p.Source, p.SourceURL,
-		p.Signed, orJSON(p.PermissionsJSON, "[]"), p.Enabled, p.LastError, p.ManifestURL, p.AutoUpdate, p.UpdateJSON, p.ID)
+		p.Signed, orJSON(p.PermissionsJSON, "[]"), p.Enabled, p.LastError, p.ManifestURL, p.AutoUpdate, p.UpdateJSON, p.UISHA256, p.Signature, p.ID)
 	return err
 }
 
@@ -4992,6 +5000,7 @@ func (s *Store) DeleteAppPlugin(ctx context.Context, id int64) error {
 	}
 	defer tx.Rollback()
 	for _, q := range []string{
+		`DELETE FROM app_plugin_versions WHERE plugin_id=?`,
 		`DELETE FROM app_plugin_schedule WHERE plugin_id=?`,
 		`DELETE FROM app_plugin_jobs WHERE plugin_id=?`,
 		`DELETE FROM app_plugin_state WHERE plugin_id=?`,
@@ -5556,4 +5565,57 @@ func collectAppPluginScheduleItems(rows *sql.Rows) ([]*model.AppPluginScheduleIt
 		out = append(out, it)
 	}
 	return out, rows.Err()
+}
+
+// App plugin versions (migration 00066) — see wasmplugin/versions.go.
+
+const appPluginVersionCols = `id, plugin_id, version, manifest_json, wasm_path, sha256, ui_sha256, permissions_json, source, source_url, manifest_url, signed, signature, dir, replaced_by, replaced_at`
+
+func scanAppPluginVersion(r rowScanner) (*model.AppPluginVersion, error) {
+	v := &model.AppPluginVersion{}
+	var by sql.NullInt64
+	if err := r.Scan(&v.ID, &v.PluginID, &v.Version, &v.ManifestJSON, &v.WasmPath, &v.SHA256, &v.UISHA256, &v.PermissionsJSON,
+		&v.Source, &v.SourceURL, &v.ManifestURL, &v.Signed, &v.Signature, &v.Dir, &by, &v.ReplacedAt); err != nil {
+		return nil, err
+	}
+	if by.Valid {
+		id := by.Int64
+		v.ReplacedBy = &id
+	}
+	return v, nil
+}
+
+func (s *Store) CreateAppPluginVersion(ctx context.Context, v *model.AppPluginVersion) (*model.AppPluginVersion, error) {
+	res, err := s.conn(ctx).ExecContext(ctx,
+		`INSERT INTO app_plugin_versions (plugin_id, version, manifest_json, wasm_path, sha256, ui_sha256, permissions_json, source, source_url, manifest_url, signed, signature, dir, replaced_by)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		v.PluginID, v.Version, orJSON(v.ManifestJSON, "{}"), v.WasmPath, v.SHA256, v.UISHA256, orJSON(v.PermissionsJSON, "[]"),
+		v.Source, v.SourceURL, v.ManifestURL, v.Signed, v.Signature, v.Dir, v.ReplacedBy)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return scanAppPluginVersion(s.conn(ctx).QueryRowContext(ctx, `SELECT `+appPluginVersionCols+` FROM app_plugin_versions WHERE id=?`, id))
+}
+
+func (s *Store) ListAppPluginVersions(ctx context.Context, pluginID int64) ([]*model.AppPluginVersion, error) {
+	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+appPluginVersionCols+` FROM app_plugin_versions WHERE plugin_id=? ORDER BY id DESC`, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.AppPluginVersion{}
+	for rows.Next() {
+		v, err := scanAppPluginVersion(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteAppPluginVersion(ctx context.Context, id int64) error {
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM app_plugin_versions WHERE id=?`, id)
+	return err
 }

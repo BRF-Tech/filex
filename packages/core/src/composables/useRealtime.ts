@@ -7,8 +7,10 @@
 // navigation, and setFocus() on selection; it binds presenceUsers into the UI.
 
 import { ref, type Ref } from 'vue';
-import { RealtimeClient, type PresenceUser, type PresenceMessage } from '../lib/realtime';
+import { RealtimeClient, type PresenceUser, type PresenceMessage, type AppUpdatedMessage } from '../lib/realtime';
 import { burstDebounce } from '../lib/burstDebounce';
+import { announceAppUpdated } from '../lib/appUpdates';
+import { invalidatePluginActions } from './usePluginActions';
 
 const RELOAD_DEBOUNCE_MS = 200;
 // Ceiling on how long a run of change frames may postpone the reload it is
@@ -47,6 +49,13 @@ export function useRealtime(api: RealtimeApi, opts: { reload: () => void }) {
     presenceUsers.value = Array.isArray(msg.users) ? msg.users : [];
   }
 
+  /** An app's approved version changed: the cached menu rows carry the old
+   *  interface's address, and an open frame on it offers to reload. */
+  function onAppUpdated(msg: AppUpdatedMessage): void {
+    invalidatePluginActions();
+    announceAppUpdated(msg.app, msg.version);
+  }
+
   function onFallback(active: boolean): void {
     degraded.value = active;
     if (active) {
@@ -66,6 +75,7 @@ export function useRealtime(api: RealtimeApi, opts: { reload: () => void }) {
       handlers: {
         onChange: debouncedReload,
         onPresence,
+        onAppUpdated,
         onFallback,
         onStatus: (c) => {
           connected.value = c;

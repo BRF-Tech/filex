@@ -59,6 +59,19 @@ describe('the Trash’s own columns', () => {
     expect(row.find('.fe-list__col--star').exists()).toBe(false);
   });
 
+  it('a discarded draft (#71) came from Drafts, not from a folder of its storage', () => {
+    // The server sends a draft's own name as its path: its real place is the
+    // owner's hidden drafts area, which no Location column may spell out.
+    const row = trashed('scratch.txt', '2026-09-22T11:11:26Z', 30);
+    (row as unknown as { extra_metadata: Record<string, unknown> }).extra_metadata.draft = true;
+    const w = trashList([row]);
+    expect(w.get('.fe-list__row .fe-list__col--location').text()).toBe(en['node.drafts']);
+    const tr = mount(ListView, {
+      props: { selected: new Set<string>(), locale: 'tr' as const, trash: true, files: [row], apiBase: '' },
+    });
+    expect(tr.get('.fe-list__row .fe-list__col--location').text()).toBe('Taslaklar');
+  });
+
   it('one day, due now, and no count at all are three different sentences', () => {
     const w = trashList([
       trashed('a.txt', '2026-09-22T11:11:26Z', 1),

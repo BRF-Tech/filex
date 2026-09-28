@@ -92,6 +92,7 @@ var fileBroadcastEvents = []EventType{
 	EventPluginNotice,
 	EventDropReceived,
 	EventE2EEscrowUsed,
+	EventE2EPasswordChanged,
 	EventShareCreated,
 	EventCommentAdded,
 }

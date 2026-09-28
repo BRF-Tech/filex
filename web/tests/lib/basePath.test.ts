@@ -21,7 +21,7 @@ import { pickMountBase, ADMIN_BASE, USER_BASE, SHARE_BASE, REQUEST_BASE } from '
 import { signInPage } from '@/lib/signOut';
 import { swLocation, registerAppServiceWorker } from '@/lib/serviceWorker';
 import { brandBadgeUrl, brandIconUrl } from '@/lib/brand';
-import { shareHref, notificationHref } from '@/lib/notificationTarget';
+import { shareHref, notificationHref } from '@brftech/filex-core/src/lib/notificationTarget';
 import { fallbackShareUrl } from '@/lib/shareLink';
 
 function setBase(content: string | null): void {

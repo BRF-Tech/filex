@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.47.0"
+version: "0.48.0"
 releaseNotes: |-
-  filex v0.47.0 — 2026-09-26
-  • The desktop app is in the Microsoft Store
-  • filex runs under a sub-path — https://example.com/filex/ behind a reverse proxy — as well as at the root of its own host
-  • Apps follow their source and update themselves, and say which filex versions they work with.
-  • The Trash says who deleted each item.
-  • Renaming a folder, restoring from the trash and deleting permanently run as jobs of the operations queue.
+  filex v0.48.0 — 2026-09-28
+  • An app may bring its own interface
+  • A new document is a draft until its first save
+  • Encryption levels, and encrypted file and folder names.
+  • Encrypt a single file.
+  • Desktop app: the notification bell and your account menu in the top bar.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

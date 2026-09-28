@@ -26,6 +26,7 @@ import type { MeasuredDrive } from '../lib/storageLine';
 import type { ExplorerConfig, AuthConfig, EndpointMap, SearchAccount } from '../types/ExplorerConfig';
 import { resolveLocale } from '../locales/resolve';
 import { listingAddress } from '../lib/internalPaths';
+import { draftsClient, type DraftDto } from '../lib/drafts';
 import { localeTag } from './useLocale';
 import { networkFailure, requestFailure } from '../lib/errorWords';
 // ⚠ The same folding rule the web app's axios layer applies, applied by the
@@ -70,6 +71,9 @@ export interface PendingOpDto {
 export interface NewFileResponse {
   /** Adapter-qualified path, ready to hand to the viewer. */
   path: string;
+  /** Made from an app's row (`new_documents`): the view that opens it. Set
+   *  by the New document dialog, not by the server. */
+  app?: { plugin: string; view: string };
   /** Final basename, which may have gained the extension server-side. */
   name: string;
   /** The TYPE the bytes were made from (a `newdoc_types` key) — not the
@@ -78,6 +82,10 @@ export interface NewFileResponse {
   ext: string;
   size: number;
   mime: string;
+  /** Drafts (issue #71): set when the document was made as a DRAFT — then
+   *  `path` is the draft's, in the person's drafts area, and nothing is at
+   *  the destination yet (lib/drafts). */
+  draft?: DraftDto;
 }
 
 export interface ManagerResponse {
@@ -291,9 +299,15 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     trashRestore: derive(config.trashRestore, '/api/files/manager/restore'),
     /* An operator's "Delete permanently" of one trash entry (`{id}`). */
     trashPurge: derive(config.trashPurge, '/api/admin/trash/{id}'),
+    /* An operator's hard delete of one version (`{id}`). */
+    versionPurge: derive(config.versionPurge, '/api/admin/versions/{id}'),
     /* wiring:e2 — escrow proof-of-possession, then the owner is told. */
     e2eEscrowChallenge: derive(config.e2eEscrowChallenge, '/api/files/e2e/escrow/challenge'),
     e2eEscrowUsed: derive(config.e2eEscrowUsed, '/api/files/e2e/escrow/used'),
+    /* wiring:e2 password — a folder password was changed; its owner is told. */
+    e2ePasswordChanged: derive(config.e2ePasswordChanged, '/api/files/e2e/password-changed'),
+    /* wiring:e2 convert — after a folder is encrypted in place. */
+    e2eCleanup: derive(config.e2eCleanup, '/api/files/e2e/cleanup'),
     /* App plugins — docs/APP-PLUGINS-API.md. */
     pluginActions: derive(config.pluginActions, '/api/files/plugins/actions'),
     pluginActionRun: derive(config.pluginActionRun, '/api/files/plugins/actions/{plugin}/{action}/run'),
@@ -301,6 +315,9 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     pluginViewEvent: derive(config.pluginViewEvent, '/api/files/plugins/views/{plugin}/{view}/event'),
     pluginUsers: derive(config.pluginUsers, '/api/files/plugins/users'),
     opsCancel: derive(config.opsCancel, '/api/files/ops/{id}/cancel'),
+    /* v4 — an app's own interface (AppFrame): its module, and its saves. */
+    pluginUICall: derive(config.pluginUICall, '/api/files/plugins/ui/{plugin}/{view}/call'),
+    pluginUISave: derive(config.pluginUISave, '/api/files/plugins/ui/{plugin}/{view}/save'),
   };
 }
 
@@ -332,6 +349,9 @@ function normalizeAuth(auth: AuthConfig | undefined): { kind: 'bearer'; token: s
   if (auth.type === 'csrf') return { kind: 'csrf', csrf: auth.csrf };
   return { kind: 'none' };
 }
+
+/** One chunk of an app interface's save (handlers/app_ui_chunks.go). */
+export const UI_SAVE_CHUNK = 8 << 20;
 
 export function useFileApi(config: ExplorerConfig) {
   const endpoints = resolveEndpoints(config);
@@ -408,6 +428,31 @@ export function useFileApi(config: ExplorerConfig) {
   const lang = () => resolveLocale(config.locale);
 
   async function jsonFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
+    const res = await rawRequest(url, init);
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw requestFailure(res.status, text, lang());
+    }
+    // ⚠⚠ A 204 carries NO BODY, and several endpoints answer with one (every
+    // delete does). Parsing it throws "Unexpected end of JSON input" AFTER the
+    // server has already done the work, so the caller reports a failure for an
+    // operation that succeeded — measured 2026-08-16 in a browser: revoking an
+    // S3 access key deleted it on the server and left it on screen with an
+    // error under it, which invites the user to trust a credential that is
+    // gone. An empty success is a success.
+    if (res.status === 204 || res.status === 205) return undefined as T;
+    const body = await res.text();
+    if (!body) return undefined as T;
+    return JSON.parse(body) as T;
+  }
+
+  /**
+   * One request with this client's credentials and language, answered as the
+   * Response itself — for a caller that reads a refusal's body as an ANSWER
+   * (a draft saved beside a taken name is a question, not a failure:
+   * lib/drafts). Every other caller wants jsonFetch.
+   */
+  async function rawRequest(url: string, init: RequestInit = {}): Promise<Response> {
     const headers = {
       // ⚠⚠ The language on SCREEN, not the one the browser was installed in.
       // Everything the server writes for a person — a plugin's surface, the
@@ -441,22 +486,22 @@ export function useFileApi(config: ExplorerConfig) {
     // Any answer — a 404 and a 500 included — means the connection is not
     // what is wrong, and the shared notice must not keep saying it is.
     noteRequestSucceeded();
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw requestFailure(res.status, text, lang());
-    }
-    // ⚠⚠ A 204 carries NO BODY, and several endpoints answer with one (every
-    // delete does). Parsing it throws "Unexpected end of JSON input" AFTER the
-    // server has already done the work, so the caller reports a failure for an
-    // operation that succeeded — measured 2026-08-16 in a browser: revoking an
-    // S3 access key deleted it on the server and left it on screen with an
-    // error under it, which invites the user to trust a credential that is
-    // gone. An empty success is a success.
-    if (res.status === 204 || res.status === 205) return undefined as T;
-    const body = await res.text();
-    if (!body) return undefined as T;
-    return JSON.parse(body) as T;
+    return res;
   }
+
+  // --------------------------------------------------------------------
+  // Drafts (issue #71) — a new document until its first save. Derived from
+  // the manager endpoint like permissions/versions, so an embed's proxy that
+  // forwards /api/files/* reaches it. The calls are lib/drafts', which the
+  // viewer uses too; this only hands it this client's credentials.
+  // --------------------------------------------------------------------
+  const draftsBase = endpoints.manager.replace(/\/manager(\?.*)?$/, '/drafts');
+  const drafts = draftsClient(draftsBase, {
+    request: rawRequest,
+    get locale() {
+      return lang();
+    },
+  });
 
   // --------------------------------------------------------------------
   // Permissions (RBAC) — derived from the manager endpoint by swapping the
@@ -683,6 +728,29 @@ export function useFileApi(config: ExplorerConfig) {
     });
   }
 
+  /**
+   * wiring:e2 names — copy or move ONE item into `target` under `name`, as one
+   * step of the queue (the server makes the literal destination; a taken name
+   * is refused, never suffixed). An encrypted-names folder needs it: a name is
+   * sealed for the folder it is in, so an item crossing folders arrives under
+   * a name sealed for its new folder, and nothing can stop between the move
+   * and the rename.
+   */
+  async function transferNamed(
+    kind: 'copy' | 'move',
+    source: string,
+    target: string,
+    name: string,
+    sourceDir?: string,
+  ): Promise<{ op: PendingOpDto }> {
+    const url = kind === 'copy' ? endpoints.copy : endpoints.moveAsync;
+    if (!url) throw new Error(`${kind} endpoint not configured`);
+    return jsonFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: [source], target, name, ...(sourceDir ? { sourceDir } : {}) }),
+    });
+  }
   async function moveAsync(source: string[], target: string, sourceDir?: string): Promise<{ op: PendingOpDto }> {
     if (!endpoints.moveAsync) throw new Error('moveAsync endpoint not configured');
     return jsonFetch(endpoints.moveAsync, {
@@ -810,6 +878,17 @@ export function useFileApi(config: ExplorerConfig) {
   }
 
   /**
+   * Deletes one version for good (`DELETE /api/admin/versions/{id}`): the
+   * row and the bytes it kept. An operator's action, like purgeTrash; used by
+   * "Delete the original for good" when a file is encrypted (useE2eFiles).
+   */
+  async function purgeVersion(id: number): Promise<void> {
+    const tpl = endpoints.versionPurge;
+    if (!tpl) throw new Error('versionPurge endpoint not configured');
+    await jsonFetch(tpl.replace('{id}', encodeURIComponent(String(id))), { method: 'DELETE' });
+  }
+
+  /**
    * Legacy in-band multipart upload (small files / chunked endpoint
    * absent). XMLHttpRequest because fetch doesn't expose upload
    * progress on most browsers.
@@ -818,9 +897,13 @@ export function useFileApi(config: ExplorerConfig) {
     path: string,
     files: File[],
     onProgress?: (p: number) => void,
+    /** Extra form fields: `expect` (the precondition "<size>:<ms>" or
+     *  "none"), `e2e_convert` (an in-place E2E conversion write). */
+    fields?: Record<string, string>,
   ): Promise<ManagerResponse> {
     const fd = new FormData();
     fd.append('path', path);
+    for (const [k, v] of Object.entries(fields ?? {})) fd.append(k, v);
     for (const f of files) {
       fd.append('file[]', f, f.name);
     }
@@ -945,7 +1028,6 @@ export function useFileApi(config: ExplorerConfig) {
         upload_limit_mb: 1024,
         onlyoffice_url: config.onlyOfficeBase ?? null,
         drawio_url: config.drawioBase ?? null,
-        convert_url: config.convertBase ?? null,
       };
     }
     return jsonFetch<Capabilities>(endpoints.capabilities);
@@ -977,6 +1059,126 @@ export function useFileApi(config: ExplorerConfig) {
    */
   function withScreenLang(url: string): string {
     return `${url}${url.includes('?') ? '&' : '?'}lang=${encodeURIComponent(lang())}`;
+  }
+
+  /**
+   * The address an app's interface is loaded from (docs/APP-PLUGINS-API.md →
+   * An app's own interface): the row's `ui.url` joined with this server's
+   * root, like every other relative address filex answers — unless the server
+   * named an absolute one (interfaces on an origin of their own).
+   */
+  function appUIUrl(url: string): string {
+    if (/^https?:\/\//i.test(url)) return url;
+    const root = endpoints.manager.replace(/\/api\/files\/manager(\?.*)?$/, '');
+    return root.replace(/\/$/, '') + (url.startsWith('/') ? url : `/${url}`);
+  }
+
+  /** `POST …/plugins/ui/{plugin}/{view}/call` — the app's module (`ui_call`). */
+  async function pluginUICall(
+    plugin: string,
+    view: string,
+    body: { method: string; params?: unknown; paths: string[] },
+  ): Promise<{ result: unknown }> {
+    if (!endpoints.pluginUICall) throw new Error('pluginUICall endpoint not configured');
+    return jsonFetch<{ result: unknown }>(withScreenLang(fillTemplate(endpoints.pluginUICall, { plugin, view })), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * `PUT …/plugins/ui/{plugin}/{view}/save?path=` — an interface's save: the
+   * new content of a file it was opened with (a new version, or the draft it
+   * is), or with `dir` + `name` a NEW file there.
+   *
+   * ⚠ Anything over one chunk (8 MiB) goes as a CHUNKED save — `chunk=start`,
+   * then `session=&offset=`, the last with `final=1` — so every request stays
+   * under a reverse proxy's body limit, and a stream the interface hands over
+   * is sent as it is read, never held whole in this page. The server writes
+   * the file once, when the last chunk arrives (handlers/app_ui_chunks.go).
+   */
+  async function pluginUISave(
+    plugin: string,
+    view: string,
+    target: { path: string } | { dir: string; name: string },
+    body: Blob | ReadableStream<Uint8Array>,
+  ): Promise<{ saved: boolean; path: string; name: string; size: number }> {
+    if (!endpoints.pluginUISave) throw new Error('pluginUISave endpoint not configured');
+    const q = 'path' in target
+      ? `path=${encodeURIComponent(target.path)}`
+      : `dir=${encodeURIComponent(target.dir)}&name=${encodeURIComponent(target.name)}`;
+    const url = fillTemplate(endpoints.pluginUISave, { plugin, view });
+    const base = `${url}${url.includes('?') ? '&' : '?'}${q}`;
+    const put = <T>(u: string, part: Blob) =>
+      jsonFetch<T>(u, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: part });
+    if (body instanceof Blob && body.size <= UI_SAVE_CHUNK) {
+      return jsonFetch(base, {
+        method: 'PUT',
+        headers: { 'Content-Type': body.type || 'application/octet-stream' },
+        body,
+      });
+    }
+    let session = '';
+    let offset = 0;
+    const next = async (part: Blob, final: boolean) => {
+      const u = session
+        ? `${base}&session=${encodeURIComponent(session)}&offset=${offset}${final ? '&final=1' : ''}`
+        : `${base}&chunk=start${final ? '&final=1' : ''}`;
+      const r = await put<{ session?: string; received?: number; saved?: boolean; path: string; name: string; size: number }>(u, part);
+      if (!final) {
+        session = r.session ?? session;
+        offset = r.received ?? offset + part.size;
+      }
+      return r;
+    };
+    if (body instanceof Blob) {
+      for (let at = 0; ; at += UI_SAVE_CHUNK) {
+        const end = Math.min(at + UI_SAVE_CHUNK, body.size);
+        const part = body.slice(at, end);
+        if (end >= body.size) return (await next(part, true)) as { saved: boolean; path: string; name: string; size: number };
+        await next(part, false);
+      }
+    }
+    const reader = body.getReader();
+    let held: Uint8Array[] = [];
+    let heldBytes = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (value && value.byteLength) {
+        held.push(value);
+        heldBytes += value.byteLength;
+      }
+      while (heldBytes >= UI_SAVE_CHUNK && !done) {
+        const all = new Blob(held as BlobPart[]);
+        await next(all.slice(0, UI_SAVE_CHUNK), false);
+        const rest = new Uint8Array(await all.slice(UI_SAVE_CHUNK).arrayBuffer());
+        held = rest.byteLength ? [rest] : [];
+        heldBytes = rest.byteLength;
+      }
+      if (done) {
+        const last = new Blob(held as BlobPart[]);
+        if (!session && last.size <= UI_SAVE_CHUNK) {
+          return jsonFetch(base, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: last });
+        }
+        return (await next(last, true)) as { saved: boolean; path: string; name: string; size: number };
+      }
+    }
+  }
+
+  /**
+   * The file's bytes as a response to stream from — `file.read` of an app's
+   * interface. The same preview address the viewers read, with this viewer's
+   * credentials, never cached (a save a moment ago must be what is read).
+   */
+  async function fetchResponse(path: string): Promise<Response> {
+    const headers = await authHeaders();
+    const res = await fetch(previewUrl(path), { headers, credentials: credentialsMode(), cache: 'no-store' });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw requestFailure(res.status, text, lang());
+    }
+    return res;
   }
 
   /** `GET /api/files/plugins/actions` — what applies to the caller. */
@@ -1081,6 +1283,72 @@ export function useFileApi(config: ExplorerConfig) {
   }): Promise<{ ok: boolean; notified: boolean }> {
     if (!endpoints.e2eEscrowUsed) throw new Error('e2e escrow endpoint not configured');
     return jsonFetch(endpoints.e2eEscrowUsed, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  /**
+   * wiring:e2 password — announce that an encrypted folder's password was
+   * changed (or reset with its recovery key), AFTER the new key file is
+   * written. The server records it in the audit log and tells the folder's
+   * owner (`e2e.password_changed`). It carries no key material: the change
+   * itself happened in this browser.
+   */
+  /**
+   * wiring:e2 convert — the first `n` bytes of a file, without downloading
+   * the rest: a range request, and the body cancelled after the first chunk
+   * even where the range is not honoured. For the conversion's "is this one
+   * already encrypted?" (the magic), on files that may be gigabytes.
+   */
+  async function fetchHead(path: string, n = 16): Promise<Uint8Array> {
+    const headers = { ...(await authHeaders()), Range: `bytes=0-${n - 1}` };
+    const res = await fetch(previewUrl(path), { headers, credentials: credentialsMode(), cache: 'no-store' });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw requestFailure(res.status, text, lang());
+    }
+    if (!res.body) return new Uint8Array(await res.arrayBuffer()).slice(0, n);
+    const reader = res.body.getReader();
+    const out = new Uint8Array(n);
+    let got = 0;
+    try {
+      while (got < n) {
+        const { done, value } = await reader.read();
+        if (done || !value) break;
+        const take = Math.min(value.length, n - got);
+        out.set(value.subarray(0, take), got);
+        got += take;
+      }
+    } finally {
+      void reader.cancel().catch(() => undefined);
+    }
+    return out.slice(0, got);
+  }
+
+  /**
+   * wiring:e2 convert — after a folder was encrypted in place: the server
+   * drops the thumbnails and extracted search content it holds for it and,
+   * when asked (owner or administrator), every version and every trash entry
+   * that came from it.
+   */
+  async function e2eCleanup(payload: { path: string; versions: boolean; trash: boolean }): Promise<{
+    versions_deleted: number;
+    trash_purged: number;
+    thumbnails_dropped: number;
+    index_cleared: number;
+  }> {
+    if (!endpoints.e2eCleanup) throw new Error('e2e cleanup endpoint not configured');
+    return jsonFetch(endpoints.e2eCleanup, { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async function e2ePasswordChanged(payload: {
+    path: string;
+    via: 'password' | 'recovery_key';
+    rekey: boolean;
+  }): Promise<{ ok: boolean; notified: boolean }> {
+    if (!endpoints.e2ePasswordChanged) throw new Error('e2e password endpoint not configured');
+    return jsonFetch(endpoints.e2ePasswordChanged, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -1275,6 +1543,8 @@ export function useFileApi(config: ExplorerConfig) {
     subfolders,
     newFolder,
     newFile,
+    drafts,
+    draftsBase,
     rename,
     renameQueued,
     move,
@@ -1287,6 +1557,7 @@ export function useFileApi(config: ExplorerConfig) {
     restoreIds,
     restoreQueued,
     purgeTrash,
+    purgeVersion,
     uploadMultipart,
     downloadUrl,
     previewUrl,
@@ -1298,6 +1569,10 @@ export function useFileApi(config: ExplorerConfig) {
     /* wiring:e2 */
     e2eEscrowChallenge,
     e2eEscrowUsed,
+    e2ePasswordChanged,
+    e2eCleanup,
+    fetchHead,
+    transferNamed,
     /* App plugins */
     pluginActions,
     pluginActionRun,
@@ -1305,6 +1580,10 @@ export function useFileApi(config: ExplorerConfig) {
     pluginViewEvent,
     pluginUsers,
     opsCancel,
+    appUIUrl,
+    pluginUICall,
+    pluginUISave,
+    fetchResponse,
     createShare,
     listShares,
     revokeShare,
