@@ -12,8 +12,10 @@
 // the converter stayed up on Escape while the share dialog closed).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
+import { nextTick } from 'vue';
 
 import Modal from '@brftech/filex-core/src/modals/Modal.vue';
+import DraftCloseModal from '@brftech/filex-core/src/modals/DraftCloseModal.vue';
 import PluginViewModal from '@brftech/filex-core/src/components/plugin/PluginViewModal.vue';
 import type { PluginSurface } from '@brftech/filex-core/src/types/Plugins';
 
@@ -105,6 +107,21 @@ describe('core Modal — a dialog mounted open', () => {
     mounted.push(w);
     vi.advanceTimersByTime(50);
     expect(document.activeElement?.getAttribute('data-testid')).toBe('keep');
+  });
+
+  // v0.48.0 release run: DraftCloseModal is mounted already open, its
+  // `watch(open)` was not immediate, so nothing focused Keep until Modal's
+  // 30 ms timer - which a slow CI runner had not reached when the test
+  // looked. With the timers frozen, only the dialog's own focus call counts.
+  it('the draft close question focuses Keep on mount, without waiting for the timer', async () => {
+    const w = mount(DraftCloseModal, {
+      props: { open: true, locale: 'en', name: 'notes.md', folder: 'docs' },
+      attachTo: document.body,
+    });
+    mounted.push(w);
+    await nextTick();
+    await nextTick();
+    expect(document.activeElement?.getAttribute('data-testid')).toBe('draft-close-keep');
   });
 
   it('answers Escape with the dialog in FRONT only', () => {

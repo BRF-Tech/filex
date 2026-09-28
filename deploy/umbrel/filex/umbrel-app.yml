@@ -2,9 +2,9 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.48.0"
+version: "0.48.1"
 releaseNotes: |-
-  filex v0.48.0 — 2026-09-28
+  filex v0.48.1 — 2026-09-28
   • An app may bring its own interface
   • A new document is a draft until its first save
   • Encryption levels, and encrypted file and folder names.

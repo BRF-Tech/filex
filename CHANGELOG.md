@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.48.0] - 2026-09-28
+## [0.48.1] - 2026-09-28
+
+> 0.48.0 was tagged but its release run failed a test (where the draft
+> close question put the focus, now fixed); nothing was published — 0.48.1
+> carries it.
 
 Apps can bring an interface of their own, a new document stays a draft until
 its first save, encrypted folders can hide their names too and be made from a
@@ -556,6 +560,11 @@ an app now waits for an administrator, and the iframe converter is gone.
   editor API script runs inside the filex page, so point filex only at a
   Document Server run or trusted as fully as filex
   ([docs/ONLYOFFICE.md → Security notes](docs/ONLYOFFICE.md#security-notes)).
+
+## [0.48.0] - 2026-09-28
+
+Tagged, never published: its release run failed a test. Everything it held
+is in 0.48.1, above.
 
 ## [0.47.0] - 2026-09-26
 

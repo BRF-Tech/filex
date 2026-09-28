@@ -47,11 +47,16 @@ const emit = defineEmits<{
 const { t } = useLocale(() => props.locale);
 
 const keepBtn = ref<HTMLButtonElement | null>(null);
+// ⚠ immediate: the dialog is mounted already open (v-if in its host), so a
+// plain watch never fired and the focus waited for Modal's 30 ms timer - a
+// test that looked sooner saw nothing focused on a slow CI runner (v0.48.0
+// release run). Modal keeps a focus that is already inside.
 watch(
   () => props.open,
   (open) => {
     if (open) void nextTick(() => keepBtn.value?.focus());
   },
+  { immediate: true },
 );
 </script>
 
