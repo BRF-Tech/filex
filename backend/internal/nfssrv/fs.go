@@ -14,13 +14,14 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/trash"
-	"github.com/brf-tech/filex/backend/internal/writegate"
 )
 
 // The billy.Filesystem one mount sees.
@@ -199,19 +200,28 @@ func (f *fs) canTraverse(t target) bool {
 // canRead is the door for a file's CONTENT: viewer on the path itself, never
 // inherited from being on the way to a grant. canTraverse above is what lets a
 // caller walk to their folder; this is what lets them open what is in it.
+//
+// Reading a file's bytes over this protocol IS a download, so it also needs
+// files.download (internal/perm): there is no preview here to leave open.
 func (f *fs) canRead(t target) bool {
-	return t.Set != nil && t.Set.Effective(t.Rel) >= acl.LevelViewer
+	return protoperm.CanRead(t.Set, t.Rel)
 }
 
-func (f *fs) canWrite(t target) bool {
+// canDo is the door for every change: the export and storage are writable,
+// no app lock refuses the path, and the caller may take action p there — the
+// level it needs (≥editor for every mutation) AND the per-user permission.
+func (f *fs) canDo(t target, p perm.Perm) bool {
 	// ⚠ The export's own read-only flag comes FIRST and cannot be argued with:
 	// an operator who exported a folder read-only to a media player has said
 	// something about the mount, not about the account.
-	if f.readOnly || t.Storage == nil || t.Storage.ReadOnly ||
-		writegate.RefusesMounted(f.srv.cfg.ACL.Locks(f.ctx, t.Storage.ID), t.Rel) {
-		return false
-	}
-	return t.Set != nil && t.Set.Effective(t.Rel) >= acl.LevelEditor
+	return !f.readOnly && protoperm.CanDo(f.ctx, t.Set, t.Storage, f.srv.cfg.ACL, t.Rel, p)
+}
+
+// writeNeed is what writing t's bytes is: files.modify when something is
+// there to replace, files.create when not.
+func (f *fs) writeNeed(t target) perm.Perm {
+	drv, err := f.driverFor(t)
+	return protoperm.WriteNeed(f.ctx, drv, err, t.Rel)
 }
 
 func (f *fs) driverFor(t target) (storage.Driver, error) {
@@ -343,7 +353,7 @@ func (f *fs) MkdirAll(name string, _ os.FileMode) error {
 	if t.isRoot() || t.Rel == "" {
 		return os.ErrPermission
 	}
-	if !f.canWrite(t) {
+	if !f.canDo(t, perm.FilesCreate) {
 		return os.ErrPermission
 	}
 	drv, err := f.driverFor(t)
@@ -370,7 +380,7 @@ func (f *fs) Remove(name string) error {
 	if t.isRoot() || t.Rel == "" {
 		return os.ErrPermission
 	}
-	if !f.canWrite(t) {
+	if !f.canDo(t, perm.FilesDelete) {
 		return os.ErrPermission
 	}
 	drv, err := f.driverFor(t)
@@ -386,6 +396,10 @@ func (f *fs) Remove(name string) error {
 		f.srv.syncer.Delete(f.ctx, t.Storage, t.Rel)
 		return os.ErrNotExist
 	case errors.Is(terr, trash.ErrUnsupported):
+		// No trash on this storage: the delete is for good — files.purge.
+		if !f.canDo(t, perm.FilesPurge) {
+			return os.ErrPermission
+		}
 		del, ok := drv.(storage.Deleter)
 		if !ok {
 			return billy.ErrNotSupported
@@ -413,7 +427,15 @@ func (f *fs) Rename(oldpath, newpath string) error {
 		return os.ErrPermission
 	}
 	// ⚠ Both ends: a rename moves a file OUT of one subtree and INTO another.
-	if !f.canWrite(src) || !f.canWrite(dst) {
+	// A new name in the same folder is files.rename, another folder
+	// files.move, both at once needs both (internal/perm); replacing what is
+	// at the destination is also files.modify there.
+	for _, p := range perm.RelocateNeeds(src.Storage.ID, src.Rel, dst.Storage.ID, dst.Rel) {
+		if !f.canDo(src, p) || !f.canDo(dst, p) {
+			return os.ErrPermission
+		}
+	}
+	if f.writeNeed(dst) == perm.FilesModify && !f.canDo(dst, perm.FilesModify) {
 		return os.ErrPermission
 	}
 	if src.Storage.ID != dst.Storage.ID {
@@ -455,7 +477,9 @@ func (f *fs) Chtimes(name string, _ time.Time, mtime time.Time) error {
 	if err != nil {
 		return err
 	}
-	if t.isRoot() || !f.canWrite(t) {
+	// Clients set times right after every upload: either half of writing is
+	// enough to touch a timestamp.
+	if t.isRoot() || (!f.canDo(t, perm.FilesModify) && !f.canDo(t, perm.FilesCreate)) {
 		return os.ErrPermission
 	}
 	drv, err := f.driverFor(t)

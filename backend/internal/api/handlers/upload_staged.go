@@ -53,6 +53,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
@@ -136,7 +137,7 @@ func (h *StagedUpload) Begin(w http.ResponseWriter, r *http.Request) {
 	// check on the destination directory. Reused rather than re-implemented on
 	// purpose — a second copy of path sanitisation is a second place to get it
 	// wrong.
-	st, destRel, _, ok := h.Manager.resolveAdapterDir(w, r, req.Path)
+	st, destRel, _, ok := h.Manager.resolveAdapterDir(w, r, req.Path, "")
 	if !ok {
 		return
 	}
@@ -186,6 +187,15 @@ func (h *StagedUpload) Begin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, mapDriverErr(err), map[string]string{"error": err.Error()})
 		return
 	}
+	// resolveAdapterDir asked only for the folder's level: adding a file is
+	// files.create, replacing one that is there is files.modify.
+	stagedNeed := perm.FilesCreate
+	if _, serr := drv.Stat(r.Context(), fullRel); serr == nil {
+		stagedNeed = perm.FilesModify
+	}
+	if !h.Manager.require(w, r, st, fullRel, stagedNeed, "insufficient permission") {
+		return
+	}
 
 	userID := currentUserID(r.Context())
 	// Quota is RESERVED here, not at commit: a staged upload that never commits
@@ -199,7 +209,7 @@ func (h *StagedUpload) Begin(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "quota: " + perr.Error()})
 			return
 		}
-		if qerr := h.Quota.CheckCanWrite(r.Context(), userID, req.Size+pending); qerr != nil {
+		if qerr := h.Quota.CheckFile(r.Context(), userID, req.Size, req.Size+pending); qerr != nil {
 			if errors.Is(qerr, quota.ErrQuotaExceeded) {
 				metrics.GuardRefusals.WithLabelValues(metrics.GuardQuota).Inc()
 				slog.Info("staged upload refused: quota",

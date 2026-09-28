@@ -13,6 +13,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
@@ -156,6 +157,11 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid role: " + req.Role})
 		return
 	}
+	// A delegated administrator (admin.users) creates accounts at or below
+	// their own role — never an administrator.
+	if refuseAdminTarget(w, r, nil, req.Role) {
+		return
+	}
 	if req.Locale == "" {
 		req.Locale = "en"
 	}
@@ -245,8 +251,19 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	// Before ANY mutation: a confined caller may only touch its own tenant's
 	// users. Runs first so a refused request cannot have written half of the
 	// body's fields already.
-	if _, status, msg := h.tenantGate(r.Context(), id); status != 0 {
+	target, status, msg := h.tenantGate(r.Context(), id)
+	if status != 0 {
 		writeJSON(w, status, map[string]string{"error": msg})
+		return
+	}
+	// A delegated administrator never edits an administrator's account and
+	// never raises a role above their own (refuseAdminTarget). Before the
+	// role validation below so the refusal does not depend on it.
+	newRole := ""
+	if req.Role != nil {
+		newRole = *req.Role
+	}
+	if refuseAdminTarget(w, r, target, newRole) {
 		return
 	}
 	// Reject an unknown role up-front, and refuse to demote the last admin
@@ -307,6 +324,13 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Role != nil {
 		_ = h.Store.UpdateUserRole(r.Context(), id, *req.Role)
+		// A custom role is "its base role plus changes"; picking a built-in
+		// role by hand is picking THAT role, so the custom one ends.
+		// (PutUserRoles is how a custom role is given.)
+		if target == nil || target.Role != *req.Role {
+			_ = h.Store.SetUserCustomRole(r.Context(), id, 0)
+			perm.Invalidate()
+		}
 	}
 	if req.Enabled != nil {
 		if err := h.Store.SetUserEnabled(r.Context(), id, *req.Enabled); err != nil {
@@ -348,6 +372,9 @@ func (h *Users) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, map[string]string{"error": msg})
 		return
 	}
+	if refuseAdminTarget(w, r, target, "") {
+		return
+	}
 	if target.IsAdmin() {
 		if last, err := h.isLastAdmin(r.Context(), id); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -371,7 +398,13 @@ func (h *Users) Delete(w http.ResponseWriter, r *http.Request) {
 // (operator accounts), so a full ListUsers scan is cheaper than threading a
 // dedicated COUNT through every Store implementation.
 func (h *Users) isLastAdmin(ctx context.Context, userID int64) (bool, error) {
-	users, err := h.Store.ListUsers(ctx)
+	return isLastAdmin(ctx, h.Store, userID)
+}
+
+// isLastAdmin reports whether userID is the only administrator the store
+// lists (tenant-confined stores list the tenant's).
+func isLastAdmin(ctx context.Context, store db.Store, userID int64) (bool, error) {
+	users, err := store.ListUsers(ctx)
 	if err != nil {
 		return false, err
 	}

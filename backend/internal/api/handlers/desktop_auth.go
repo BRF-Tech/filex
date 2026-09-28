@@ -163,6 +163,8 @@ func (h *DesktopAuth) Complete(w http.ResponseWriter, r *http.Request) {
 		// Starred and Shared with me. Pairings made before this keep `app`
 		// until they are made again (docs/DESKTOP.md).
 		Kind: model.TokenKindUser,
+		// Using this token is access.desktop, not access.api (package perm).
+		Source: model.TokenSourceDesktop,
 	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

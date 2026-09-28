@@ -11,6 +11,7 @@ import (
 	nfshelper "github.com/willscott/go-nfs/helpers"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 )
 
@@ -61,6 +62,11 @@ type mount struct {
 func (h *handler) Mount(ctx context.Context, conn net.Conn, req nfs.MountRequest) (nfs.MountStatus, billy.Filesystem, []nfs.AuthFlavor) {
 	remote := remoteIP(conn)
 	p, export, err := h.srv.cfg.Auth.Export(ctx, string(req.Dirpath), remote)
+	if err == nil {
+		// access.nfs (package perm): the export's owner may no longer mount.
+		// One more reason behind the one status below.
+		p, err = h.srv.cfg.Auth.Admit(ctx, p, perm.AccessNFS, "nfs")
+	}
 	if err != nil {
 		// ⚠ One status for every failure — unknown path, expired export,
 		// disabled account, address not in the allow-list. Distinguishing them

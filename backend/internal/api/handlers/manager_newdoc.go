@@ -13,6 +13,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/newdoc"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
@@ -313,7 +314,7 @@ func (h *Manager) planNewDoc(w http.ResponseWriter, r *http.Request, body vfNewF
 	// also refuses to offer a folder the person cannot write to, but that is
 	// a courtesy to the person, not a permission check: the client is never
 	// the check.
-	current, destRel, _, ok := h.resolveAdapterDir(w, r, body.Path)
+	current, destRel, _, ok := h.resolveAdapterDir(w, r, body.Path, perm.FilesCreate)
 	if !ok {
 		return nil, false
 	}
@@ -337,7 +338,7 @@ func (h *Manager) planNewDoc(w http.ResponseWriter, r *http.Request, body vfNewF
 	// ceiling: a quota that the New-document button can step over is not a
 	// quota. Same status + code as the upload path so one client branch
 	// handles both.
-	if err := h.checkQuota(r.Context(), size); err != nil {
+	if err := h.checkQuota(r.Context(), size, size); err != nil {
 		if errors.Is(err, quota.ErrQuotaExceeded) {
 			slog.Info("newfile refused: quota",
 				slog.Int64("user", quotastore.OwnerFrom(r.Context())),

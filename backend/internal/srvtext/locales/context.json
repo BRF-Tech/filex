@@ -1,6 +1,9 @@
 {
   "about": "Context for translators — not read by the server. `groups`: where the keys under a prefix appear (the longest matching prefix wins). `keys`: a note for one key. `vars`: what each {placeholder} holds; `key_vars` overrides it for one key. scripts/lib/i18n-catalogue.mjs merges this into filex-catalogue-context.json, and web/tests/i18n/langPackCatalogue.test.ts fails when a server key has no group or a placeholder no description.",
   "groups": {
+    "server.perm.blocked_extension": "API refusal when a permission rule blocks a file type the person tried to upload, create or rename to. One sentence.",
+    "server.perm.denied.": "API refusal shown when a person lacks a permission (a toast or dialog in the file manager, or an error an API client logs). One sentence; the {action} is a lowercase phrase from server.perm.action.*.",
+    "server.perm.action.": "A lowercase verb phrase naming what one permission allows, slotted into the server.perm.denied.* sentences as {action}. Grammar must fit every one of those sentences.",
     "server.mail.": "Email filex sends. Plain text: one line per key, no markup. Written in the RECIPIENT's language as each flow decides it (below).",
     "server.mail.greeting": "Email: the first line of every mail filex writes to a person.",
     "server.mail.valid_days": "Email (share link, file request): how long the link works.",
@@ -68,6 +71,9 @@
     "server.notify.plugin.notice.body": "An installed app's own notification: \"<app name>: <the app's message>\"."
   },
   "vars": {
+    "ext": "a file extension without the dot, e.g. exe",
+    "action": "what the person tried to do — one of the server.perm.action.* phrases",
+    "rule": "the name an administrator gave a role (a custom role; the key keeps its older name)",
     "name": "a file or folder name, as it is on disk",
     "link": "a clickable link, already made — put it where your language puts it; the words inside it are their own key",
     "count": "a number",

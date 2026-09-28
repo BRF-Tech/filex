@@ -29,6 +29,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
@@ -99,7 +100,10 @@ func NewVersions(store db.Store, svc *versioning.Service) *Versions {
 // fall through to a 200 with an empty list (List) or a 500 carrying a database
 // error string (Snapshot / Restore), so there was no coherent "no such node"
 // answer for a refusal to imitate. Now there is.
-func (h *Versions) authorizedNode(w http.ResponseWriter, r *http.Request, nodeID int64, need acl.Level, missing string) (*model.Node, bool) {
+//
+// p, when set, is the per-user permission the operation needs as well; the
+// level is then acl.NeedLevel(p) and need is ignored.
+func (h *Versions) authorizedNode(w http.ResponseWriter, r *http.Request, nodeID int64, need acl.Level, p perm.Perm, missing string) (*model.Node, bool) {
 	ctx := r.Context()
 	n, err := h.Store.GetNode(ctx, nodeID)
 	if err != nil || n == nil || n.DeletedAt != nil {
@@ -115,6 +119,15 @@ func (h *Versions) authorizedNode(w http.ResponseWriter, r *http.Request, nodeID
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": missing})
 			return nil, false
 		}
+	}
+	if p != "" {
+		if v := aclCanID(ctx, h.ACL, h.Store, n.StorageID, livePathOf(n), p); !v.ok {
+			if !v.WritePerm(w, r) {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+			}
+			return nil, false
+		}
+		return n, true
 	}
 	if !aclAllowID(ctx, h.ACL, h.Store, n.StorageID, livePathOf(n), need) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
@@ -155,7 +168,7 @@ func (h *Versions) List(w http.ResponseWriter, r *http.Request) {
 	}
 	// Viewer: the timeline is metadata about content the caller can already
 	// read, and the read-only inspector is meant to show it.
-	node, ok := h.authorizedNode(w, r, nodeID, acl.LevelViewer, "not found")
+	node, ok := h.authorizedNode(w, r, nodeID, acl.LevelViewer, "", "not found")
 	if !ok {
 		return
 	}
@@ -211,7 +224,7 @@ func (h *Versions) Snapshot(w http.ResponseWriter, r *http.Request) {
 	// storage. A foreign node_id here was a way to burn another tenant's quota
 	// on demand, and a read-only account's node_id a way to make a read-only
 	// account write.
-	if _, ok := h.authorizedNode(w, r, req.NodeID, acl.LevelEditor, "not found"); !ok {
+	if _, ok := h.authorizedNode(w, r, req.NodeID, 0, perm.FilesModify, "not found"); !ok {
 		return
 	}
 	v, err := h.Service.Snapshot(r.Context(), req.NodeID)
@@ -242,7 +255,7 @@ func (h *Versions) Restore(w http.ResponseWriter, r *http.Request) {
 	// Visible first, then writegate (names, app locks), then ≥editor: the
 	// level check reads a lock's viewer cap as a plain 403, and a person
 	// rolling back a frozen document is told who froze it.
-	node, ok := h.authorizedNode(w, r, req.NodeID, acl.LevelViewer, "not found")
+	node, ok := h.authorizedNode(w, r, req.NodeID, acl.LevelViewer, "", "not found")
 	if !ok {
 		return
 	}
@@ -251,7 +264,7 @@ func (h *Versions) Restore(w http.ResponseWriter, r *http.Request) {
 	if gate(w, r, h.ACL, node.StorageID, writegate.Writes(livePathOf(node))) {
 		return
 	}
-	if _, ok := h.authorizedNode(w, r, req.NodeID, acl.LevelEditor, "not found"); !ok {
+	if _, ok := h.authorizedNode(w, r, req.NodeID, 0, perm.FilesModify, "not found"); !ok {
 		return
 	}
 
@@ -332,7 +345,7 @@ func (h *Versions) HardDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "version not found"})
 		return
 	}
-	if _, ok := h.authorizedNode(w, r, v.NodeID, acl.LevelEditor, "version not found"); !ok {
+	if _, ok := h.authorizedNode(w, r, v.NodeID, 0, perm.FilesPurge, "version not found"); !ok {
 		return
 	}
 	if err := h.Service.HardDeleteVersion(r.Context(), id); err != nil {

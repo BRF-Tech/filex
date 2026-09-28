@@ -5,6 +5,11 @@ every endpoint / MCP tool the feature exposes. Backwards compatible: RBAC is
 **off per storage by default**, so an untouched deployment behaves exactly as
 before.
 
+> **What an account may *do*** — delete, share, download, use SFTP, manage users —
+> is the roles and per-user permission layer on top of this, in
+> [PERMISSIONS.md](PERMISSIONS.md). A file action needs both: the grant level
+> described here, and the permission.
+
 ## Model
 
 Two layers combine, then a ceiling is applied:

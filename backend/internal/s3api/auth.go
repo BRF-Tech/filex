@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 )
 
@@ -60,6 +61,11 @@ func (a *Authenticator) Authenticate(r *http.Request) (*protocolauth.Principal, 
 	lookup := func(keyID string) (string, error) {
 		p, secret, lerr := a.Res.AccessKey(ctx, keyID)
 		if lerr != nil {
+			return "", lerr
+		}
+		// access.s3 (package perm): refused like an unknown key, so the
+		// answer does not say the key was real.
+		if p, lerr = a.Res.Admit(ctx, p, perm.AccessS3, "s3"); lerr != nil {
 			return "", lerr
 		}
 		principal = p

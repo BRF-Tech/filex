@@ -61,6 +61,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
@@ -214,6 +215,20 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	if n, err := h.Store.GetNodeByPath(r.Context(), storageID, hash); err == nil {
 		existing = n
 	}
+	// The ≥editor check above is the path; the action is a change to a file
+	// that is there, or the addition of one that is not.
+	saveNeed := perm.FilesModify
+	if existing == nil {
+		if _, serr := drv.Stat(r.Context(), rel); serr != nil {
+			saveNeed = perm.FilesCreate
+		}
+	}
+	if v := aclCanID(r.Context(), h.ACL, h.Store, storageID, rel, saveNeed); !v.ok {
+		if !v.WritePerm(w, r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		}
+		return
+	}
 	// This call predates writehook.BeforeOverwrite and still snapshots
 	// directly through h.Versions, because it already has the node row in
 	// hand. What it no longer does is proceed past a failure: it used to log
@@ -239,6 +254,10 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body := []byte(req.Content)
+	if err := checkUploadSize(r.Context(), h.Store, int64(len(body))); err != nil {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": err.Error(), "code": "FILE_TOO_LARGE"})
+		return
+	}
 	if err := wr.Write(r.Context(), rel, bytes.NewReader(body), int64(len(body))); err != nil {
 		writeJSON(w, mapDriverErr(err), map[string]string{"error": "write: " + err.Error()})
 		return

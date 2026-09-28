@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch, type Component } from 'vue';
-import { useRoute, RouterLink } from 'vue-router';
+import { useRoute, useRouter, RouterLink } from 'vue-router';
 import { trashApi } from '@/api/trash';
 import TrashFull from './icons/TrashFull.vue';
 import {
@@ -12,6 +12,7 @@ import {
   Brush,
   PlugZap,
   ShieldCheck,
+  UserCog,
   ScrollText,
   RefreshCcw,
   Share2,
@@ -75,6 +76,7 @@ watch(() => route.name, refreshTrash);
  * panel because it is a `home` view, exactly like the next plugin's will.
  */
 const auth = useAuthStore();
+const router = useRouter();
 const { apps: homeApps } = usePluginHomeApps();
 const appItems = computed<NavItem[]>(() =>
   auth.isAdmin
@@ -104,6 +106,19 @@ interface NavItem {
   id?: string;
 }
 
+/**
+ * An administrator sees every page. A delegated one (backend internal/perm:
+ * an admin.* permission without the role) sees the pages the router would
+ * let them into — the same `meta.adminPerm` question, so the sidebar and the
+ * guard cannot disagree — and the pages outside the admin area.
+ */
+function itemVisible(it: NavItem): boolean {
+  if (auth.isAdmin) return true;
+  const meta = router.resolve(it.to).meta;
+  if (!meta.requiresAdmin) return true;
+  return typeof meta.adminPerm === 'string' && auth.can(meta.adminPerm);
+}
+
 const items = computed<NavItem[]>(() => [
   { to: { name: 'dashboard' }, label: t('nav.dashboard'), icon: LayoutDashboard, group: 'main' },
   { to: { name: 'explore' }, label: t('nav.files'), icon: FolderOpen, group: 'main' },
@@ -124,6 +139,7 @@ const items = computed<NavItem[]>(() => [
 
   { to: { name: 'users' }, label: t('nav.users'), icon: Users, group: 'access' },
   { to: { name: 'grants' }, label: t('nav.grants'), icon: ShieldCheck, group: 'access' },
+  { to: { name: 'roles' }, label: t('nav.roles'), icon: UserCog, group: 'access' },
   {
     to: { name: 'auth-providers' },
     label: t('nav.authProviders'),
@@ -165,7 +181,7 @@ const groups = computed(() => {
     ops: [],
     meta: [],
   };
-  for (const it of items.value) map[it.group].push(it);
+  for (const it of items.value) if (itemVisible(it)) map[it.group].push(it);
   return map;
 });
 

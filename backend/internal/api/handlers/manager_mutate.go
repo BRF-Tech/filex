@@ -17,10 +17,12 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
@@ -75,9 +77,90 @@ func (h *Manager) Mutate(w http.ResponseWriter, r *http.Request) {
 		h.vfDelete(w, r)
 	case "upload":
 		h.vfUpload(w, r)
+	case "allowed":
+		h.vfAllowed(w, r)
 	default:
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "action not implemented: " + action})
 	}
+}
+
+// vfAllowedBody is POST /api/files/manager?action=allowed.
+type vfAllowedBody struct {
+	Items       []vfPathHolder `json:"items"`
+	Permissions []string       `json:"permissions"`
+}
+
+// vfAllowedMaxItems bounds one question; a bigger selection is asked in parts.
+const vfAllowedMaxItems = 1000
+
+// vfAllowed answers, for each item path (adapter://rel), which of the asked
+// permissions the caller holds THERE — the same acl.Set.Can every file
+// action checks, so a role that allows Delete only in Scratch gets Delete
+// offered on Scratch/draft.txt and not on Finance/report.txt. It changes
+// nothing; the action itself still decides. Paths it cannot place (unknown
+// storage, "..") answer an empty list.
+//
+// The answer is a list in the order of the items, not keyed by path: a
+// confined token's paths are rewritten on the way in (confine.Middleware),
+// so the caller would not recognise them.
+func (h *Manager) vfAllowed(w http.ResponseWriter, r *http.Request) {
+	var body vfAllowedBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	if len(body.Items) > vfAllowedMaxItems {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too many items"})
+		return
+	}
+	var asked []perm.Perm
+	for _, k := range body.Permissions {
+		if _, ok := perm.Lookup(perm.Perm(k)); ok {
+			asked = append(asked, perm.Perm(k))
+		}
+	}
+	storages, err := h.Store.ListEnabledStorages(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	byName := make(map[string]*model.Storage, len(storages))
+	for _, s := range storages {
+		byName[s.Name] = s
+	}
+	sets := map[int64]*acl.Set{}
+	out := make([][]string, len(body.Items))
+	for i, it := range body.Items {
+		held := []string{}
+		out[i] = held
+		adapter, rel := splitAdapterPath(it.Path)
+		if adapter == "" && len(storages) > 0 {
+			adapter = storages[0].Name
+		}
+		st := byName[adapter]
+		if st == nil || pathHasDotDot(rel) {
+			continue
+		}
+		if h.ACL == nil {
+			for _, p := range asked {
+				held = append(held, string(p))
+			}
+			out[i] = held
+			continue
+		}
+		set, ok := sets[st.ID]
+		if !ok {
+			set, _ = h.ACL.LoadSet(r.Context(), auth.UserFrom(r.Context()), st)
+			sets[st.ID] = set
+		}
+		for _, p := range asked {
+			if set.Can(rel, p) {
+				held = append(held, string(p))
+			}
+		}
+		out[i] = held
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"allowed": out})
 }
 
 // vfNewFolderBody is POST /api/files/manager?action=newfolder.
@@ -101,7 +184,7 @@ func (h *Manager) vfNewFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	current, parentRel, storageNames, ok := h.resolveAdapterDir(w, r, body.Path)
+	current, parentRel, storageNames, ok := h.resolveAdapterDir(w, r, body.Path, perm.FilesCreate)
 	if !ok {
 		return
 	}
@@ -201,7 +284,7 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	current, parentRel, storageNames, ok := h.resolveAdapterDir(w, r, body.Path)
+	current, parentRel, storageNames, ok := h.resolveAdapterDir(w, r, body.Path, perm.FilesRename)
 	if !ok {
 		return
 	}
@@ -228,8 +311,13 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 	if gate(w, r, h.ACL, current.ID, writegate.Writes(srcRel), writegate.Writes(path.Join(path.Dir(srcRel), body.Name))) {
 		return
 	}
-	if !h.allowed(r.Context(), current, srcRel, acl.LevelEditor) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+	if !h.require(w, r, current, srcRel, perm.FilesRename, "insufficient permission") {
+		return
+	}
+	// The NEW name too: it is the path the file will have, so a rule's
+	// blocked file types (acl.Set.Can) apply to it — renaming report.txt to
+	// report.exe is producing an .exe.
+	if !h.require(w, r, current, path.Join(path.Dir(srcRel), body.Name), perm.FilesRename, "insufficient permission") {
 		return
 	}
 
@@ -329,7 +417,7 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	current, destRel, storageNames, ok := h.resolveAdapterDir(w, r, body.Path)
+	current, destRel, storageNames, ok := h.resolveAdapterDir(w, r, body.Path, perm.FilesMove)
 	if !ok {
 		return
 	}
@@ -397,8 +485,9 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item path: " + it.Path})
 			return
 		}
-		if !h.allowed(ctx, current, srcRel, acl.LevelEditor) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + it.Path})
+		// Items keep their names (a de-collided "a (1).txt" is filex's pick,
+		// not the caller's), so this is files.move alone.
+		if !h.require(w, r, current, srcRel, perm.FilesMove, "insufficient permission: "+it.Path) {
 			return
 		}
 		dstRel, derr := ops.MoveDest(ctx, drv, srcRel, path.Join(destRel, path.Base(srcRel)),
@@ -469,7 +558,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	current, parentRel, storageNames, ok := h.resolveAdapterDir(w, r, body.Path)
+	current, parentRel, storageNames, ok := h.resolveAdapterDir(w, r, body.Path, perm.FilesDelete)
 	if !ok {
 		return
 	}
@@ -514,8 +603,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item path: " + it.Path})
 			return
 		}
-		if !h.allowed(ctx, current, srcRel, acl.LevelEditor) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + it.Path})
+		if !h.require(w, r, current, srcRel, perm.FilesDelete, "insufficient permission: "+it.Path) {
 			return
 		}
 
@@ -664,7 +752,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pathStr := r.FormValue("path")
-	current, destRel, storageNames, ok := h.resolveAdapterDir(w, r, pathStr)
+	current, destRel, storageNames, ok := h.resolveAdapterDir(w, r, pathStr, "")
 	if !ok {
 		return
 	}
@@ -712,8 +800,16 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 	var batch int64
 	for _, fh := range files {
 		batch += fh.Size
+		// The per-file limit (permission rules) is per FILE, so it is asked
+		// file by file; the quota below is asked of the batch.
+		if h.Quota != nil {
+			if ferr := h.Quota.CheckFileSize(r.Context(), quotastore.OwnerFrom(r.Context()), fh.Size); ferr != nil {
+				writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": ferr.Error(), "code": "FILE_TOO_LARGE", "file": fh.Filename})
+				return
+			}
+		}
 	}
-	if err := h.checkQuota(r.Context(), batch); err != nil {
+	if err := h.checkQuota(r.Context(), 0, batch); err != nil {
 		if errors.Is(err, quota.ErrQuotaExceeded) {
 			slog.Info("upload refused: quota",
 				slog.Int64("user", quotastore.OwnerFrom(r.Context())),
@@ -783,6 +879,16 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		if err := storage.EnsureFileTarget(r.Context(), drv, fullRel); err != nil {
 			_ = src.Close()
 			writeJSON(w, mapDriverErr(err), map[string]string{"error": err.Error()})
+			return
+		}
+		// Adding a file is files.create; replacing one that is already there
+		// is a change to it, files.modify.
+		upNeed := perm.FilesCreate
+		if _, statErr := drv.Stat(r.Context(), fullRel); statErr == nil {
+			upNeed = perm.FilesModify
+		}
+		if !h.require(w, r, current, fullRel, upNeed, "insufficient permission") {
+			_ = src.Close()
 			return
 		}
 
@@ -910,7 +1016,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 // the adapter prefix off `pathStr`, look up the storage row, and
 // validate the relative path. On error it writes the response and
 // returns ok=false so the caller can early-exit.
-func (h *Manager) resolveAdapterDir(w http.ResponseWriter, r *http.Request, pathStr string) (*model.Storage, string, []string, bool) {
+func (h *Manager) resolveAdapterDir(w http.ResponseWriter, r *http.Request, pathStr string, need perm.Perm) (*model.Storage, string, []string, bool) {
 	storages, err := h.Store.ListEnabledStorages(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -946,10 +1052,19 @@ func (h *Manager) resolveAdapterDir(w http.ResponseWriter, r *http.Request, path
 		return nil, "", nil, false
 	}
 	// RBAC: every mutation writes into this base dir (create/upload/move-dest
-	// /rename-parent/delete-parent) → require ≥editor on it. Viewer accounts
-	// (ceiling=viewer) are thus read-only even on RBAC-off storages.
-	if !h.allowed(r.Context(), current, rel, acl.LevelEditor) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+	// /rename-parent/delete-parent) → require ≥editor on it (acl.NeedLevel of
+	// every mutating permission), plus the caller's per-user permission for
+	// the action. Viewer accounts (ceiling=viewer) are thus read-only even on
+	// RBAC-off storages.
+	// need == "" is an upload: whether each file is an addition or a
+	// replacement is only known per file, so the caller checks that itself
+	// and only the path level is asked here.
+	if need == "" {
+		if !h.allowed(r.Context(), current, rel, acl.LevelEditor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+			return nil, "", nil, false
+		}
+	} else if !h.require(w, r, current, rel, need, "insufficient permission") {
 		return nil, "", nil, false
 	}
 	return current, rel, storageNames, true
@@ -1191,7 +1306,7 @@ func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, fi
 	// The ceiling, before a byte is written. For the public drop link the
 	// account measured is the LINK CREATOR (quotastore.OwnerFrom), because
 	// theirs is the disk being filled — the uploader has no account at all.
-	if err := h.checkQuota(ctx, size); err != nil {
+	if err := h.checkQuota(ctx, size, size); err != nil {
 		return nil, err
 	}
 	// A file named exactly like an existing subfolder would leave `X` and `X/…`

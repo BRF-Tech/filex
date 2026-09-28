@@ -89,7 +89,7 @@ const managerPath = "/api/files/manager"
 // itself: it is whatever the caller typed.
 var managerVerbs = map[string]bool{
 	"index": true, "subfolders": true, "changes": true, "search": true, "preview": true, "download": true,
-	"newfolder": true, "newfile": true, "rename": true, "move": true, "delete": true, "upload": true,
+	"newfolder": true, "newfile": true, "rename": true, "move": true, "delete": true, "upload": true, "allowed": true,
 }
 
 // managerAction returns the file-manager verb of r for the access log: "" on

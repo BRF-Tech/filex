@@ -115,7 +115,7 @@ func (h *Handler) createMultipartUpload(w http.ResponseWriter, r *http.Request, 
 		WriteError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	if !h.writable(p, set, key) {
+	if !h.writable(p, set, key, h.writeNeed(ctx, st, key)) {
 		WriteError(w, r, http.StatusForbidden, "AccessDenied", "you do not have write access to this key")
 		return
 	}
@@ -152,7 +152,7 @@ func (h *Handler) uploadPart(w http.ResponseWriter, r *http.Request, p *protocol
 		return
 	}
 	set, err := p.ACL(ctx, st)
-	if err != nil || !h.writable(p, set, key) {
+	if err != nil || !h.writable(p, set, key, h.writeNeed(ctx, st, key)) {
 		WriteError(w, r, http.StatusForbidden, "AccessDenied", "you do not have write access to this key")
 		return
 	}
@@ -215,7 +215,7 @@ func (h *Handler) completeMultipartUpload(w http.ResponseWriter, r *http.Request
 		return
 	}
 	set, err := p.ACL(ctx, st)
-	if err != nil || !h.writable(p, set, key) {
+	if err != nil || !h.writable(p, set, key, h.writeNeed(ctx, st, key)) {
 		WriteError(w, r, http.StatusForbidden, "AccessDenied", "you do not have write access to this key")
 		return
 	}
@@ -281,7 +281,7 @@ func (h *Handler) completeMultipartUpload(w http.ResponseWriter, r *http.Request
 	size := body.Size()
 
 	if up.UserID != 0 && h.cfg.Quota != nil {
-		if err := h.cfg.Quota.CheckCanWrite(ctx, up.UserID, size); err != nil {
+		if err := h.cfg.Quota.CheckFile(ctx, up.UserID, size, size); err != nil {
 			WriteError(w, r, http.StatusRequestEntityTooLarge, "EntityTooLarge", err.Error())
 			return
 		}
@@ -346,7 +346,7 @@ func (h *Handler) abortMultipartUpload(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	set, err := p.ACL(r.Context(), st)
-	if err != nil || !h.writable(p, set, key) {
+	if err != nil || !h.writable(p, set, key, "") {
 		WriteError(w, r, http.StatusForbidden, "AccessDenied", "you do not have write access to this key")
 		return
 	}
@@ -363,7 +363,7 @@ func (h *Handler) listParts(w http.ResponseWriter, r *http.Request, p *protocola
 		return
 	}
 	set, err := p.ACL(r.Context(), st)
-	if err != nil || !h.writable(p, set, key) {
+	if err != nil || !h.writable(p, set, key, "") {
 		WriteError(w, r, http.StatusForbidden, "AccessDenied", "you do not have write access to this key")
 		return
 	}

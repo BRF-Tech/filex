@@ -244,7 +244,7 @@ func (f *fs) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 	if t.isRoot() || t.Rel == "" {
 		return nil, os.ErrInvalid
 	}
-	if !f.canWrite(t) {
+	if !f.canDo(t, f.writeNeed(t)) {
 		// PermissionDenied, unlike a read: a write that cannot happen must SAY
 		// so, or a client retries forever against a path it can see.
 		return nil, sftp.ErrSSHFxPermissionDenied
@@ -327,7 +327,7 @@ func (w *writer) Close() error {
 	// after — checking afterwards means the disk already holds what the quota
 	// was meant to prevent.
 	if u := auth.UserFrom(ctx); u != nil && w.fs.srv.cfg.Quota != nil {
-		if err := w.fs.srv.cfg.Quota.CheckCanWrite(ctx, u.ID, w.high); err != nil {
+		if err := w.fs.srv.cfg.Quota.CheckFile(ctx, u.ID, w.high, w.high); err != nil {
 			return err
 		}
 	}

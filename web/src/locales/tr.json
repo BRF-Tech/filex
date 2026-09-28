@@ -154,7 +154,8 @@
     "plugins": "Eklentiler",
     "usage": "Kullanım ve maliyet",
     "apps": "Uygulamalar",
-    "appearance": "Görünüm"
+    "appearance": "Görünüm",
+    "roles": "Roller"
   },
   "login": {
     "title": "Oturum aç",
@@ -424,6 +425,7 @@
     "resetPasswordConfirm": "\"{email}\" için yeni bir parola oluşturulsun mu? Mevcut parola geçersiz olur ve bu hesabın tüm oturumları kapanır.",
     "passwordOptionalHint": "İsteğe bağlı — parolası olmayan bir hesap SSO ile ya da bir API anahtarıyla oturum açar",
     "createdOk": "Kullanıcı oluşturuldu",
+    "createdRoleNotSet": "Hesap İzleyici olarak oluşturuldu, ancak rolü atanamadı: {error}",
     "updatedOk": "Kullanıcı güncellendi",
     "deletedOk": "Kullanıcı silindi",
     "quota": {
@@ -880,7 +882,10 @@
       "app_plugin": "Uygulama",
       "auth_providers": "Giriş sağlayıcısı",
       "quota": "Kota",
-      "themes": "Tema"
+      "themes": "Tema",
+      "permissions": "İzin",
+      "roles": "Rol",
+      "permission_rule": "Rol"
     },
     "verb": {
       "action": "değiştirildi",
@@ -923,7 +928,10 @@
       "download_link_refused": "dışarı sürükleyerek indirme reddedildi",
       "ui_save": "arayüzünden kaydedildi",
       "upgrade": "yükseltildi",
-      "rollback": "önceki sürüme döndürüldü"
+      "rollback": "önceki sürüme döndürüldü",
+      "permissions_set": "izinleri değiştirildi",
+      "defaults_set": "varsayılanlar değiştirildi",
+      "roles_set": "rolleri değiştirildi"
     },
     "target": {
       "auth_provider": "Kimlik sağlayıcısı",
@@ -940,7 +948,9 @@
       "user": "Kullanıcı",
       "version": "Sürüm",
       "app_plugin": "Uygulama",
-      "file": "Dosya"
+      "file": "Dosya",
+      "permissions": "Yerleşik rol",
+      "permission_rule": "Rol"
     },
     "viaAi": "{resource} (AI)",
     "filterResource": "Ne",
@@ -2549,5 +2559,241 @@
     "minLength": "En az {n} karakter kullanın. | En az {n} karakter kullanın.",
     "maxLength": "En çok {n} karakter kullanın. | En çok {n} karakter kullanın.",
     "pattern": "Bu değer beklenen biçimde değil."
+  },
+  "permissions": {
+    "title": "Roller",
+    "subtitle": "Rol, adı olan bir izin kümesidir. Herkesin bir yerleşik rolü vardır (Yönetici, Kullanıcı veya Görüntüleyici) ve istenen sayıda özel rol verilebilir. Kişinin rollerinden biri bir şeyi reddederse o şey reddedilir; kişiye özel istisnalar tüm rollere üstün gelir.",
+    "items": {
+      "files": {
+        "download": {
+          "label": "İndirme",
+          "hint": "Dosyaları ve zip arşivlerini cihaza kaydetme; WebDAV, SFTP, FTP, S3 veya NFS ile okuma. Önizleme açık kalır."
+        },
+        "create": {
+          "label": "Dosya ve klasör ekleme",
+          "hint": "Yükleme, klasör ve dosya oluşturma, kopyalama, arşiv açma, çöp kutusundan geri yükleme."
+        },
+        "modify": {
+          "label": "Dosya değiştirme",
+          "hint": "Üzerine yazma, metin düzenleyicide veya ONLYOFFICE'te düzenleme, eski sürüme dönme."
+        },
+        "rename": {
+          "label": "Yeniden adlandırma",
+          "hint": "Dosya ve klasörlere aynı klasörde yeni ad verme."
+        },
+        "move": {
+          "label": "Taşıma",
+          "hint": "Dosya ve klasörleri başka klasöre taşıma. Aynı anda taşıyıp yeniden adlandırmak ikisini de gerektirir."
+        },
+        "delete": {
+          "label": "Silme",
+          "hint": "Dosya ve klasörleri çöp kutusuna taşıma."
+        },
+        "purge": {
+          "label": "Kalıcı silme",
+          "hint": "Çöp kutusunu boşaltma; çöp kutusu olmayan depolarda silme."
+        },
+        "tag": {
+          "label": "Etiketleme",
+          "hint": "Etiket ekleme ve kaldırma."
+        }
+      },
+      "share": {
+        "links": {
+          "label": "Paylaşım bağlantıları",
+          "hint": "Herkese açık indirme bağlantısı oluşturma."
+        },
+        "upload_links": {
+          "label": "Yükleme bağlantıları",
+          "hint": "Başkalarının dosya yükleyebileceği bağlantı oluşturma."
+        },
+        "users": {
+          "label": "Kişilerle paylaşma",
+          "hint": "Bir dosya veya klasöre başka hesaplara erişim verme."
+        }
+      },
+      "comments": {
+        "write": {
+          "label": "Yorum yazma",
+          "hint": "Dosyalara yorum yazma."
+        }
+      },
+      "ai": {
+        "use": {
+          "label": "Yapay zekâ ajan API'si",
+          "hint": "Yapay zekâ ajanlarının ve MCP istemcilerinin /api/ai üzerinden dosyalarla çalışması."
+        }
+      },
+      "plugins": {
+        "run": {
+          "label": "Uygulama çalıştırma",
+          "hint": "İmza akışı gibi uygulama eylemlerini çalıştırma."
+        }
+      },
+      "access": {
+        "webdav": {
+          "label": "WebDAV",
+          "hint": "WebDAV ile bağlanma, ör. işletim sisteminin dosya yöneticisinden."
+        },
+        "sftp": {
+          "label": "SFTP",
+          "hint": "SFTP ile bağlanma ve SSH anahtarı kaydetme."
+        },
+        "ftp": {
+          "label": "FTPS",
+          "hint": "FTPS ile bağlanma."
+        },
+        "s3": {
+          "label": "S3 anahtarları",
+          "hint": "S3 erişim anahtarı oluşturma ve kullanma."
+        },
+        "nfs": {
+          "label": "NFS paylaşımları",
+          "hint": "NFS paylaşımı oluşturma ve bağlama."
+        },
+        "api": {
+          "label": "API anahtarları",
+          "hint": "Kişisel API anahtarı oluşturma ve kullanma."
+        },
+        "desktop": {
+          "label": "Masaüstü uygulaması",
+          "hint": "Masaüstü uygulamasından oturum açma."
+        }
+      },
+      "account": {
+        "edit": {
+          "label": "Kendi profilini düzenleme",
+          "hint": "Kendi adını, e-postasını, resmini ve parolasını değiştirme."
+        }
+      },
+      "admin": {
+        "users": {
+          "label": "Kullanıcıları yönetme",
+          "hint": "Kullanıcılar, izinleri, kotaları ve parola sıfırlama — yönetici hesapları hariç."
+        },
+        "grants": {
+          "label": "Klasör erişimlerini yönetme",
+          "hint": "Tüm klasör erişimlerini görme ve kaldırma."
+        },
+        "shares": {
+          "label": "Tüm paylaşımları yönetme",
+          "hint": "Herkesin bağlantılarını görme ve iptal etme."
+        },
+        "audit": {
+          "label": "Denetim kaydını okuma",
+          "hint": "Denetim kaydını görme."
+        },
+        "monitor": {
+          "label": "İzleme",
+          "hint": "Pano, kullanım, eşitleme geçmişi ve iş kuyruğu; salt okunur."
+        },
+        "full": {
+          "label": "Tam yönetici",
+          "hint": "Geri kalan her şey. Yalnızca yönetici rolüyle gelir."
+        }
+      }
+    },
+    "groups": {
+      "files": "Dosyalar ve klasörler",
+      "sharing": "Paylaşım ve özellikler",
+      "access": "Web uygulaması dışından erişim",
+      "account": "Kendi hesabı",
+      "admin": "Yönetim alanı"
+    },
+    "presets": {
+      "label": "Hazır ayar",
+      "full_admin": "Tam yönetici",
+      "standard": "Standart kullanıcı",
+      "read_only": "Salt okunur",
+      "upload_only": "Yalnızca yükleme",
+      "guest": "Misafir",
+      "custom": "Özel"
+    },
+    "effect": {
+      "inherit": "Devral",
+      "allow": "İzin ver",
+      "deny": "Reddet"
+    },
+    "source": {
+      "role": "hesap rolü",
+      "base": "yerleşik rol",
+      "rule": "“{name}” rolü",
+      "override": "bu hesap için ayarlandı",
+      "viewer_ceiling": "salt okunur hesap",
+      "role_off": "“{name}” rolü kapalı"
+    },
+    "all": "Tümü",
+    "none": "Hiçbiri",
+    "card": {
+      "title": "Roller ve izinler",
+      "subtitle": "Bu kişinin neler yapabileceği: rolü ve yalnızca ona özel istisnalar. Sonuç ve nereden geldiği her iznin yanında gösterilir.",
+      "adminNote": "Yöneticiler tüm izinlere sahiptir; roller ve istisnalar onlara uygulanmaz.",
+      "viewerNote": "Salt okunur bir hesap, burada ne ayarlanırsa ayarlansın dosya ekleyemez, değiştiremez, silemez ve paylaşamaz.",
+      "conditional": "Ayrıca yalnızca belirli klasörlerde geçerli {count} role sahip — bu roller sadece orada uygulanır.",
+      "clear": "İstisnaları temizle",
+      "saved": "İzinler kaydedildi",
+      "settingsTitle": "Rollerden gelen sınırlar",
+      "exceptionsTitle": "Bu kişiye özel istisnalar",
+      "builtinRole": "Rol: {role} — yukarıdaki hesap bilgilerinden değiştirin.",
+      "readOnlyRoleNote": "“{role}” yalnızca dosyaları görüntüleyebilir; bu yüzden ekleme, değiştirme, silme ve paylaşma istisna olarak izin verilemez. İzin vermek için bunlardan birini rolde işaretleyin (ya da başka bir rol seçin)."
+    },
+    "defaults": {
+      "title": "Yeni hesaplar için varsayılanlar",
+      "subtitle": "Normal (kullanıcı) bir hesabın herhangi bir kural veya ayardan önce yapabildikleri. Salt okunur hesaplar Salt okunur hazır ayarını kullanır.",
+      "saved": "Varsayılanlar kaydedildi"
+    },
+    "rules": {
+      "title": "Özel roller",
+      "subtitle": "Herkesin tek bir rolü vardır. Rolü kişinin kendi sayfasından seçin. Özel bir rol, kendi izin listesidir.",
+      "add": "Yeni rol",
+      "edit": "Rolü düzenle",
+      "empty": "Henüz özel rol yok.",
+      "name": "Rol adı",
+      "description": "Açıklama",
+      "enabled": "Etkin",
+      "disabled": "Kapalı",
+      "effects": "İzinler",
+      "settings": "Sınırlar",
+      "storages": "Depolar",
+      "paths": "Klasörler (ör. Arsiv veya Musteriler/*/Sozlesmeler)",
+      "maxDays": "Paylaşım bağlantısının en uzun süresi (gün)",
+      "passwordRequired": "Paylaşım bağlantılarında parola zorunlu",
+      "blockedExt": "Engellenen dosya türleri",
+      "blockedExtHint": "ör. exe, bat, ps1",
+      "maxUpload": "En büyük dosya (MB)",
+      "require2fa": "İki adımlı doğrulama zorunlu",
+      "deleteConfirm": "“{name}” rolü silinsin mi?",
+      "saved": "Rol kaydedildi",
+      "deleted": "Rol silindi",
+      "summaryAllow": "İzin verir: {list}",
+      "summaryDeny": "Reddeder: {list}",
+      "summaryLimits": "Sınırlar: {list}",
+      "everywhere": "her yerde",
+      "members": "{count} üye",
+      "locked": "Her şey, her zaman — değiştirilemez",
+      "builtin": "Yerleşik",
+      "custom": "Özel",
+      "editBuiltin": "{role} rolünü düzenle",
+      "builtinSaved": "Rol kaydedildi",
+      "viewerCeilingNote": "Bir Görüntüleyici asla dosya ekleyemez, değiştiremez, silemez veya paylaşamaz; bunlar kapalı kalır.",
+      "plusGroups": "SSO grupları için başlangıç rolü: {list}",
+      "ssoGroups": "SSO grupları için başlangıç rolü",
+      "ssoGroupsHint": "İlk girişi bu gruplardan birini taşıyan yeni bir hesap bu rolü alır. Sonrasında, herkesinki gibi kişinin sayfasından değiştirilir.",
+      "permissionsHint": "Bu role sahip kişilerin neler yapabileceğini işaretleyin. Yeni bir rol hiçbir şey işaretlenmeden başlar — bir hazır ayar tek tıkla doldurur.",
+      "folders": "Bazı klasörlerde farklı",
+      "foldersHint": "İsteğe bağlı. Depolama veya klasör seçin, sonra oradaki dosya işlemlerine İzin ver ya da Reddet deyin. Diğer her yerde yukarıdaki işaretler geçerlidir.",
+      "summaryCount": "{total} izinden {count} tanesi",
+      "summaryFolders": "{places} içinde:",
+      "disableConfirm": "“{name}” kapatılsın mı? Bu role sahip {count} kişi, rol yeniden açılana kadar hiçbir erişime sahip olmaz. | “{name}” kapatılsın mı? Bu role sahip {count} kişi, rol yeniden açılana kadar hiçbir erişime sahip olmaz.",
+      "deleteTitle": "“{name}” rolünü sil",
+      "deleteMove": "Bu role {count} kişi sahip. Bunun yerine neye sahip olsunlar? | Bu role {count} kişi sahip. Bunun yerine neye sahip olsunlar?",
+      "moveTo": "Verilecek rol"
+    },
+    "customBadge": "İstisnalar",
+    "twoFactor": {
+      "title": "İki adımlı doğrulama gerekli",
+      "body": "Yöneticiniz bu hesap için iki adımlı doğrulamayı zorunlu kıldı. Devam etmek için kurun.",
+      "action": "Şimdi kur"
+    }
   }
 }

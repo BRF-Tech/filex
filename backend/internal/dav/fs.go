@@ -11,6 +11,8 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -90,14 +92,23 @@ func (f *davFS) aclSet(ctx context.Context, st *model.Storage) (*acl.Set, error)
 // canWrite is the FileSystem-level twin of Handler.gateWrite (defense in
 // depth: even if a request slips past the pre-gate, mutations are refused
 // here with os.ErrPermission).
-func (f *davFS) canWrite(ctx context.Context, st *model.Storage, set *acl.Set, rel string) error {
+//
+// p is the per-user permission the mutation needs (internal/perm); the
+// ≥editor level comes with it (acl.NeedLevel).
+func (f *davFS) canWrite(ctx context.Context, st *model.Storage, set *acl.Set, rel string, p perm.Perm) error {
 	if st.ReadOnly {
 		return os.ErrPermission
 	}
-	if set.Effective(rel) < acl.LevelEditor {
+	if set.Effective(rel) < acl.LevelEditor || !set.Can(rel, p) {
 		return os.ErrPermission
 	}
 	return nil
+}
+
+// writeNeed is what writing rel's bytes is: files.modify when something is
+// there to replace, files.create when not.
+func writeNeed(ctx context.Context, drv storage.Driver, rel string) perm.Perm {
+	return protoperm.WriteNeed(ctx, drv, nil, rel)
 }
 
 // mapErr converts storage driver errors into fs-flavored ones the webdav
@@ -131,7 +142,7 @@ func (f *davFS) Mkdir(ctx context.Context, name string, _ os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	if err := f.canWrite(ctx, st, set, rel); err != nil {
+	if err := f.canWrite(ctx, st, set, rel, perm.FilesCreate); err != nil {
 		return err
 	}
 	drv, err := f.h.cfg.Resolver(st.ID)
@@ -188,7 +199,7 @@ func (f *davFS) OpenFile(ctx context.Context, name string, flag int, _ os.FileMo
 		if rel == "" {
 			return nil, os.ErrPermission
 		}
-		if err := f.canWrite(ctx, st, set, rel); err != nil {
+		if err := f.canWrite(ctx, st, set, rel, writeNeed(ctx, drv, rel)); err != nil {
 			return nil, err
 		}
 		if _, ok := drv.(storage.Writer); !ok {
@@ -262,7 +273,7 @@ func (f *davFS) RemoveAll(ctx context.Context, name string) error {
 	if !set.CanSee(rel) {
 		return os.ErrNotExist
 	}
-	if err := f.canWrite(ctx, st, set, rel); err != nil {
+	if err := f.canWrite(ctx, st, set, rel, perm.FilesDelete); err != nil {
 		return err
 	}
 	drv, err := f.h.cfg.Resolver(st.ID)
@@ -300,6 +311,10 @@ func (f *davFS) RemoveAll(ctx context.Context, name string) error {
 		return nil
 
 	case errors.Is(terr, trash.ErrUnsupported):
+		// A delete for good is files.purge as well as files.delete.
+		if !set.Can(rel, perm.FilesPurge) {
+			return os.ErrPermission
+		}
 		// The driver can neither Move nor Copy, so there is no way to keep the
 		// bytes. Delete them for real — and drop the rows instead of soft
 		// deleting, so nothing shows up in the trash offering a Restore that
@@ -353,11 +368,19 @@ func (f *davFS) Rename(ctx context.Context, oldName, newName string) error {
 	if !set.CanSee(relSrc) {
 		return os.ErrNotExist
 	}
-	if err := f.canWrite(ctx, st, set, relSrc); err != nil {
-		return err
-	}
-	if err := f.canWrite(ctx, st, set, relDst); err != nil {
-		return err
+	// ⚠ An overwriting MOVE reaches here only after x/net/webdav has removed
+	// the destination through RemoveAll — so replacing a file by moving onto
+	// it needs files.delete there, where SFTP's posix-rename asks
+	// files.modify. Stricter, never looser.
+	// A new name in the same folder is files.rename, another folder
+	// files.move, both at once needs both.
+	for _, p := range perm.RelocateNeeds(st.ID, relSrc, st.ID, relDst) {
+		if err := f.canWrite(ctx, st, set, relSrc, p); err != nil {
+			return err
+		}
+		if err := f.canWrite(ctx, st, set, relDst, p); err != nil {
+			return err
+		}
 	}
 	drv, err := f.h.cfg.Resolver(st.ID)
 	if err != nil {

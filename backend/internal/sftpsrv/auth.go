@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 )
 
@@ -91,6 +92,9 @@ func (s *Server) passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.
 	if err != nil {
 		return nil, errAuth
 	}
+	if p, err = s.cfg.Auth.Admit(context.Background(), p, perm.AccessSFTP, "sftp"); err != nil {
+		return nil, errAuth
+	}
 	return s.grant(conn, p, login)
 }
 
@@ -109,6 +113,9 @@ func (s *Server) publicKeyCallback(conn ssh.ConnMetadata, key ssh.PublicKey) (*s
 	fp := Fingerprint(key)
 	p, err := s.cfg.Auth.PublicKey(context.Background(), login, fp)
 	if err != nil {
+		return nil, errAuth
+	}
+	if p, err = s.cfg.Auth.Admit(context.Background(), p, perm.AccessSFTP, "sftp"); err != nil {
 		return nil, errAuth
 	}
 	return s.grant(conn, p, login)

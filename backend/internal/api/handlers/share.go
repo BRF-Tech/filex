@@ -28,6 +28,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
@@ -275,10 +276,18 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// RBAC: creating a public share is an outbound-access grant → ≥editor.
+	// RBAC: creating a public share is an outbound-access grant → ≥editor,
+	// and the per-user permission for the kind of link: share.links for a
+	// download link, share.upload_links for a file-drop (upload) link.
 	if h.ACL != nil {
-		if !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelEditor) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		linkPerm := perm.ShareLinks
+		if req.Kind == model.ShareKindDrop {
+			linkPerm = perm.ShareUploadLinks
+		}
+		if v := aclCanID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, linkPerm); !v.ok {
+			if !v.WritePerm(w, r) {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+			}
 			return
 		}
 	}
@@ -343,6 +352,11 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	requestedExpiry := opts.ExpiresAt
+	// Permission-rule settings (link_policy.go): after requestedExpiry is
+	// taken, so a rule's cap is reported as a clamp like the install's.
+	if gen := applyLinkPolicy(&opts, linkSettings(r.Context(), h.ACL), time.Now()); gen != "" {
+		pinGenerated = gen
+	}
 	sh, err := h.Service.Create(r.Context(), opts)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

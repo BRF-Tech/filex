@@ -718,6 +718,26 @@ export function useFileApi(config: ExplorerConfig) {
     });
   }
 
+  /**
+   * Which of `permissions` the account holds on each of `items` — the
+   * server's per-path answer for actions a role allows or denies only in some
+   * folders. One list per item, in the order asked. Changes nothing.
+   */
+  async function allowedAt(items: string[], permissions: string[]): Promise<string[][]> {
+    const out: string[][] = [];
+    // The server takes at most 1000 paths per question.
+    for (let i = 0; i < items.length; i += 1000) {
+      const part = items.slice(i, i + 1000);
+      const data = await jsonFetch<{ allowed?: string[][] }>(managerUrl('allowed'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ permissions, items: part.map((p) => ({ path: p })) }),
+      });
+      part.forEach((_, j) => out.push(data.allowed?.[j] ?? []));
+    }
+    return out;
+  }
+
   /** Server-side recursive copy (async — returns a PendingOp). */
   async function copy(source: string[], target: string): Promise<{ op: PendingOpDto }> {
     if (!endpoints.copy) throw new Error('copy endpoint not configured');
@@ -1552,6 +1572,7 @@ export function useFileApi(config: ExplorerConfig) {
     moveAsync,
     deleteAsync,
     deleteItems,
+    allowedAt,
     restore,
     listTrash,
     restoreIds,

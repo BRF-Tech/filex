@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 )
@@ -206,7 +207,7 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 			return
 		}
-		if mode == "edit" && !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelEditor) {
+		if mode == "edit" && !aclCanID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, perm.FilesModify).ok {
 			mode = "view"
 		}
 	}

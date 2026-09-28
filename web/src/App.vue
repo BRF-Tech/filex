@@ -16,6 +16,7 @@ import {
   hydratePrefs,
   rememberSession,
 } from '@brftech/filex-core';
+import TwoFactorGate from '@/components/TwoFactorGate.vue';
 import { applySessionLook } from '@/lib/instanceThemes';
 import { applyPrefLocale, loadOfferedLocales } from '@/i18n';
 import { applyAccountTheme } from '@/lib/theme';
@@ -281,6 +282,9 @@ onMounted(async () => {
        reading somebody else's document, and that page says for itself when it
        cannot be loaded. -->
   <ConnectionNotice v-if="!isPublicLink" :locale="$i18n.locale" />
+  <!-- A permission rule requires 2FA and this account has not enrolled: the
+       server refuses everything but enrolment, so say so over everything. -->
+  <TwoFactorGate v-if="!isPublicLink" />
   <!-- ⚠ Toasts are the application's voice (a failed upload, a copied
        link). A visitor with a share link is not using the application and
        has nothing to be told in its words. -->

@@ -93,7 +93,7 @@ func (h *Handler) copyObject(w http.ResponseWriter, r *http.Request, p *protocol
 		WriteError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	if !h.writable(p, dstSet, dstKey) {
+	if !h.writable(p, dstSet, dstKey, h.writeNeed(ctx, dstSt, dstKey)) {
 		WriteError(w, r, http.StatusForbidden, "AccessDenied", "you do not have write access to the destination")
 		return
 	}
@@ -171,7 +171,7 @@ func (h *Handler) copyObject(w http.ResponseWriter, r *http.Request, p *protocol
 	if u := auth.UserFrom(ctx); u != nil && h.cfg.Quota != nil {
 		// A copy is a second physical object: it costs quota even though the
 		// caller uploaded nothing.
-		if err := h.cfg.Quota.CheckCanWrite(ctx, u.ID, stat.Size); err != nil {
+		if err := h.cfg.Quota.CheckFile(ctx, u.ID, stat.Size, stat.Size); err != nil {
 			WriteError(w, r, http.StatusRequestEntityTooLarge, "EntityTooLarge", err.Error())
 			return
 		}

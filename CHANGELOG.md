@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Roles and per-user permissions** ([docs/PERMISSIONS.md](docs/PERMISSIONS.md)).
+  28 permissions — file actions (download, create, modify, rename, move,
+  delete, permanent delete, tag), sharing, comments, the agent API, apps,
+  each protocol, API keys, the desktop app, editing one's own account, and
+  five admin areas — granted through **roles**. Everyone has **one role**,
+  picked in the Role field on their page: Administrator, User, Viewer (the
+  last two now editable), or a **custom role** — its own list of permissions,
+  optionally different in some folders ("no delete, except in Scratch"). A
+  custom role can be the starting role of new SSO accounts in given groups.
+  Per-person exceptions beat the role. A custom role can carry limits —
+  share-link lifetime and password,
+  blocked file types, largest file, required two-factor authentication.
+  Enforced on every door: the web app and REST API, the agent API, WebDAV,
+  SFTP, FTPS, S3 and NFS, and API keys. A refusal says which permission and
+  which role, in the reader's language.
+- **Delegated administration**: an account without the admin role can be
+  given users, folder grants, shares, audit or monitoring — never an
+  administrator's account, never more than it holds.
+- Admin → Users shows each person's role, exceptions and where every
+  answer comes from; Admin → Roles lists the built-in and custom roles.
+  Changes are audited with before and after.
+- SSO sign-ins record the provider's groups claim; a new account whose
+  groups a custom role names starts with that role.
+
+### Changed
+
+- Nothing changes on upgrade: every account starts from what its role could
+  do before (the new migrations only add tables and columns).
+- The agent API's share tool now needs editor access to the file, as the
+  web app's share dialog always did.
+- Explorer rename checks the new name as well as the old one, and the
+  invite-by-email fallback that creates a public link needs the right to
+  create public links.
+
 ## [0.48.1] - 2026-09-28
 
 > 0.48.0 was tagged but its release run failed a test (where the draft

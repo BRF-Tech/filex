@@ -45,6 +45,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
@@ -203,6 +204,8 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.ACL == nil {
 		d.ACL = acl.New(d.Store)
 	}
+	// Permission-rule settings the session layer enforces (Require 2FA).
+	auth.SetPermissionStore(d.Store)
 
 	// Thumbnail URL stamps: ONE signer per router, handed to both halves --
 	// the endpoint that verifies (handlers.Thumb) and the listings that mint
@@ -302,6 +305,9 @@ func BuildRouter(d *Deps) http.Handler {
 	// ITS root, never under the app's base — and below Logger, so a request
 	// refused for arriving outside the base is still in the access log.
 	r.Use(basepath.Middleware(d.Cfg.BasePath))
+	// One permission resolution per request, however many storages it
+	// touches (perm.WithMemo; every acl.LoadSet consults it).
+	r.Use(perm.Middleware)
 	// Per-user answers stay out of shared caches — see APINoStore. ⚠ Above
 	// CORS and the demo guard, so an answer those write themselves (a
 	// preflight, a demo refusal) carries the default as well: "every /api
@@ -563,6 +569,7 @@ func BuildRouter(d *Deps) http.Handler {
 	stg.ForgetStorage = d.ForgetStorage
 	stg.DemoMode = d.Cfg.Demo.Mode
 	ush := handlers.NewUsers(d.Store)
+	permH := handlers.NewPermissionsAdmin(d.Store, d.ACL)
 	seth := handlers.NewSettings(d.Store)
 	seth.AttachMailer(d.Mailer)
 	authh := handlers.NewAuth(d.Store, d.LocalAuth, d.OIDCAuth, d.Cfg.PublicURL, d.Cfg.MultiTenant, d.Cfg.CookieDomain)
@@ -573,6 +580,7 @@ func BuildRouter(d *Deps) http.Handler {
 
 	// New self-service + admin handlers.
 	authSelf := handlers.NewAuthSelf(d.Store)
+	authSelf.ACL = d.ACL
 	dashH := handlers.NewDashboard(d.Store, d.Caps, d.Queue)
 	dashH.DemoMode = d.Cfg.Demo.Mode
 	auditH := handlers.NewAudit(d.Store)
@@ -1032,13 +1040,18 @@ func BuildRouter(d *Deps) http.Handler {
 		// re-mounting an already-mounted path (the public /api/auth Route
 		// above owns it). We declare each leaf path inline instead.
 		r.Get("/api/auth/me", authSelf.Me)
+		// What this account may do (internal/perm), so the file manager can
+		// hide what would only answer 403.
+		r.Get("/api/auth/me/permissions", permH.MyPermissions)
 		// tema:v1 — the operator stylesheet, for signed-in browsers only.
 		// ⚠ Deliberately NOT on the public /api/branding payload any more:
 		// that is the fetch the LOGIN PAGE makes, and a sheet delivered there
 		// is a sheet that can hide the sign-in form. See custom_css.go.
 		r.Get("/api/me/custom-css", handlers.NewCustomCSS(d.Store).Get)
-		r.Patch("/api/auth/profile", authSelf.UpdateProfile)
-		r.Post("/api/auth/password", authSelf.ChangePassword)
+		// account.edit: a shared or demo login can be locked out of changing
+		// its own profile and password (File Browser's "lock password").
+		r.With(handlers.RequirePermission(d.ACL, perm.AccountEdit)).Patch("/api/auth/profile", authSelf.UpdateProfile)
+		r.With(handlers.RequirePermission(d.ACL, perm.AccountEdit)).Post("/api/auth/password", authSelf.ChangePassword)
 		r.Post("/api/auth/totp/enroll", authSelf.TotpEnroll)
 		r.Post("/api/auth/totp/verify", authSelf.TotpVerify)
 		r.Post("/api/auth/totp/disable", authSelf.TotpDisable)
@@ -1061,8 +1074,8 @@ func BuildRouter(d *Deps) http.Handler {
 			// is asking.
 			s3keys := handlers.NewS3Keys(d.Store, d.ProtocolAuth, d.Cfg.S3, d.Cfg.PublicURL)
 			r.Get("/api/auth/s3-keys", s3keys.List)
-			r.Post("/api/auth/s3-keys", s3keys.Create)
-			r.Post("/api/auth/s3-keys/{id}/state", s3keys.SetState)
+			r.With(handlers.RequirePermission(d.ACL, perm.AccessS3)).Post("/api/auth/s3-keys", s3keys.Create)
+			r.With(handlers.RequirePermission(d.ACL, perm.AccessS3)).Post("/api/auth/s3-keys/{id}/state", s3keys.SetState)
 			r.Delete("/api/auth/s3-keys/{id}", s3keys.Delete)
 
 			// Self-service SSH keys, for the SFTP endpoint.
@@ -1075,8 +1088,8 @@ func BuildRouter(d *Deps) http.Handler {
 				sftpHost(d.Cfg.PublicURL), sftpPort(d.Cfg.SFTP.Addr),
 				ftpsFacts(d.Cfg, d.FTPSAddr))
 			r.Get("/api/auth/ssh-keys", sshkeys.List)
-			r.Post("/api/auth/ssh-keys", sshkeys.Create)
-			r.Post("/api/auth/ssh-keys/{id}/state", sshkeys.SetState)
+			r.With(handlers.RequirePermission(d.ACL, perm.AccessSFTP)).Post("/api/auth/ssh-keys", sshkeys.Create)
+			r.With(handlers.RequirePermission(d.ACL, perm.AccessSFTP)).Post("/api/auth/ssh-keys/{id}/state", sshkeys.SetState)
 			r.Delete("/api/auth/ssh-keys/{id}", sshkeys.Delete)
 
 			// Self-service NFS exports. ⚠ The path a POST returns IS the
@@ -1086,16 +1099,16 @@ func BuildRouter(d *Deps) http.Handler {
 			nfsexports := handlers.NewNFSExports(d.Store, d.ProtocolAuth, d.Cfg.NFS.Enabled,
 				sftpHost(d.Cfg.PublicURL), portOf(d.Cfg.NFS.Addr, 2049))
 			r.Get("/api/auth/nfs-exports", nfsexports.List)
-			r.Post("/api/auth/nfs-exports", nfsexports.Create)
-			r.Post("/api/auth/nfs-exports/{id}/state", nfsexports.SetState)
+			r.With(handlers.RequirePermission(d.ACL, perm.AccessNFS)).Post("/api/auth/nfs-exports", nfsexports.Create)
+			r.With(handlers.RequirePermission(d.ACL, perm.AccessNFS)).Post("/api/auth/nfs-exports/{id}/state", nfsexports.SetState)
 			r.Delete("/api/auth/nfs-exports/{id}", nfsexports.Delete)
 
 			// Self-service API tokens — any user (incl. non-admin user/viewer) may
 			// mint tokens bound to themselves, capped to their role ceiling + own
 			// grants (see handlers.SelfTokens). Admins also have /api/admin/ai-tokens.
 			r.Get("/api/tokens", selfTokensH.List)
-			r.Post("/api/tokens", selfTokensH.Create)
-			r.Patch("/api/tokens/{id}", selfTokensH.Update)
+			r.With(handlers.RequirePermission(d.ACL, perm.AccessAPI)).Post("/api/tokens", selfTokensH.Create)
+			r.With(handlers.RequirePermission(d.ACL, perm.AccessAPI)).Patch("/api/tokens/{id}", selfTokensH.Update)
 			r.Delete("/api/tokens/{id}", selfTokensH.Delete)
 		})
 
@@ -1107,7 +1120,7 @@ func BuildRouter(d *Deps) http.Handler {
 		// ⚠ This group lets API tokens in; the handler turns every one of them
 		// away (403 `session_required`), because it MINTS a credential and a
 		// token must not be able to mint a wider one for its owner.
-		r.Post("/api/auth/desktop/complete", desktopAuthH.Complete)
+		r.With(handlers.RequirePermission(d.ACL, perm.AccessDesktop)).Post("/api/auth/desktop/complete", desktopAuthH.Complete)
 
 		// gorunum:v3 — what this person chose about the interface itself
 		// (theme, palette, density, language), one document per SURFACE
@@ -1198,13 +1211,13 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Route("/plugins", func(r chi.Router) {
 				r.Get("/actions", apH.Actions)
 				r.Get("/users", apH.Users)
-				r.Post("/actions/{plugin}/{action}/run", apH.Run)
+				r.With(handlers.RequirePermission(d.ACL, perm.PluginsRun)).Post("/actions/{plugin}/{action}/run", apH.Run)
 				r.Get("/views/{plugin}/{view}", apH.View)
-				r.Post("/views/{plugin}/{view}/event", apH.ViewEvent)
+				r.With(handlers.RequirePermission(d.ACL, perm.PluginsRun)).Post("/views/{plugin}/{view}/event", apH.ViewEvent)
 				// An app's own interface (handlers/app_ui.go): its saves, and
-				// its module.
-				r.Put("/ui/{plugin}/{view}/save", apH.UISave)
-				r.Post("/ui/{plugin}/{view}/call", apH.UICall)
+				// its module. Running an app, like its views' events.
+				r.With(handlers.RequirePermission(d.ACL, perm.PluginsRun)).Put("/ui/{plugin}/{view}/save", apH.UISave)
+				r.With(handlers.RequirePermission(d.ACL, perm.PluginsRun)).Post("/ui/{plugin}/{view}/call", apH.UICall)
 			})
 
 			// SFC's per-verb async endpoints — translate to ops.Submit.
@@ -1282,7 +1295,7 @@ func BuildRouter(d *Deps) http.Handler {
 			// tester's finding of 2026-09-22.
 			r.Route("/manager/tags", func(r chi.Router) {
 				r.Get("/", metaH.GetTags)
-				r.Post("/", metaH.SetTags)
+				r.With(handlers.RequirePermission(d.ACL, perm.FilesTag)).Post("/", metaH.SetTags)
 				// Every tag the caller can see, both kinds (Tags panel, Tagged files page).
 				r.Get("/all", metaH.ListAllTags)
 			})
@@ -1315,7 +1328,7 @@ func BuildRouter(d *Deps) http.Handler {
 			cmtH := handlers.NewComments(d.Store)
 			cmtH.AttachACL(d.ACL)
 			r.Get("/comments", cmtH.List)
-			r.Post("/comments", cmtH.Create)
+			r.With(handlers.RequirePermission(d.ACL, perm.CommentsWrite)).Post("/comments", cmtH.Create)
 			r.Delete("/comments/{id}", cmtH.Delete)
 
 			/* wiring:e2 */
@@ -1389,9 +1402,12 @@ func BuildRouter(d *Deps) http.Handler {
 		// every route below exactly like the administrator's session. A token
 		// also wins over a session cookie sent with it, as on /api/files.
 		r.Use(auth.MiddlewareWithToken(d.Store, true))
-		// The account must be an administrator AND a token must grant `admin`
-		// and not be confined to a folder (auth.CallerMayAdminister).
-		r.Use(auth.RequireAdmin)
+		// ⚠ NOT r.Use(auth.RequireAdmin) here any more: the delegated admin
+		// area below (internal/perm admin.* permissions) admits accounts
+		// that are not administrators. Every route in this group is instead
+		// in exactly one of the two halves of /api/admin — the RequireAdmin
+		// group, which is where anything new lands, or the delegated group,
+		// where each route names its permission.
 		// Scope admin to its tenant (no-op unless multi-tenant mode is on). A
 		// tenant-admin then only sees its own storages/users; the supertenant
 		// sees all. See docs/MULTI-TENANCY.md.
@@ -1416,277 +1432,322 @@ func BuildRouter(d *Deps) http.Handler {
 		// have to carry and be filtered by a provider label); refusing is the
 		// honest interim. Unscoped and single-tenant callers pass, so an
 		// ordinary install's scrape job is unaffected.
-		r.Handle("/metrics", metricsSupertenantOnly(metrics.Handler()))
+		r.With(auth.RequireAdmin).Handle("/metrics", metricsSupertenantOnly(metrics.Handler()))
 
 		r.Route("/api/admin", func(r chi.Router) {
-			r.Get("/dashboard", dashH.Get)
-			// Duplicate-file report — same (size, etag) grouping (v0.2 "Bul").
-			r.Get("/duplicates", handlers.NewDuplicates(d.Store).Report)
+			// ── Delegated admin area ────────────────────────────────────────
+			// Each route names the admin.* permission that opens it to an
+			// account that is not an administrator (handlers.
+			// RequireAdminPermission); administrators pass as before. Only
+			// routes whose handlers hold the no-escalation line themselves
+			// (handlers.refuseAdminTarget) may live here. Paths are flat — no
+			// r.Route — so none of them mounts a subtree over the other group.
+			// ⚠ A list root is registered with AND without its trailing slash:
+			// the r.Route("/users") it replaced answered both, and the admin
+			// panel calls /api/admin/users/.
+			r.Group(func(r chi.Router) {
+				users := handlers.RequireAdminPermission(d.ACL, perm.AdminUsers)
+				r.With(users).Get("/users", ush.List)
+				r.With(users).Get("/users/", ush.List)
+				r.With(users).Post("/users", ush.Create)
+				r.With(users).Post("/users/", ush.Create)
+				r.With(users).Get("/users/{id}", ush.Get)
+				r.With(users).Patch("/users/{id}", ush.Update)
+				r.With(users).Delete("/users/{id}", ush.Delete)
+				r.With(users).Post("/users/{id}/reset-password", usersAdmH.ResetPassword)
+				// Roles (internal/perm) — named apart from /api/files/permissions, the
+				// per-file sharing panel. The catalogue the Users page draws, and one
+				// account's exceptions beside its effective answer. The handler holds
+				// the no-escalation line (PermissionsAdmin.PutUserPermissions).
+				r.With(users).Get("/roles/catalogue", permH.Catalogue)
+				r.With(users).Get("/roles/exceptions", permH.ListOverrides)
+				r.With(users).Get("/users/{id}/exceptions", permH.GetUserPermissions)
+				r.With(users).Put("/users/{id}/exceptions", permH.PutUserPermissions)
+				// Roles (custom permission rules) held by one account, and the list to
+				// pick from — reading and assigning is admin.users; creating and editing
+				// a role is an administrator's (below). The handler holds the line: a
+				// delegated administrator gives only roles whose allows they hold.
+				r.With(users).Get("/users/{id}/roles", permH.GetUserRoles)
+				r.With(users).Put("/users/{id}/roles", permH.PutUserRoles)
+				r.With(users).Get("/roles", permH.ListRules)
+				r.With(users).Get("/roles/", permH.ListRules)
+				r.With(users).Get("/roles/builtin", permH.GetDefaults)
+				// Per-user quota, nested where callers look for it first. The
+				// flat /quota/{user_id} predates it and still works;
+				// handlers/quota.go has documented the nested shape since before
+				// it existed, which sent olivov hunting for a provider-quota
+				// endpoint that was never there (G2).
+				r.With(users).Get("/users/{id}/quota", quotaH.AdminGet)
+				r.With(users).Post("/users/{id}/quota", quotaH.AdminSet)
+				r.With(users).Patch("/users/{id}/quota", quotaH.AdminSet)
+				r.With(users).Post("/users/{id}/quota/recompute", quotaH.AdminRecompute)
+				r.With(users).Get("/quota/{user_id}", quotaH.AdminGet)
+				r.With(users).Post("/quota/{user_id}", quotaH.AdminSet)
+				r.With(users).Post("/quota/{user_id}/recompute", quotaH.AdminRecompute)
 
-			// Driver config contracts — what fields each storage driver
-			// needs, straight from the driver registry. Every admin
-			// surface that builds a driver config (new storage, edit,
-			// replication target) renders from this instead of carrying
-			// its own hardcoded field list. See handlers/storage_drivers.go.
-			r.Get("/storage-drivers", handlers.NewStorageDrivers().List)
+				// Global RBAC permissions overview — who has what, where.
+				grants := handlers.RequireAdminPermission(d.ACL, perm.AdminGrants)
+				r.With(grants).Get("/grants", grantsH.AdminList)
+				r.With(grants).Delete("/grants/{id}", grantsH.AdminDelete)
 
-			// Storage plugins — out-of-process drivers the admin installs.
-			// Their descriptors show up in /storage-drivers above the moment
-			// a plugin is running. See handlers/plugins.go, docs/PLUGINS.md.
-			pluginsH := handlers.NewPlugins(d.Plugins, d.Cfg.MultiTenant)
-			r.Route("/plugins", func(r chi.Router) {
-				r.Get("/", pluginsH.List)
-				r.Post("/", pluginsH.Install)
-				r.Post("/updates/check", pluginsH.CheckUpdates)
-				r.Get("/{id}", pluginsH.Get)
-				r.Patch("/{id}", pluginsH.Patch)
-				r.Post("/{id}/restart", pluginsH.Restart)
-				r.Post("/{id}/upgrade", pluginsH.Upgrade)
-				r.Delete("/{id}", pluginsH.Delete)
+				shares := handlers.RequireAdminPermission(d.ACL, perm.AdminShares)
+				r.With(shares).Get("/shares", sharesAdmH.List)
+				r.With(shares).Get("/shares/", sharesAdmH.List)
+				r.With(shares).Post("/shares/{id}/revoke", sharesAdmH.Revoke)
+				r.With(shares).Delete("/shares/{id}", sharesAdmH.Delete)
+
+				audit := handlers.RequireAdminPermission(d.ACL, perm.AdminAudit)
+				r.With(audit).Get("/audit", auditH.List)
+				r.With(audit).Get("/audit/", auditH.List)
+
+				// Read-only views of the instance. Instance-wide ones keep
+				// their own requireSupertenant inside the handler.
+				monitor := handlers.RequireAdminPermission(d.ACL, perm.AdminMonitor)
+				r.With(monitor).Get("/dashboard", dashH.Get)
+				r.With(monitor).Get("/usage", usageH.Report)
+				r.With(monitor).Get("/sync-runs", syncAdmH.List)
+				r.With(monitor).Get("/sync-runs/", syncAdmH.List)
+				r.With(monitor).Get("/sync-runs/{id}", syncAdmH.Detail)
+				r.With(monitor).Get("/queue/stats", queueH.Stats)
+				r.With(monitor).Get("/queue", queueH.List)
+				r.With(monitor).Get("/queue/", queueH.List)
+				r.With(monitor).Get("/queue/{id}", queueH.Get)
 			})
 
-			// App plugins — in-process wasm modules the admin installs
-			// (handlers/app_plugins_admin.go, docs/APP-PLUGINS.md).
-			apAdm := handlers.NewAppPluginsAdmin(d.AppPlugins, d.AppPluginsDisabledReason)
-			apAdm.Audit = func(ctx context.Context, userID *int64, action string, storageID int64, rel, ip string) error {
-				return d.Store.InsertAuditEntry(ctx, &model.AuditEntry{
-					UserID: userID, Action: action, TargetType: "file", TargetID: rel,
-					Metadata: map[string]any{"storage_id": storageID, "path": rel}, IP: ip,
+			// ── Administrators only ─────────────────────────────────────────
+			r.Group(func(r chi.Router) {
+				r.Use(auth.RequireAdmin)
+
+				// Built-in and custom roles reach many accounts at once, so editing them
+				// is an administrator's alone — a delegated admin.users could otherwise
+				// write a role that grants themselves anything
+				// (handlers/permissions_admin.go). /roles/builtin is a fixed path, so
+				// chi routes it before /roles/{id}.
+				r.Put("/roles/builtin", permH.PutDefaults)
+				r.Post("/roles", permH.CreateRule)
+				r.Post("/roles/", permH.CreateRule)
+				r.Put("/roles/{id}", permH.UpdateRule)
+				r.Delete("/roles/{id}", permH.DeleteRule)
+				// Duplicate-file report — same (size, etag) grouping (v0.2 "Bul").
+				r.Get("/duplicates", handlers.NewDuplicates(d.Store).Report)
+
+				// Driver config contracts — what fields each storage driver
+				// needs, straight from the driver registry. Every admin
+				// surface that builds a driver config (new storage, edit,
+				// replication target) renders from this instead of carrying
+				// its own hardcoded field list. See handlers/storage_drivers.go.
+				r.Get("/storage-drivers", handlers.NewStorageDrivers().List)
+
+				// Storage plugins — out-of-process drivers the admin installs.
+				// Their descriptors show up in /storage-drivers above the moment
+				// a plugin is running. See handlers/plugins.go, docs/PLUGINS.md.
+				pluginsH := handlers.NewPlugins(d.Plugins, d.Cfg.MultiTenant)
+				r.Route("/plugins", func(r chi.Router) {
+					r.Get("/", pluginsH.List)
+					r.Post("/", pluginsH.Install)
+					r.Post("/updates/check", pluginsH.CheckUpdates)
+					r.Get("/{id}", pluginsH.Get)
+					r.Patch("/{id}", pluginsH.Patch)
+					r.Post("/{id}/restart", pluginsH.Restart)
+					r.Post("/{id}/upgrade", pluginsH.Upgrade)
+					r.Delete("/{id}", pluginsH.Delete)
 				})
-			}
-			r.Route("/app-plugins", func(r chi.Router) {
-				r.Get("/", apAdm.List)
-				r.Post("/", apAdm.Install)
-				// Static, so chi matches it before /{id}/upgrade.
-				r.Post("/updates/check", apAdm.CheckUpdates)
-				r.Get("/{id}", apAdm.Get)
-				r.Patch("/{id}", apAdm.Patch)
-				r.Post("/{id}/upgrade", apAdm.Upgrade)
-				r.Post("/{id}/rollback", apAdm.Rollback)
-				r.Delete("/{id}", apAdm.Delete)
-				r.Get("/{id}/settings", apAdm.GetSettings)
-				r.Put("/{id}/settings", apAdm.PutSettings)
-				r.Get("/{id}/overrides", apAdm.GetOverrides)
-				r.Put("/{id}/overrides", apAdm.PutOverrides)
-				r.Get("/{id}/logs", apAdm.Logs)
-				r.Get("/signing/ca.pem", apAdm.SigningCA)
-				r.Get("/signing/cas", apAdm.SigningCAs)
-				r.Post("/signing/ca/import", apAdm.ImportSigningCA)
-				r.Post("/signing/ca/rotate", apAdm.RotateSigningCA)
-				r.Get("/locks", apAdm.Locks)
-				r.Delete("/locks", apAdm.Unlock)
-				// The links apps opened (?plugin=sign&active=true). An app's
-				// public page is a share, so these rows are also in
-				// /api/admin/shares with a `plugin_name` on them; this is the
-				// same rows filtered, for a panel that wants one app's table.
-				r.Get("/shares", sharesAdmH.ListAppPluginShares)
-			})
 
-			r.Route("/storages", func(r chi.Router) {
-				r.Get("/", stg.List)
-				r.Post("/", stg.Create)
-				r.Post("/test", storagesAdmH.Test)
-				r.Post("/discover", storagesAdmH.Discover)
-				// The order storages are listed in (issue #57). Static, so
-				// chi matches it before /{id}.
-				r.Put("/order", stg.SetOrder)
-				r.Get("/{id}", stg.Get)
-				r.Patch("/{id}", stg.Update)
-				r.Delete("/{id}", stg.Delete)
-				r.Post("/{id}/sync", stg.TriggerSync)
-				r.Get("/{id}/sync-runs", storagesAdmH.SyncRuns)
-				r.Get("/{id}/drift", storagesAdmH.Drift)
-			})
-
-			// Replication targets — separate entity (backup-only sinks).
-			// See handlers/replication_targets.go for the rationale.
-			repTargetsH := handlers.NewReplicationTargets(d.Store)
-			r.Route("/replication-targets", func(r chi.Router) {
-				r.Get("/", repTargetsH.List)
-				r.Post("/", repTargetsH.Create)
-				r.Get("/{id}", repTargetsH.Get)
-				r.Patch("/{id}", repTargetsH.Update)
-				r.Delete("/{id}", repTargetsH.Delete)
-			})
-
-			r.Route("/users", func(r chi.Router) {
-				r.Get("/", ush.List)
-				r.Post("/", ush.Create)
-				r.Get("/{id}", ush.Get)
-				r.Patch("/{id}", ush.Update)
-				r.Delete("/{id}", ush.Delete)
-				r.Post("/{id}/reset-password", usersAdmH.ResetPassword)
-				// Per-user quota, nested where callers look for it first.
-				// The flat /api/admin/quota/{user_id} below predates this and
-				// still works; handlers/quota.go has documented this nested
-				// shape since before it existed, which sent olivov hunting
-				// for a provider-quota endpoint that was never there (G2).
-				r.Get("/{id}/quota", quotaH.AdminGet)
-				r.Post("/{id}/quota", quotaH.AdminSet)
-				r.Patch("/{id}/quota", quotaH.AdminSet)
-				r.Post("/{id}/quota/recompute", quotaH.AdminRecompute)
-			})
-
-			r.Route("/settings", func(r chi.Router) {
-				r.Get("/", seth.List)
-				r.Patch("/", seth.Update)
-				r.Post("/smtp-test", seth.SMTPTest)
-				r.Put("/{key}", seth.Set)
-			})
-
-			/* tema:v1 — operator-defined themes (handlers/themes.go).
-			   ⚠ Every method calls requireSupertenant ITSELF rather than
-			   sitting behind a middleware here, because this is not the only
-			   door: /api/ai/admin mounts the same handler instances for the
-			   MCP admin tools, and a route-level gate would guard one of two
-			   (the reasoning in handlers/supertenant.go). */
-			themesH := handlers.NewThemes(d.Store, appearanceSrc)
-			r.Route("/themes", func(r chi.Router) {
-				r.Get("/", themesH.List)
-				r.Put("/{key}", themesH.Put)
-				r.Delete("/{key}", themesH.Delete)
-			})
-
-			// Protection settings ("Koru" v0.4): trash retention + version
-			// keep count + antivirus status, frozen contract for the admin
-			// SPA (see handlers/protection.go).
-			protH := handlers.NewProtection(d.Store)
-			r.Get("/protection", protH.Get)
-			r.Patch("/protection", protH.Patch)
-
-			archiveAdminH := handlers.NewArchiveAdmin(d.Store, archiveEngine)
-			r.Get("/archives", archiveAdminH.Get)
-			r.Patch("/archives", archiveAdminH.Patch)
-			r.Post("/archives/test", archiveAdminH.Test)
-
-			// Tenant lifecycle (multi-tenancy). In multi-tenant mode only the
-			// supertenant's admins pass the handler's internal gate.
-			r.Route("/providers", func(r chi.Router) {
-				r.Get("/", provH.List)
-				r.Post("/", provH.Create)
-				r.Patch("/{id}", provH.Update)
-				r.Delete("/{id}", provH.Delete)
-				r.Post("/{id}/storages", provH.LinkStorage)
-				r.Delete("/{id}/storages/{storageID}", provH.UnlinkStorage)
-			})
-
-			// AI / MCP / FilexClient bearer tokens. POST returns the
-			// plaintext token ONCE; only its sha256 hash is stored.
-			aiTokensH := handlers.NewAITokens(d.Store, d.ProtocolAuth)
-			r.Route("/ai-tokens", func(r chi.Router) {
-				r.Get("/", aiTokensH.List)
-				r.Post("/", aiTokensH.Create)
-				r.Patch("/{id}", aiTokensH.Update)
-				r.Delete("/{id}", aiTokensH.Delete)
-			})
-
-			// Release awareness / self-upgrade. GET is cached (never touches
-			// the network), /check forces a fetch, /apply installs.
-			updateH := handlers.NewUpdate(d.Updater)
-			r.Get("/update", updateH.Status)
-			r.Post("/update/check", updateH.Check)
-			r.Post("/update/apply", updateH.Apply)
-
-			// Global RBAC permissions overview — who has what, where.
-			r.Get("/grants", grantsH.AdminList)
-			r.Delete("/grants/{id}", grantsH.AdminDelete)
-
-			r.Route("/audit", func(r chi.Router) {
-				r.Get("/", auditH.List)
-			})
-
-			r.Route("/sync-runs", func(r chi.Router) {
-				r.Get("/", syncAdmH.List)
-				r.Get("/{id}", syncAdmH.Detail)
-			})
-
-			r.Route("/shares", func(r chi.Router) {
-				r.Get("/", sharesAdmH.List)
-				r.Post("/{id}/revoke", sharesAdmH.Revoke)
-				r.Delete("/{id}", sharesAdmH.Delete)
-			})
-
-			r.Route("/trash", func(r chi.Router) {
-				r.Post("/empty", trashH.AdminEmpty)
-				// The progress of the empty POST started: a large trash is
-				// purged in the background and the page polls this.
-				r.Get("/empty", trashH.EmptyStatus)
-				r.Delete("/{id}", trashH.Purge)
-			})
-
-			r.Route("/quota", func(r chi.Router) {
-				r.Get("/{user_id}", quotaH.AdminGet)
-				r.Post("/{user_id}", quotaH.AdminSet)
-				r.Post("/{user_id}/recompute", quotaH.AdminRecompute)
-			})
-
-			r.Route("/versions", func(r chi.Router) {
-				r.Delete("/{id}", versionsH.HardDelete)
-			})
-
-			r.Get("/usage", usageH.Report)
-
-			r.Route("/external", func(r chi.Router) {
-				r.Get("/", externalH.List)
-				r.Patch("/{name}", externalH.Update)
-				r.Post("/{name}/test", externalH.Test)
-			})
-
-			r.Route("/auth-providers", func(r chi.Router) {
-				r.Get("/", authProvH.List)
-				r.Patch("/{name}", authProvH.Update)
-				r.Post("/{name}/test", authProvH.Test)
-			})
-
-			r.Route("/search", func(r chi.Router) {
-				r.Get("/stats", searchAdmH.Stats)
-				r.Post("/rebuild", searchAdmH.Rebuild)
-			})
-
-			r.Route("/queue", func(r chi.Router) {
-				r.Get("/stats", queueH.Stats)
-				r.Get("/", queueH.List)
-				r.Get("/{id}", queueH.Get)
-				r.Post("/{id}/retry", queueH.Retry)
-				r.Delete("/{id}", queueH.Cancel)
-			})
-
-			r.Route("/notifications", func(r chi.Router) {
-				r.Get("/", notifH.AdminList)
-				r.Post("/test", notifH.AdminTest)
-				r.Get("/webhook-config", notifH.AdminWebhookConfig)
-				r.Patch("/webhook-config", notifH.AdminUpdateWebhookConfig)
-			})
-
-			// Webhook v2 targets — multi-destination, event-filtered,
-			// HMAC-signed deliveries (migration 00017). The legacy single
-			// global webhook stays on /notifications/webhook-config above.
-			webhooksAdmH := handlers.NewWebhooksAdmin(d.Store, d.Notify)
-			r.Route("/webhooks", func(r chi.Router) {
-				r.Get("/", webhooksAdmH.List)
-				r.Post("/", webhooksAdmH.Create)
-				r.Patch("/{id}", webhooksAdmH.Update)
-				r.Delete("/{id}", webhooksAdmH.Delete)
-				r.Post("/{id}/test", webhooksAdmH.Test)
-			})
-
-			r.Route("/replica", func(r chi.Router) {
-				r.Route("/rules", func(r chi.Router) {
-					r.Get("/", replicaH.ListRules)
-					r.Post("/", replicaH.CreateRule)
-					r.Patch("/{id}", replicaH.UpdateRule)
-					r.Delete("/{id}", replicaH.DeleteRule)
+				// App plugins — in-process wasm modules the admin installs
+				// (handlers/app_plugins_admin.go, docs/APP-PLUGINS.md).
+				apAdm := handlers.NewAppPluginsAdmin(d.AppPlugins, d.AppPluginsDisabledReason)
+				apAdm.Audit = func(ctx context.Context, userID *int64, action string, storageID int64, rel, ip string) error {
+					return d.Store.InsertAuditEntry(ctx, &model.AuditEntry{
+						UserID: userID, Action: action, TargetType: "file", TargetID: rel,
+						Metadata: map[string]any{"storage_id": storageID, "path": rel}, IP: ip,
+					})
+				}
+				r.Route("/app-plugins", func(r chi.Router) {
+					r.Get("/", apAdm.List)
+					r.Post("/", apAdm.Install)
+					// Static, so chi matches it before /{id}/upgrade.
+					r.Post("/updates/check", apAdm.CheckUpdates)
+					r.Get("/{id}", apAdm.Get)
+					r.Patch("/{id}", apAdm.Patch)
+					r.Post("/{id}/upgrade", apAdm.Upgrade)
+					r.Post("/{id}/rollback", apAdm.Rollback)
+					r.Delete("/{id}", apAdm.Delete)
+					r.Get("/{id}/settings", apAdm.GetSettings)
+					r.Put("/{id}/settings", apAdm.PutSettings)
+					r.Get("/{id}/overrides", apAdm.GetOverrides)
+					r.Put("/{id}/overrides", apAdm.PutOverrides)
+					r.Get("/{id}/logs", apAdm.Logs)
+					r.Get("/signing/ca.pem", apAdm.SigningCA)
+					r.Get("/signing/cas", apAdm.SigningCAs)
+					r.Post("/signing/ca/import", apAdm.ImportSigningCA)
+					r.Post("/signing/ca/rotate", apAdm.RotateSigningCA)
+					r.Get("/locks", apAdm.Locks)
+					r.Delete("/locks", apAdm.Unlock)
+					// The links apps opened (?plugin=sign&active=true). An app's
+					// public page is a share, so these rows are also in
+					// /api/admin/shares with a `plugin_name` on them; this is the
+					// same rows filtered, for a panel that wants one app's table.
+					r.Get("/shares", sharesAdmH.ListAppPluginShares)
 				})
-				r.Route("/failures", func(r chi.Router) {
-					r.Get("/", replicaH.ListFailures)
-					r.Get("/count", replicaH.CountFailures)
+
+				r.Route("/storages", func(r chi.Router) {
+					r.Get("/", stg.List)
+					r.Post("/", stg.Create)
+					r.Post("/test", storagesAdmH.Test)
+					r.Post("/discover", storagesAdmH.Discover)
+					// The order storages are listed in (issue #57). Static, so
+					// chi matches it before /{id}.
+					r.Put("/order", stg.SetOrder)
+					r.Get("/{id}", stg.Get)
+					r.Patch("/{id}", stg.Update)
+					r.Delete("/{id}", stg.Delete)
+					r.Post("/{id}/sync", stg.TriggerSync)
+					r.Get("/{id}/sync-runs", storagesAdmH.SyncRuns)
+					r.Get("/{id}/drift", storagesAdmH.Drift)
 				})
-				r.Post("/fix", replicaH.FixAll)
-				r.Post("/fix-one", replicaH.FixOne)
-				r.Get("/report", replicaH.GetReport)
-				r.Post("/report/run-now", replicaH.RunReportNow)
-				r.Get("/settings", replicaH.GetSettings)
-				r.Patch("/settings", replicaH.UpdateSettings)
+
+				// Replication targets — separate entity (backup-only sinks).
+				// See handlers/replication_targets.go for the rationale.
+				repTargetsH := handlers.NewReplicationTargets(d.Store)
+				r.Route("/replication-targets", func(r chi.Router) {
+					r.Get("/", repTargetsH.List)
+					r.Post("/", repTargetsH.Create)
+					r.Get("/{id}", repTargetsH.Get)
+					r.Patch("/{id}", repTargetsH.Update)
+					r.Delete("/{id}", repTargetsH.Delete)
+				})
+
+				r.Route("/settings", func(r chi.Router) {
+					r.Get("/", seth.List)
+					r.Patch("/", seth.Update)
+					r.Post("/smtp-test", seth.SMTPTest)
+					r.Put("/{key}", seth.Set)
+				})
+
+				/* tema:v1 — operator-defined themes (handlers/themes.go).
+				   ⚠ Every method calls requireSupertenant ITSELF rather than
+				   sitting behind a middleware here, because this is not the only
+				   door: /api/ai/admin mounts the same handler instances for the
+				   MCP admin tools, and a route-level gate would guard one of two
+				   (the reasoning in handlers/supertenant.go). */
+				themesH := handlers.NewThemes(d.Store, appearanceSrc)
+				r.Route("/themes", func(r chi.Router) {
+					r.Get("/", themesH.List)
+					r.Put("/{key}", themesH.Put)
+					r.Delete("/{key}", themesH.Delete)
+				})
+
+				// Protection settings ("Koru" v0.4): trash retention + version
+				// keep count + antivirus status, frozen contract for the admin
+				// SPA (see handlers/protection.go).
+				protH := handlers.NewProtection(d.Store)
+				r.Get("/protection", protH.Get)
+				r.Patch("/protection", protH.Patch)
+
+				archiveAdminH := handlers.NewArchiveAdmin(d.Store, archiveEngine)
+				r.Get("/archives", archiveAdminH.Get)
+				r.Patch("/archives", archiveAdminH.Patch)
+				r.Post("/archives/test", archiveAdminH.Test)
+
+				// Tenant lifecycle (multi-tenancy). In multi-tenant mode only the
+				// supertenant's admins pass the handler's internal gate.
+				r.Route("/providers", func(r chi.Router) {
+					r.Get("/", provH.List)
+					r.Post("/", provH.Create)
+					r.Patch("/{id}", provH.Update)
+					r.Delete("/{id}", provH.Delete)
+					r.Post("/{id}/storages", provH.LinkStorage)
+					r.Delete("/{id}/storages/{storageID}", provH.UnlinkStorage)
+				})
+
+				// AI / MCP / FilexClient bearer tokens. POST returns the
+				// plaintext token ONCE; only its sha256 hash is stored.
+				aiTokensH := handlers.NewAITokens(d.Store, d.ProtocolAuth)
+				r.Route("/ai-tokens", func(r chi.Router) {
+					r.Get("/", aiTokensH.List)
+					r.Post("/", aiTokensH.Create)
+					r.Patch("/{id}", aiTokensH.Update)
+					r.Delete("/{id}", aiTokensH.Delete)
+				})
+
+				// Release awareness / self-upgrade. GET is cached (never touches
+				// the network), /check forces a fetch, /apply installs.
+				updateH := handlers.NewUpdate(d.Updater)
+				r.Get("/update", updateH.Status)
+				r.Post("/update/check", updateH.Check)
+				r.Post("/update/apply", updateH.Apply)
+
+				r.Route("/trash", func(r chi.Router) {
+					r.Post("/empty", trashH.AdminEmpty)
+					// The progress of the empty POST started: a large trash is
+					// purged in the background and the page polls this.
+					r.Get("/empty", trashH.EmptyStatus)
+					r.Delete("/{id}", trashH.Purge)
+				})
+
+				r.Route("/versions", func(r chi.Router) {
+					r.Delete("/{id}", versionsH.HardDelete)
+				})
+
+				r.Route("/external", func(r chi.Router) {
+					r.Get("/", externalH.List)
+					r.Patch("/{name}", externalH.Update)
+					r.Post("/{name}/test", externalH.Test)
+				})
+
+				r.Route("/auth-providers", func(r chi.Router) {
+					r.Get("/", authProvH.List)
+					r.Patch("/{name}", authProvH.Update)
+					r.Post("/{name}/test", authProvH.Test)
+				})
+
+				r.Route("/search", func(r chi.Router) {
+					r.Get("/stats", searchAdmH.Stats)
+					r.Post("/rebuild", searchAdmH.Rebuild)
+				})
+
+				// Reading the queue is admin.monitor (the delegated group); acting
+				// on it stays here.
+				r.Post("/queue/{id}/retry", queueH.Retry)
+				r.Delete("/queue/{id}", queueH.Cancel)
+
+				r.Route("/notifications", func(r chi.Router) {
+					r.Get("/", notifH.AdminList)
+					r.Post("/test", notifH.AdminTest)
+					r.Get("/webhook-config", notifH.AdminWebhookConfig)
+					r.Patch("/webhook-config", notifH.AdminUpdateWebhookConfig)
+				})
+
+				// Webhook v2 targets — multi-destination, event-filtered,
+				// HMAC-signed deliveries (migration 00017). The legacy single
+				// global webhook stays on /notifications/webhook-config above.
+				webhooksAdmH := handlers.NewWebhooksAdmin(d.Store, d.Notify)
+				r.Route("/webhooks", func(r chi.Router) {
+					r.Get("/", webhooksAdmH.List)
+					r.Post("/", webhooksAdmH.Create)
+					r.Patch("/{id}", webhooksAdmH.Update)
+					r.Delete("/{id}", webhooksAdmH.Delete)
+					r.Post("/{id}/test", webhooksAdmH.Test)
+				})
+
+				r.Route("/replica", func(r chi.Router) {
+					r.Route("/rules", func(r chi.Router) {
+						r.Get("/", replicaH.ListRules)
+						r.Post("/", replicaH.CreateRule)
+						r.Patch("/{id}", replicaH.UpdateRule)
+						r.Delete("/{id}", replicaH.DeleteRule)
+					})
+					r.Route("/failures", func(r chi.Router) {
+						r.Get("/", replicaH.ListFailures)
+						r.Get("/count", replicaH.CountFailures)
+					})
+					r.Post("/fix", replicaH.FixAll)
+					r.Post("/fix-one", replicaH.FixOne)
+					r.Get("/report", replicaH.GetReport)
+					r.Post("/report/run-now", replicaH.RunReportNow)
+					r.Get("/settings", replicaH.GetSettings)
+					r.Patch("/settings", replicaH.UpdateSettings)
+				})
 			})
 		})
 	})
@@ -1746,6 +1807,9 @@ func BuildRouter(d *Deps) http.Handler {
 		// TokenFrom/TokenUserFrom are on the context.
 		r.Use(auth.AuditMiddleware(d.Store))
 
+		// ai.use: the agent REST + MCP surface as a whole. Checked on the
+		// token's USER, so a token cannot carry more than its owner may do.
+		r.Use(handlers.RequirePermission(d.ACL, perm.AIUse))
 		// Discovery: any valid token may learn its confinement root + reachable
 		// storages (no verb scope needed) so a confined agent stops guessing.
 		r.Get("/root", aiH.Root)
@@ -1766,7 +1830,7 @@ func BuildRouter(d *Deps) http.Handler {
 		r.With(auth.RequireScope("write")).Post("/mkdir", aiH.Mkdir)
 		r.With(auth.RequireScope("write")).Post("/move", aiH.Move)
 		// Set a file's tags; every item names its kind (ai_tags.go).
-		r.With(auth.RequireScope("write")).Post("/tags", aiH.TagsSet)
+		r.With(auth.RequireScope("write"), handlers.RequirePermission(d.ACL, perm.FilesTag)).Post("/tags", aiH.TagsSet)
 		r.With(auth.RequireScope("delete")).Post("/delete", aiH.Delete)
 
 		// Share surface — public /s/<token> links (folders zip on download).

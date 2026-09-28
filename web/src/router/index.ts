@@ -307,7 +307,7 @@ const routes: RouteRecordRaw[] = [
         path: 'dashboard',
         name: 'dashboard',
         component: () => import('@/views/Dashboard.vue'),
-        meta: { breadcrumb: 'nav.dashboard' },
+        meta: { adminPerm: 'admin.monitor', breadcrumb: 'nav.dashboard' },
       },
       {
         // The shared connections surface — the same component the desktop
@@ -329,7 +329,7 @@ const routes: RouteRecordRaw[] = [
         path: 'usage',
         name: 'usage',
         component: () => import('@/views/Usage.vue'),
-        meta: { breadcrumb: 'nav.usage' },
+        meta: { adminPerm: 'admin.monitor', breadcrumb: 'nav.usage' },
       },
       {
         path: 'storages/new',
@@ -347,13 +347,13 @@ const routes: RouteRecordRaw[] = [
         path: 'users',
         name: 'users',
         component: () => import('@/views/Users.vue'),
-        meta: { breadcrumb: 'nav.users' },
+        meta: { adminPerm: 'admin.users', breadcrumb: 'nav.users' },
       },
       {
         path: 'users/:id',
         name: 'users.edit',
         component: () => import('@/views/UserEdit.vue'),
-        meta: { breadcrumb: 'users.editTitle', parent: 'users' },
+        meta: { adminPerm: 'admin.users', breadcrumb: 'users.editTitle', parent: 'users' },
       },
       {
         /**
@@ -419,28 +419,38 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.updates' },
       },
       {
+        // Roles: the built-in roles and the custom ones (backend
+        // internal/perm). Administrators only — both reach many accounts.
+        path: 'roles',
+        name: 'roles',
+        component: () => import('@/views/Roles.vue'),
+        meta: { breadcrumb: 'nav.roles' },
+      },
+      // The page's first address; kept so old links and bookmarks land.
+      { path: 'permissions', redirect: { name: 'roles' } },
+      {
         path: 'grants',
         name: 'grants',
         component: () => import('@/views/AdminGrants.vue'),
-        meta: { breadcrumb: 'nav.grants' },
+        meta: { adminPerm: 'admin.grants', breadcrumb: 'nav.grants' },
       },
       {
         path: 'audit',
         name: 'audit',
         component: () => import('@/views/Audit.vue'),
-        meta: { breadcrumb: 'nav.audit' },
+        meta: { adminPerm: 'admin.audit', breadcrumb: 'nav.audit' },
       },
       {
         path: 'sync',
         name: 'sync',
         component: () => import('@/views/Sync.vue'),
-        meta: { breadcrumb: 'nav.sync' },
+        meta: { adminPerm: 'admin.monitor', breadcrumb: 'nav.sync' },
       },
       {
         path: 'shares',
         name: 'shares',
         component: () => import('@/views/Shares.vue'),
-        meta: { breadcrumb: 'nav.shares' },
+        meta: { adminPerm: 'admin.shares', breadcrumb: 'nav.shares' },
       },
       {
         path: 'trash',
@@ -491,7 +501,7 @@ const routes: RouteRecordRaw[] = [
         path: 'queue',
         name: 'queue',
         component: () => import('@/views/Queue.vue'),
-        meta: { breadcrumb: 'nav.queue' },
+        meta: { adminPerm: 'admin.monitor', breadcrumb: 'nav.queue' },
       },
       {
         path: 'notifications',
@@ -684,6 +694,13 @@ router.beforeEach(async (to) => {
   // same screen. Naming `explore` here instead would mean the ONLY way to see
   // Home was to type /drive/ by hand — the page would exist and nobody would
   // ever arrive on it.
+  // A delegated administrator (an admin.* permission without the role) is
+  // let into the admin panel for the pages that name a permission they hold
+  // (`meta.adminPerm`); every other admin page stays the role's. The server
+  // decides the same thing per route (handlers.RequireAdminPermission).
+  if (to.meta.requiresAdmin && !auth.isAdmin && typeof to.meta.adminPerm === 'string' && auth.can(to.meta.adminPerm)) {
+    return true;
+  }
   if (to.meta.requiresAdmin && !auth.isAdmin) {
     if (!onUserBase()) {
       // ⚠ A real navigation, not a router redirect. vue-router prefixes every

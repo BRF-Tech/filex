@@ -47,8 +47,15 @@ func (h *UsersAdmin) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	// password + updates 0 rows + returns 200, leaking the cleartext
 	// password into the caller's response for a user that does not
 	// exist. (Found by Cypress 41-users-crud sweep, 2026-05-18.)
-	if _, gerr := h.Store.GetUser(r.Context(), id); gerr != nil {
+	target, gerr := h.Store.GetUser(r.Context(), id)
+	if gerr != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+	// ⚠⚠ The takeover this route would otherwise be: a delegated
+	// administrator (admin.users) resetting an administrator's password is
+	// handed that administrator's new password in the response.
+	if refuseAdminTarget(w, r, target, "") {
 		return
 	}
 	pw, err := generateRandomPassword(16)

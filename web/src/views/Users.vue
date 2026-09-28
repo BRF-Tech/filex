@@ -14,6 +14,7 @@ import { formatRelative } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
+import { RolesApi } from '@/api/roles';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Modal from '@/components/ui/Modal.vue';
@@ -32,7 +33,10 @@ const caps = useCapabilitiesStore();
 const toast = useToastStore();
 
 const q = ref('');
-const role = ref<UserRole | ''>('');
+// The role filter: '' (all), a built-in role, or "custom:<id>". Applied
+// here: people on a custom role are listed under it, not under the level
+// underneath it.
+const role = ref<string>('');
 const page = ref(1);
 const pageSize = 25;
 
@@ -42,7 +46,8 @@ const showReset = ref<User | null>(null);
 
 const newEmail = ref('');
 const newName = ref('');
-const newRole = ref<UserRole>('viewer');
+// A built-in role, or a custom one as "custom:<id>".
+const newRole = ref<string>('viewer');
 const newPassword = ref('');
 const creating = ref(false);
 const deleting = ref(false);
@@ -83,12 +88,49 @@ function openCreate() {
 }
 
 async function load() {
-  await users.fetch({
-    q: q.value || undefined,
-    role: role.value || undefined,
-    page: page.value,
-    page_size: pageSize,
-  });
+  await Promise.all([
+    users.fetch({
+      q: q.value || undefined,
+      role: undefined,
+      page: page.value,
+      page_size: pageSize,
+    }),
+    loadCustom(),
+  ]);
+}
+
+// Which accounts have their own permission overrides (backend internal/perm),
+// for the "Custom permissions" marker. Best effort: an older server has no
+// such endpoint, and the list is whole without it.
+const customPerms = ref<Set<number>>(new Set());
+// user id → the name of the custom role it holds (one per person), shown in
+// place of the built-in role.
+const roleOf = ref<Map<number, string>>(new Map());
+const roleIdOf = ref<Map<number, number>>(new Map());
+const customRoleList = ref<{ id: number; name: string }[]>([]);
+async function loadCustom() {
+  const [all, roles] = await Promise.all([
+    RolesApi.allOverrides().catch(() => ({})),
+    RolesApi.listRules().catch(() => ({ rules: [], assignments: {} as Record<string, number> })),
+  ]);
+  customPerms.value = new Set(
+    Object.entries(all)
+      .filter(([, m]) => Object.keys(m as object).length > 0)
+      .map(([id]) => Number(id)),
+  );
+  const names = new Map(roles.rules.map((r) => [r.id, r.name]));
+  const m = new Map<number, string>();
+  const ids = new Map<number, number>();
+  for (const [uid, rid] of Object.entries(roles.assignments)) {
+    const name = names.get(rid);
+    if (name) {
+      m.set(Number(uid), name);
+      ids.set(Number(uid), rid);
+    }
+  }
+  roleOf.value = m;
+  roleIdOf.value = ids;
+  customRoleList.value = roles.rules.map((r) => ({ id: r.id, name: r.name }));
 }
 
 watch([q, role], () => {
@@ -98,14 +140,31 @@ watch([q, role], () => {
 
 // ⚠ computed, not a plain array: a label built once at setup keeps the
 // language the page was opened in when the language changes.
-const roleOptions = computed(() => [
-  { value: '', label: t('common.all') },
+const builtinRoleOptions = computed(() => [
   { value: 'admin', label: t('users.roles.admin') },
   { value: 'user', label: t('users.roles.user') },
   { value: 'viewer', label: t('users.roles.viewer') },
 ]);
+const roleOptions = computed(() => [
+  { value: '', label: t('common.all') },
+  ...builtinRoleOptions.value,
+  ...customRoleList.value.map((r) => ({ value: `custom:${r.id}`, label: r.name })),
+]);
 
-const createRoleOptions = computed(() => roleOptions.value.filter((o) => o.value !== ''));
+const createRoleOptions = computed(() => [
+  ...builtinRoleOptions.value,
+  ...customRoleList.value.map((r) => ({ value: `custom:${r.id}`, label: r.name })),
+]);
+
+const visibleRows = computed(() => {
+  const f = role.value;
+  if (!f) return users.page.items;
+  return users.page.items.filter((u) => {
+    const held = u.role !== 'admin' ? roleIdOf.value.get(u.id) : undefined;
+    if (f.startsWith('custom:')) return held === Number(f.slice(7));
+    return u.role === f && held === undefined;
+  });
+});
 
 /* The explorer's table (DataTable): every column resizes, hides, moves and
  * sorts, and the arrangement is remembered on the account under
@@ -145,13 +204,26 @@ async function submitCreate() {
   createFailure.value = '';
   if (newEmailError.value || creating.value) return;
   creating.value = true;
+  const picked = newRole.value;
+  const customId = picked.startsWith('custom:') ? Number(picked.slice(7)) : null;
   try {
-    await users.create({
+    // A custom role: the account starts as a Viewer — the least it can be —
+    // and the role call then sets the level the role needs. If that call
+    // fails, the person is a Viewer, never more.
+    const created = await users.create({
       email: newEmail.value.trim(),
       display_name: newName.value.trim(),
-      role: newRole.value,
+      role: customId ? 'viewer' : (picked as UserRole),
       password: newPassword.value || undefined,
     });
+    if (customId) {
+      try {
+        await RolesApi.setUserRole(created.id, customId);
+      } catch (e: unknown) {
+        toast.error(t('users.createdRoleNotSet', { error: extractError(e, t('errors.generic')) }));
+      }
+      await Promise.all([load(), loadCustom()]);
+    }
     toast.success(t('users.createdOk'));
     showCreate.value = false;
     newEmail.value = '';
@@ -237,12 +309,12 @@ function onRowAction(key: string, row: User) {
     <DataTable
       table-id="admin.users"
       :columns="columns"
-      :rows="users.page.items"
+      :rows="visibleRows"
       :loading="users.loading"
       :empty="t('common.none')"
       :page="page"
       :page-size="pageSize"
-      :total="users.page.total"
+      :total="role ? visibleRows.length : users.page.total"
       row-key="id"
       :row-actions="(row: User) => rowActions(row)"
       :row-actions-test-id="(row: User) => `user-actions-${row.id}`"
@@ -261,9 +333,22 @@ function onRowAction(key: string, row: User) {
       </template>
 
       <template #cell-role="{ row }">
-        <Badge :tone="roleTone((row as User).role)" size="xs">
+        <span class="inline-flex flex-wrap items-center gap-1">
+        <Badge v-if="(row as User).role !== 'admin' && roleOf.has((row as User).id)" tone="brand" size="xs">
+          {{ roleOf.get((row as User).id) }}
+        </Badge>
+        <Badge v-else :tone="roleTone((row as User).role)" size="xs">
           {{ t(`users.roles.${(row as User).role}`) }}
         </Badge>
+        <Badge
+          v-if="customPerms.has((row as User).id)"
+          tone="amber"
+          size="xs"
+          :data-testid="`user-custom-perms-${(row as User).id}`"
+        >
+          {{ t('permissions.customBadge') }}
+        </Badge>
+        </span>
       </template>
 
       <template #cell-last_login_at="{ row }">

@@ -51,7 +51,7 @@ func (f *fs) OpenFile(name string, flag int, _ os.FileMode) (billy.File, error) 
 	write := flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_APPEND) != 0
 
 	if write {
-		if !f.canWrite(t) {
+		if !f.canDo(t, f.writeNeed(t)) {
 			// A write that cannot happen must say so — unlike a read, where
 			// "no such file" is the answer that keeps the tree from leaking.
 			return nil, os.ErrPermission
@@ -255,7 +255,7 @@ func (h *file) Close() error {
 
 	ctx := context.WithoutCancel(h.fs.ctx)
 	if u := auth.UserFrom(ctx); u != nil && h.fs.srv.cfg.Quota != nil {
-		if err := h.fs.srv.cfg.Quota.CheckCanWrite(ctx, u.ID, h.size); err != nil {
+		if err := h.fs.srv.cfg.Quota.CheckFile(ctx, u.ID, h.size, h.size); err != nil {
 			return err
 		}
 	}

@@ -428,6 +428,37 @@ type Store interface {
 	UpdateFileGrantLevel(ctx context.Context, id int64, level string) error
 	DeleteFileGrant(ctx context.Context, id int64) error
 
+	// Per-user permissions (migration 00069, see internal/perm). Overrides
+	// are keyed by permission name; values are model.PermAllow/PermDeny. The
+	// store persists what it is handed — perm.ValidateEffects runs first.
+	// GetUserPermissionOverrides returns an empty map (never an error) for a
+	// user with no row. SetUserPermissionOverrides with an empty map removes
+	// the row. ListUserPermissionOverrides returns every user that has one.
+	GetUserPermissionOverrides(ctx context.Context, userID int64) (map[string]string, error)
+	SetUserPermissionOverrides(ctx context.Context, userID int64, overrides map[string]string, updatedBy *int64) error
+	ListUserPermissionOverrides(ctx context.Context) (map[int64]map[string]string, error)
+
+	// Permission rules (migration 00069). ListPermissionRules is id order —
+	// the order perm.Resolve reports "the first rule that denied it" in.
+	// GetPermissionRule returns sql.ErrNoRows for an unknown id.
+	ListPermissionRules(ctx context.Context) ([]*model.PermissionRule, error)
+	GetPermissionRule(ctx context.Context, id int64) (*model.PermissionRule, error)
+	CreatePermissionRule(ctx context.Context, r *model.PermissionRule) (*model.PermissionRule, error)
+	UpdatePermissionRule(ctx context.Context, r *model.PermissionRule) error
+	DeletePermissionRule(ctx context.Context, id int64) error
+
+	// SSO groups from a user's most recent SSO login (migration 00069).
+	// SetUserSSOGroups replaces the whole set.
+	ListUserSSOGroups(ctx context.Context, userID int64) ([]string, error)
+	SetUserSSOGroups(ctx context.Context, userID int64, groups []string) error
+
+	// A person's one custom role (migration 00069). GetUserCustomRole is 0
+	// for none; SetUserCustomRole with 0 takes it away. Deleting the role
+	// takes it from everyone who held it (ON DELETE CASCADE).
+	GetUserCustomRole(ctx context.Context, userID int64) (int64, error)
+	SetUserCustomRole(ctx context.Context, userID, roleID int64) error
+	ListUserCustomRoles(ctx context.Context) (map[int64]int64, error)
+
 	// Shares
 	CreateShare(ctx context.Context, share *model.Share) (*model.Share, error)
 	GetShareByID(ctx context.Context, id int64) (*model.Share, error)

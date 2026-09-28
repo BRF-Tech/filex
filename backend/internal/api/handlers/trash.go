@@ -30,6 +30,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
@@ -217,8 +218,14 @@ func (h *Trash) mayRestore(w http.ResponseWriter, r *http.Request, id int64) (no
 		// ⚠ Judged on where the file came from, never on `.filex-trash/…`: a
 		// grant on the bin says nothing about somebody else's deleted file.
 		orig, known := trash.OriginalPath(node)
-		if !known || !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, orig, acl.LevelEditor) {
+		if !known {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+			return nil, false
+		}
+		if v := aclCanID(r.Context(), h.ACL, h.Store, node.StorageID, orig, perm.FilesCreate); !v.ok {
+			if !v.WritePerm(w, r) {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+			}
 			return nil, false
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/tenant"
@@ -124,7 +126,7 @@ func scopeOf(ctx context.Context) *tenant.Scope {
 // requireEditor reports whether the caller may write/share at (st, rel):
 // admin, or acl.LevelEditor effective there. Used by the share-by-email action
 // (same capability that created the link). Writes 403 + returns false if not.
-func (h *Grants) requireEditor(w http.ResponseWriter, r *http.Request, st *model.Storage, rel string) bool {
+func (h *Grants) requireEditor(w http.ResponseWriter, r *http.Request, st *model.Storage, rel string, p perm.Perm) bool {
 	u := auth.UserFrom(r.Context())
 	if u == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -142,12 +144,18 @@ func (h *Grants) requireEditor(w http.ResponseWriter, r *http.Request, st *model
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return false
 	}
+	if p != "" && !set.AllowsAt(rel, p) {
+		writePermDeniedSource(w, r, p, set.WhyAt(rel, p))
+		return false
+	}
 	return true
 }
 
 // requireOwner reports whether the caller may manage permissions on (st, rel):
-// admin, or acl.LevelOwner effective there. Writes 403 + returns false if not.
-func (h *Grants) requireOwner(w http.ResponseWriter, r *http.Request, st *model.Storage, rel string) bool {
+// admin, or acl.LevelOwner effective there — plus, when p is set, the
+// caller's per-user permission p (share.users for every change to who has
+// access; "" for merely reading the panel). Writes 403 + returns false if not.
+func (h *Grants) requireOwner(w http.ResponseWriter, r *http.Request, st *model.Storage, rel string, p perm.Perm) bool {
 	u := auth.UserFrom(r.Context())
 	if u == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -165,6 +173,10 @@ func (h *Grants) requireOwner(w http.ResponseWriter, r *http.Request, st *model.
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only an owner can manage permissions here"})
 		return false
 	}
+	if p != "" && !set.AllowsAt(rel, p) {
+		writePermDeniedSource(w, r, p, set.WhyAt(rel, p))
+		return false
+	}
 	return true
 }
 
@@ -177,7 +189,7 @@ func (h *Grants) List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireOwner(w, r, st, rel) {
+	if !h.requireOwner(w, r, st, rel, "") {
 		return
 	}
 	all, err := h.Store.ListFileGrantsByStorage(r.Context(), st.ID)
@@ -246,7 +258,7 @@ func (h *Grants) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "enable RBAC on this storage before granting per-item access"})
 		return
 	}
-	if !h.requireOwner(w, r, st, rel) {
+	if !h.requireOwner(w, r, st, rel, perm.ShareUsers) {
 		return
 	}
 	if !model.ValidGrantLevel(req.Level) {
@@ -382,7 +394,7 @@ func (h *Grants) authorizeGrant(w http.ResponseWriter, r *http.Request, g *model
 	if !ownsStorage(w, r, st.ID, "grant") {
 		return nil, false
 	}
-	if !h.requireOwner(w, r, st, acl.CleanRel(g.PathPrefix)) {
+	if !h.requireOwner(w, r, st, acl.CleanRel(g.PathPrefix), perm.ShareUsers) {
 		return nil, false
 	}
 	return st, true
@@ -581,7 +593,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireOwner(w, r, st, rel) {
+	if !h.requireOwner(w, r, st, rel, perm.ShareUsers) {
 		return
 	}
 	if !model.ValidGrantLevel(req.Level) {
@@ -714,14 +726,30 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "item not indexed yet — open it once, then retry"})
 		return
 	}
-	sh, serr := h.Share.Create(r.Context(), share.CreateOpts{NodeID: node.ID, CreatedBy: createdBy})
+	// This branch mints a PUBLIC link, which is share.links — the
+	// share.users that got the caller this far is about people with accounts.
+	if v := aclCanID(r.Context(), h.ACL, h.Store, st.ID, rel, perm.ShareLinks); !v.ok {
+		if !v.WritePerm(w, r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		}
+		return
+	}
+	opts := share.CreateOpts{NodeID: node.ID, CreatedBy: createdBy}
+	pin := applyLinkPolicy(&opts, linkSettings(r.Context(), h.ACL), time.Now())
+	sh, serr := h.Share.Create(r.Context(), opts)
 	if serr != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": serr.Error()})
 		return
 	}
+	days := 0
+	if sh.ExpiresAt != nil {
+		days = int(time.Until(*sh.ExpiresAt).Hours()/24 + 0.5)
+	}
 	url := h.Tenants.FromRequest(r) + "/s/" + sh.Token
 	lang := srvtext.Pick(req.Locale, userLang(r))
-	subject, body := shareMailText(lang, h.siteName(r.Context()), baseName(rel), isDir, 0, url, "", 0)
+	// A PIN the rules required goes in the mail with the link; without it the
+	// recipient could not open what they were sent.
+	subject, body := shareMailText(lang, h.siteName(r.Context()), baseName(rel), isDir, 0, url, pin, days)
 	emailed := h.tryMail(mailer.WithLanguage(r.Context(), lang), email, subject, body)
 	writeJSON(w, http.StatusOK, map[string]any{"mode": "shared", "url": url, "emailed": emailed})
 }
@@ -792,7 +820,7 @@ func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireEditor(w, r, st, rel) {
+	if !h.requireEditor(w, r, st, rel, perm.ShareLinks) {
 		return
 	}
 	recipients := parseRecipients(req.Email, req.Emails)

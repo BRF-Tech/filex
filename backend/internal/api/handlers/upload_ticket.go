@@ -219,8 +219,8 @@ func (a *aiOps) CreateUploadTicket(ctx context.Context, req uploadTicketRequest)
 	if s.ReadOnly {
 		return nil, storage.ErrReadOnly
 	}
-	if !a.allow(ctx, s, rel, acl.LevelEditor) {
-		return nil, errAIForbidden
+	if err := a.can(ctx, s, rel, a.writeNeed(ctx, s, rel)); err != nil {
+		return nil, err
 	}
 	// A folder as `path` would write a file at the folder's own key — the
 	// kind conflict EnsureFileTarget exists to prevent. Catch it at mint time

@@ -309,7 +309,7 @@ func (w *writeFile) Close() error {
 	// x/net/webdav turns a Close error into 405 — but a wrong status is not the
 	// same kind of mistake as writing past the limit and counting it afterwards.
 	if u := auth.UserFrom(ctx); u != nil && w.h.cfg.Quota != nil {
-		if err := w.h.cfg.Quota.CheckCanWrite(ctx, u.ID, w.size); err != nil {
+		if err := w.h.cfg.Quota.CheckFile(ctx, u.ID, w.size, w.size); err != nil {
 			return err
 		}
 	}

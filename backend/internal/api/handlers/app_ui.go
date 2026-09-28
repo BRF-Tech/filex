@@ -30,10 +30,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -138,11 +138,16 @@ func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmp
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "outside this token's root"})
 		return
 	}
-	// A draft of the caller's own is theirs to write; anything else needs
-	// editor, like every other save.
-	if !syspath.IsDraftOf(rel, uid) && !aclAllowID(r.Context(), h.ACL, h.Store, storageID, rel, acl.LevelEditor) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "insufficient permission"})
-		return
+	// A draft of the caller's own is theirs to write (making it took
+	// files.create); anything else is a save over a file: files.modify
+	// there (≥editor), like every other save.
+	if !syspath.IsDraftOf(rel, uid) {
+		if v := aclCanID(r.Context(), h.ACL, h.Store, storageID, rel, perm.FilesModify); !v.ok {
+			if !v.WritePerm(w, r) {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "insufficient permission"})
+			}
+			return
+		}
 	}
 	if lk, ok := h.Store.(e2e.NodeByPathLookup); ok && e2e.UnderEncrypted(r.Context(), lk, storageID, "/"+rel) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "encrypted", "message": "an app cannot write into an encrypted folder"})
@@ -185,6 +190,14 @@ func (h *AppPlugins) uiSaveNew(w http.ResponseWriter, r *http.Request, p *wasmpl
 		return
 	}
 	if gate(w, r, h.ACL, folder.storage.ID, writegate.Writes(strings.Trim(path.Join(folder.rel, name), "/"))) {
+		return
+	}
+	// "Save as" makes a new file: files.create on that name, which also holds
+	// a role's blocked file types and folder exceptions to it.
+	if v := aclCanID(r.Context(), h.ACL, h.Store, folder.storage.ID, strings.Trim(path.Join(folder.rel, name), "/"), perm.FilesCreate); !v.ok {
+		if !v.WritePerm(w, r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "insufficient permission"})
+		}
 		return
 	}
 	// "Save as" is held to what a save over a file is held to (security

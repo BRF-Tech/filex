@@ -90,6 +90,12 @@ func APITokenMiddleware(store db.Store) func(http.Handler) http.Handler {
 				writeAuthErr(w, http.StatusUnauthorized, "token user not found")
 				return
 			}
+			// access.api / access.desktop (package perm), as in the apitoken
+			// driver: a token its owner may no longer use is not a credential.
+			if !TokenMayBeUsed(ctx, store, user, tok) {
+				writeAuthErr(w, http.StatusUnauthorized, "this account may not use API tokens")
+				return
+			}
 			username, ok := tok.ResolveUsername(r.Header.Get(tokenUserHeaderName))
 			if !ok {
 				writeAuthErr(w, http.StatusForbidden, "unknown token username")
@@ -127,6 +133,12 @@ func MiddlewareWithToken(store db.Store, required bool) func(http.Handler) http.
 							// ever minted working.
 							if !user.Enabled {
 								writeAuthErr(w, http.StatusForbidden, "this account is disabled")
+								return
+							}
+							// access.api / access.desktop (package perm) — the third token
+							// door, with its own lookup.
+							if !TokenMayBeUsed(ctx, store, user, tok) {
+								writeAuthErr(w, http.StatusUnauthorized, "this account may not use API tokens")
 								return
 							}
 							// A username outside the token's allow-list is a hard

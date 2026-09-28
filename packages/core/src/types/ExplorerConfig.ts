@@ -721,6 +721,24 @@ export interface ExplorerConfig {
    * before any preference is consulted.
    */
   rememberFolderView?: boolean;
+  /**
+   * The signed-in account's effective permissions (filex backend
+   * `internal/perm` — "files.delete", "share.links", …), as the host read
+   * them from `/api/auth/me`. When set, the explorer hides the actions the
+   * account may not take — the same ones the server would refuse with 403
+   * `permission_denied`. Absent means "not known": every action stays, and
+   * the server's answer is what the person sees. Account-wide on purpose: a
+   * rule limited to some folders is decided by the server per path.
+   */
+  permissions?: string[];
+  /**
+   * The permissions whose answer differs from folder to folder (filex
+   * `/api/auth/me` → `permissions_by_folder`): a role that allows Delete only
+   * in Scratch, or denies it only in Finance. The explorer asks the server
+   * about the selected paths (`?action=allowed`) before offering these, so
+   * Delete shows in Scratch and not elsewhere. Ignored without `permissions`.
+   */
+  permissionsByFolder?: string[];
   storages?: Array<{
     name: string;
     /**

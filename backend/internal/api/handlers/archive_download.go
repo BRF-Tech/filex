@@ -67,6 +67,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/httpx"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/zipstream"
@@ -310,8 +311,10 @@ func (a *Archive) DownloadTicket(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": confine.ErrOutOfRoot.Error()})
 			return
 		}
-		if !aclAllowID(ctx, a.ACL, a.Store, storageID, rel, acl.LevelViewer) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + raw})
+		if v := aclCanID(ctx, a.ACL, a.Store, storageID, rel, perm.FilesDownload); !v.ok {
+			if !v.WritePerm(w, r) {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + raw})
+			}
 			return
 		}
 		set, ok := sets[storageID]

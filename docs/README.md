@@ -100,6 +100,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [SSO (OIDC)](SSO.md) — sign in with Keycloak / Auth0 / Authentik / Okta / …
 - [LDAP & reverse‑proxy auth](LDAP.md) — Active Directory / LDAP, header auth
 - [RBAC & permissions](RBAC.md) — account roles, per‑storage RBAC, per‑item grants
+- [Roles & per-user permissions](PERMISSIONS.md) — what an account may do: 28 permissions, built-in and custom roles, per-person exceptions, delegated admins, per-protocol enforcement
 
 ## Integrations
 
