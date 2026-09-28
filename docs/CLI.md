@@ -26,6 +26,12 @@ curl -fL -o filex https://github.com/BRF-Tech/filex/releases/latest/download/fil
 chmod +x filex && sudo mv filex /usr/local/bin/
 ```
 
+Every platform has an arm64 build beside the x64 one: `filex-linux-arm64`,
+`filex-darwin-arm64` (Apple Silicon) and `filex-windows-arm64.exe`, next to
+`filex-linux-amd64`, `filex-darwin-amd64` and `filex-windows-amd64.exe`. Each
+release starts the arm64 builds on arm64 machines — server, login, upload,
+download — before it publishes them.
+
 Or build from source: `cd backend && go build ./cmd/filex`.
 
 Or with a package manager — the CLI is plain **`filex`** in each (the desktop

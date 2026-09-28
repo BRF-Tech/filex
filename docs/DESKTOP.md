@@ -1,8 +1,8 @@
 # filex desktop app
 
 The filex explorer in its own window, with folder sync that keeps running in the
-background. Windows, Linux and macOS (Apple Silicon) — and on every one of
-them there is a copy that runs without being installed.
+background. Windows and Linux (x64 and arm64) and macOS (Apple Silicon) — and
+on every one of them there is a copy that runs without being installed.
 
 It is the same explorer the web app and embedders use — not a separate,
 half-finished copy. What it adds on top: **several accounts at once**, **folders
@@ -35,7 +35,7 @@ The desktop app is **`filex-app`** in every one of them; plain `filex` is the
 
 | Platform | Command | Notes |
 |---|---|---|
-| Ubuntu and other Linux with snapd | `sudo snap install filex-app` | The Snap Store build above. The sign-in is stored in your keyring once the snap may reach it: `sudo snap connect filex-app:password-manager-service` (the app says so when it is needed). |
+| Ubuntu and other Linux with snapd | `sudo snap install filex-app` | The Snap Store build above, for x64 and arm64 (snapd picks the one for the machine). The sign-in is stored in your keyring once the snap may reach it: `sudo snap connect filex-app:password-manager-service` (the app says so when it is needed). |
 | macOS 13+ (Apple Silicon) | `brew install brf-tech/filex/filex-app` | Homebrew tap [`BRF-Tech/homebrew-filex`](https://github.com/BRF-Tech/homebrew-filex); `brew upgrade` keeps it current (the Mac app does not update itself). The first launch is blocked once, as below: the app is not signed with a Developer ID. |
 | Windows 10/11 | [Microsoft Store](https://apps.microsoft.com/detail/9PKXDJLVZWXW) — *filex File Manager* | **The one Windows build that is code-signed**: Microsoft signs it, so there is no SmartScreen prompt, and the Store installs and updates it. On a machine that also has the installer below, both read the same accounts and folders; Settings says so. |
 | Windows 10/11 | `winget install BRFTech.filex-app` — **not installable yet** | The same per-user installer as the download below, updating itself the same way. Every release submits it, and the package is still waiting for its first review by the winget moderators: until that is approved, `winget` does not find it. |
@@ -44,22 +44,25 @@ The desktop app is **`filex-app`** in every one of them; plain `filex` is the
 
 | Platform | File | What it does |
 |---|---|---|
-| Windows 10/11 (64-bit) | [`filex-desktop-x64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x64.exe) | Installer. Installs for **your user only** (`%LOCALAPPDATA%\Programs\filex`) — no administrator rights, and the app can replace its own files, which is what lets it update itself quietly. Adds a Start-menu entry. |
-| Windows 10/11 (64-bit) | [`filex-desktop-portable-x64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-portable-x64.exe) | **Portable** — nothing is installed. Double-click it wherever it is: a USB stick, `Downloads`, a work machine you may not install software on. It keeps its files in a `filex-data` folder beside itself. See [Portable](#portable-windows) below. |
-| Linux (any, 64-bit) | [`filex-desktop-x86_64.AppImage`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x86_64.AppImage) | **Portable** — no installation. `chmod +x` and run. |
-| Debian / Ubuntu | [`filex-desktop-amd64.deb`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-amd64.deb) | System-wide install (package `filex-app`), appears in your applications menu. |
-| Fedora / openSUSE | [`filex-desktop-x86_64.rpm`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x86_64.rpm) | The same, as an RPM (package `filex-app`). |
+| Windows 10/11 (x64) | [`filex-desktop-x64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x64.exe) | Installer. Installs for **your user only** (`%LOCALAPPDATA%\Programs\filex`) — no administrator rights, and the app can replace its own files, which is what lets it update itself quietly. Adds a Start-menu entry. |
+| Windows 10/11 (x64) | [`filex-desktop-portable-x64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-portable-x64.exe) | **Portable** — nothing is installed. Double-click it wherever it is: a USB stick, `Downloads`, a work machine you may not install software on. It keeps its files in a `filex-data` folder beside itself. See [Portable](#portable-windows) below. |
+| Windows on Arm (arm64) | [`filex-desktop-arm64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-arm64.exe) · [`filex-desktop-portable-arm64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-portable-arm64.exe) | The same installer and portable copy, built for arm64 (since 0.48.1): no emulation, and the sync engine inside is arm64 too. An installed copy updates itself to the next arm64 build. |
+| Linux (any, x64) | [`filex-desktop-x86_64.AppImage`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x86_64.AppImage) | **Portable** — no installation. `chmod +x` and run. |
+| Debian / Ubuntu (x64) | [`filex-desktop-amd64.deb`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-amd64.deb) | System-wide install (package `filex-app`), appears in your applications menu. |
+| Fedora / openSUSE (x64) | [`filex-desktop-x86_64.rpm`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x86_64.rpm) | The same, as an RPM (package `filex-app`). |
+| Linux (arm64) | [`filex-desktop-arm64.AppImage`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-arm64.AppImage) · [`filex-desktop-arm64.deb`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-arm64.deb) · [`filex-desktop-aarch64.rpm`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-aarch64.rpm) | The same three for arm64 (since 0.48.1), each updating itself from its own arm64 feed. |
 | macOS 13+ (Apple Silicon) | [`filex-desktop-arm64.dmg`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-arm64.dmg) | Drag to *Applications*. **Unsigned** — see the first-launch note below. Intel Macs: no build; the web app works there. |
 
 ```bash
 # Debian / Ubuntu
-sudo apt install ./filex-desktop-amd64.deb
+sudo apt install ./filex-desktop-amd64.deb      # arm64: ./filex-desktop-arm64.deb
 
 # Fedora / openSUSE
-sudo dnf install ./filex-desktop-x86_64.rpm     # openSUSE: sudo zypper install ./filex-desktop-x86_64.rpm
+sudo dnf install ./filex-desktop-x86_64.rpm     # arm64: ./filex-desktop-aarch64.rpm
+                                                # openSUSE: sudo zypper install ./filex-desktop-x86_64.rpm
 
 # Anything else
-chmod +x filex-desktop-x86_64.AppImage
+chmod +x filex-desktop-x86_64.AppImage          # arm64: filex-desktop-arm64.AppImage
 ./filex-desktop-x86_64.AppImage
 ```
 

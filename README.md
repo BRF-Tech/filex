@@ -460,6 +460,18 @@ so expect a SmartScreen prompt from the Windows installer. Details:
 [docs/DESKTOP.md](docs/DESKTOP.md). The CLI alone: `brew install brf-tech/filex/filex`
 ([docs/CLI.md](docs/CLI.md); its winget package, `BRFTech.filex`, is in the same review).
 
+**ARM (arm64)** — what ships for it (every release builds these and runs them on
+arm64 machines before publishing):
+
+| | arm64 |
+|---|---|
+| Server + CLI binary | Linux, macOS and Windows: `filex-<os>-arm64` and the `.tar.gz` / `.zip` archives |
+| Docker images (`ghcr.io/brf-tech/filex`, full and slim) | multi-arch — `docker pull` picks arm64 by itself |
+| Desktop app — Linux | `filex-desktop-arm64.AppImage`, `filex-desktop-arm64.deb`, `filex-desktop-aarch64.rpm`, and the Snap Store (`sudo snap install filex-app` picks arm64) — since 0.48.1 |
+| Desktop app — Windows on Arm | `filex-desktop-arm64.exe` (installer) and `filex-desktop-portable-arm64.exe` — since 0.48.1; the app updates itself to the arm64 build |
+| Desktop app — macOS | Apple Silicon only (no Intel build) |
+| Homebrew | the CLI (`filex`) on Apple Silicon and on Linux on Arm; the desktop app (`filex-app`) on Apple Silicon |
+
 The same binary is also a client for servers, scripts and headless machines:
 
 ```bash
