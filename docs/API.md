@@ -478,6 +478,20 @@ export interface ExplorerConfig {
    *  Starred row that then disappears. See docs/MCP.md → Token kinds. */
   callerKind?: 'user' | 'app';
 
+  /** What the signed-in account may do (filex `internal/perm` —
+   *  "files.delete", "share.links", …). Omit it and the explorer reads
+   *  `GET /api/auth/me` itself (the `me` endpoint, derived from apiBase) and
+   *  hides the actions the server would refuse with `403 permission_denied` —
+   *  so the desktop app and every embed hide what the web app hides. An
+   *  administrator is not narrowed; an answer without permissions changes
+   *  nothing. Account-wide: `permissionsByFolder` names the permissions whose
+   *  answer differs by folder, which the explorer asks the server about for
+   *  the selected paths (`POST …/manager?action=allowed`). */
+  permissions?: string[];
+  permissionsByFolder?: string[];
+  /** Override for the endpoint above (`/api/auth/me`). */
+  me?: string;
+
   /** How a mouse opens an item. `'double'` (default) — a single click selects
    *  and a double click opens (Enter opens the selection); `'single'` — the
    *  first click opens. Touch is unaffected: a tap always opens, the checkbox

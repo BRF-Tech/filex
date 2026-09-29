@@ -73,7 +73,10 @@ type Harness struct {
 	// Locale is the language a call carries when the event does not name
 	// one (default "en").
 	Locale string
-	// Actor is the person the call runs as.
+	// Actor is the person the call runs as. By default an administrator, and
+	// so holding every one of the manifest's `user_permissions`
+	// (Actor.Permissions), as filex decides it; clear Permissions (or set
+	// the ids a test needs) to draw a screen for somebody who holds fewer.
 	Actor wire.Actor
 
 	selection []wire.FileRef
@@ -90,8 +93,18 @@ func New(p *pluginkit.Plugin) *Harness {
 		Plugin: p,
 		Host:   NewHost(p.Manifest),
 		Locale: "en",
-		Actor:  wire.Actor{ID: 1, Email: "admin@local", Name: "Admin", Role: "owner"},
+		Actor:  defaultActor(p.Manifest),
 	}
+}
+
+// defaultActor is the administrator a harness runs as: filex gives an
+// administrator every app permission, so they hold all of m's.
+func defaultActor(m wire.Manifest) wire.Actor {
+	a := wire.Actor{ID: 1, Email: "admin@local", Name: "Admin", Role: "owner"}
+	for _, up := range m.UserPermissions {
+		a.Permissions = append(a.Permissions, up.ID)
+	}
+	return a
 }
 
 // NewFor is New for a plugin that takes its host as a parameter — the
@@ -112,7 +125,7 @@ func NewFor(m wire.Manifest, build func(*Host) *pluginkit.Plugin) *Harness {
 		Plugin: p,
 		Host:   host,
 		Locale: "en",
-		Actor:  wire.Actor{ID: 1, Email: "admin@local", Name: "Admin", Role: "owner"},
+		Actor:  defaultActor(m),
 	}
 }
 

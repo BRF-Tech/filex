@@ -8,8 +8,12 @@ recipient:
   folder without ever seeing its contents ("file‑drop" / "Request files").
 
 Both are created from the explorer's **Share** dialog on any item (a share
-link needs ≥editor on the item); a file request can also be started for the
-folder you are in from the navigation panel's **+ New → Request files**.
+link needs ≥editor on the item and the `share.links` permission; a file
+request, `share.upload_links` — see [PERMISSIONS.md](PERMISSIONS.md)); a file
+request can also be started for the folder you are in from the navigation
+panel's **+ New → Request files**. The agent API and the MCP `file_share` tool
+ask exactly the same, and an API token needs `write`. A link keeps needing
+that right after it is made ([A link follows its creator](#a-link-follows-its-creator)).
 
 The same dialog carries **People with access** — the per-item grants — for the
 item's **owner** only: an editor cannot read the grant list, so the section is
@@ -46,6 +50,7 @@ Audit log. To give someone a file, make a share link — a ticket you copy out o
 your browser is already spent or about to be.
 
 - [Share links (download)](#share-links-download)
+- [A link follows its creator](#a-link-follows-its-creator)
 - [File requests (upload / file-drop)](#file-requests-upload--file-drop)
 - [Emailing a link](#emailing-a-link)
 - [Failure modes & troubleshooting](#failure-modes--troubleshooting)
@@ -237,6 +242,41 @@ person behind it. **Copy PIN** is not offered when there is nothing to show:
 - the server has no `FILEX_SECRET_KEY`, so there is nothing to seal a PIN
   with. The link works exactly the same; only reading its PIN back does not.
 
+### A link follows its creator
+
+A public link is only ever worth what its creator may still do. It answers
+while the person who made it **still** holds the right to make it on the item
+— `share.links` for a share link, `share.upload_links` for a file request, at
+the editor level — and answers like a link that never existed (`404`) from
+the moment they do not: their role or an exception took the permission away,
+they were made a viewer, or their grant on the folder was revoked. Nothing is
+deleted and nothing is revoked: give the right back and the link answers
+again, with the same address and PIN. Its creator — and an administrator —
+still sees it under **My shares** / **Shares** meanwhile, and can revoke it.
+
+The download page, the link's metadata, a shared folder's browsing, the file
+request page and its uploads, and the public shell's `/api/public/*` all ask
+the same question, on every visit.
+
+**Deleting the creator's account deletes their links** — every download link
+and file request they opened goes with the account, whichever door deleted it
+(an administrator, a tenant deletion), and the deletion's audit entry counts
+them (`links_closed`) ([BACKEND.md → Admin: users](BACKEND.md#admin-users)).
+
+Two kinds of link are left alone:
+
+- an **app's own public page** — a signing link: the app's own permission
+  allowed the action that opened it, and an outside signer's page does not
+  close because the requester's sharing rights changed, nor when the
+  requester's account is deleted (the app checks the requester's access to the
+  document itself, below);
+- a link with **no recorded creator** — made before links recorded one, or
+  whose creator was deleted before 0.49.0: there is nobody left to ask, so it
+  keeps answering until an administrator revokes it.
+
+A custom role can also shape the links its people make — a maximum lifetime
+and a required PIN ([PERMISSIONS.md → Custom roles](PERMISSIONS.md#custom-roles)).
+
 ---
 
 ## File requests (upload / file-drop)
@@ -291,6 +331,13 @@ per‑file size, an optional extension allowlist, an optional PIN, an expiry, a
 lifetime `max_uploads` cap, and **per‑IP rate limiting** on the anonymous upload
 endpoint. Read‑only storages reject drops.
 
+**The creator's own limits apply too.** What is dropped lands in the
+creator's storage as the creator's file, so their role's limits hold on top
+of the link's: a file type their role blocks is refused (`415
+ext_not_allowed`, with the `extension`), and a file over their largest-file
+limit answers `413 file_too_large`, even where the link's own
+`max_file_size_mb` is larger ([PERMISSIONS.md → Custom roles](PERMISSIONS.md#custom-roles)).
+
 **Language.** Every public page — the PIN gate, the uploader, the error pages
 and the download-share pages — renders in ONE language per visitor. In the
 shell that a JavaScript browser gets, that is the browser's own language, and
@@ -327,7 +374,10 @@ admin settings.)
 
 ## Failure modes & troubleshooting
 
-- **Link shows a 404 page** — expired, past its download/upload cap, or revoked.
+- **Link shows a 404 page** — expired, past its download/upload cap, or
+  revoked — or its creator no longer holds the right to make it
+  ([A link follows its creator](#a-link-follows-its-creator)); it answers
+  again when the right is given back.
 - **An app's link says it is gone, although nobody revoked it** — the account
   that created it was switched off or deleted (re-enabling the account brings
   every one of its links back), or the app that answers it was stopped or
@@ -335,9 +385,20 @@ admin settings.)
   opens, but the step that would start the app's work is refused and the
   visitor is asked to get a new link from the person who sent it.
 - **"Request files" not offered** — you're on a file, not a folder (drop links
-  are folder‑only), or you lack ≥editor on it.
+  are folder‑only), you lack ≥editor on it, or your role does not allow
+  `share.upload_links` here. The same goes for the dialog's link switch and
+  the details panel's **Create link** (`share.links`) and for **People with
+  access** (`share.users`): every explorer leaves out what the server would
+  refuse.
+- **Making a link is refused** — `403 permission_denied` naming
+  `share.links` (or `share.upload_links` for a file request): your role or an
+  exception does not allow that kind of link, here or in this folder. The
+  answer names the role that decided; an administrator changes it
+  ([PERMISSIONS.md](PERMISSIONS.md)).
 - **Drop rejected** — hit `max_files`, `max_file_size_mb`, a disallowed
-  extension, the per‑IP rate limit, or a read‑only storage. The page shows which:
+  extension, the per‑IP rate limit, a read‑only storage, or a type or size the
+  **creator's** role does not allow (`415 ext_not_allowed`,
+  `413 file_too_large`). The page shows which:
   every refusal of `POST /d/{token}` and `POST /api/public/d/{token}/upload`
   carries the code a script branches on (`error`, e.g. `ext_not_allowed`) **and**
   the sentence a person reads (`message`, in the visitor's language).

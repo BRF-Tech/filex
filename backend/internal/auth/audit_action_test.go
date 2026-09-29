@@ -24,6 +24,13 @@ func TestActionForPath(t *testing.T) {
 		{"user delete", http.MethodDelete, "/api/admin/users/5", "5", "", "user.delete", "user", "5"},
 		{"storage delete", http.MethodDelete, "/api/admin/storages/3", "3", "", "storage.delete", "storage", "3"},
 		{"external update", http.MethodPatch, "/api/admin/external/onlyoffice", "", "onlyoffice", "external.update", "external", "onlyoffice"},
+		// Roles (internal/perm). /roles/builtin must not read as a role update.
+		{"builtin role", http.MethodPut, "/api/admin/roles/builtin", "", "", "permissions.defaults_set", "permissions", ""},
+		{"role create", http.MethodPost, "/api/admin/roles", "", "", "permission_rule.create", "permission_rule", ""},
+		{"role update", http.MethodPut, "/api/admin/roles/4", "4", "", "permission_rule.update", "permission_rule", "4"},
+		{"role delete", http.MethodDelete, "/api/admin/roles/4", "4", "", "permission_rule.delete", "permission_rule", "4"},
+		{"user exceptions", http.MethodPut, "/api/admin/users/5/exceptions", "5", "", "user.permissions_set", "user", "5"},
+		{"user roles", http.MethodPut, "/api/admin/users/5/roles", "5", "", "user.roles_set", "user", "5"},
 		// Generic fallback: replica isn't in the explicit switch.
 		{"generic replica patch", http.MethodPatch, "/api/admin/replica/settings", "", "", "replica.update", "replica", ""},
 		{"generic queue retry", http.MethodPost, "/api/admin/queue/abc/retry", "abc", "", "queue.create", "queue", "abc"},

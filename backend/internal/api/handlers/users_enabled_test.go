@@ -125,6 +125,7 @@ func TestAdminUsers_DisableKillsLiveAccess(t *testing.T) {
 	rawToken := "enabled-test-token-" + targetEmail
 	_, err = store.CreateAPIToken(ctx, &model.APIToken{
 		UserID: target.ID, Label: "enabled-test", TokenHash: apitoken.HashToken(rawToken),
+		Scopes: "read",
 	})
 	require.NoError(t, err)
 

@@ -166,10 +166,19 @@ notification; the rail shows a red dot on the account, and its file view reads
 
 Signing in gives the app a **personal** API token (kind `user`, see
 [MCP.md → Token kinds](MCP.md#token-kinds--user-vs-app)) that acts as you: its
-scopes are `read,write,delete`, or `read` alone for a **viewer** account — what
-you could mint for yourself on the API keys page, never more, never `admin`. It
-appears in your token list labelled *filex desktop — &lt;platform&gt;*; revoking it
-there signs that copy of the app out.
+scopes are `read,write,delete`, or `read,write` for a **viewer** account — never
+`admin`. It appears in your token list labelled *filex desktop — &lt;platform&gt;*;
+revoking it there signs that copy of the app out.
+
+Changing the account itself — the profile, the password, two-factor — needs a
+token's `write` since 0.49
+([RBAC.md → API tokens](RBAC.md#api-tokens-verbs-on-every-surface)), so a
+viewer's desktop carries it too and its account menu saves what the web app
+saves. It changes no file: the viewer role still refuses every write, link and
+grant. It is the one token a viewer holds with `write` — the API keys page still
+mints `read` only for a viewer. ⚠ A viewer who paired before 0.49.0 keeps the
+old `read` token until the app signs in again — **Reconnect** on the account in
+*Settings → Accounts* — and until then its account menu answers 403 on a save.
 
 The pairing is finished by your **signed-in browser session** and nothing else.
 `POST /api/auth/desktop/complete` answers `403` with `reason:

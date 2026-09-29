@@ -5,6 +5,18 @@ every endpoint / MCP tool the feature exposes. Backwards compatible: RBAC is
 **off per storage by default**, so an untouched deployment behaves exactly as
 before.
 
+> **What an account may *do*** — delete, share, download, use SFTP, manage users —
+> is the roles and per-user permission layer on top of this, in
+> [PERMISSIONS.md](PERMISSIONS.md). A file action needs both: the grant level
+> described here, and the permission.
+>
+> In the admin panel the grants are **Admin → Folder access** (*Klasör
+> erişimi*) — every per-file and per-folder grant, who has what, where — and
+> the roles are **Admin → Roles**. (Before 0.49 the grants page was called
+> *Permissions*.)
+
+![Admin → Folder access: every per-folder grant — who, which storage, which path, which level](screenshots/v0.49.0/roles/folder-access-1440.png)
+
 ## Model
 
 Two layers combine, then a ceiling is applied:
@@ -42,6 +54,81 @@ Enforcement is server-side at every `/api/files/*` chokepoint AND the `/api/ai`
 (REST + MCP) surface, keyed off the authenticated user — so cookie sessions are
 filtered too, not just tokens. `internal/confine` (the token `root:` scope hard
 ceiling) still composes on top.
+
+### API tokens: verbs on every surface
+
+A request authenticated by an API token is limited by the token's **verbs** as
+well as by the account's grants, on every surface a token can use:
+`/api/files`, `/api/shares`, `/api/notifications`, `/api/me`, `/api/ai` (REST
+and MCP), WebDAV, SFTP, FTPS, and the S3 access keys and NFS exports minted
+from a token (they inherit its verbs).
+
+| Verb | Needed for |
+|------|------------|
+| `read` | every request on these surfaces — listing, downloading, searching |
+| `write` | creating, changing, moving and renaming; public links and item permissions; uploads, archives, versions, restoring from the trash; team tags; app actions that need edit rights; **changing the account itself** — `PATCH /api/auth/profile`, `POST /api/auth/password` and `POST /api/auth/totp/enroll`, `…/verify`, `…/disable`. Without it the document editor opens read-only. |
+| `delete` | deleting (to the trash), discarding a draft, dropping versions or trash entries |
+
+Without `write` a token keeps what a **viewer** keeps: its preferences, stars,
+recently opened, personal tags, comments and notifications. It can read its own
+account (`GET /api/auth/me`) but not change its profile, its password or its
+two-factor setup — a token that may only read must not be able to take the
+account over. A refused request answers
+`403 {"error":"token missing scope: <verb>"}`. A browser session is judged by
+the account alone, as before. A token's list is exactly what it grants — an
+empty list grants nothing; tokens from before v0.43.0 carry the explicit full
+list. The desktop app's token carries `write` for every account — a **viewer's**
+too (`read,write`, never `delete`) — so its account dialog saves the profile,
+the password and two-factor as the web app does. `write` opens no file change
+for a viewer: the viewer role still refuses every write, link and grant, with
+the role's answer rather than the token's. A viewer's own API keys stay `read`.
+
+On each surface:
+
+| Surface | How the verbs apply |
+|---|---|
+| `/api/files`, `/api/shares`, `/api/notifications`, `/api/me` (the explorer, `filex client`, an embed's proxy) | every route asks `read`; the routes that change files add `write`, those that remove files add `delete`. Two routes decide by the request: the manager's `?action=` (`delete` asks `delete`, `allowed` — the question the explorer asks before it offers an action — asks `read`, every other action `write`) and the operations queue's job kind |
+| `/api/ai` REST and MCP | each route and each `file_*` tool asks the verb of its REST twin; `tools/list` leaves out the tools the token cannot use ([MCP.md](MCP.md#mcp-endpoint-apiaimcp)) |
+| WebDAV, SFTP, FTPS (a token as the password) | `read` to list and download, `write` to create, change, rename and move, `delete` to remove |
+| S3 access keys and NFS exports **minted from a token** | carry that token's verbs the same way; one minted from a browser session carries every verb, as before |
+
+### Public links need edit rights on every surface
+
+A public link — a download link or a file-drop link — hands the item to people
+who have no account, so it needs **editor** on the item, and the account's
+`share.links` permission (`share.upload_links` for a file drop), whichever door
+makes it: the explorer (`POST /api/files/share`), `POST /api/ai/share`, or the
+MCP `file_share` tool — and a token making it needs `write`. filex's own
+folders (the trash, open-with copies) are never linked.
+
+The link keeps needing them: it answers only while its creator still holds
+that permission at the editor level on the item, and answers `404` from the
+moment they do not — revoking a person's grant on a folder closes the links
+they made in it, and giving it back opens them again. Links an app opened, and
+links whose creator's account was deleted, are not affected
+([PERMISSIONS.md → Public links follow their creator](PERMISSIONS.md#public-links-follow-their-creator)).
+
+### Administration and plugins need a session
+
+Some acts are a signed-in administrator's only. An API token — even an
+administrator's own admin-scoped one — gets `403 {"error":"session_required",
+"message": …}` on every door that reaches them (`/api/admin`, `/api/ai/admin`
+and the `admin_*` MCP tools alike):
+
+- creating an administrator, promoting an account to administrator, changing
+  an administrator's role, and setting or resetting an administrator's
+  password;
+- allowing an admin-area permission (`admin.*`) — as a person's exception, in
+  a custom role, or in a built-in role
+  ([PERMISSIONS.md](PERMISSIONS.md#handing-out-administration-takes-a-session));
+- installing, upgrading, going back, switching, removing and re-permissioning
+  an app or a storage plugin, and approving or rejecting an install request —
+  the refusal names `request_endpoint`, where a token leaves a request
+  instead ([APP-PLUGINS.md → Install requests](APP-PLUGINS.md#install-requests)).
+
+An administrator signed in to the admin panel does all of them as before.
+Managing accounts that are not administrators, taking a permission away, and
+reading plugins stay open to an admin-scoped token.
 
 ## Endpoints — permissions panel (`/api/files/permissions`)
 
@@ -119,13 +206,13 @@ is `PATCH /api/admin/ai-tokens/{id}` `{"kind":"user"}`.
 or narrow what a caller may do — every check on this page still applies — it only
 decides whether the surfaces that belong to one identity are drawn at all.
 
-## Endpoints — admin (`/api/admin`, admin-only)
+## Endpoints — admin (`/api/admin`)
 
 | Method | Path | Notes |
 |--------|------|-------|
-| GET | `/api/admin/grants` | Global overview: every grant enriched with `storage_name`, `user_email` and `user_name` (the person as every screen names them). |
-| DELETE | `/api/admin/grants/{id}` | Admin override revoke. |
-| POST | `/api/admin/settings/smtp-test` | `{to?}` → `{ok, error?, sent?}`. Verifies the SMTP config (auth handshake) and, with `to`, sends a real test mail. SMTP config lives in the `smtp.*` settings keys (`host/port/tls/from/username/password`). |
+| GET | `/api/admin/grants` | Global overview — the **Folder access** page: every grant enriched with `storage_name`, `user_email` and `user_name` (the person as every screen names them). Admin, or a delegated administrator holding `admin.grants`. |
+| DELETE | `/api/admin/grants/{id}` | Admin override revoke (admin or `admin.grants`). |
+| POST | `/api/admin/settings/smtp-test` | Admin only. `{to?}` → `{ok, error?, sent?}`. Verifies the SMTP config (auth handshake) and, with `to`, sends a real test mail. SMTP config lives in the `smtp.*` settings keys (`host/port/tls/from/username/password`). |
 
 `storages.rbac_enabled` is set via the normal storage create/update payloads
 (`POST/PATCH /api/admin/storages`, field `rbac_enabled`).
@@ -133,7 +220,7 @@ decides whether the surfaces that belong to one identity are drawn at all.
 ## MCP admin tools
 
 Exposed on `/api/ai/mcp` for an API token carrying the `admin` scope (alongside
-the existing 59 `admin_*` tools):
+the other `admin_*` tools — [MCP.md → Tool set](MCP.md#tool-set)):
 
 | Tool | Input | Effect |
 |------|-------|--------|

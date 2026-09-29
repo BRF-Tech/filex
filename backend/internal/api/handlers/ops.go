@@ -17,6 +17,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
@@ -81,10 +82,6 @@ var clientKinds = map[string]bool{ops.OpCopy: true, ops.OpMove: true, ops.OpDele
 
 // Submit queues a new op and returns the opID.
 func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
-	if o.Service == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ops queue unavailable"})
-		return
-	}
 	var req opsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
@@ -95,6 +92,20 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 			"error": "kind must be copy, move or delete",
 			"code":  "BAD_KIND",
 		})
+		return
+	}
+	// A token does what its verbs name (auth/token_verbs.go), and here the
+	// verb is the body's kind: delete asks `delete`, copy and move `write`.
+	// Asked before anything else about the request.
+	verb := auth.VerbWrite
+	if req.Kind == ops.OpDelete {
+		verb = auth.VerbDelete
+	}
+	if !auth.AllowVerb(w, r, verb) {
+		return
+	}
+	if o.Service == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ops queue unavailable"})
 		return
 	}
 	// Tenancy FIRST, before the ACL — because the ACL cannot answer this
@@ -153,13 +164,11 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 	}
 	// RBAC: require ≥editor on each source (and, for copy/move, the dest).
 	for i, rel := range rels {
-		if !aclAllowID(r.Context(), o.ACL, o.Store, req.StorageID, rel, acl.LevelEditor) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + req.Sources[i]})
+		if !o.opAllow(w, r, req.StorageID, rel, opSourcePerm(req.Kind), "insufficient permission: "+req.Sources[i]) {
 			return
 		}
 	}
-	if writesDest && !aclAllowID(r.Context(), o.ACL, o.Store, destID, drel, acl.LevelEditor) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission (dest)"})
+	if writesDest && !o.opAllow(w, r, destID, drel, opDestPerm(req.Kind), "insufficient permission (dest)") {
 		return
 	}
 
@@ -247,8 +256,7 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 	// RBAC: require ≥editor on every source (the async worker runs userless,
 	// so authorize here at submit time).
 	for _, rel := range sources {
-		if !aclAllowID(r.Context(), o.ACL, o.Store, storageID, rel, acl.LevelEditor) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + rel})
+		if !o.opAllow(w, r, storageID, rel, opSourcePerm(kind), "insufficient permission: "+rel) {
 			return
 		}
 	}
@@ -343,8 +351,7 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 	// in the DESTINATION's storage (checking the source's would ask about a
 	// path in the wrong depo, and answer about permissions nobody granted).
 	if kind != "delete" && dest != "" {
-		if !aclAllowID(r.Context(), o.ACL, o.Store, destStorageID, strings.Trim(dest, "/"), acl.LevelEditor) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission (dest)"})
+		if !o.opAllow(w, r, destStorageID, strings.Trim(dest, "/"), opDestPerm(kind), "insufficient permission (dest)") {
 			return
 		}
 	}
@@ -738,4 +745,46 @@ func (o *Ops) gateOp(w http.ResponseWriter, r *http.Request, kind string, storag
 	}
 	src, dst := ops.Targets(kind, sources, dest)
 	return gate(w, r, o.ACL, storageID, src...) || gate(w, r, o.ACL, destStorageID, dst...)
+}
+
+// opSourcePerm is the per-user permission each source of an op needs, or ""
+// for a copy: copying reads the source (it stays where it is) and the check
+// that matters is files.create at the destination. The source keeps the
+// ≥editor level it always needed, checked separately.
+func opSourcePerm(kind string) perm.Perm {
+	switch kind {
+	case "move":
+		return perm.FilesMove
+	case "delete":
+		return perm.FilesDelete
+	default:
+		return ""
+	}
+}
+
+// opDestPerm is the permission a copy or move needs at its destination.
+func opDestPerm(kind string) perm.Perm {
+	if kind == "move" {
+		return perm.FilesMove
+	}
+	return perm.FilesCreate
+}
+
+// opAllow checks one path of an op: the per-user permission p when set (its
+// level included), otherwise the plain ≥editor level. It writes the refusal.
+func (o *Ops) opAllow(w http.ResponseWriter, r *http.Request, storageID int64, rel string, p perm.Perm, legacyMsg string) bool {
+	if p == "" {
+		if !aclAllowID(r.Context(), o.ACL, o.Store, storageID, rel, acl.LevelEditor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": legacyMsg})
+			return false
+		}
+		return true
+	}
+	if v := aclCanID(r.Context(), o.ACL, o.Store, storageID, rel, p); !v.ok {
+		if !v.WritePerm(w, r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": legacyMsg})
+		}
+		return false
+	}
+	return true
 }

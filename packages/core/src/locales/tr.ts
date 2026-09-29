@@ -1542,7 +1542,7 @@ export const tr: Record<string, string> = {
   'storages.fields.prefix': 'Önek (prefix)',
   'storages.fields.privateKey': 'Özel anahtar (PEM)',
   'storages.fields.rbac': 'Öğe bazlı erişim denetimi (RBAC)',
-  'storages.fields.rbacHint': 'Açıkken admin olmayanlar yalnızca izin panelinden kendilerine verilen dosya/klasörleri görür. Kapalıyken depo tüm kullanıcılara açıktır (yetki role göre).',
+  'storages.fields.rbacHint': 'Açıkken yönetici olmayanlar yalnızca kendilerine yetki verilen dosya ve klasörleri görür (Klasör erişimi sayfasında listelenir). Kapalıyken herkes depoyu rolüne göre açar.',
   'storages.fields.readOnly': 'Salt okunur mount',
   'storages.fields.region': 'Bölge',
   'storages.fields.root': 'Temel yol',

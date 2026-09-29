@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.48.1"
+version: "0.49.0"
 releaseNotes: |-
-  filex v0.48.1 — 2026-09-28
-  • An app may bring its own interface
-  • A new document is a draft until its first save
-  • Encryption levels, and encrypted file and folder names.
-  • Encrypt a single file.
-  • Desktop app: the notification bell and your account menu in the top bar.
+  filex v0.49.0 — 2026-09-28
+  • Everyone has one role, and a role is a list of permissions you choose
+  • An app can declare permissions an administrator hands out per role and per person
+  • An app is told which of its own permissions the person holds
+  • An API key asks for a plugin; an administrator installs it
+  • Administration can be delegated
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

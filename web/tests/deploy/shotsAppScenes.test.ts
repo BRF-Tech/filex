@@ -30,6 +30,7 @@ describe('which shot scripts need an app build', () => {
   it('reads it off the findApp() calls — the scenes that photograph the apps', () => {
     expect(needs.get('apps.mjs')).toEqual({ apps: ['sign', 'convert'], set: 'apps' });
     expect(needs.get('signing.mjs')).toEqual({ apps: ['sign'], set: 'signing' });
+    expect(needs.get('apppermissions.mjs')).toEqual({ apps: ['sign'], set: 'apppermissions' });
     // A language pack is an "app" with no module of its own (app-locations.mjs
     // → `dataOnly`), and it is found and left out by exactly the same rule.
     expect(needs.get('langpack.mjs')).toEqual({
@@ -69,14 +70,19 @@ describe('the plan, before anything is built', () => {
   // it, which needs both app builds and the three pack checkouts (Spanish,
   // German, French: the ones that ship. The Arabic pack on the maintainer's
   // machine is a right-to-left TEST fixture and is not in app-locations at
-  // all, so no picture can find it).
+  // all, so no picture can find it). `pluginrequests.mjs` (install requests)
+  // serves the sign build and the Spanish pack as the sources an agent asks
+  // for. 0.49.0 added `apppermissions.mjs`: the signing app's own permission
+  // ("Request signatures") on the role and person editors.
   it('left out: every app scene is excluded with the reason, nothing refused', () => {
     const { excluded, refused } = planAppScenes({ needs, withoutApps: true, locate: absent });
-    expect([...excluded.keys()].sort()).toEqual(['apps.mjs', 'langpack.mjs', 'signing.mjs']);
+    expect([...excluded.keys()].sort()).toEqual(['apppermissions.mjs', 'apps.mjs', 'langpack.mjs', 'pluginrequests.mjs', 'signing.mjs']);
+    expect(excluded.get('apppermissions.mjs')).toBe('needs the sign app build');
     expect(excluded.get('apps.mjs')).toBe('needs the sign + convert app builds');
     expect(excluded.get('langpack.mjs')).toBe(
       'needs the sign + convert + lang-es + lang-de + lang-fr app builds',
     );
+    expect(excluded.get('pluginrequests.mjs')).toBe('needs the sign + lang-es app builds');
     expect(refused).toEqual([]);
   });
 
@@ -84,6 +90,7 @@ describe('the plan, before anything is built', () => {
     const { excluded, refused } = planAppScenes({ needs, withoutApps: false, locate: absent });
     expect(excluded.size).toBe(0);
     expect(refused).toEqual([
+      'e2e/shots/apppermissions.mjs needs the sign app: no sign build (looked in ../filex-sign).',
       'e2e/shots/apps.mjs needs the sign app: no sign build (looked in ../filex-sign).',
       'e2e/shots/apps.mjs needs the convert app: no convert build (looked in ../filex-convert).',
       'e2e/shots/langpack.mjs needs the sign app: no sign build (looked in ../filex-sign).',
@@ -91,6 +98,8 @@ describe('the plan, before anything is built', () => {
       'e2e/shots/langpack.mjs needs the lang-es app: no lang-es build (looked in ../filex-lang-es).',
       'e2e/shots/langpack.mjs needs the lang-de app: no lang-de build (looked in ../filex-lang-de).',
       'e2e/shots/langpack.mjs needs the lang-fr app: no lang-fr build (looked in ../filex-lang-fr).',
+      'e2e/shots/pluginrequests.mjs needs the sign app: no sign build (looked in ../filex-sign).',
+      'e2e/shots/pluginrequests.mjs needs the lang-es app: no lang-es build (looked in ../filex-lang-es).',
       'e2e/shots/signing.mjs needs the sign app: no sign build (looked in ../filex-sign).',
     ]);
   });

@@ -164,6 +164,20 @@ const LEGITIMATE_TWINS: Twin[] = [
   },
   {
     files: [
+      'backend/internal/db/drivers/postgres/permissions.go',
+      'backend/internal/db/drivers/sqlite/permissions.go',
+    ],
+    reason:
+      'Per-user permissions (internal/perm), split the way customthemes.go is: ' +
+      'the row scanning, the select list, the JSON codecs, the result-set loops ' +
+      'and the delete-then-insert of a group list have no dialect and live once ' +
+      'in internal/db/permission_scan.go and permcodec.go. What is left is the ' +
+      'statements themselves in the two dialects (`?` vs `$1`, the upsert, ' +
+      'RETURNING vs LastInsertId, CURRENT_TIMESTAMP vs NOW()) — the repo’s ' +
+      'standing choice over a placeholder-rewriting builder.',
+  },
+  {
+    files: [
       'backend/internal/queue/drivers/postgres/postgres.go',
       'backend/internal/queue/drivers/sqlite/sqlite.go',
     ],

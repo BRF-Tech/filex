@@ -50,10 +50,16 @@ const REQUIRED: Record<string, Record<string, string>> = {
     'GitHub Release': '0.44.0/0.44.1 shipped without the desktop packages',
     'ghcr:': 'v0.43.0 had no images',
     'npm:': 'every package under packages/ (0.48 added filex-app-ui, which filex-core depends on)',
+    'latest.yml offers the x64 and the arm64 installer': '0.48.1: Windows reads ONE feed whatever the CPU; x64 first',
+    'are amd64 + arm64': '0.48.1: the arm64 images are smoke-tested before they are tagged',
+    'Snap Store: filex-app': '0.48.1: one revision per architecture on stable',
+    'winget: the': '0.48.1: both winget manifests name the arm64 installer',
+    'Microsoft Store:': '0.48.1: the Store gets the x64 + arm64 bundle',
   },
   deployed: {
     'update': 'lesson #69: stable.json three releases behind',
     'desktop feeds offer': 'lesson #69: the desktop feed four releases behind',
+    'desktop/latest.yml offers the x64 and the arm64 installer': '0.48.1: the feed the installed apps read',
     "pages, not a snapshot": 'lesson #511: docs.filex.sh served an old snapshot',
     'shop window: the published surfaces': 'CONTRIBUTING step 12, after the docs',
   },
@@ -86,7 +92,7 @@ describe("this repository's release plan", () => {
 
   it('names the workflow guards by titles that exist, so a rename cannot make the gate vacuous', () => {
     const guards = p.exportGates.find((g: { vitest?: unknown }) => g.vitest).vitest.mustPass as string[];
-    const sources = ['releaseGatesImages.test.ts', 'goreleaserTemplates.test.ts', 'wingetCla.test.ts', 'msstoreSubmit.test.ts'].map((f) =>
+    const sources = ['releaseGatesImages.test.ts', 'goreleaserTemplates.test.ts', 'wingetCla.test.ts', 'msstoreSubmit.test.ts', 'releaseArm64.test.ts'].map((f) =>
       fs.readFileSync(path.join(REPO, 'web', 'tests', 'deploy', f), 'utf8'),
     );
     expect(guards.length).toBeGreaterThanOrEqual(5);

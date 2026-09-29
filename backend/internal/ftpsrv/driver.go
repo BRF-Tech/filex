@@ -13,6 +13,7 @@ import (
 
 	ftpserver "github.com/fclairamb/ftpserverlib"
 
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 )
 
@@ -110,6 +111,11 @@ func (d *driver) AuthUser(cc ftpserver.ClientContext, user, pass string) (ftpser
 		return nil, errAuth
 	}
 	p, err := d.srv.cfg.Auth.Any(context.Background(), user, pass)
+	if err == nil {
+		// access.ftp (package perm) — the "that account may not use this
+		// protocol" case below, now also decided per account.
+		p, err = d.srv.cfg.Auth.Admit(context.Background(), p, perm.AccessFTP, "ftp")
+	}
 	if err != nil {
 		// One error for every failure: "no such account", "wrong password" and
 		// "that account may not use this protocol" must be indistinguishable,

@@ -231,7 +231,9 @@ const headerActions = computed<AccountAction[]>(() => {
   // instead of under an avatar. See SideNav.vue (paylas:m1).
   // ⚠ Admins only, and it is the ONLY role check in this cluster. Everything
   // else here belongs to whoever is signed in.
-  if (auth.isAdmin) rows.push({ key: 'admin', label: t('explore.gotoAdmin'), icon: 'admin' });
+  // A delegated administrator (an admin.* permission, backend internal/perm)
+  // has an admin panel too — only the pages their permissions open.
+  if (auth.hasAdminArea) rows.push({ key: 'admin', label: t('explore.gotoAdmin'), icon: 'admin' });
   // The explorer's own settings, between this account's doors and the exit,
   // in the order core's lib/accountMenu puts them — the same rule the desktop
   // app's avatar follows (FileExplorer `config.account`), so the two menus
@@ -303,7 +305,7 @@ function runAccountAction(key: string) {
     runExplorerRow?.(explorerKey);
     return;
   }
-  if (key === 'admin') void router.push({ name: 'dashboard' });
+  if (key === 'admin') void router.push({ name: firstAdminPage() });
   else if (key === 'settings') showSettings.value = true;
   // paylas:m1 — the empty screen's own door; the SAME route the navigation
   // row's `@open-my-shares` pushes, so both ways in land on one screen.
@@ -681,6 +683,14 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     // users should never see mount instructions sets `connections: false`.
     connections: true,
     storages: roots.value,
+    // What this account may do (backend internal/perm), so the explorer
+    // does not offer what the server would refuse. An administrator holds
+    // everything, which is the same as not narrowing at all.
+    // Account-wide permissions plus those the role allows in some folders.
+    // For the ones that differ by folder (Delete only in Scratch) the
+    // explorer asks the server about the selected files before offering them.
+    permissions: auth.isAdmin ? undefined : [...auth.permissions, ...auth.permissionsInFolders],
+    permissionsByFolder: auth.isAdmin ? undefined : auth.permissionsByFolder,
     initialPath: opensOnHome.value ? '.home' : initialPathFromQuery.value || '',
     // "Open" / double-click → open the standalone editor in a new tab.
     // The route reads `?path=&type=&mode=` and mounts the right viewer
@@ -732,6 +742,21 @@ onMounted(async () => {
   }
   if (selectFromQuery.value || appFromQuery.value) void revealAndOpen();
 });
+
+/** The first admin page this account may open: the dashboard for an
+ *  administrator or a monitor, else the page its one delegation names. */
+function firstAdminPage(): string {
+  if (auth.isAdmin || auth.can('admin.monitor')) return 'dashboard';
+  for (const [perm, page] of [
+    ['admin.users', 'users'],
+    ['admin.grants', 'grants'],
+    ['admin.shares', 'shares'],
+    ['admin.audit', 'audit'],
+  ] as const) {
+    if (auth.can(perm)) return page;
+  }
+  return 'dashboard';
+}
 </script>
 
 <template>

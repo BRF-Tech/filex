@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -111,7 +113,9 @@ type UpdateInfo struct {
 	Version string `json:"version,omitempty"`
 	// Ref is the git ref that version is read from (a GitHub source).
 	Ref string `json:"ref,omitempty"`
-	// Requires: incompatible — the range that version declares.
+	// Requires: incompatible — the range that version declares, or ">" this
+	// filex when its manifest carries what this filex does not know (a field
+	// a newer filex added: peekManifest).
 	Requires string `json:"requires,omitempty"`
 	// Notes are the source's release notes for Version, as plain text
 	// (a GitHub release's body, clipped).
@@ -254,6 +258,67 @@ type candidate struct {
 	m     *Manifest
 	ref   string // the GitHub ref it is read from
 	notes string // the release's notes, plain text
+	// requires (a blocked one): the filex it needs — its range, or ">" this
+	// filex when it carries what this filex does not know (beyond).
+	requires string
+	beyond   string
+}
+
+// peekManifest is the update check's reading of a manifest the strict read
+// refused (ParseManifest, strictErr): its name, version and filex range, and
+// what in it this filex does not know — a field (`user_permissions` to a
+// filex before 0.49.0) or a newer manifest_version. beyond is "" when the
+// refusal is about something else; err when not even those can be read.
+//
+// ⚠⚠ Only the CHECK reads this leniently (lesson #751). A newer app's
+// release that uses a field a newer filex added is a version that needs a
+// newer filex, not a broken source: read strictly, it turned the admin's
+// Apps list red ("Could not check … unknown field") as if the app were at
+// fault. Install and upgrade stay strict — an unknown field may be a
+// permission this filex cannot enforce.
+func peekManifest(raw []byte, strictErr error) (m *Manifest, beyond string, err error) {
+	var head struct {
+		ManifestVersion int    `json:"manifest_version"`
+		Name            string `json:"name"`
+		Version         string `json:"version"`
+		Filex           string `json:"filex"`
+		MinFilex        string `json:"min_filex"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return nil, "", err
+	}
+	m = &Manifest{}
+	m.ManifestVersion, m.Name, m.Version, m.Filex, m.MinFilex = head.ManifestVersion, head.Name, head.Version, head.Filex, head.MinFilex
+	if head.ManifestVersion > wire.ProtocolVersion {
+		return m, fmt.Sprintf("manifest_version %d", head.ManifestVersion), nil
+	}
+	// Unknown fields and nothing else: the same bytes read without the
+	// strict decoder's refusal decode whole.
+	field, unknown := unknownField(strictErr)
+	var whole wire.Manifest
+	if unknown && json.Unmarshal(raw, &whole) == nil {
+		return m, field, nil
+	}
+	return m, "", nil
+}
+
+// unknownField reads encoding/json's DisallowUnknownFields refusal
+// (`json: unknown field "requires"`) — the first unknown field, quoted.
+func unknownField(err error) (string, bool) {
+	if err == nil {
+		return "", false
+	}
+	const marker = `json: unknown field `
+	msg := err.Error()
+	i := strings.Index(msg, marker)
+	if i < 0 {
+		return "", false
+	}
+	rest := msg[i+len(marker):]
+	if name, uerr := strconv.Unquote(rest); uerr == nil {
+		return strconv.Quote(name), true
+	}
+	return "a field", true
 }
 
 // maxNotesBytes clips a release's notes: the review shows them, it does not
@@ -272,14 +337,24 @@ func (r *Registry) findUpdate(ctx context.Context, p *Installed, src updateSourc
 	var notes map[string]string
 	consider := func(raw []byte, ref string) (bool, error) {
 		m, err := ParseManifest(raw)
+		// unread: the strict read's refusal, when the lenient one
+		// (peekManifest) stands in to tell "needs a newer filex" from broken.
+		var unread error
+		beyond := ""
 		if err != nil {
-			return false, installErr(ErrCodeManifestInvalid, err.Error())
+			unread = installErr(ErrCodeManifestInvalid, err.Error())
+			if m, beyond, err = peekManifest(raw, err); err != nil {
+				return false, unread
+			}
 		}
 		if m.Name != p.Row.Name {
 			return false, installErr(ErrCodeManifestInvalid, "the source now names "+m.Name+", the installed app is "+p.Row.Name)
 		}
 		v, ok := releaseVersion(m.Version)
 		if !ok || !current.Newer(v) {
+			if unread != nil && beyond == "" {
+				return false, unread
+			}
 			return false, nil
 		}
 		rng, err := compatRange(m)
@@ -287,11 +362,18 @@ func (r *Registry) findUpdate(ctx context.Context, p *Installed, src updateSourc
 			return false, installErr(ErrCodeManifestInvalid, err.Error())
 		}
 		host, enforced := hostRelease()
-		if enforced && !rng.admits(host) {
+		excluded := enforced && !rng.admits(host)
+		if excluded || beyond != "" {
 			if blocked == nil {
-				blocked = &candidate{m: m, ref: ref}
+				blocked = &candidate{m: m, ref: ref, requires: rng.text, beyond: beyond}
+				if !excluded {
+					blocked.requires = ">" + FilexVersion()
+				}
 			}
 			return false, nil
+		}
+		if unread != nil {
+			return false, unread
 		}
 		found = &candidate{m: m, ref: ref, notes: notes[ref]}
 		return true, nil
@@ -447,9 +529,11 @@ func (r *Registry) FetchUpdate(ctx context.Context, id int64) (*InstallInput, er
 	}
 	if found == nil {
 		if blocked != nil {
-			c := compatOf(blocked.m)
-			return nil, &InstallError{Code: ErrCodeIncompatible, Requires: c.Requires, Filex: c.Filex,
-				Message: p.Row.Name + " " + blocked.m.Version + " works with filex " + c.Requires + "; this is filex " + c.Filex}
+			msg := p.Row.Name + " " + blocked.m.Version + " works with filex " + blocked.requires + "; this is filex " + FilexVersion()
+			if blocked.beyond != "" {
+				msg = p.Row.Name + " " + blocked.m.Version + " uses " + blocked.beyond + ", which this filex does not know: it needs a newer filex than " + FilexVersion()
+			}
+			return nil, &InstallError{Code: ErrCodeIncompatible, Requires: blocked.requires, Filex: FilexVersion(), Message: msg}
 		}
 		return nil, installErr(ErrCodeUpToDate, "the source has nothing newer than "+p.Row.Version)
 	}
@@ -546,9 +630,9 @@ func (r *Registry) checkApp(ctx context.Context, p *Installed, src updateSource,
 		}
 	}
 	if found == nil && blocked != nil && info.Status == UpdateCurrent {
-		info.Status, info.Version = UpdateIncompatible, blocked.m.Version
-		if c := compatOf(blocked.m); c != nil {
-			info.Requires = c.Requires
+		info.Status, info.Version, info.Requires = UpdateIncompatible, blocked.m.Version, blocked.requires
+		if blocked.beyond != "" {
+			p.log("info", "update check: "+blocked.m.Version+" uses "+blocked.beyond+", which this filex does not know; it needs a newer filex")
 		}
 	}
 	r.announce(ctx, p, &info)

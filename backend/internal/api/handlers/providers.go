@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
@@ -238,12 +239,18 @@ func (h *Providers) Delete(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Each account's own public links go with it (db.Store.DeleteUser); the
+	// audit row says how many were still open.
+	var linksClosed int64
 	for _, u := range users {
-		if err := h.Store.DeleteUser(r.Context(), u.ID); err != nil {
+		closed, err := h.Store.DeleteUserWithLinks(r.Context(), u.ID)
+		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		linksClosed += closed
 	}
+	auth.AddAuditDetail(r.Context(), "links_closed", linksClosed)
 	ids, _ := h.Store.ListProviderStorageIDs(r.Context(), p.ID)
 	for _, sid := range ids {
 		_ = h.Store.UnlinkProviderStorage(r.Context(), p.ID, sid)

@@ -102,7 +102,7 @@ func TestCatalogEventsAreDotted(t *testing.T) {
 		EventReplicaFail, EventQuotaFull, EventDiskFull,
 		EventQueueStuck, EventUpdateAvailable, EventUpdateApplied,
 		EventAppUpdated, EventAppUpdateAvailable, EventAppUpdateNeedsApproval, EventAppUpdateFailed,
-		EventPluginUpdateAvailable,
+		EventPluginUpdateAvailable, EventPluginRequested,
 	} {
 		if strings.Contains(string(e), ".") {
 			t.Errorf("operational alarm %q carries a dot: it would be read as a "+

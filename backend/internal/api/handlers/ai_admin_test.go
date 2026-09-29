@@ -190,11 +190,19 @@ func mcpPost(t *testing.T, client *http.Client, url, tok, payload string) (int, 
 func TestAIAdmin_MCP_ToolsGatedByScope(t *testing.T) {
 	srv, client, store, uid := adminFixture(t)
 
-	// mcp-only token: admin tools must NOT be advertised.
+	// mcp-only token: admin tools must NOT be advertised, and neither are
+	// the file tools — they follow the token's verbs (ai_mcp.go fileToolVerb).
 	mcpTok := issueToken(t, store, uid, "mcp", nil)
 	code, body := mcpPost(t, client, srv.URL+"/api/ai/mcp", mcpTok, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
 	require.Equal(t, http.StatusOK, code, body)
-	assert.Contains(t, body, "file_list", "file tools always present")
+	assert.Contains(t, body, "file_root", "discovery needs no verb")
+	assert.NotContains(t, body, `"file_list"`, "file tools need their verbs")
+	assert.NotContains(t, body, "admin_users_list", "admin tools hidden without admin scope")
+
+	readTok := issueToken(t, store, uid, "read,mcp", nil)
+	code, body = mcpPost(t, client, srv.URL+"/api/ai/mcp", readTok, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Contains(t, body, `"file_list"`, "read,mcp is offered the read tools")
 	assert.NotContains(t, body, "admin_users_list", "admin tools hidden without admin scope")
 
 	// mcp+admin token: admin tools ARE advertised.

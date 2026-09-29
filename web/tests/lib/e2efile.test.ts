@@ -142,6 +142,11 @@ describe('.fxe — what this build writes', () => {
     expect(created.header.iter).toBe(600_000);
   });
 
+  // ⚠ Six real PBKDF2 derivations at 600 000 iterations: writers never go
+  // below that whatever FAST asks for (see the test above), so each make()
+  // and each open costs one. Under the default 5 s this failed only when the
+  // whole suite ran on a loaded machine (2026-09-28, 5032 ms), and passed
+  // alone. The time is the key derivation, not a wait; hence its own budget.
   it('an empty file, and one exactly a chunk long', async () => {
     for (const n of [0, 1024, 2048]) {
       const plain = pattern(n, 4);
@@ -149,7 +154,7 @@ describe('.fxe — what this build writes', () => {
       const got = await openWith(file, { password: PW });
       expect('error' in got ? got.error : sha(got.plain), `len ${n}`).toBe(sha(plain));
     }
-  });
+  }, 20_000);
 
   it('writers use the production chunk size and at least 600 000 iterations by default', async () => {
     const created = await createFxe('a.txt', 3, bytesStream(new Uint8Array([1, 2, 3])), PW);

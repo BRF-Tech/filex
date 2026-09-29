@@ -47,6 +47,7 @@ type IdP struct {
 
 	mu          sync.Mutex
 	email, sub  string
+	extra       map[string]any
 	lastIDToken string
 	codes       map[string]bool
 	logouts     []url.Values
@@ -110,6 +111,14 @@ func (p *IdP) EndSessionEndpoint() string {
 func (p *IdP) SignIn(email, sub string) {
 	p.mu.Lock()
 	p.email, p.sub = email, sub
+	p.mu.Unlock()
+}
+
+// SetExtraClaims adds claims (a groups claim, say) to every id_token from
+// now on; nil removes them.
+func (p *IdP) SetExtraClaims(claims map[string]any) {
+	p.mu.Lock()
+	p.extra = claims
 	p.mu.Unlock()
 }
 
@@ -216,10 +225,14 @@ func (p *IdP) token(w http.ResponseWriter, r *http.Request) {
 	}
 	p.mu.Lock()
 	now := time.Now()
-	idt := p.IDToken(map[string]any{
+	claims := map[string]any{
 		"iss": p.Issuer(), "aud": clientID, "sub": p.sub, "email": p.email, "email_verified": true,
 		"iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(), "sid": "sid-" + p.sub,
-	})
+	}
+	for k, v := range p.extra {
+		claims[k] = v
+	}
+	idt := p.IDToken(claims)
 	p.lastIDToken = idt
 	p.mu.Unlock()
 	writeJSON(w, map[string]any{

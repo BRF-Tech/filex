@@ -129,11 +129,12 @@ function.
 | `label`, `description` | `Text` = `{en, tr, …}`; `en` is required everywhere a Text appears, other languages fall back to it |
 | `permissions` | the closed list below; anything else is refused at install |
 | `permission_reasons` | shown beside each permission in the install review — say why |
+| `user_permissions` | **since 0.49.0** — permissions of your app's own that the administrator hands out per role and per person (`[{id, label, description?, default}]`), named by an action's or a view's `requires`; see [User permissions](#user-permissions-what-an-administrator-hands-out). Not to be confused with `permissions`, which is what your *code* may do |
 | `languages` | the languages the plugin promises to speak, e.g. `["en", "tr"]` (empty = `["en"]`). **Every `Text` it returns must carry all of them** — the host refuses to install one whose `describe` answer is missing a language, and `pluginkit/plugintest` checks the screens too |
 | `ui_locales` | languages for **filex itself**: `{"es": {"ctx.download": "Descargar", …}}` by filex's own keys (both catalogues, one flat namespace). They join the language list every picker offers (public pages included) and leave with the app; a missing key falls back to English. A manifest with `ui_locales` and nothing that runs is a **language pack** and needs no module — see [Writing a language pack](#writing-a-language-pack) |
 | `settings` | the storage-driver field shape (`key, type, label, help, required, secret, default, placeholder, options, min, max`, plus `multi` / `show_when` / `required_when` — see *Fields*); `type` is `string \| password \| int \| bool \| select \| text \| date`; `secret` fields are sealed and only readable through `settings_get`. `label`, `help`, `placeholder` and an option's `label` may be **one string or a `Text`** (`{en, tr, …}`); a `Text` must carry every declared language, a plain string is shown as it is (every manifest written before v0.43 keeps installing). ⚠ `advanced` is **gone** — a setting that matters is on the form |
-| `actions[]` | menu rows: `applies` (`kind` file/dir/any, `ext` lower-case no dot, `mime` exact or `image/*`, `multi`, `min`, `max`, **`state` / `no_state`** — bare keys you keep with `StateSet`; the row is offered only where one of `state` is set and none of `no_state` is), optional `view` opened first, `confirm` text, `min_role` viewer/editor/owner, `danger`, `output.mode` sibling/version/none with `output.name` pattern (`{stem}`, `{ext}`, `{name}`), `limits.timeout_s`, **`hidden`** (never in a menu — only a surface's `job` or a page starts it: the second half of a flow). **`applies.engine_ext`** `{engine: [ext…]}` adds extensions that apply only while that engine is installed and granted (office documents only where LibreOffice is); it adds to a non-empty `ext`/`mime` list |
-| `views[]` | screens: `placement` modal (dialog) / **page** (full page in a new tab — a wizard with the document beside it) / inspector (details panel, needs `applies`) / home (side bar) |
+| `actions[]` | menu rows: `applies` (`kind` file/dir/any, `ext` lower-case no dot, `mime` exact or `image/*`, `multi`, `min`, `max`, **`state` / `no_state`** — bare keys you keep with `StateSet`; the row is offered only where one of `state` is set and none of `no_state` is), optional `view` opened first, `confirm` text, `min_role` viewer/editor/owner, `danger`, `output.mode` sibling/version/none with `output.name` pattern (`{stem}`, `{ext}`, `{name}`), `limits.timeout_s`, **`hidden`** (never in a menu — only a surface's `job` or a page starts it: the second half of a flow), **`requires`** (since 0.49.0: the id of one of your `user_permissions` — only people who hold it see and run the action). **`applies.engine_ext`** `{engine: [ext…]}` adds extensions that apply only while that engine is installed and granted (office documents only where LibreOffice is); it adds to a non-empty `ext`/`mime` list |
+| `views[]` | screens: `placement` modal (dialog) / **page** (full page in a new tab — a wizard with the document beside it) / inspector (details panel, needs `applies`) / home (side bar). **`requires`** (since 0.49.0), as on an action: the screen — its opening, its events and every job it queues — is refused to people without that user permission |
 | `public_pages[]` | the screens an outside participant may be sent to: `pin` optional/required/none, TTL default and ceiling in days. Opening one mints a **share** (`/s/<token>`, see *Public links, end to end*); a page you never declare cannot be opened. **`purpose`** `{label, revoke, section}` names what its links are in My shares / Shares ("Signing request"), what revoking one does, and the section of your `home` view that shows it. `ShareCreate` takes the same `Purpose` for one link — it wins over the page's, and a page-less link (a plain share of a file) has no other way to say what it is |
 | `limits` | `memory_pages` (default 1024 = 64 MiB, ceiling 4096), `call_timeout_s` for screens (default 15, ceiling 60); jobs default 300 s, ceiling 900 |
 | `messages` | texts filex says on your behalf long after the call is over, in each reader's language: `{"lock.collecting": {"en": …, "tr": …}}`. A file lock's reason is kept as a key plus arguments (`pluginkit.FileLockMessage`) and read back on the admin page and in the `423` a refused write gets. Every declared language is required, and a key the manifest does not declare is refused |
@@ -167,7 +168,10 @@ What filex does with it:
   first.
 - **The update check** takes the newest version whose range lets the running
   filex in — so you can publish a version for the next filex while servers
-  that have not upgraded yet stay on the one before.
+  that have not upgraded yet stay on the one before. Since 0.49.0 it also
+  steps over a version whose manifest carries a field this filex does not
+  know (or a newer `manifest_version`), and lists it as needing a newer filex
+  (`requires` is `>` the running filex) rather than *Could not check*.
 - **An installed app that filex is upgraded past keeps running**, marked *Not
   compatible with this filex* on the Apps list. The range is your promise;
   keep it honest.
@@ -181,6 +185,18 @@ carries it (`manifest: json: unknown field "filex"` — unknown fields are
 refused, above). Adding it to a manifest makes that version 0.47-and-later
 only. An app that must still install on an older filex says only
 `min_filex` (known since 0.43, honoured from 0.47), or leaves the range out.
+
+The same holds for every field added later: **filex before 0.49.0 refuses
+`user_permissions` and `requires`**, so a manifest that uses them says
+`"filex": ">=0.49.0"`. ⚠ 0.47 and 0.48 cannot read such a manifest at all —
+not even its range — so they do not say *needs a newer filex*: the install
+review answers `manifest_invalid` (`unknown field "user_permissions"`), and the
+update check steps over that release to an older one that fits, or, when there
+is none, says *Could not check* with the same reason. From 0.49.0 the update
+check reads a newer version's name, version and range even when the manifest
+carries fields it does not know, and says *needs a newer filex* for it; install
+and upgrade still refuse such a manifest — an unknown field may be a permission
+this filex cannot enforce.
 
 ### Publishing so updates are found
 
@@ -196,16 +212,17 @@ source is read:
   installed at a tag follows the repository's releases: the newest one that is
   not a draft or a pre-release and whose range fits. A tag with no *release*
   is not seen; a pre-release (a GitHub pre-release, or a `-rc.1` version) is
-  never installed by itself. Do not move a tag after publishing it: servers
+  never offered as an update. Do not move a tag after publishing it: servers
   pin the module by the hash the manifest said.
 - **A language pack: the branch.** Bump `version` and push `filex-app.json` to
   the branch it is installed from (`main`) — that is the whole release. A pack
   needs no release, no tag and no `wasm` block.
 - **By address:** keep serving `filex-app.json` at the same address; the
   module comes from the new manifest's `wasm.url` when it is a full address.
-- **Keep the permissions** if you want the update to arrive by itself. A
-  version that asks for one more permission — or a pack that grows a module —
-  waits for the administrator's approval, however small the change.
+- **Nothing arrives by itself.** Since 0.48 every newer version waits for an
+  administrator's approval. One that keeps its permissions is listed as
+  *Update available*; one that asks for one more permission — or a pack that
+  grows a module — as *Needs approval*, and the review marks what is new.
 - **Say the range** (`filex`) when a version needs a newer filex than the one
   before it, so servers that have not upgraded keep the version that works.
 
@@ -233,6 +250,85 @@ the module and the manifest.
 
 The administrator grants the list exactly; there is no partial grant in v1.
 
+### User permissions: what an administrator hands out
+
+`permissions` above is what your **code** may do on the server. A **user
+permission** is the other direction: an action of your app that an
+organisation may want to allow to some people and not to others. The signing
+app is the model — anybody may sign what they were sent, but *sending a
+document round for signature* is something an administrator may keep to some
+roles. Declare it, and name it where it applies:
+
+```json
+{
+  "filex": ">=0.49.0",
+  "user_permissions": [
+    { "id": "request",
+      "label": { "en": "Request signatures", "tr": "İmza isteme" },
+      "description": { "en": "Start a signature request. Signing needs no permission.",
+                       "tr": "İmza isteği başlatmak. İmzalamak için izin gerekmez." },
+      "default": "user" }
+  ],
+  "actions": [
+    { "id": "sign", "label": { "en": "Sign…", "tr": "İmzala…" }, "applies": { "ext": ["pdf"] } },
+    { "id": "request", "label": { "en": "Request signatures…", "tr": "İmza iste…" },
+      "applies": { "ext": ["pdf"] }, "view": "request", "requires": "request" }
+  ],
+  "views": [
+    { "id": "request", "placement": "page", "label": { "en": "Request", "tr": "İste" }, "requires": "request" }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | `[a-z0-9][a-z0-9_-]{0,63}` — no dots; unique in the app. filex keys it as `app.<app>.<id>` (`app.sign.request`) |
+| `label`, `description` | a `Text` in **every** language the manifest declares (the description is optional, but complete when present) — the administrator reads them when deciding |
+| `default` | who holds it until the administrator decides: `viewer` (every account), `user` (accounts that can change files) or `admin` (administrators only, until granted). Absent = `user` |
+
+An action's or a view's `requires` names the id; one that names an id not in
+`user_permissions` is refused at install. What filex then does:
+
+- **decides it per person**: an administrator always holds it; otherwise the
+  person's own exception, their custom role, their built-in role (User or
+  Viewer) and last your `default`, first answer wins
+  ([PERMISSIONS.md → App permissions](PERMISSIONS.md#app-permissions));
+- **hides** an action or a view the person does not hold — it is not in
+  `GET /api/files/plugins/actions`, so no menu row, details section or home
+  screen is drawn for it;
+- **refuses** it on every door that starts your work for that person — the
+  run, a view's opening and each event (and so the job a screen queues), your
+  interface's save and its `ui_call` — with `403 permission_denied` naming
+  `app.<app>.<id>`. Your module is not called at all, so you need no check of
+  your own.
+
+Declare only what an organisation would want to limit — an app with a
+permission for everything is an app nobody can configure. Work with no
+signed-in person of this filex behind it — a scheduled wake-up (`schedule`),
+an outside participant's public page — is not asked.
+
+**Your code is told what the person holds** (since 0.49.0). A job, a view
+event and your interface's `ui_call` carry `actor.permissions`: the ids of
+your `user_permissions` the person holds, decided by the same question filex
+asks at the door — an administrator holds every one. A public page's event
+and work nobody started carry no actor to ask about. Use it for what filex
+cannot do for you: a hint on ANOTHER screen that points at a gated action.
+The signing app's Verify screen says "…or Request signatures… to ask others"
+only to somebody who may:
+
+```go
+hint := wire.Text{"en": "Use “Sign…” to sign it yourself."}
+if in.Context.Actor.Can("request") { // the id, not app.sign.request
+	hint = wire.Text{"en": "Use “Sign…” to sign it yourself, or “Request signatures…” to ask others."}
+}
+```
+
+`Can` is false on a nil actor and on a filex that does not say, so an
+unknown answer leaves the hint out. It is a courtesy, not a gate — the door
+still decides, so never skip a check of your own because `Can` said yes.
+`plugintest` runs as an administrator and holds every permission you declare;
+set `h.Actor.Permissions` to test a screen for somebody who holds fewer.
+
 ## The exports
 
 filex calls these on a **fresh instance per call**: nothing survives between
@@ -256,7 +352,9 @@ call-scoped handle like `in:0`; `path` is the adapter-qualified spelling a
 `read_only` is true when the file's storage takes no writes — refuse there, at
 your first screen and in your first job, a flow that ENDS in a write: filex
 refuses a job that writes, not one that only leads to a write later), `output` (the action's
-mode and name pattern), `actor` (`{id, email, name, role}`), `locale`,
+mode and name pattern), `actor` (`{id, email, name, role, permissions}` —
+`permissions` since 0.49.0, the ids of your `user_permissions` the person
+holds: [User permissions](#user-permissions-what-an-administrator-hands-out)), `locale`,
 `settings` (non-secret values), `engines` (which are present *and* granted),
 `share_max_ttl_days` (below).
 
@@ -956,9 +1054,11 @@ form for one of your categories.
   sign the manifest's sha256 (hex, lower-case) the way you would a module's.
 
 To publish a new version, bump `version` and push `filex-app.json`: a pack
-installed from GitHub or an address moves to it by itself at the next update
-check (once a day, or **Check for updates** on the Apps tab — see
-[Publishing so updates are found](#publishing-so-updates-are-found)); one
+installed from GitHub or an address finds it at the next update check (once a
+day, or **Check for updates** on the Apps tab — see
+[Publishing so updates are found](#publishing-so-updates-are-found)) and shows
+*Update available*; it moves when an administrator approves it with **Review
+update** — since 0.48 nothing updates itself, a language pack included. One
 installed from a file is upgraded with **Upgrade** on its row.
 Removing the pack removes its languages at once; a person who had chosen one
 falls back to their next choice (and gets it back if the pack returns).

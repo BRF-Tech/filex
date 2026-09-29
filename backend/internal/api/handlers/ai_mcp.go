@@ -130,6 +130,9 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 		Version: version.String(),
 	}, nil)
 	registerFilexTools(srv, ops, h.searchIndex())
+	// The file tools need the verbs their /api/ai twins need; a tool the token
+	// cannot use is not offered at all, like an admin_* tool to a non-admin.
+	withdrawUngrantedFileTools(srv, auth.TokenFrom(r.Context()))
 
 	// Admin tools are gated by the `admin` token scope (on top of the route's
 	// `mcp` scope) and by the token not being confined to a folder — the same
@@ -141,6 +144,47 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 		registerAdminTools(srv, h.admin, principal)
 	}
 	return srv
+}
+
+// fileToolVerb is the token verb each file tool needs: the verb its REST twin
+// under /api/ai asks (routes.go). "" = discovery, which needs none, like
+// GET /api/ai/root.
+//
+// ⚠⚠ The route that serves these tools asks only `mcp`; the verb of each
+// operation is asked here, so a `read,mcp` token is read-only on MCP exactly
+// as on /api/ai. A new file tool needs a row: ai_mcp_verbs_internal_test lists
+// what registerFilexTools offers and goes red for a tool without one.
+var fileToolVerb = map[string]string{
+	"file_root":          "",
+	"file_list":          auth.VerbRead,
+	"file_info":          auth.VerbRead,
+	"file_read":          auth.VerbRead,
+	"file_search":        auth.VerbRead,
+	"file_tags":          auth.VerbRead, // setting tags also asks `write` (aiOps.Tags)
+	"file_write":         auth.VerbWrite,
+	"file_upload_ticket": auth.VerbWrite,
+	"file_mkdir":         auth.VerbWrite,
+	"file_move":          auth.VerbWrite,
+	"file_share":         auth.VerbWrite,
+	"file_unshare":       auth.VerbWrite,
+	"file_zip":           auth.VerbWrite,
+	"file_unzip":         auth.VerbWrite,
+	"file_delete":        auth.VerbDelete,
+}
+
+// withdrawUngrantedFileTools removes every file tool whose verb tok does not
+// hold. The MCP route is token-only, so tok is never nil behind it; a nil tok
+// (a server built by hand) withdraws everything that needs a verb.
+func withdrawUngrantedFileTools(srv *mcp.Server, tok *model.APIToken) {
+	var drop []string
+	for name, verb := range fileToolVerb {
+		if verb != "" && !tok.HasScope(verb) {
+			drop = append(drop, name)
+		}
+	}
+	if len(drop) > 0 {
+		srv.RemoveTools(drop...)
+	}
 }
 
 // ───── tool input/output types ─────

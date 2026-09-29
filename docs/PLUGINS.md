@@ -47,7 +47,7 @@ app runtime is on and at least one app is installed.)
 | **From a URL** | Downloaded, checked against a **required** SHA256 (and the signature, when required) **before anything is executed**, then as above. The URL must point at a **public** host: private, loopback and link-local targets are refused, after DNS and on every redirect, so a plugin URL cannot become a probe of the server's own network. | Unattended installs, scripted setups. |
 | **Remote service** | Nothing is launched: filex connects to an address you give it with a bearer token you give it. **Remote = TLS**: `https://` anywhere; plain `http://` only when the address is on the private network (loopback, link-local, RFC 1918, ULA), because the token and every storage credential travel on that connection. | A sidecar container, a plugin on another host, or a plugin you are developing. |
 
-![The Plugins page with the example plugin running](screenshots/v0.48.0/admin-plugins.png)
+![The Plugins page with the example plugin running](screenshots/v0.49.0/admin-plugins.png)
 
 > ⚠ **A plugin runs with filex's own privileges** and is handed the credentials
 > of every storage created on it. Install only plugins you trust — the same
@@ -85,6 +85,34 @@ To turn the subsystem off entirely: **`FILEX_PLUGINS_DISABLED=1`**. Nothing is
 launched, no remote is contacted, and the admin API answers 503 saying so. In
 multi-tenant mode the page is **supertenant-only**: a tenant admin gets a 403
 that says whose surface it is.
+
+### Install requests
+
+⚠⚠ **An API key cannot install, upgrade, switch or remove a storage plugin**
+— nor name the source its updates come from. Those need an administrator
+**signed in to the admin panel**; a key is refused `403 session_required`,
+whatever its scopes. A storage plugin's process runs with filex's rights and is
+handed every storage's credentials: the decision to run one is a person's.
+
+What a key can do is **leave a request**, exactly as for an app
+([APP-PLUGINS.md → Install requests](APP-PLUGINS.md#install-requests) has the
+whole model): filex resolves the source now and freezes the build it found —
+the feed's version and the binary's SHA-256 for this server's platform, or,
+for a plugin by address, the SHA-256 of the binary it downloaded and hashed
+(without running it). An administrator approves or rejects it under **Admin →
+Plugins → Install requests**; approval installs exactly that build, held to
+that hash before anything is started, and a source that publishes another
+build by then closes the request as **Source changed** instead.
+
+```bash
+curl -sS -H "Authorization: Bearer $FILEX_KEY" -H 'Content-Type: application/json' \
+  -d '{"kind":"storage","name":"myfs","source":"acme/filex-myfs","reason":"The archive team needs it"}' \
+  https://files.example.com/api/admin/plugin-requests
+```
+
+`{"kind":"storage","op":"upgrade","name":"myfs"}` asks for the newer version
+the plugin's own source has ([Updates](#updates-from-a-source)). A key still
+reads the list, one plugin and the update check, and may **Restart** one.
 
 ### States
 
@@ -661,6 +689,7 @@ restart invisible to the person using the file manager.
 | Sockets a plugin creates | `<data-dir>/plugins/<name>/run/` (directory mode 0700; the SDK gives the socket 0600) |
 | A binary's signature | `<data-dir>/plugins/<name>/<binary>.sig` (mode 0600) — written at install/upgrade when a signature was supplied, verified again at every start while trusted keys are configured |
 | Registration | the `plugins` table (migration 00029) |
+| Install requests an API key left | the `plugin_requests` table (migration 00070), shared with apps — [Install requests](#install-requests) |
 | A remote plugin's token | sealed with `FILEX_SECRET_KEY` — registering one without that key is refused rather than stored in plaintext |
 | The previous binary, during an upgrade | `<data-dir>/plugins/<name>/<binary>.previous` (and `<binary>.sig.previous`), removed once the new one is up (and used to roll back when it is not) |
 | Conformance probe leftovers | `.filex-conformance-<random>/` at a storage's root — named so an operator who finds one knows what made it |

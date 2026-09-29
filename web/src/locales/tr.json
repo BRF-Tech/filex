@@ -126,7 +126,7 @@
     "external": "Dış servisler",
     "authProviders": "Kimlik sağlayıcılar",
     "apiMcp": "API / MCP",
-    "grants": "İzinler",
+    "grants": "Klasör erişimi",
     "audit": "Denetim kaydı",
     "sync": "Senkron çalışmaları",
     "shares": "Paylaşımlar",
@@ -154,7 +154,8 @@
     "plugins": "Eklentiler",
     "usage": "Kullanım ve maliyet",
     "apps": "Uygulamalar",
-    "appearance": "Görünüm"
+    "appearance": "Görünüm",
+    "roles": "Roller"
   },
   "login": {
     "title": "Oturum aç",
@@ -258,7 +259,7 @@
       "syncInterval": "Tarama aralığı (dakika)",
       "syncIntervalHint": "filex bu depoyu dışarıdan yapılan değişiklikler için ne sıklıkla tarasın (yoklama modu). Sunucu varsayılanı (15 dakika) için boş bırakın. Büyük ve seyrek değişen bir depo uzun aralıkla daha rahattır; aralığını aşan bir tarama ikinci kez başlatılmaz.",
       "rbac": "Öğe bazlı erişim denetimi (RBAC)",
-      "rbacHint": "Açıkken admin olmayanlar yalnızca izin panelinden kendilerine verilen dosya/klasörleri görür. Kapalıyken depo tüm kullanıcılara açıktır (yetki role göre).",
+      "rbacHint": "Açıkken yönetici olmayanlar yalnızca kendilerine yetki verilen dosya ve klasörleri görür (Klasör erişimi sayfasında listelenir). Kapalıyken herkes depoyu rolüne göre açar.",
       "path": "Dizin yolu",
       "followSymlinks": "Bu klasörün dışına çıkan sembolik bağları izle",
       "scanExclude": "Taramadan hariç tutulacak yollar",
@@ -424,6 +425,7 @@
     "resetPasswordConfirm": "\"{email}\" için yeni bir parola oluşturulsun mu? Mevcut parola geçersiz olur ve bu hesabın tüm oturumları kapanır.",
     "passwordOptionalHint": "İsteğe bağlı — parolası olmayan bir hesap SSO ile ya da bir API anahtarıyla oturum açar",
     "createdOk": "Kullanıcı oluşturuldu",
+    "createdRoleNotSet": "Hesap İzleyici olarak oluşturuldu, ancak rolü atanamadı: {error}",
     "updatedOk": "Kullanıcı güncellendi",
     "deletedOk": "Kullanıcı silindi",
     "quota": {
@@ -753,7 +755,7 @@
     "technicalDetailIs": "Teknik ayrıntı: {detail}"
   },
   "grants": {
-    "title": "İzinler",
+    "title": "Klasör erişimi",
     "subtitle": "Dosya/klasör bazlı tüm yetkiler — kime, nerede, ne. İstediğinizi geri alın.",
     "search": "Kullanıcı, yol, depo ara…",
     "user": "Kullanıcı",
@@ -763,7 +765,7 @@
     "revoke": "Geri al",
     "revokeConfirm": "{email} kullanıcısının {path} erişimi geri alınsın mı?",
     "revokedOk": "Yetki geri alındı",
-    "empty": "Henüz izin yok."
+    "empty": "Henüz yetki yok."
   },
   "apiMcp": {
     "title": "API / MCP",
@@ -847,7 +849,7 @@
       "embed": "Gömme",
       "external": "Harici servis",
       "file": "Dosya",
-      "grants": "İzin",
+      "grants": "Klasör erişimi",
       "notifications": "Bildirim",
       "plugins": "Eklenti",
       "profile": "Profil",
@@ -878,9 +880,14 @@
       "webhooks": "Webhook",
       "app_plugins": "Uygulama",
       "app_plugin": "Uygulama",
+      "plugin_request": "Eklenti isteği",
+      "plugin_requests": "Eklenti isteği",
       "auth_providers": "Giriş sağlayıcısı",
       "quota": "Kota",
-      "themes": "Tema"
+      "themes": "Tema",
+      "permissions": "Yerleşik rol",
+      "roles": "Rol",
+      "permission_rule": "Rol"
     },
     "verb": {
       "action": "değiştirildi",
@@ -923,7 +930,14 @@
       "download_link_refused": "dışarı sürükleyerek indirme reddedildi",
       "ui_save": "arayüzünden kaydedildi",
       "upgrade": "yükseltildi",
-      "rollback": "önceki sürüme döndürüldü"
+      "rollback": "önceki sürüme döndürüldü",
+      "permissions_set": "istisnaları değiştirildi",
+      "defaults_set": "izinleri değiştirildi",
+      "roles_set": "rolü değiştirildi",
+      "approve": "onaylandı",
+      "reject": "reddedildi",
+      "expire": "süresi doldu",
+      "supersede": "kaynağı değiştiği için kapatıldı"
     },
     "target": {
       "auth_provider": "Kimlik sağlayıcısı",
@@ -940,7 +954,10 @@
       "user": "Kullanıcı",
       "version": "Sürüm",
       "app_plugin": "Uygulama",
-      "file": "Dosya"
+      "file": "Dosya",
+      "permissions": "Yerleşik rol",
+      "permission_rule": "Rol",
+      "plugin_request": "Eklenti isteği"
     },
     "viaAi": "{resource} (AI)",
     "filterResource": "Ne",
@@ -1194,7 +1211,7 @@
     "creds": "Demo hesabı: {email} · parola: {password}",
     "sandbox": "Ortak deneme alanı — her gece sıfırlanır; burada depolama, eklenti ve uygulamalar kapalıdır.",
     "adminHint": "Tam yönetici yetkisi için demo dışı bir hesapla oturum açın.",
-    "alsoIncluded": "Ayrıca: uygulamalar — izin incelemesinden geçerek kurulan WebAssembly eklentileri, e-İmza ve Dönüştür ile birlikte · dil paketleri ve sağdan sola yerleşim · Görünüm ekranından kurum temaları · oluşturduğunuz bağlantılar, Paylaştıklarım'da · kişisel ve takım etiketleri · sembolik bağlantılı klasörler · klasör başına hatırlanan görünüm ve sıralama · dosya ve klasör bazında yetkilerle RBAC · çok kiracılık · OIDC SSO ve LDAP / Active Directory · yerinde görüntüleyiciler ve düzenleyiciler, ONLYOFFICE ile Office belgeleri · + Yeni menüsünden belge oluşturma — Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise ONLYOFFICE bağlıyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
+    "alsoIncluded": "Ayrıca: uygulamalar — izin incelemesinden geçerek kurulan WebAssembly eklentileri, e-İmza ve Dönüştür ile birlikte · dil paketleri ve sağdan sola yerleşim · Görünüm ekranından kurum temaları · oluşturduğunuz bağlantılar, Paylaştıklarım'da · kişisel ve takım etiketleri · sembolik bağlantılı klasörler · klasör başına hatırlanan görünüm ve sıralama · roller ve kişiye özel istisnalar, dosya ve klasör bazında erişim ve uygulamaların kendi izinleri · çok kiracılık · OIDC SSO ve LDAP / Active Directory · yerinde görüntüleyiciler ve düzenleyiciler, ONLYOFFICE ile Office belgeleri · + Yeni menüsünden belge oluşturma — Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise ONLYOFFICE bağlıyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
     "features": {
       "storageTitle": "6 depolama sürücüsü, iki yönde",
       "storageBody": "Yerel diskleri, S3'ü, SFTP'yi, WebDAV'ı, FTP/FTPS'i ve SMB/NAS paylaşımlarını tek bir ağaçta yan yana bağlayın — sonra aynı ağaca S3, SFTP, FTPS, NFSv3 ya da WebDAV olarak geri erişin.",
@@ -1334,6 +1351,7 @@
       "app_update_needs_approval": "Uygulama güncellemesi onay bekliyor",
       "app_update_failed": "Uygulama güncellemesi başarısız",
       "plugin_update_available": "Depo eklentisi güncellemesi var",
+      "plugin_requested": "Eklenti kurulum isteği",
       "replica_fail": "Kopyaya yazılamadı",
       "replica_fail_spike": "Kopya hataları artıyor",
       "replica_reconcile_done": "Kopya yeniden denemeleri kuyrukta",
@@ -1803,6 +1821,67 @@
   "connections": {
     "subtitle": "Bu sunucuya kendi bilgisayarınızdan nasıl erişilir — bağlayın ya da bir S3 istemcisi, SFTP veya filex uygulamasıyla erişin.",
     "advanced": "Depoları yönet"
+  },
+  "pluginRequests": {
+    "title": "Kurulum istekleri",
+    "subtitle": "API anahtarı eklenti kuramaz, yükseltemez ya da kaldıramaz: bir ajan, betik ya da CLI bunun yerine buraya istek bırakır. Kaynağın o an verdiği yanıt isteğe dondurulur — manifest, SHA-256, izinler — ve onayladığınızda yalnızca bu kurulur.",
+    "expiresAfter": "Kimsenin karar vermediği bir isteğin süresi {count} gün sonra dolar.",
+    "pendingCount": "{count} bekliyor",
+    "showHistory": "Karara bağlanan istekleri göster",
+    "hideHistory": "Yalnızca bekleyen istekleri göster",
+    "empty": "Bekleyen istek yok.",
+    "emptyHistory": "Henüz istek yok.",
+    "jump": "{from} → {to}",
+    "via": "API anahtarı “{key}”",
+    "fields": {
+      "plugin": "Eklenti",
+      "version": "Sürüm",
+      "source": "Kaynak",
+      "requester": "İsteyen",
+      "reason": "Gerekçe",
+      "permissions": "İzinler",
+      "requested": "İstendi",
+      "expires": "Süre sonu",
+      "status": "Durum"
+    },
+    "kind": {
+      "app": "Uygulama",
+      "storage": "Depo eklentisi"
+    },
+    "op": {
+      "install": "Kurulum",
+      "upgrade": "Yükseltme"
+    },
+    "status": {
+      "pending": "Bekliyor",
+      "approved": "Onaylandı",
+      "rejected": "Reddedildi",
+      "expired": "Süresi doldu",
+      "superseded": "Kaynak değişti"
+    },
+    "source": {
+      "own": "Kendi güncelleme kaynağı"
+    },
+    "actions": {
+      "review": "İncele",
+      "approve": "Onayla ve kur",
+      "reject": "Reddet"
+    },
+    "review": {
+      "title": "Kurulum isteği: {name}",
+      "sha256": "SHA-256",
+      "manifestSha256": "Manifest SHA-256",
+      "frozen": "Onaylarsanız yalnızca bu baytlar ve bu izinler kurulur, başka hiçbir şey değil. Kaynak şu an farklı bir şey sunuyorsa hiçbir şey kurulmaz ve istek “Kaynak değişti” olarak kapanır.",
+      "lastError": "Son onay denemesi başarısız oldu: {error}",
+      "rejectReason": "Neden reddettiğiniz (isteğe bağlı)",
+      "rejectPlaceholder": "İsteği bırakan bunu okuyabilir.",
+      "decided": "{status}: {who}, {when}",
+      "decidedNobody": "{status}, {when}",
+      "note": "Not"
+    },
+    "approved": "{name} {version} kuruldu",
+    "rejected": "{name} isteği reddedildi",
+    "superseded": "{name} kaynağı istek bırakıldıktan sonra değişti; hiçbir şey kurulmadı. İstek “Kaynak değişti” olarak kapatıldı."
   },
   "plugins": {
     "title": "Eklentiler",
@@ -2549,5 +2628,259 @@
     "minLength": "En az {n} karakter kullanın. | En az {n} karakter kullanın.",
     "maxLength": "En çok {n} karakter kullanın. | En çok {n} karakter kullanın.",
     "pattern": "Bu değer beklenen biçimde değil."
+  },
+  "permissions": {
+    "title": "Roller",
+    "subtitle": "Rol, adı olan bir izin kümesidir. Herkesin tam olarak bir rolü vardır: Yönetici (her şey, kilitli), Kullanıcı, İzleyici ya da kişinin kendi sayfasında seçilen özel bir rol. Kişiye özel istisnalar rolün önüne geçer.",
+    "items": {
+      "files": {
+        "download": {
+          "label": "İndirme",
+          "hint": "Dosyaları ve zip arşivlerini cihaza kaydetme; WebDAV, SFTP, FTP, S3 veya NFS ile okuma. Önizleme açık kalır."
+        },
+        "create": {
+          "label": "Dosya ve klasör ekleme",
+          "hint": "Yükleme, klasör ve dosya oluşturma, kopyalama, arşiv açma, çöp kutusundan geri yükleme."
+        },
+        "modify": {
+          "label": "Dosya değiştirme",
+          "hint": "Üzerine yazma, metin düzenleyicide veya ONLYOFFICE'te düzenleme, eski sürüme dönme."
+        },
+        "rename": {
+          "label": "Yeniden adlandırma",
+          "hint": "Dosya ve klasörlere aynı klasörde yeni ad verme."
+        },
+        "move": {
+          "label": "Taşıma",
+          "hint": "Dosya ve klasörleri başka klasöre taşıma. Aynı anda taşıyıp yeniden adlandırmak ikisini de gerektirir."
+        },
+        "delete": {
+          "label": "Silme",
+          "hint": "Dosya ve klasörleri çöp kutusuna taşıma."
+        },
+        "purge": {
+          "label": "Kalıcı silme",
+          "hint": "Çöp kutusunu boşaltma; çöp kutusu olmayan depolarda silme."
+        },
+        "tag": {
+          "label": "Etiketleme",
+          "hint": "Etiket ekleme ve kaldırma."
+        }
+      },
+      "share": {
+        "links": {
+          "label": "Paylaşım bağlantıları",
+          "hint": "Herkese açık indirme bağlantısı oluşturma."
+        },
+        "upload_links": {
+          "label": "Yükleme bağlantıları",
+          "hint": "Başkalarının dosya yükleyebileceği bağlantı oluşturma."
+        },
+        "users": {
+          "label": "Kişilerle paylaşma",
+          "hint": "Başka hesaplara bir dosya veya klasöre erişim verme."
+        }
+      },
+      "comments": {
+        "write": {
+          "label": "Yorum yazma",
+          "hint": "Dosyalara yorum yazma."
+        }
+      },
+      "ai": {
+        "use": {
+          "label": "Yapay zekâ ajan API'si",
+          "hint": "Yapay zekâ ajanlarının ve MCP istemcilerinin /api/ai üzerinden dosyalarla çalışması."
+        }
+      },
+      "plugins": {
+        "run": {
+          "label": "Uygulama çalıştırma",
+          "hint": "İmza akışı gibi uygulama eylemlerini çalıştırma."
+        }
+      },
+      "access": {
+        "webdav": {
+          "label": "WebDAV",
+          "hint": "WebDAV ile bağlanma, ör. işletim sisteminin dosya yöneticisinden."
+        },
+        "sftp": {
+          "label": "SFTP",
+          "hint": "SFTP ile bağlanma ve SSH anahtarı kaydetme."
+        },
+        "ftp": {
+          "label": "FTPS",
+          "hint": "FTPS ile bağlanma."
+        },
+        "s3": {
+          "label": "S3 erişim anahtarları",
+          "hint": "S3 erişim anahtarı oluşturma ve kullanma."
+        },
+        "nfs": {
+          "label": "NFS export'ları",
+          "hint": "NFS export'u oluşturma ve bağlama."
+        },
+        "api": {
+          "label": "API anahtarları",
+          "hint": "Kişisel API anahtarı oluşturma ve kullanma."
+        },
+        "desktop": {
+          "label": "Masaüstü uygulaması",
+          "hint": "Masaüstü uygulamasından oturum açma."
+        }
+      },
+      "account": {
+        "edit": {
+          "label": "Kendi profilini düzenleme",
+          "hint": "Kendi adını, e-postasını, resmini ve parolasını değiştirme."
+        }
+      },
+      "admin": {
+        "users": {
+          "label": "Kullanıcıları yönetme",
+          "hint": "Kullanıcılar, izinleri, kotaları ve parola sıfırlama — yönetici hesapları hariç."
+        },
+        "grants": {
+          "label": "Klasör erişimlerini yönetme",
+          "hint": "Tüm klasör yetkilerini görme ve geri alma."
+        },
+        "shares": {
+          "label": "Tüm paylaşımları yönetme",
+          "hint": "Herkesin bağlantılarını görme ve iptal etme."
+        },
+        "audit": {
+          "label": "Denetim kaydını okuma",
+          "hint": "Denetim kaydını görme."
+        },
+        "monitor": {
+          "label": "İzleme",
+          "hint": "Pano, kullanım, senkron geçmişi ve iş kuyruğu; salt okunur."
+        },
+        "full": {
+          "label": "Tam yönetici",
+          "hint": "Geri kalan her şey. Yalnızca yönetici rolüyle gelir."
+        }
+      }
+    },
+    "groups": {
+      "files": "Dosyalar ve klasörler",
+      "sharing": "Paylaşım ve özellikler",
+      "access": "Web uygulaması dışından erişim",
+      "account": "Kendi hesabı",
+      "admin": "Yönetim alanı",
+      "apps": "Uygulamalar"
+    },
+    "presets": {
+      "label": "Hazır ayar",
+      "full_admin": "Tam yönetici",
+      "standard": "Standart kullanıcı",
+      "read_only": "Salt okunur",
+      "upload_only": "Yalnızca yükleme",
+      "guest": "Misafir",
+      "custom": "Özel izinler"
+    },
+    "effect": {
+      "inherit": "Devral",
+      "allow": "İzin ver",
+      "deny": "Reddet"
+    },
+    "result": {
+      "allowed": "İzin var",
+      "denied": "İzin yok"
+    },
+    "source": {
+      "role": "yalnızca yöneticiler",
+      "base": "yerleşik rol",
+      "rule": "“{name}” rolü",
+      "override": "bu kişiye özel istisna",
+      "viewer_ceiling": "salt okunur hesap",
+      "role_off": "“{name}” rolü kapalı",
+      "app_default": "uygulamanın varsayılanı"
+    },
+    "apps": {
+      "hint": "Kurulu bir uygulamanın rol ve kişi bazında verilip geri alınabilen izinleri.",
+      "default": "Varsayılan",
+      "defaultAllowed": "Varsayılan (izin var)",
+      "defaultDenied": "Varsayılan (izin yok)",
+      "resetAll": "Varsayılana döndür",
+      "holders": {
+        "viewer": "Uygulamanın varsayılanı: herkes",
+        "user": "Uygulamanın varsayılanı: dosya değiştirebilenler",
+        "admin": "Uygulamanın varsayılanı: yalnızca yöneticiler"
+      },
+      "readOnly": "Uygulama izinlerini yalnızca bir yönetici değiştirebilir."
+    },
+    "all": "Tümü",
+    "none": "Hiçbiri",
+    "card": {
+      "title": "Roller ve izinler",
+      "subtitle": "Bu kişinin neler yapabileceği: rolü ve yalnızca ona özel istisnalar. Sonuç ve nereden geldiği her iznin yanında gösterilir.",
+      "adminNote": "Yöneticiler tüm izinlere sahiptir; roller ve istisnalar onlara uygulanmaz.",
+      "viewerNote": "Salt okunur bir hesap, burada ne ayarlanırsa ayarlansın dosya ekleyemez, değiştiremez, silemez ve paylaşamaz.",
+      "conditional": "Rolü bazı klasörlerde farklı çalışır; burada gösterilen, geri kalan her yerde geçerli olandır.",
+      "clear": "İstisnaları temizle",
+      "saved": "İzinler kaydedildi",
+      "settingsTitle": "Rollerden gelen sınırlar",
+      "exceptionsTitle": "Bu kişiye özel istisnalar",
+      "builtinRole": "Rol: {role} — yukarıdaki hesap bilgilerinden değiştirin.",
+      "readOnlyRoleNote": "“{role}” yalnızca dosyaları görüntüleyebilir; bu yüzden eklemeye, değiştirmeye, silmeye ve paylaşmaya istisna olarak izin verilemez. İzin vermek için bunlardan birini rolde işaretleyin (ya da başka bir rol seçin)."
+    },
+    "rules": {
+      "add": "Yeni rol",
+      "edit": "Rolü düzenle",
+      "empty": "Henüz özel rol yok.",
+      "name": "Rol adı",
+      "description": "Açıklama",
+      "enabled": "Etkin",
+      "disabled": "Kapalı",
+      "effects": "İzinler",
+      "settings": "Sınırlar",
+      "storages": "Depolar",
+      "paths": "Klasörler (ör. Arşiv veya Müşteriler/*/Sözleşmeler)",
+      "maxDays": "Paylaşım bağlantısının en uzun süresi (gün)",
+      "passwordRequired": "Paylaşım bağlantılarında parola zorunlu",
+      "blockedExt": "Engellenen dosya türleri",
+      "blockedExtHint": "ör. exe, bat, ps1",
+      "maxUpload": "En büyük dosya (MB)",
+      "require2fa": "İki adımlı doğrulama zorunlu",
+      "deleteConfirm": "“{name}” rolü silinsin mi?",
+      "saved": "Rol kaydedildi",
+      "deleted": "Rol silindi",
+      "summaryAllow": "İzin verir: {list}",
+      "summaryDeny": "Reddeder: {list}",
+      "summaryLimits": "Sınırlar: {list}",
+      "members": "{count} üye",
+      "locked": "Her şey, her zaman — değiştirilemez",
+      "builtin": "Yerleşik",
+      "builtinSummary": "İzinleri satırın Aksiyon menüsünden ayarlanır",
+      "membersColumn": "Kişiler",
+      "custom": "Özel",
+      "editBuiltin": "{role} rolünü düzenle",
+      "builtinSaved": "Rol kaydedildi",
+      "viewerCeilingNote": "Bir İzleyici asla dosya ekleyemez, değiştiremez, silemez veya paylaşamaz; bunlar kapalı kalır.",
+      "plusGroups": "SSO grupları için başlangıç rolü: {list}",
+      "ssoGroups": "SSO grupları için başlangıç rolü",
+      "ssoGroupsHint": "İlk oturum açışında bu gruplardan birini taşıyan yeni bir hesap bu rolü alır. Sonrasında rolü, herkesinki gibi, kişinin sayfasından değiştirilir.",
+      "permissionsHint": "Bu role sahip kişilerin neler yapabileceğini işaretleyin. Yeni bir rol Standart kullanıcı hazır ayarıyla başlar; bir hazır ayar işaretleri tek tıkla değiştirir.",
+      "folders": "Bazı klasörlerde farklı",
+      "foldersHint": "İsteğe bağlı. Depo ya da klasör seçin, sonra oradaki dosya işlemlerine izin verin ya da onları reddedin. Diğer her yerde yukarıdaki işaretler geçerlidir.",
+      "summaryCount": "{total} izinden {count} tanesi",
+      "summaryFolders": "{places} içinde:",
+      "disableConfirm": "“{name}” kapatılsın mı? Bu role sahip {count} kişi, rol yeniden açılana kadar hiçbir erişime sahip olmaz. | “{name}” kapatılsın mı? Bu role sahip {count} kişi, rol yeniden açılana kadar hiçbir erişime sahip olmaz.",
+      "deleteTitle": "“{name}” rolünü sil",
+      "deleteMove": "Bu role {count} kişi sahip. Bunun yerine hangi rolü alsınlar? | Bu role {count} kişi sahip. Bunun yerine hangi rolü alsınlar?",
+      "moveTo": "Verilecek rol",
+      "translations": "Diğer dillerde ad ve açıklama",
+      "translationsHint": "Herkes rolü filex'i kullandığı dilde görür. Bir dil boş bırakılırsa o dilde yukarıdaki ad ve açıklama görünür.",
+      "translationsCount": "{count} dil",
+      "nameIn": "Rol adı ({language})",
+      "descriptionIn": "Açıklama ({language})"
+    },
+    "customBadge": "İstisnalar",
+    "twoFactor": {
+      "title": "İki adımlı doğrulama gerekli",
+      "body": "Yöneticiniz bu hesap için iki adımlı doğrulamayı zorunlu kıldı. Devam etmek için kurun.",
+      "action": "Şimdi kur"
+    }
   }
 }

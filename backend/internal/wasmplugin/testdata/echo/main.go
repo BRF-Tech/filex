@@ -109,6 +109,21 @@ var manifest = wire.Manifest{
 		ID: "gather", Label: wire.Text{"en": "Gather", "tr": "Topla"}, View: "picks",
 		Applies: wire.Applies{Kind: "file", Ext: []string{"txt"}, Multi: true},
 		Output:  wire.Output{Mode: "sibling", Name: "{stem}-gathered{ext}"},
+	}, {
+		// request needs the app's own user permission `request` (manifest
+		// user_permissions): what an administrator can take away from a role
+		// or give to one person (perm/app.go) — the menu drops it and the run
+		// is refused for an account without it. Signing's "Request
+		// signatures" in miniature; e2e 179 walks it in the browser.
+		ID: "request", Label: wire.Text{"en": "Request signatures probe", "tr": "İmza isteme denemesi"}, Requires: "request",
+		Applies: wire.Applies{Kind: "file", Ext: []string{"txt"}}, Output: wire.Output{Mode: "none"},
+	}},
+	// The one user permission the fixture declares (app.echo.request).
+	UserPermissions: []wire.UserPermission{{
+		ID:          "request",
+		Label:       wire.Text{"en": "Request signatures", "tr": "İmza isteme"},
+		Description: wire.Text{"en": "Ask other people to sign a document.", "tr": "Başkalarından bir belgeyi imzalamalarını isteme."},
+		Default:     "user",
 	}},
 	PublicPages: []wire.PublicPage{{ID: "signer", Label: wire.Text{"en": "Sign the document", "tr": "Belgeyi imzala"}, PIN: "optional", DefaultTTLDays: 7, MaxTTLDays: 30}},
 	Views: []wire.View{{ID: "hello", Placement: "modal", Label: wire.Text{"en": "Hello", "tr": "Hello"}}, {ID: "wizard", Placement: "page", Label: wire.Text{"en": "Wizard", "tr": "Wizard"}},
@@ -275,6 +290,9 @@ func init() {
 			"owned": func(in *wire.ActionRunInput) (*wire.ActionRunOutput, error) {
 				return &wire.ActionRunOutput{OK: true, Message: wire.Text{"en": "owned " + in.JobID}}, nil
 			},
+			"request": func(in *wire.ActionRunInput) (*wire.ActionRunOutput, error) {
+				return &wire.ActionRunOutput{OK: true, Message: wire.Text{"en": "requested " + in.JobID}}, nil
+			},
 			"invite": func(in *wire.ActionRunInput) (*wire.ActionRunOutput, error) {
 				pin := "auto"
 				if v, ok := in.Params["pin"].(string); ok {
@@ -399,7 +417,13 @@ func init() {
 						ro = "true"
 					}
 				}
-				return &wire.ActionRunOutput{OK: true, Message: wire.Text{"en": "ro=" + ro, "tr": "ro=" + ro}}, nil
+				// ...and, for an app with user_permissions, which of them the
+				// person the job runs as holds (wire.Actor.Permissions).
+				msg := "ro=" + ro
+				if len(in.Actor.Permissions) > 0 {
+					msg += " perms=" + strings.Join(in.Actor.Permissions, ",")
+				}
+				return &wire.ActionRunOutput{OK: true, Message: wire.Text{"en": msg, "tr": msg}}, nil
 			},
 			"lock": func(in *wire.ActionRunInput) (*wire.ActionRunOutput, error) {
 				// Lock the first input for a day and tell one person, with a
@@ -639,8 +663,12 @@ func init() {
 						first = string(data)
 					}
 				}
+				var perms []string
+				if in.Context.Actor != nil {
+					perms = in.Context.Actor.Permissions
+				}
 				return map[string]any{"view": in.ViewID, "method": in.Method, "params": params,
-					"inputs": len(in.Context.Inputs), "first": first, "locale": in.Context.Locale}, nil
+					"inputs": len(in.Context.Inputs), "first": first, "locale": in.Context.Locale, "perms": perms}, nil
 			},
 			// refuse: an app's own words, in every language it speaks.
 			"refuse": func(in *wire.UICallInput) (any, error) {
@@ -670,9 +698,10 @@ func init() {
 				// request hand a view (v3.1): the section asked for and the
 				// actor's address.
 				section, _ := in.Data["section"].(string)
-				ip := ""
+				ip, perms := "", ""
 				if in.Context.Actor != nil {
 					ip = in.Context.Actor.IP
+					perms = strings.Join(in.Context.Actor.Permissions, ",")
 				}
 				// ...and whether the file's storage takes writes.
 				ro := "none"
@@ -684,7 +713,7 @@ func init() {
 				}
 				return &wire.Surface{Title: wire.Text{"en": "Wizard", "tr": "Wizard"}, Section: section,
 					Sections: []wire.Section{{ID: "a", Label: wire.Text{"en": "A", "tr": "A"}}, {ID: "b", Label: wire.Text{"en": "B", "tr": "B"}}},
-					Nodes:    []wire.Node{{Type: "text", Props: map[string]any{"text": map[string]string{"en": "page " + in.Event + " section=" + section + " ip=" + ip + " ro=" + ro + " locale=" + in.Context.Locale}}}}}, nil
+					Nodes:    []wire.Node{{Type: "text", Props: map[string]any{"text": map[string]string{"en": "page " + in.Event + " section=" + section + " ip=" + ip + " ro=" + ro + " locale=" + in.Context.Locale + " perms=" + perms}}}}}, nil
 			},
 			"picks": func(in *wire.ViewEventInput) (*wire.Surface, error) {
 				// Every answer says how many files the host handed this event

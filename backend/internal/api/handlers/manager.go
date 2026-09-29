@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
@@ -90,11 +91,16 @@ func (h *Manager) AttachOps(o *ops.Service) { h.Ops = o }
 // ceiling. The identity comes from quotastore.OwnerFrom, not from the session,
 // so the public drop link is measured against the LINK CREATOR's quota — they
 // are the account whose disk is being filled.
-func (h *Manager) checkQuota(ctx context.Context, size int64) error {
+//
+// fileSize is one file's size, held against the per-file upload limit of the
+// permission rules (quota.CheckFile); size is what the write adds. A batch
+// passes its total as size and 0 as fileSize, having checked each file with
+// checkFileSize first.
+func (h *Manager) checkQuota(ctx context.Context, fileSize, size int64) error {
 	if h.Quota == nil || size <= 0 {
 		return nil
 	}
-	if err := h.Quota.CheckCanWrite(ctx, quotastore.OwnerFrom(ctx), size); err != nil {
+	if err := h.Quota.CheckFile(ctx, quotastore.OwnerFrom(ctx), fileSize, size); err != nil {
 		if errors.Is(err, quota.ErrQuotaExceeded) {
 			metrics.GuardRefusals.WithLabelValues(metrics.GuardQuota).Inc()
 		}
@@ -177,6 +183,21 @@ func (h *Manager) allowed(ctx context.Context, s *model.Storage, rel string, nee
 		return false
 	}
 	return set.Effective(rel) >= need
+}
+
+// require is allowed() for an action with a per-user permission: it checks
+// the level p needs on rel AND p itself, writing the refusal (legacyMsg when
+// the path is the reason, the permission refusal otherwise).
+func (h *Manager) require(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, p perm.Perm, legacyMsg string) bool {
+	if h.ACL == nil {
+		return true
+	}
+	set, err := h.ACL.LoadSet(r.Context(), auth.UserFrom(r.Context()), s)
+	if err != nil || set == nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": legacyMsg})
+		return false
+	}
+	return requireCan(w, r, set, rel, p, legacyMsg)
 }
 
 // allowedByID is allowed() keyed by storage id (for id-based read/stat).
@@ -530,8 +551,15 @@ func (h *Manager) streamBody(w http.ResponseWriter, r *http.Request, s *model.St
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
 		return
 	}
-	// RBAC: previewing/downloading a file needs ≥viewer on it.
-	if !h.allowed(r.Context(), s, rel, acl.LevelViewer) {
+	// RBAC: previewing/downloading a file needs ≥viewer on it. A download
+	// (as an attachment) also needs files.download; a preview does not —
+	// see perm.FilesDownload: a browser that renders a file already holds
+	// its bytes, so the permission governs the explicit save, not viewing.
+	if asAttachment {
+		if !h.require(w, r, s, rel, perm.FilesDownload, "forbidden") {
+			return
+		}
+	} else if !h.allowed(r.Context(), s, rel, acl.LevelViewer) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
@@ -1426,6 +1454,17 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 	if !h.allowedByID(r.Context(), storageID, aclRel, acl.LevelViewer) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
+	}
+	// ?download=1 asks for an attachment: that is a download, and needs
+	// files.download too (the inline read a viewer renders does not; see
+	// vfStream).
+	if r.URL.Query().Get("download") == "1" {
+		if v := aclCanID(r.Context(), h.ACL, h.Store, storageID, aclRel, perm.FilesDownload); !v.ok {
+			if !v.WritePerm(w, r) {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+			}
+			return
+		}
 	}
 
 	drv, err := h.StorageResolver(storageID)

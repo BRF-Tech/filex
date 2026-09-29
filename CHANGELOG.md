@@ -7,6 +7,275 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-09-28
+
+Everyone has one role now — Administrator, User, Viewer or a custom role with
+its own list of permissions — and an app can declare permissions of its own
+that an administrator hands out the same way. An API key is held to its
+`read`, `write` and `delete` verbs on every route and protocol, and the acts
+that make somebody an administrator or install a plugin are a signed-in
+person's: a key leaves an install request instead. Roles and per-user
+permissions are manjotsc's pull request
+([#75](https://github.com/BRF-Tech/filex/pull/75)).
+
+> ⚠ **An API key's verbs now hold everywhere** ([Security](#security)): an
+> integration that changes or deletes files — through `/api/files` (and so
+> `filex client`), the MCP file tools, WebDAV, SFTP, FTPS, or an S3 key or NFS
+> export minted from a token — with a token that does not name `write` or
+> `delete` gets `403 token missing scope: <verb>`. Changing the account's
+> profile, password or two-factor with a token needs `write` too; the desktop
+> app's pairing carries it for every role, a viewer's included, and a viewer
+> who paired before 0.49.0 signs the app in again once (**Reconnect**). Give
+> each token the verbs it uses; tokens issued before 0.43.0 carry the full
+> list and are unaffected.
+
+> ⚠ **Some acts are a signed-in administrator's only** ([Security](#security)):
+> installing, upgrading, going back, switching, removing and re-permissioning
+> an app or a storage plugin; creating an administrator, promoting an account,
+> changing an administrator's role or setting their password; and allowing an
+> admin-area permission (`admin.*`) through an exception, a custom role or a
+> built-in role. An API key gets `403 session_required` — for a plugin it
+> leaves a request instead (`POST /api/admin/plugin-requests`). Taking a right
+> away stays open to a key.
+
+> ⚠ **A public link follows its creator's right to make it**
+> ([Security](#security)): a download link answers only while the person who
+> made it still holds `share.links` and edit rights on the item (a file
+> request: `share.upload_links`). A link whose creator has since become a
+> viewer or lost the folder answers `404` after the upgrade, and answers again
+> once the right is given back. Deleting an account now deletes the download
+> links and file requests it opened. An app's own public pages are not
+> affected, and neither are links whose creator was deleted before 0.49.0 —
+> they name no creator.
+
+> ⚠ **For app authors** ([Added](#added)): filex before 0.49.0 refuses a
+> manifest that carries `user_permissions` or `requires` (unknown fields are
+> refused), so a manifest that uses them says `"filex": ">=0.49.0"`. An older
+> server cannot read even that range: its update check says *Could not check*
+> for such a release, rather than *needs a newer filex*. From 0.49.0 the
+> update check says *needs a newer filex* for a version that carries a field
+> this filex does not know ([Fixed](#fixed)).
+
+### Added
+
+- **Everyone has one role, and a role is a list of permissions you choose**
+  ([docs/PERMISSIONS.md](docs/PERMISSIONS.md)). 28 permissions — file actions
+  (download, create, modify, rename, move, delete, permanent delete, tag),
+  sharing, comments, the agent API, apps, each protocol, API keys, the desktop
+  app, editing one's own account, and five admin areas — granted through
+  **roles**. Everyone has **one role**, picked in the Role field on their page:
+  Administrator, User, Viewer (the last two now editable), or a **custom
+  role** — its own list of permissions, optionally different in some folders
+  ("no delete, except in Scratch"). A custom role can be the starting role of
+  new SSO accounts in given groups. Per-person exceptions beat the role. A
+  custom role can carry limits — share-link lifetime and password, blocked
+  file types, largest file, required two-factor authentication. Enforced on
+  every door: the web app and REST API, the agent API, WebDAV, SFTP, FTPS, S3
+  and NFS, and API keys. A refusal says which permission and which role, in
+  the reader's language.
+- **An app can declare permissions an administrator hands out per role and
+  per person** ([docs/APP-PLUGINS.md → App permissions](docs/APP-PLUGINS.md#app-permissions)).
+  The manifest's `user_permissions` names them — a signing app can put
+  *Request signatures* behind one while signing what somebody sent you needs
+  none — and an action or a screen that `requires` one is left out of the menu,
+  and refused with `403 permission_denied` naming the permission and where the
+  answer came from, for an account that does not hold it. A key is
+  `app.<app>.<id>`; the answer is an administrator's always, else the person's
+  exception, else their custom role's (`settings.apps`), else the built-in
+  role's (`/api/admin/roles/builtin` → `apps`), else the app's own default —
+  `viewer`, `user` or `admin`. `GET /api/admin/roles/catalogue` lists the
+  installed apps' permissions under `apps`. **Admin → Roles** shows them as an
+  **Apps** group in every role's editor, each *Default (…)* / *Allow* /
+  *Deny*, *Default* saying what it comes to for that role; a person's page
+  shows the same rows among their exceptions, beside the answer and where it
+  comes from (the exceptions answer carries `effective.apps`). A preset and
+  *Clear exceptions* leave a person's app exceptions as they are; the Apps
+  group resets them on its own. A delegated administrator leaves a person's
+  app permissions as they are, and sees them read-only.
+- **An app is told which of its own permissions the person holds**
+  ([docs/PLUGIN-KIT.md → User permissions](docs/PLUGIN-KIT.md#user-permissions-what-an-administrator-hands-out)).
+  A job (`action_run`), a screen's event and an interface's `ui_call` carry
+  `actor.permissions`: the ids of the app's `user_permissions` the person
+  holds, decided by the same question filex asks at the door, so an
+  administrator holds every one. A public page's event and work nobody
+  started carry none. The Go SDK reads it with `Actor.Can(id)`, and
+  `plugintest`'s default actor, an administrator, holds every permission the
+  manifest declares. An app uses it to leave out a hint to an action the
+  reader cannot run.
+- **An API key asks for a plugin; an administrator installs it** (migration
+  00070, `plugin_requests`). An API key — an agent, a script, the CLI — leaves
+  a request to install or upgrade an app or a storage plugin, with a required
+  reason. filex resolves the source at once and freezes what it answered: the
+  manifest, the SHA-256 the bytes must have and the permissions it asks for.
+  An administrator approves or rejects it under **Admin → Plugins → Install
+  requests** (the explorer's table; the review shows the install wizard's
+  permission list with the app's reasons). Approval installs exactly the
+  frozen bytes with exactly the frozen permissions; a source that serves
+  anything else by then closes the request as **Source changed**
+  (`superseded`) and installs nothing. One waiting request per source; a
+  request nobody decides expires after 14 days
+  (`FILEX_PLUGIN_REQUEST_TTL_DAYS`). Supertenant-only in multi-tenant mode.
+  REST: [BACKEND.md → Admin: plugin requests](docs/BACKEND.md#admin-plugin-requests).
+  - **Plugin tools for agents** (admin MCP): `admin_app_plugins_list`,
+    `admin_app_plugin_get`, `admin_app_plugin_logs`,
+    `admin_app_plugins_check_updates`, `admin_plugins_list`,
+    `admin_plugin_get`, `admin_plugins_check_updates`,
+    `admin_plugin_request_install`, `admin_plugin_request_upgrade`,
+    `admin_plugin_requests_list`, `admin_plugin_request_get` — reading and
+    requesting only; there is no tool to approve or reject
+    ([MCP.md → Plugin tools](docs/MCP.md#plugin-tools)).
+  - **`filex client plugins request` / `filex client plugins requests`** —
+    leave and follow a request from the command line
+    ([CLI.md](docs/CLI.md#plugin-requests)).
+  - **`plugin_requested`** notification: the administrators hear of a new
+    request in the bell and on every webhook that carries operator alarms.
+  - Audit entries `plugin_request.create`, `.approve`, `.reject`, `.expire`,
+    `.supersede`.
+- **Administration can be delegated**: an account without the admin role can
+  be given users, folder grants, shares, audit or monitoring — never an
+  administrator's account, never more than it holds. A change is judged by
+  what the account would hold afterwards, so lifting a Deny, ending a
+  restrictive role or creating a User account counts too; a password is reset
+  or set only for an account that holds nothing the delegate lacks.
+- **The desktop app for Windows on Arm and Linux arm64.** An arm64 installer
+  and portable `.exe` for Windows, and an arm64 AppImage, `.deb`, `.rpm` and
+  Snap Store revision for Linux — built by every release, installed and opened
+  on arm64 machines before they are published, and updated from their own
+  feeds (Windows: one feed, the x64 installer first, so existing installs see
+  what they saw before). The Microsoft Store gets x64 and arm64 in one bundle,
+  and the winget manifest names both installers. 0.48.1's arm64 packages were
+  added to its release afterwards.
+- **Every release runs the arm64 CLI, server and images on arm64 machines**
+  (Linux, Windows, macOS): serve, sign in, upload, download byte for byte,
+  move, delete — before anything is published.
+- Admin → Users shows each person's role, exceptions and where every answer
+  comes from; Admin → Roles lists the built-in and custom roles, in the
+  explorer's table like every other admin list. Changes are audited with
+  before and after.
+- **A custom role in every language** (migration 00071): the role editor's
+  *Name and description in other languages* gives a role its name and
+  description in each interface language the server offers — the built-in
+  ones and every installed language pack's. Everyone sees the role in their
+  own language on the Roles, Users and person pages, and a refusal names it in
+  the reader's account language. The role's own name stays required and is
+  the fallback; `source.rule_name` and the audit log keep it.
+  `POST` / `PUT /api/admin/roles` take `names` and `descriptions`
+  (`{"tr": "…"}`); a language the server does not offer is refused
+  ([PERMISSIONS.md → API](docs/PERMISSIONS.md#api)).
+- SSO sign-ins record the provider's groups claim; a new account whose groups
+  a custom role names starts with that role.
+
+### Changed
+
+- Every account keeps what its role could do before: migration 00069 only
+  adds tables and columns, and the built-in User and Viewer roles start as the
+  Standard user and Read-only presets.
+- **Admin → Permissions is now Admin → Folder access** (*Klasör erişimi*):
+  the page that lists every per-file and per-folder grant, apart from Roles.
+- **The explorer reads the account's permissions itself** when its host
+  passes none (`GET /api/auth/me`): the desktop app and the embedded explorer
+  now hide the actions a role refuses, as the web app does, instead of
+  offering them and answering `403`. An administrator is not narrowed, and an
+  answer without permissions changes nothing.
+- Explorer rename checks the new name as well as the old one, and the
+  invite-by-email fallback that creates a public link needs the right to
+  create public links.
+- **A viewer's desktop app changes its own account.** Its pairing now carries
+  `read,write` (never `delete`), so the account menu saves the profile, the
+  password and two-factor as the web app does; the viewer role still refuses
+  every file change, link and grant. A viewer who paired before 0.49.0
+  presses **Reconnect** once ([DESKTOP.md](docs/DESKTOP.md#the-token-the-app-is-given)).
+
+### Fixed
+
+- **The Users page's search box filters the list.** It sent the text to a
+  server that returns every account and never read it, so typing changed
+  nothing.
+- **The CLI inside the desktop app says which release it is.** It answered
+  `filex --version` with "0.1.0-dev" in every package; it is now stamped with
+  the version, commit and build date like the released CLI.
+- **A dialog behind another no longer takes the focus from the one in
+  front.** Every dialog puts the focus in itself shortly after it opens. When
+  a second dialog opened over it in that moment (the "Close this draft?"
+  question, when a draft was closed right after it was opened), the dialog
+  behind took the focus a moment later: "Keep in Drafts" lost it to the
+  draft's text box, and an Enter went into the text instead of answering the
+  question. Only the dialog in front takes the focus now.
+- **A file dropped through a file request over its creator's size limit
+  answers `413 file_too_large`** with the drop page's own sentence, not
+  `503 storage_unavailable`.
+- **The Releases page on docs.filex.sh** keeps a release note's references to
+  its own sections as plain words; they used to land in an older release's
+  section of the same page.
+- **Every door that makes a link is hidden without its permission.**
+  *New → Request files* stayed in the menu for an account without
+  `share.upload_links`, and the server refused it. Now the explorer asks
+  the same permissions the server asks, per folder when the role says so, in
+  every host: *Request files* and the share dialog's file-request section need
+  `share.upload_links`, the dialog's link switch and options and the details
+  panel's *Create link* need `share.links`, the people section and *Manage*
+  need `share.users`. *Share* (and its key, Shift+S) is offered only when one
+  of them applies — a file takes no file request.
+- **The explorer's per-folder question works with a read-only token.**
+  `POST /api/files/manager?action=allowed` changes nothing and now needs
+  `read`; under `write` a read-only token's question was refused, and the
+  explorer, reading that as "unknown", offered every action that differs from
+  folder to folder.
+- **An app update that needs a newer filex says so, even when this filex
+  cannot read all of it.** A newer version whose manifest carries a field this
+  filex does not know (or a newer `manifest_version`) made the update check
+  answer *Could not check* with `unknown field`, as if the app were broken.
+  The check now reads its name, version and range, and lists it as needing a
+  newer filex — or steps over it to an older release that fits. Installing or
+  upgrading to such a manifest is still refused.
+
+### Security
+
+- Harden plugin installation: installing, upgrading, going back, switching,
+  removing and changing the action overrides of an app
+  (`/api/admin/app-plugins`), and installing, upgrading, `PATCH` and `DELETE`
+  of a storage plugin (`/api/admin/plugins`), now need an administrator signed
+  in to the admin panel; an API key gets `403 session_required`, naming
+  `/api/admin/plugin-requests`, where it leaves a request. Reading — the lists,
+  one plugin, the logs, the update check and the install review
+  (`?dry_run=1`) — stays open to an admin-scoped key
+  ([APP-PLUGINS.md → Install requests](docs/APP-PLUGINS.md#install-requests)).
+- Harden API token permissions: a token's verbs — `read`, `write`, `delete` —
+  are now enforced on every route and protocol a token can reach: the web
+  explorer's `/api/files` routes (and so `filex client`), the MCP file tools,
+  WebDAV, SFTP, FTPS, and the S3 keys and NFS exports minted from a token.
+  Without `write` a token keeps what a viewer keeps (preferences, stars,
+  recently opened, personal tags, comments, notifications) and the document
+  editor opens read-only; MCP `tools/list` offers only the file tools the
+  token can use. Changing the account itself — `PATCH /api/auth/profile`,
+  `POST /api/auth/password` and the three `/api/auth/totp/*` routes — needs
+  `write` as well. ⚠ An integration that changes or deletes files with a token
+  that does not name `write` or `delete` now gets `403 token missing scope`:
+  give its token the verbs it uses. Tokens issued before 0.43.0 carry the full
+  list and are unaffected. See [RBAC.md](docs/RBAC.md#api-tokens-verbs-on-every-surface).
+- Harden public links: one rule makes a link on every surface — the explorer,
+  `POST /api/ai/share` and the MCP `file_share` tool alike — edit rights on the
+  item and the `share.links` permission (`share.upload_links` for a file
+  request). A link answers only while its creator still holds that right on
+  the item, and answers again when the right comes back; `/s/`, its metadata,
+  folder browsing, `/d/` and `/api/public/*` ask the same question. A file
+  request applies its creator's blocked file types and largest file to what is
+  dropped ([SHARING.md](docs/SHARING.md#a-link-follows-its-creator)).
+- Harden account deletion: deleting an account deletes the download links and
+  file requests it opened, in the same transaction, on every path that deletes
+  one — an administrator, a tenant deletion, a rolled-back provisioning. They
+  used to stay with no creator, and a link with no creator kept answering.
+  The deletion's audit entry records `links_closed`, the number still open.
+  An app's own public pages stay.
+- Harden administrator accounts: creating an administrator, promoting an
+  account to administrator, changing an administrator's role, setting or
+  resetting an administrator's password, and allowing an admin-area
+  permission — as a person's exception, in a custom role (its list or its
+  folder part), or in a built-in role — need an administrator signed in to
+  the admin panel; an API key gets `403 session_required`, on `/api/admin`,
+  `/api/ai/admin` and the `admin_users_*` MCP tools alike. Managing accounts
+  that are not administrators, and taking a permission away, are unchanged.
+
 ## [0.48.1] - 2026-09-28
 
 > 0.48.0 was tagged but its release run failed a test (where the draft

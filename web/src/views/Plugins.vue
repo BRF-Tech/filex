@@ -11,6 +11,10 @@
  * page of its own. The Apps tab opens first when the runtime is on and at
  * least one app is installed — the tab tells this shell once it has loaded;
  * a click by the operator always wins over that default.
+ *
+ * Above both tabs: the install requests an API key left (PluginRequestsPanel)
+ * — an agent cannot install a plugin, it asks, and the decision is made here.
+ * An approval redraws both tabs (`generation`), since it installed something.
  */
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -18,6 +22,7 @@ import { useRoute, useRouter } from 'vue-router';
 
 import StoragePluginsTab from '@/components/plugins/StoragePluginsTab.vue';
 import AppPluginsTab from '@/components/plugins/AppPluginsTab.vue';
+import PluginRequestsPanel from '@/components/plugins/PluginRequestsPanel.vue';
 
 type Tab = 'storage' | 'apps';
 
@@ -44,10 +49,15 @@ function onAppsLoaded(info: { enabled: boolean; count: number }) {
   if (chosen.value) return;
   if (info.enabled && info.count > 0) activeTab.value = 'apps';
 }
+
+/** Bumped when a request was approved: both tabs load again. */
+const generation = ref(0);
 </script>
 
 <template>
   <div class="space-y-4">
+    <PluginRequestsPanel @installed="generation++" />
+
     <nav class="flex gap-1 border-b border-zinc-200 dark:border-zinc-800" role="tablist">
       <button
         v-for="tab in (['storage', 'apps'] as Tab[])"
@@ -67,10 +77,10 @@ function onAppsLoaded(info: { enabled: boolean; count: number }) {
     </nav>
 
     <div v-show="activeTab === 'storage'" role="tabpanel">
-      <StoragePluginsTab />
+      <StoragePluginsTab :key="`storage-${generation}`" />
     </div>
     <div v-show="activeTab === 'apps'" role="tabpanel">
-      <AppPluginsTab @loaded="onAppsLoaded" />
+      <AppPluginsTab :key="`apps-${generation}`" @loaded="onAppsLoaded" />
     </div>
   </div>
 </template>

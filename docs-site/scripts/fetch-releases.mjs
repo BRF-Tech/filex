@@ -59,6 +59,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { exportRules, neutralize } from './neutralize.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const siteDir = path.resolve(__dirname, '..')
@@ -279,8 +280,15 @@ function parseImages(body) {
   return images
 }
 
-function normalise(raw) {
-  const body = typeof raw.body === 'string' ? raw.body : ''
+// Read once: the export's own rewrite rules (null in a public checkout).
+let rules
+function bodyOf(raw) {
+  if (rules === undefined) rules = exportRules()
+  return neutralize(typeof raw.body === 'string' ? raw.body : '', rules)
+}
+
+export function normalise(raw) {
+  const body = bodyOf(raw)
   const { groups, headline, found } = parseChangelog(body)
   // Prose only for releases published by hand, which carry no `## Changelog`
   // section at all. A generated body whose every commit was filtered out (a
@@ -367,11 +375,19 @@ function esc(text) {
  * linked `docs/LAZY-CATALOGUE.md`, the server's tree was still v0.43.2's, and
  * every refresh failed on the dead link until the tree was replaced
  * (2026-09-25). So a page that is not in `docsDir` goes to the repository too.
+ *
+ * ⚠ An in-page anchor (`[Removed](#removed)`) keeps its words and loses the
+ * link. A release body points at its own sections, which exist in
+ * CHANGELOG.md; this page holds every release, so `#removed` matched nothing
+ * (the anchor gate's dead link on v0.48.1, 2026-09-28) and `#changed` landed
+ * in another release's section without a word of warning.
  */
 export function relativeLinks(text, docsRoot = docsDir) {
   const REPO = 'https://github.com/BRF-Tech/filex/blob/main/'
   const published = (rel) => fs.existsSync(path.join(docsRoot, rel.replace(/#.*$/, '')))
-  return String(text).replace(/\]\((?!https?:|\/|#|mailto:)([^)\s]+)\)/g, (_m, href) => {
+  return String(text)
+    .replace(/\[([^\]\n]+)\]\(#[^)\s]*\)/g, '$1')
+    .replace(/\]\((?!https?:|\/|#|mailto:)([^)\s]+)\)/g, (_m, href) => {
     const docs = href.match(/^(?:\.\/)?docs\/(.+)$/)
     if (docs) return published(docs[1]) ? `](./${docs[1]})` : `](${REPO}docs/${docs[1]})`
     // Already relative to this directory and pointing at a page we publish.

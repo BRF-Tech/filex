@@ -28,6 +28,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
@@ -37,7 +38,6 @@ import (
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
-	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 	"github.com/brf-tech/filex/backend/internal/zipstream"
 
@@ -268,19 +268,26 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	// A public link to `.filex-trash` would hand every deleted file on the
-	// storage to whoever holds the URL; to `.filex-open`, other people's
-	// open documents.
-	if gate(w, r, h.ACL, node.StorageID, writegate.Names(node.Path)) {
-		return
+	// ONE rule for every door that mints a link (public_link_rule.go):
+	// filex's own names are never linked (a link to `.filex-trash` hands out
+	// every deleted file, one to `.filex-open` other people's open
+	// documents); a public link is an outbound-access grant → ≥editor; and
+	// the per-user permission for the kind of link — share.links for a
+	// download link, share.upload_links for a file-drop link. /api/ai/share
+	// and the MCP file_share tool ask the very same function.
+	linkPerm := perm.ShareLinks
+	if req.Kind == model.ShareKindDrop {
+		linkPerm = perm.ShareUploadLinks
 	}
-
-	// RBAC: creating a public share is an outbound-access grant → ≥editor.
-	if h.ACL != nil {
-		if !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelEditor) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+	if err := publicLinkRefusal(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, linkPerm); err != nil {
+		var lr *linkRefusal
+		if errors.As(err, &lr) && lr.v.WritePerm(w, r) {
 			return
 		}
+		if !answerGate(w, err) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		}
+		return
 	}
 
 	// File-drop links mint a public UPLOAD endpoint into a folder — validate
@@ -343,6 +350,11 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	requestedExpiry := opts.ExpiresAt
+	// Permission-rule settings (link_policy.go): after requestedExpiry is
+	// taken, so a rule's cap is reported as a clamp like the install's.
+	if gen := applyLinkPolicy(&opts, linkSettings(r.Context(), h.ACL), time.Now()); gen != "" {
+		pinGenerated = gen
+	}
 	sh, err := h.Service.Create(r.Context(), opts)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -896,6 +908,12 @@ func (h *Share) HandleMetadata(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusGone, map[string]string{"error": "expired"})
 		return
 	}
+	// A link whose creator may no longer share answers like one that is not
+	// there (link_creator.go).
+	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
 	resp := map[string]any{
 		"requires_pin":   sh.PinHash != "",
 		"expires_at":     sh.ExpiresAt,
@@ -946,6 +964,11 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	if sh.IsExpired(time.Now()) {
 		h.renderErrorPage(w, r, http.StatusNotFound, "expired")
+		return
+	}
+	// A link whose creator may no longer share closes (link_creator.go).
+	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh) {
+		h.renderErrorPage(w, r, http.StatusNotFound, "notfound")
 		return
 	}
 

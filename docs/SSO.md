@@ -158,8 +158,15 @@ first boot — see
 - Example (Keycloak realm roles): `FILEX_OIDC_ROLE_CLAIM=realm_access.roles`,
   `FILEX_OIDC_ADMIN_GROUP=filex-admin`, then assign the `filex-admin` realm role
   to the users who should administer filex.
-- Per-file/folder access is governed separately by [RBAC](RBAC.md); SSO only
-  decides account role (user vs admin).
+- A **custom role** can name SSO groups: a **new** account whose groups claim
+  (the same `FILEX_OIDC_ROLE_CLAIM`) carries one of them starts with that role
+  instead of the built-in User — at creation only; afterwards the role is
+  changed on the person's page, and a later sign-in neither gives it back nor
+  takes it away ([PERMISSIONS.md → Starting role for SSO groups](PERMISSIONS.md#starting-role-for-sso-groups)).
+  filex stores each sign-in's groups for that purpose.
+- Per-file/folder access is governed separately by [RBAC](RBAC.md), and what an
+  account may do by its role and exceptions ([PERMISSIONS.md](PERMISSIONS.md));
+  SSO decides the admin role at every sign-in, and a custom starting role once.
 
 > SSO accounts have **no local password** (they authenticate via the IdP). If
 > you later disable OIDC, give those users a password first (admin → reset) or

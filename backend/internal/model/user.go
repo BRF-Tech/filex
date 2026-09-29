@@ -192,7 +192,11 @@ type APIToken struct {
 	// app's proxy, a bot, an MCP client). Every token acts as its owner either
 	// way; kind only decides whether the identity-bearing surfaces are drawn
 	// for it. See NormalizeTokenKind for why "" reads as app.
-	Kind       string     `json:"kind"`
+	Kind string `json:"kind"`
+	// Source is which door minted the token (migration 00060): TokenSourceDesktop
+	// for a desktop pairing, "" for every other. It decides which permission
+	// USING the token falls under — access.desktop or access.api (package perm).
+	Source     string     `json:"source,omitempty"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -213,6 +217,10 @@ const (
 	// would mean the token owner's history shown to a stranger.
 	TokenKindApp = "app"
 )
+
+// TokenSourceDesktop marks a token minted by the desktop app's pairing
+// (handlers/desktop_auth.go).
+const TokenSourceDesktop = "desktop"
 
 // NormalizeTokenKind maps a stored/incoming value to a canonical kind.
 //

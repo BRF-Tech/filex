@@ -179,6 +179,8 @@ type Registry struct {
 	userScope func(ctx context.Context, u *model.User) context.Context
 	// home answers CallContext.Home (SetHomeResolver).
 	home func(ctx context.Context, u *model.User) string
+	// heldPerms answers wire.Actor.Permissions (SetHeldPermissions).
+	heldPerms func(ctx context.Context, u *model.User, p *Installed) []string
 	// visible answers "may this person see this file?" for state_list.
 	// Nil means every file passes, which is what a single-user instance
 	// with no ACL wiring wants.
@@ -332,6 +334,26 @@ func (r *Registry) SetOutputSink(s OutputSink) { r.sink = s }
 // when not beside their source" (CallContext.Home) — the HTTP layer, which
 // knows storages, tenants and the ACL.
 func (r *Registry) SetHomeResolver(f func(ctx context.Context, u *model.User) string) { r.home = f }
+
+// SetHeldPermissions wires the answer to "which of this app's own user
+// permissions does this person hold" (wire.Actor.Permissions) — the HTTP
+// layer, which decides them at every door with the same question
+// (handlers.appPermHeld), so what an app is told is what the door does.
+func (r *Registry) SetHeldPermissions(f func(ctx context.Context, u *model.User, p *Installed) []string) {
+	r.heldPerms = f
+}
+
+// wireActor is the person a call runs as, as the app is told: who, their
+// address on a view (ip; empty on a job), and which of THIS app's
+// user_permissions they hold. Nobody (id 0: a wake-up, work nobody started)
+// holds none.
+func (r *Registry) wireActor(ctx context.Context, p *Installed, u *model.User, ip string) wire.Actor {
+	a := wire.Actor{ID: u.ID, Email: u.Email, Name: u.DisplayName, Role: u.Role, IP: ip}
+	if r.heldPerms != nil && u.ID > 0 && p != nil && p.Manifest != nil && len(p.Manifest.UserPermissions) > 0 {
+		a.Permissions = r.heldPerms(ctx, u, p)
+	}
+	return a
+}
 
 // Close frees every compiled module and the runtime. It waits for an upgrade
 // in flight — an automatic one included — to finish its swap, and refuses any

@@ -42,6 +42,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/quota"
@@ -242,6 +243,11 @@ func (h *Handler) authenticate(r *http.Request) (*principal, bool) {
 	if err != nil {
 		return nil, false
 	}
+	// access.webdav (package perm). WebDAV re-authenticates every request,
+	// so taking it away ends the mapped drive at its next request.
+	if p, err = h.auth.Admit(r.Context(), p, perm.AccessWebDAV, "webdav"); err != nil {
+		return nil, false
+	}
 	return &principal{Principal: p}, true
 }
 
@@ -299,6 +305,15 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 		return http.StatusNotFound, "outside /dav"
 	}
 	if !write {
+		// A GET of a file's bytes is a download (internal/perm
+		// files.download). Only refused where the path is VISIBLE — an
+		// invisible one must keep answering the library's 404, or the refusal
+		// becomes an existence oracle.
+		if r.Method == http.MethodGet && name != "" && rel != "" {
+			if status, msg := h.gateDownload(r.Context(), p, name, rel); status != 0 {
+				return status, msg
+			}
+		}
 		return 0, ""
 	}
 	if name == "" {
@@ -333,7 +348,7 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 	// A PUT with no Content-Length still gets caught at Close; see writeFile.
 	if r.Method == http.MethodPut && r.ContentLength > 0 && h.cfg.Quota != nil {
 		if u := auth.UserFrom(ctx); u != nil {
-			if err := h.cfg.Quota.CheckCanWrite(ctx, u.ID, r.ContentLength); err != nil {
+			if err := h.cfg.Quota.CheckFile(ctx, u.ID, r.ContentLength, r.ContentLength); err != nil {
 				return http.StatusInsufficientStorage, "quota exceeded"
 			}
 		}
@@ -386,6 +401,21 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 		}
 		if status, msg := h.gateWrite(ctx, p, dst, drel, r.Method, true); status != 0 {
 			return status, msg
+		}
+		if r.Method == "MOVE" {
+			// A new name in the same folder is files.rename, another folder
+			// files.move, both at once needs both — at both ends. The
+			// FileSystem's Rename asks again; this is where the refusal can
+			// name the permission.
+			set, err := h.cfg.ACL.LoadSet(ctx, p.User, st)
+			if err != nil {
+				return http.StatusInternalServerError, "acl load failed"
+			}
+			for _, need := range perm.RelocateNeeds(st.ID, rel, st.ID, drel) {
+				if !set.AllowsAt(rel, need) || !set.AllowsAt(drel, need) {
+					return http.StatusForbidden, "permission denied: your account lacks the " + string(need) + " permission"
+				}
+			}
 		}
 	}
 	return 0, ""
@@ -452,6 +482,63 @@ func (h *Handler) gateWrite(ctx context.Context, p *principal, st *model.Storage
 	}
 	if set.Effective(rel) < acl.LevelEditor {
 		return http.StatusForbidden, "insufficient permissions"
+	}
+	if need := davPerm(ctx, drv, method, rel, dest); need != "" && !set.AllowsAt(rel, need) {
+		return http.StatusForbidden, "permission denied: your account lacks the " + string(need) + " permission"
+	}
+	return 0, ""
+}
+
+// davPerm is the per-user permission (internal/perm) a mutating method needs
+// on rel — the source, or with dest the destination of a COPY/MOVE. "" means
+// the ≥editor level alone decides, as it always did (the source of a COPY,
+// which only reads it; UNLOCK, which releases what LOCK took).
+func davPerm(ctx context.Context, drv storage.Driver, method, rel string, dest bool) perm.Perm {
+	exists := func() bool {
+		_, err := drv.Stat(ctx, rel)
+		return err == nil
+	}
+	switch method {
+	case http.MethodPut, "LOCK", "PROPPATCH":
+		// LOCK and PROPPATCH are how Office and Finder begin a save; the
+		// save is a change to a file that is there, or the addition of one.
+		if exists() {
+			return perm.FilesModify
+		}
+		return perm.FilesCreate
+	case "MKCOL":
+		return perm.FilesCreate
+	case http.MethodDelete:
+		return perm.FilesDelete
+	case "MOVE":
+		// Whether a MOVE is a rename (same folder), a move or both depends
+		// on the two paths together: preGate asks once it has both, and the
+		// FileSystem's Rename checks replacing what is at the destination.
+		return ""
+	case "COPY":
+		if !dest {
+			return ""
+		}
+		if exists() {
+			return perm.FilesModify
+		}
+		return perm.FilesCreate
+	}
+	return ""
+}
+
+// gateDownload refuses a GET of a visible file the caller may not download.
+func (h *Handler) gateDownload(ctx context.Context, p *principal, name, rel string) (int, string) {
+	st, err := storageref.Resolve(ctx, h.cfg.Store, name)
+	if err != nil || st == nil || !st.Enabled || !scopeOf(ctx).CanAccessStorage(st.ID) {
+		return 0, "" // the FileSystem answers 404
+	}
+	set, err := h.cfg.ACL.LoadSet(ctx, p.User, st)
+	if err != nil || set == nil {
+		return 0, ""
+	}
+	if set.Effective(rel) >= acl.LevelViewer && !set.AllowsAt(rel, perm.FilesDownload) {
+		return http.StatusForbidden, "permission denied: your account lacks the " + string(perm.FilesDownload) + " permission"
 	}
 	return 0, ""
 }

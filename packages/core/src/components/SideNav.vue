@@ -82,7 +82,7 @@ export interface NavApp {
   icon?: string;
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   /** Expanded (labels visible) vs collapsed to the icon rail. */
   expanded: boolean;
   /** Narrow/embed mode — the panel is a drawer over the listing, not a column. */
@@ -188,6 +188,13 @@ const props = defineProps<{
   /** Offer "Request files" in that menu — a folder we may write to and share. */
   canRequestFiles?: boolean;
   /**
+   * May this account make file requests at all here (`share.upload_links`)?
+   * `false` drops the row — like every action the account's role does not
+   * allow, it is not offered — where `canRequestFiles` only greys it for a
+   * folder that cannot take one. Absent = allowed: the server decides.
+   */
+  requestFilesAllowed?: boolean;
+  /**
    * belge:n1 — offer "New document" in that menu. False on a server that
    * publishes no `newdoc_types`, and on one where every type it publishes
    * needs an editor service this deployment has not got.
@@ -213,7 +220,11 @@ const props = defineProps<{
    * the deployment cannot keep.
    */
   apps?: NavApp[];
-}>();
+}>(), {
+  // An absent Boolean prop is `false` in Vue; this one defaults to ON — a
+  // host that says nothing lets the server decide.
+  requestFilesAllowed: true,
+});
 
 const emit = defineEmits<{
   (e: 'toggle'): void;
@@ -455,12 +466,17 @@ const newActions = computed<ContextAction[]>(() => {
   // Only when there is a real folder to hang a drop link on. Rendered as a
   // disabled row rather than dropped, so the menu does not change height
   // between folders — a menu whose items move is a menu people misclick.
-  list.push({ divider: true, key: 'new-sep', label: '' });
-  list.push({
-    key: 'request-files',
-    label: t('drive.new.request'),
-    disabled: !props.canRequestFiles,
-  });
+  // ⚠ Except when the account may not make file requests at all
+  // (`share.upload_links`): then it is not offered, like every other action
+  // the role does not allow. It used to stay, and the server said no.
+  if (props.requestFilesAllowed !== false) {
+    list.push({ divider: true, key: 'new-sep', label: '' });
+    list.push({
+      key: 'request-files',
+      label: t('drive.new.request'),
+      disabled: !props.canRequestFiles,
+    });
+  }
   return list;
 });
 

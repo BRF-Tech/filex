@@ -15,6 +15,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/versioning"
@@ -157,12 +158,24 @@ func (h *E2E) Cleanup(w http.ResponseWriter, r *http.Request) {
 	}
 	actor := auth.UserFrom(ctx)
 	if req.Versions || req.Trash {
+		// Removing versions or trash entries removes files: `delete`, on top
+		// of the route's `write` (auth/token_verbs.go).
+		if !auth.AllowVerb(w, r, auth.VerbDelete) {
+			return
+		}
 		owner := h.folderOwner(r, st.ID, root)
 		mine := actor != nil && owner != nil && *owner == actor.ID
 		if !mine && (actor == nil || !actor.IsAdmin()) {
 			writeJSON(w, http.StatusForbidden, map[string]string{
 				"error": "only the folder's owner or an administrator can delete its versions or trash entries",
 			})
+			return
+		}
+		// Removing versions and trash entries is deleting for good.
+		if v := aclCanID(ctx, h.ACL, h.Store, st.ID, root, perm.FilesPurge); !v.ok {
+			if !v.WritePerm(w, r) {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+			}
 			return
 		}
 	}

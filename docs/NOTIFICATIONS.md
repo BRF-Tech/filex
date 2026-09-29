@@ -219,6 +219,7 @@ a problem, which is the worst way to learn your monitoring was never wired.
 | `app_update_needs_approval` | warning | yes | A newer version of an app asks for permissions it was not granted (meta `added`), or a language pack now brings a module (`adds_module`). **Once** per version. |
 | `app_update_failed` | warning | 0.47 only | An automatic app update was tried and undone; the version it had kept running. Only filex 0.47, which updated apps by itself, wrote it; the id stays so its rows still read. |
 | `plugin_update_available` | info | yes | A storage plugin's update source has a newer version for this server's platform; nothing is installed until an administrator reviews it ([PLUGINS.md → Updates from a source](PLUGINS.md#updates-from-a-source)). Meta: `plugin`, `version`. **Once** per version. |
+| `plugin_requested` | info | yes | An API key (an agent, a script, the CLI) asked for a plugin to be installed or upgraded, and the request waits under **Plugins → Install requests** ([APP-PLUGINS.md → Install requests](APP-PLUGINS.md#install-requests)). Meta: `plugin`, `plugin_label_<lang>`, `version`, `kind` (`app` \| `storage`), `op` (`install` \| `upgrade`), `requester`, `request_id`, `reason`. **Once** per request: asking again for the same source tells nobody. |
 
 **File and share events** (webhook v2) — the subscribable catalogue, every one
 of them tickable on a target in **Admin → Webhooks**:

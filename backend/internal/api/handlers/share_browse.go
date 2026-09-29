@@ -214,7 +214,8 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 	pin := h.extractPIN(r)
 
 	resolved, err := h.Store.GetShareByToken(r.Context(), strings.ToLower(tok))
-	if err != nil || resolved == nil || resolved.IsExpired(time.Now()) {
+	if err != nil || resolved == nil || resolved.IsExpired(time.Now()) ||
+		!linkCreatorAllows(r.Context(), h.ACL, h.Store, resolved) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}

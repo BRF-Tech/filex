@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
-import { seedFixtures } from './fixtures.mjs';
+import { seedFixtures, syncAndWait } from './fixtures.mjs';
 import { addLocalStorage, bootInstance, client, log, newContext, shot, signIn, sleep, uploadTree, waitForThumbs } from './scene.mjs';
 
 const SET = 'appearance';
@@ -55,9 +55,15 @@ async function main() {
     // Something to look at in the explorer: the screenshot world, uploaded
     // through filex so its photos have thumbnails.
     seedFixtures(seed);
-    await addLocalStorage(admin, 'demo', join(inst.files, 'demo'));
+    const demo = await addLocalStorage(admin, 'demo', join(inst.files, 'demo'));
     await uploadTree(admin, 'demo://', seed);
     await waitForThumbs(admin, 'demo://Photos', 6);
+    // ⚠ And one finished sync: uploads catalogue the files but never finish a
+    // storage's FIRST sync, so without it the themed explorer carries "This
+    // storage's first sync has not finished…" across its top — true of a
+    // half-indexed storage, and nothing to do with the theme this picture is
+    // about (the first 0.49.0 take had it).
+    await syncAndWait((_token, path, init) => admin.call(path, init), null, demo.id);
 
     // ── 1. composing the theme ───────────────────────────────────────────
     const ctx = await newContext(browser, { height: 1000 });
@@ -134,6 +140,9 @@ async function main() {
       (c) => getComputedStyle(document.documentElement).getPropertyValue('--fe-primary').trim() === c,
       THEME.light['--fe-primary'],
     );
+    if (await epage.getByText('first sync has not finished').count()) {
+      throw new Error('themed-explorer-1440.png would carry the unfinished-first-sync notice — the sync above did not land');
+    }
     await epage.mouse.move(0, 0);
     await sleep(1200);
     await shot(epage, SET, 'themed-explorer-1440.png');

@@ -70,6 +70,7 @@ import { attachViewPrefsHttp } from './lib/viewPrefsHttp';
 import { underApiBase } from './lib/appBase';
 import { provideTableEnv } from './lib/tableEnv';
 import { gateOnService, isOfficeExt } from './lib/serviceGate';
+import { canShareAny, sharingHeld, type SharingHeld } from './lib/sharingHeld';
 import { opFailure, sayFailure } from './lib/errorWords';
 import { resolveUiProfile } from './lib/uiProfile';
 import RecentlyOpened from './components/RecentlyOpened.vue';
@@ -390,6 +391,34 @@ const emit = defineEmits<{
 // --------------------------------------------------------------------
 
 const api = useFileApi(props.config);
+
+/* The account's permissions (filex internal/perm). The host may pass them
+ * (`config.permissions` / `permissionsByFolder` — the web app does); when it
+ * passes none, the explorer reads them from `/api/auth/me` itself, so the
+ * desktop app and the work / fishapp embeds hide exactly what the web app
+ * hides without each host wiring it (one surface, one behaviour). An
+ * administrator holds everything — the same as not narrowing — and a failed
+ * or permission-less answer leaves it unknown: every action stays and the
+ * server decides, as before. */
+const fetchedPermissions = ref<{ permissions: string[]; byFolder: string[] } | null>(null);
+const heldPermissions = computed<string[] | undefined>(
+  () => props.config.permissions ?? fetchedPermissions.value?.permissions,
+);
+const heldByFolder = computed<string[] | undefined>(() =>
+  props.config.permissions ? props.config.permissionsByFolder : fetchedPermissions.value?.byFolder,
+);
+function loadOwnPermissions(): void {
+  if (props.config.permissions) return;
+  api.myPermissions().then(
+    (res) => {
+      fetchedPermissions.value = res && !res.admin ? { permissions: res.permissions, byFolder: res.byFolder } : null;
+    },
+    () => {
+      fetchedPermissions.value = null;
+    },
+  );
+}
+onMounted(loadOwnPermissions);
 
 // Locale up-front: the pendingOps onSettled callback below (and the undo-toast
 // helpers) need `t()` at runtime, so the catalogue must be constructed before
@@ -3072,7 +3101,7 @@ function openPaletteWith(q: string) {
 const permInitialTab = ref<'perms' | 'share' | 'drop' | undefined>(undefined);
 function openFileRequest() {
   const path = qualify(currentPath.value);
-  if (!path) return;
+  if (!path || !requestFilesHeld.value) return;
   const segs = currentPath.value.split('/').filter(Boolean);
   permTarget.value = {
     path,
@@ -3604,14 +3633,73 @@ function selPerm(sel: FileNode[]): string | undefined {
 function selReadOnly(sel: FileNode[]): boolean {
   return sel.some(nodeReadOnly);
 }
+/* Permissions that differ from folder to folder (`config.permissionsByFolder`
+ * — a role allowing Delete only in Scratch) are asked of the server per path
+ * and remembered here: path → the permissions held there. Until a path is
+ * answered its folder-dependent actions stay hidden; a failed question offers
+ * them, and the server decides as before. */
+const folderAllowed = ref<Record<string, string[]>>({});
+const folderAsking = new Set<string>();
+// Bumped when the account's permissions change: an answer asked before is
+// dropped, not written into the fresh cache.
+let folderGen = 0;
+watch(
+  () => [heldPermissions.value, heldByFolder.value],
+  () => {
+    folderGen++;
+    folderAsking.clear();
+    folderAllowed.value = {};
+  },
+);
+function askFolderAllowed(paths: string[]): void {
+  const byFolder = heldByFolder.value;
+  if (!byFolder?.length) return;
+  const missing = paths.filter((p) => !(p in folderAllowed.value) && !folderAsking.has(p));
+  if (!missing.length) return;
+  missing.forEach((p) => folderAsking.add(p));
+  const perms = [...byFolder];
+  const gen = folderGen;
+  const settle = (answers: string[][]) => {
+    if (gen !== folderGen) return;
+    const next = { ...folderAllowed.value };
+    missing.forEach((p, i) => {
+      next[p] = answers[i] ?? [];
+      folderAsking.delete(p);
+    });
+    folderAllowed.value = next;
+  };
+  api.allowedAt(missing, perms).then(settle, () => settle(missing.map(() => perms)));
+}
+/** permHeld for an action on `paths`: every one of them must allow it. */
+function permHeldAt(p: string, paths: string[]): boolean {
+  if (!heldPermissions.value || !paths.length || !heldByFolder.value?.includes(p)) {
+    return permHeld(p);
+  }
+  // ⚠ Starts a request from inside a computed; the answer lands later in
+  // `folderAllowed`, which re-runs it. Nothing reactive is written now.
+  askFolderAllowed(paths);
+  return paths.every((x) => folderAllowed.value[x]?.includes(p) ?? false);
+}
 // Can the current user write into the directory being viewed? Gates the
 // toolbar New Folder / Upload / Paste + drag-drop upload.
-const canWriteHere = computed(() => permCanEdit(dirPerm.value));
+const canWriteHere = computed(
+  () => permCanEdit(dirPerm.value) && permHeldAt('files.create', currentPath.value ? [qualify(currentPath.value)] : []),
+);
 // Empty-state affordances: the "drop files here" hint + upload button only
 // make sense in a real writable folder (not the virtual drives root, not the
 // trash view).
 const emptyCanUpload = computed(
   () => canWriteHere.value && !atVirtualRoot.value && !trashMode.value,
+);
+/* The sharing kinds the account holds on the folder being viewed and on the
+ * share dialog's item (lib/sharingHeld). "+ New → Request files" makes a file
+ * request here and the dialog makes links there, so each asks the same
+ * permissions the server will ask — per folder when the role says so. */
+const requestFilesHeld = computed(
+  () => sharingAt(currentPath.value ? [qualify(currentPath.value)] : []).uploadLinks,
+);
+const permTargetSharing = computed<SharingHeld | undefined>(() =>
+  permTarget.value && heldPermissions.value ? sharingAt([permTarget.value.path]) : undefined,
 );
 
 // Context menu
@@ -4973,7 +5061,13 @@ useKeyboardShortcuts(rootEl, {
   onRefresh: () => void load(),
   onDownload: () => void dispatchItemAction('download', activeTargets()),
   onPreview: () => void dispatchItemAction('preview', activeTargets()),
-  onShare: () => void dispatchItemAction('access', activeTargets()),
+  /* The share dialog is a door that makes links: the key opens it only where
+     the menu offers Share (a role without any sharing permission gets
+     nothing from the key either). */
+  onShare: () => {
+    const targets = activeTargets();
+    if (offeredOn('access', targets)) void dispatchItemAction('access', targets);
+  },
   onTags: () => void dispatchItemAction('tags', activeTargets()),
   onOpenTab: () => void dispatchItemAction('open-tab', activeTargets()),
   onCopyPath: () => {
@@ -5601,11 +5695,11 @@ const contextActions = computed<ContextAction[]>(() => {
     // "Delete permanently" only for someone the server lets purge
     // (trashCanEmpty): offered to everyone, it did nothing for most.
     return [
-      { key: 'restore', label: t('ctx.restore') },
+      { key: 'restore', label: t('ctx.restore'), hidden: !permHeld('files.create') },
       ...(trashCanEmpty.value
         ? [
             { divider: true, key: 'sep1', label: '' },
-            { key: 'delete', label: t('ctx.delete_perm'), danger: true },
+            { key: 'delete', label: t('ctx.delete_perm'), danger: true, hidden: !permHeld('files.purge') },
           ]
         : []),
     ];
@@ -5665,7 +5759,61 @@ const contextActions = computed<ContextAction[]>(() => {
 // right-click menu and the top menu don't match"). The toolbar filters out
 // dividers/hidden; the context menu shows them. Action handling is unified in
 // dispatchItemAction().
+/* ── Per-user permissions (filex backend internal/perm) ──────────────────
+ * The account's permissions — the host's `config.permissions`, or the list
+ * the explorer read from `/api/auth/me` itself when the host passed none
+ * (`heldPermissions`) — hide the actions the server would refuse with 403
+ * `permission_denied`. One filter over the finished list, so the right-click
+ * menu, the toolbar and the split pane — all built by selectionActionList —
+ * agree. Only when neither is known (nothing passed, and nothing usable came
+ * back) does every action stay and the server decide. */
+function permHeld(p: string): boolean {
+  const held = heldPermissions.value;
+  return !held || held.includes(p);
+}
+const ACTION_PERMS: Record<string, string[]> = {
+  rename: ['files.rename'],
+  cut: ['files.move'],
+  'move-to': ['files.move'],
+  delete: ['files.delete'],
+  download: ['files.download'],
+  convert: ['files.create'],
+  'copy-to': ['files.create'],
+  paste: ['files.create', 'files.move'],
+  tags: ['files.tag'],
+};
+/** The sharing kinds held on `paths` (lib/sharingHeld) — the one answer the
+ *  Share action, the share dialog, "Request files" and the details panel's
+ *  "Create link" all read. */
+function sharingAt(paths: string[]): SharingHeld {
+  return sharingHeld((p) => permHeldAt(p, paths));
+}
+function gateByPermissions(list: ContextAction[], sel: FileNode[]): ContextAction[] {
+  if (!heldPermissions.value) return list;
+  const paths = sel.map((n) => n.path);
+  return list.map((a) => {
+    // Share opens a dialog with three kinds of sharing in it; it is offered
+    // when one of them can be used HERE — and a file takes no file request.
+    if (a.key === 'access') {
+      const dirs = sel.length > 0 && sel.every((n) => n.type === 'dir');
+      return canShareAny(sharingAt(paths), dirs) ? a : { ...a, hidden: true };
+    }
+    const needs = ACTION_PERMS[a.key];
+    // Any one of the listed permissions is enough (paste is a copy or a move).
+    return needs && !needs.some((p) => permHeldAt(p, paths)) ? { ...a, hidden: true } : a;
+  });
+}
+/** Does the selection's own list offer `key`? The keyboard asks this before
+ *  it acts, so a shortcut cannot open what the menu hides. */
+function offeredOn(key: string, targets: FileNode[]): boolean {
+  return selectionActionList(targets).some((a) => a.key === key && !a.hidden && !a.disabled);
+}
+
 function selectionActionList(sel: FileNode[]): ContextAction[] {
+  return gateByPermissions(selectionActionListAll(sel), sel);
+}
+
+function selectionActionListAll(sel: FileNode[]): ContextAction[] {
   const any = sel.length > 0;
   const single = sel.length === 1;
   /* pane:p1 — a STORAGE row is a mount point, not a file: rename, delete, cut,
@@ -5824,8 +5972,10 @@ const toolbarActions = computed<ContextAction[]>(() => {
   if (trashActive.value) {
     if (sel.length === 0) return [];
     return [
-      { key: 'restore', label: t('ctx.restore') },
-      ...(trashCanEmpty.value ? [{ key: 'delete', label: t('ctx.delete_perm'), danger: true }] : []),
+      { key: 'restore', label: t('ctx.restore'), hidden: !permHeld('files.create') },
+      ...(trashCanEmpty.value
+        ? [{ key: 'delete', label: t('ctx.delete_perm'), danger: true, hidden: !permHeld('files.purge') }]
+        : []),
     ];
   }
   const trimmedPath = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
@@ -8227,6 +8377,12 @@ const inspectorNodes = computed<FileNode[]>(() => {
   if (live.length) return live;
   return heldValid.value ? (heldSelection.value?.nodes ?? []) : [];
 });
+/** The sharing kinds held on the panel's one item — its "Create link" is a
+ *  door that makes links like any other (lib/sharingHeld). */
+const inspectorSharing = computed<SharingHeld | undefined>(() => {
+  const nodes = inspectorNodes.value;
+  return nodes.length === 1 && heldPermissions.value ? sharingAt([nodes[0].path]) : undefined;
+});
 /** Where the held item lives — named, so "this is not what is selected in front
  *  of you" is never a guess. Empty while a live selection is shown. */
 const inspectorHeldIn = computed(() =>
@@ -10043,6 +10199,7 @@ function closeRecoveryKey() {
       :can-write="canWriteHere && !atVirtualRoot && !trashActive"
       :locale="locale"
       :can-request-files="canWriteHere && !atVirtualRoot && !trashActive && !navView && !e2eActive /* surucu:d1; wiring:e2 — a visitor's upload would land in the clear */"
+      :request-files-allowed="requestFilesHeld /* share.upload_links — not offered at all without it */"
       :can-new-document="canNewDocument && !trashActive && !navView && !e2eActive /* belge:n1; wiring:e2 — the server writes the template in the clear */"
       @new-document="showNewDocument = true"
       :quota="quotaSnapshot /* surucu:d1 */"
@@ -10798,6 +10955,7 @@ function closeRecoveryKey() {
       :locale="locale"
       :narrow="isNarrow"
       :caller-admin="callerAdmin /* the Node ID row is an administrator's (InspectorPanel) */"
+      :sharing="inspectorSharing /* its Create link / Manage buttons (lib/sharingHeld) */"
       :thumb-src="thumbs.src"
       :api-base="props.config.apiBase ?? '' /* etiket:t1 — the details panel's
              Tags section mounts the same TagPicker the context menu opens, and
@@ -11326,6 +11484,7 @@ function closeRecoveryKey() {
       :mail-ready="capabilitiesData?.mail?.ready"
       :can-configure="callerAdmin"
       :perm="permTarget.perm || dirPerm"
+      :sharing="permTargetSharing /* which of its sections the account may use (lib/sharingHeld) */"
       @close="showPerm = false; permInitialTab = undefined"
     />
 

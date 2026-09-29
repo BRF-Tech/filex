@@ -366,7 +366,7 @@ field selects the name part only, the way a rename does, so typing replaces
   extension is swapped (`notes.txt` → `notes.md`); a name with no extension, or
   one you chose (`test.conf`), stays as it is.
 
-![The New document dialog with a Plain text document named LICENSE](screenshots/v0.48.0/newdoc/newdoc-any-name-1280.png)
+![The New document dialog with a Plain text document named LICENSE](screenshots/v0.49.0/newdoc/newdoc-any-name-1280.png)
 
 The create itself is `POST /api/files/manager?action=newfile` with
 `{path, name, type, exact_name}`, where `type` is one of the `newdoc_types`
@@ -416,11 +416,11 @@ you were in gets nothing until you save it.
 
 | What Create opens — a draft, under the bar that says where Save puts it | Closing a draft that was never saved |
 |---|---|
-| ![The text editor on a new draft, with the draft bar](screenshots/v0.48.0/newdoc/newdoc-license-editor-1280.png) | ![Save to disk, Keep in Drafts or Discard](screenshots/v0.48.0/newdoc/drafts-close-1280.png) |
+| ![The text editor on a new draft, with the draft bar](screenshots/v0.49.0/newdoc/newdoc-license-editor-1280.png) | ![Save to disk, Keep in Drafts or Discard](screenshots/v0.49.0/newdoc/drafts-close-1280.png) |
 
 | Save, when a file has taken the name meanwhile | Drafts, in the navigation panel |
 |---|---|
-| ![Save the draft under another name?](screenshots/v0.48.0/newdoc/drafts-taken-1280.png) | ![The Drafts view](screenshots/v0.48.0/newdoc/drafts-view-1280.png) |
+| ![Save the draft under another name?](screenshots/v0.49.0/newdoc/drafts-taken-1280.png) | ![The Drafts view](screenshots/v0.49.0/newdoc/drafts-view-1280.png) |
 
 Drafts belong to a person, so a caller that is not one creates the file
 directly, as before: an app token, and an embed confined to one folder by its

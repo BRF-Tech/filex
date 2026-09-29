@@ -102,7 +102,29 @@ pnpm run dist:linux      # .deb + .rpm + AppImage (the .rpm needs rpmbuild: `apt
 pnpm run dist:mac        # .dmg + .zip — host arch (arm64 on Apple Silicon), ad-hoc sealed
 pnpm run dist:store      # Microsoft Store package (.appx) — Windows only; see "Microsoft Store"
 pnpm run dist:snap       # Snap Store .snap (strict, core20 template; no snapcraft needed)
+
+# Windows on Arm, cross-built on an x64 machine (the CLI inside is arm64 too)
+pnpm run dist:win:arm64    # filex-desktop-arm64.exe + filex-desktop-portable-arm64.exe
+pnpm run dist:store:arm64  # filex-desktop-arm64.appx
 ```
+
+**Architectures.** electron-builder builds for the host unless told otherwise,
+and so does `scripts/fetch-cli.mjs` for the CLI it embeds (the sync engine):
+`--arch x64|arm64` picks another one (`GOARCH` works too), and with
+`FILEX_CLI_BIN` it only checks the given binary is that architecture. An arm64
+installer with an x64 CLI inside installs, opens and fails at the first sync.
+Linux arm64 is built **on** arm64 (the release uses GitHub's `ubuntu-24.04-arm`):
+electron-builder 24 has no prebuilt arm64 snap template, so the arm64 snap is
+built by real snapcraft (in LXD), and its bundled fpm is x86-64 only
+(`USE_SYSTEM_FPM=true` + `gem install fpm` for the .deb and .rpm).
+
+⚠ Each `dist:win*` run writes `release/latest.yml` naming only the installer it
+built, and electron-updater reads **one** `latest.yml` on Windows whatever the
+CPU. The release joins the two with the x64 installer first
+(`.github/workflows/scripts/merge-latest-yml.mjs` in the public repository);
+never publish the arm64 run's `latest.yml` on its own — every x64 install would
+be offered the arm64 installer. Linux has a feed per architecture
+(`latest-linux.yml`, `latest-linux-arm64.yml`) and needs no joining.
 
 Linux packages are built on Linux; `electronuserland/builder` in Docker is
 enough for all four, the snap included.
@@ -399,6 +421,13 @@ Partner Center (`MSSTORE_*` secrets, `MSSTORE_PRODUCT_ID` variable). While an
 earlier submission is still in certification it leaves the Store alone and
 says so; upload the artifact by hand once that one is live. A Store problem is
 a warning on the run, never a failed release.
+
+From 0.48.1 the job also builds the arm64 package (`dist:store:arm64`) and
+submits both in ONE `filex-desktop.msixbundle` (`makeappx bundle`), which is
+what Partner Center recommends for more than one architecture; the two
+packages must be identical but for `ProcessorArchitecture`. The Store may hold
+several packages of the same version as long as their architectures differ,
+and hands each device the highest version it can run.
 
 - **Version.** The Store refuses a first number of 0 and keeps the fourth for
   itself, so the package carries a mapping that `scripts/appx-manifest.cjs`

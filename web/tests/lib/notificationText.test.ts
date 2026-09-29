@@ -391,6 +391,22 @@ describe('an app update notice', () => {
     expect(r).toEqual({ title: 'myfs depo eklentisinin 1.1.0 sürümü yayında', body: 'Eklentiler → Depolama altında sizi bekliyor.' });
   });
 
+  // pluginreq: an API key asked for a plugin — who asked, and their words.
+  it('says a plugin request by the app’s label, who asked and why', () => {
+    const req = row('plugin_requested', { requester: 'work-agent', reason: 'Ekip İspanyolca arayüz istiyor', from: undefined });
+    expect(renderNotification(req, 'tr')).toEqual({
+      title: 'Eklenti isteği: İspanyolca dil paketi 0.1.4',
+      body: 'work-agent: Ekip İspanyolca arayüz istiyor',
+    });
+    expect(renderNotification(req, 'en').title).toBe('Plugin request: Spanish language pack 0.1.4');
+    const storage = renderNotification(
+      { event: 'plugin_requested', title: 'x asks to install myfs 1.0.0', meta: { plugin: 'myfs', plugin_label_en: 'myfs', version: '1.0.0', reason: 'arşiv' } },
+      'tr',
+    );
+    expect(storage.title).toBe('Eklenti isteği: myfs 1.0.0');
+    expect(storage.body).toBe('Birisi: arşiv');
+  });
+
   it('says an available and a failed update without the server’s English', () => {
     expect(renderNotification(row('app_update_available', {}), 'tr').title).toBe('İspanyolca dil paketi 0.1.4 yayında');
     const failed = renderNotification(row('app_update_failed', { error: 'describe: version mismatch' }), 'tr');

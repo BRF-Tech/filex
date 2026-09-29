@@ -237,6 +237,13 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
     en: { title: 'Storage plugin {plugin} {version} is available', body: 'It waits for you under Plugins → Storage.' },
     tr: { title: '{plugin} depo eklentisinin {version} sürümü yayında', body: 'Eklentiler → Depolama altında sizi bekliyor.' },
   },
+  // pluginreq/service.go announce: meta.{plugin_label_<lang>, version,
+  // requester, reason, kind, op}. An API key asked for a plugin; it waits on
+  // the Plugins page. One phrasing for an install and an upgrade.
+  plugin_requested: {
+    en: { title: 'Plugin request: {plugin} {version}', body: '{requester}: {reason}' },
+    tr: { title: 'Eklenti isteği: {plugin} {version}', body: '{requester}: {reason}' },
+  },
   // replica/recorder.go NotifyReplicaFail: meta.{path,op,error}
   replica_fail: {
     en: { title: 'Replica {op} failed: {name}', body: '{error}' },
@@ -437,6 +444,8 @@ export function notificationVars(
     current: str(meta.current),
     // app_update_needs_approval: the permissions the new version adds.
     added: str(meta.added),
+    // plugin_requested: who asked (named as the account was when it asked).
+    requester: str(meta.requester) || words.someone,
     op: str(meta.op),
     error: str(meta.error) || str(meta.primary_error),
     failed: num(meta.failed_count),

@@ -5,7 +5,7 @@ family talks to any running filex server over its public REST API. Nothing is
 installed server-side — the CLI only uses endpoints the web UI already uses.
 
 ```
-filex client login | ls | upload | download | mkdir | rm | mv | search | share
+filex client login | ls | upload | download | mkdir | rm | mv | search | share | plugins
 ```
 
 The same binary also carries three commands that are not part of `client`:
@@ -69,6 +69,14 @@ The token may be a **session token** (minted by `login`) or a durable
 **API token** — an API key from the admin panel's API / MCP page or the explorer's
 **API keys** entry — the
 server accepts both as `Authorization: Bearer`.
+
+⚠ An API token does only what its verbs name, on every command: `ls`,
+`download` and `search` need `read`; `upload`, `mkdir`, `mv` and `share` need
+`write`; `rm` needs `delete`. A command the token cannot run fails with
+`HTTP 403: token missing scope: <verb>` — mint a token with the verbs the
+script uses ([RBAC.md → API tokens](RBAC.md#api-tokens-verbs-on-every-surface)).
+The account behind it is held to its own permissions too
+([PERMISSIONS.md](PERMISSIONS.md)): `share` also needs `share.links`.
 
 Two variables move where the CLI keeps its own files, for a checkout or a run
 that must not touch your real state — both ignored when empty:
@@ -272,6 +280,31 @@ Expires: 2026-07-24 13:44
 Folders can be shared too — the public link serves them as a ZIP. The PIN is
 generated server-side and shown **once**; `--expires-days 0` (default) means
 no expiry.
+
+### Plugin requests
+
+An API key cannot install a plugin: it **asks**, and an administrator signed
+in to the admin panel approves or rejects the request
+([APP-PLUGINS.md → Install requests](APP-PLUGINS.md#install-requests)). With
+an admin-scoped key:
+
+```bash
+filex client plugins request --kind app --github-repo BRF-Tech/filex-sign --ref v0.1.1 \
+  --reason "The legal team signs contracts in filex"
+filex client plugins request --kind storage --name myfs --source acme/filex-myfs --reason "Archive storage"
+filex client plugins request --kind app --upgrade --name sign --reason "Security fix"
+filex client plugins requests                 # waiting ones; --status all for every state
+```
+
+```
+Request #7: install app sign 0.1.1 — pending
+Permissions: files:read, files:write, …
+sha256:      4dddf289c4b0…
+The request is waiting for an administrator's approval in the admin panel (Plugins → Install requests). …
+```
+
+`--reason` is required. Asking again for the same source answers the waiting
+request (`Already requested #7`). There is no command to approve or reject.
 
 ## `filex mount` — the server as a folder
 

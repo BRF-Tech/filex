@@ -205,7 +205,7 @@ func TestStorageUsage_RootConfinedTokenGetsNoWholeStorageTotal(t *testing.T) {
 
 	adminUser, err := store.GetUserByEmail(ctx, email)
 	require.NoError(t, err)
-	token := testutil.NewAPIToken(t, store, adminUser.ID, "root:confined://projects/p1")
+	token := testutil.NewAPIToken(t, store, adminUser.ID, "read,root:confined://projects/p1")
 
 	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/files/quota/storages", nil)
 	require.NoError(t, err)

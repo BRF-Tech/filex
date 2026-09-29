@@ -282,6 +282,7 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     shareDelete: derive(config.shareDelete, '/api/files/share/{uuid}'),
     limits: derive(config.limits, '/api/files/limits'),
     capabilities: derive(config.capabilities, '/api/files/capabilities'),
+    me: derive(config.me, '/api/auth/me'),
     archiveList: derive(config.archiveList, '/api/files/archive/list'),
     archiveExtract: derive(config.archiveExtract, '/api/files/archive/extract'),
     archiveCreate: derive(config.archiveCreate, '/api/files/archive/create'),
@@ -718,6 +719,26 @@ export function useFileApi(config: ExplorerConfig) {
     });
   }
 
+  /**
+   * Which of `permissions` the account holds on each of `items` — the
+   * server's per-path answer for actions a role allows or denies only in some
+   * folders. One list per item, in the order asked. Changes nothing.
+   */
+  async function allowedAt(items: string[], permissions: string[]): Promise<string[][]> {
+    const out: string[][] = [];
+    // The server takes at most 1000 paths per question.
+    for (let i = 0; i < items.length; i += 1000) {
+      const part = items.slice(i, i + 1000);
+      const data = await jsonFetch<{ allowed?: string[][] }>(managerUrl('allowed'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ permissions, items: part.map((p) => ({ path: p })) }),
+      });
+      part.forEach((_, j) => out.push(data.allowed?.[j] ?? []));
+    }
+    return out;
+  }
+
   /** Server-side recursive copy (async — returns a PendingOp). */
   async function copy(source: string[], target: string): Promise<{ op: PendingOpDto }> {
     if (!endpoints.copy) throw new Error('copy endpoint not configured');
@@ -1031,6 +1052,28 @@ export function useFileApi(config: ExplorerConfig) {
       };
     }
     return jsonFetch<Capabilities>(endpoints.capabilities);
+  }
+
+  /** What the signed-in account may do (`/api/auth/me`, filex internal/perm):
+   *  null when the endpoint is off or the answer carries no permissions. */
+  async function myPermissions(): Promise<{
+    admin: boolean;
+    permissions: string[];
+    byFolder: string[];
+  } | null> {
+    if (!endpoints.me) return null;
+    const me = await jsonFetch<{
+      user?: { role?: string };
+      permissions?: string[];
+      permissions_in_folders?: string[];
+      permissions_by_folder?: string[];
+    }>(endpoints.me);
+    if (!me || !Array.isArray(me.permissions)) return null;
+    return {
+      admin: me.user?.role === 'admin',
+      permissions: [...me.permissions, ...(me.permissions_in_folders ?? [])],
+      byFolder: me.permissions_by_folder ?? [],
+    };
   }
 
   /* ── App plugins (docs/APP-PLUGINS-API.md) ─────────────────────────── */
@@ -1552,6 +1595,8 @@ export function useFileApi(config: ExplorerConfig) {
     moveAsync,
     deleteAsync,
     deleteItems,
+    allowedAt,
+    myPermissions,
     restore,
     listTrash,
     restoreIds,

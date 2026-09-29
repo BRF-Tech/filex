@@ -101,6 +101,15 @@ const (
 	// `version`. Once per version; nothing is installed until an
 	// administrator reviews it.
 	EventPluginUpdateAvailable EventType = "plugin_update_available"
+	// EventPluginRequested: somebody who may not install plugins — an API key:
+	// an agent, a script, the CLI — left a request to install or upgrade one,
+	// and it waits for an administrator on the Plugins page
+	// (internal/pluginreq). Meta `plugin`, `plugin_label_<lang>` (an app's
+	// label in every language it has; a storage plugin's name), `version`,
+	// `kind` (app | storage), `op` (install | upgrade), `requester`,
+	// `request_id`, `reason`. Once per request: asking again for the same
+	// source answers the pending request and tells nobody.
+	EventPluginRequested EventType = "plugin_requested"
 )
 
 // operatorEvents are the alarms above: things only an administrator can act on
@@ -126,7 +135,7 @@ var operatorEvents = []EventType{
 	EventPrimaryReadFail, EventQuotaNearFull, EventQuotaFull, EventQueueStuck, EventAuthFailSpike,
 	EventDiskFull, EventUpdateAvailable, EventUpdateApplied,
 	EventAppUpdated, EventAppUpdateAvailable, EventAppUpdateNeedsApproval, EventAppUpdateFailed,
-	EventPluginUpdateAvailable,
+	EventPluginUpdateAvailable, EventPluginRequested,
 }
 
 // Canonical file/share events (webhook v2 — "Bağlan" (Connect) wave). Emitted

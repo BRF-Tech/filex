@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/mailer"
@@ -37,6 +38,9 @@ import (
 // ("blind drop"). The target folder is resolved server-side from the token;
 // the anonymous client can never influence the destination path.
 type Drop struct {
+	// ACL, when wired, closes a link whose creator may no longer make it
+	// (link_creator.go). Nil in tests built by hand: every link answers.
+	ACL       *acl.Resolver
 	Store     db.Store
 	Manager   *Manager
 	Service   *share.Service
@@ -69,6 +73,11 @@ func (h *Drop) AttachBranding(b *BrandingSource) { h.Branding = b }
 
 // AttachLocale sets the fallback language for the drop pages.
 func (h *Drop) AttachLocale(def string) { h.DefaultLocale = def }
+
+// AttachACL wires the permission resolver: a file request closes when its
+// creator may no longer make one, and the creator's blocked file types apply
+// to what is dropped (link_creator.go).
+func (h *Drop) AttachACL(r *acl.Resolver) { h.ACL = r }
 
 // ownerLocale resolves the language for everything a drop sends to the folder
 // owner - the bell notification, the webhook v2 payload, the owner e-mail and
@@ -375,6 +384,12 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 		h.refuse(w, r, http.StatusGone, map[string]any{"error": "expired"})
 		return
 	}
+	// A file request whose creator may no longer make one closes
+	// (link_creator.go): the same answer as an unknown token.
+	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh) {
+		h.refuse(w, r, http.StatusNotFound, map[string]any{"error": "not_found"})
+		return
+	}
 	// The PIN may be in the form (the no-JS page embeds it) or already
 	// answered on this browser (the SPA's cookie). One gate, counted.
 	if !shareUnlocked(h.Service, r, sh) {
@@ -443,6 +458,12 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 		}
 		if !extAllowed(fh.Filename, ds.AllowedExt) {
 			h.refuse(w, r, http.StatusUnsupportedMediaType, map[string]any{"error": "ext_not_allowed", "allowed_ext": ds.AllowedExt})
+			return
+		}
+		// The creator's own role may block the type outright (blocked
+		// extensions): the file lands in their storage as their file.
+		if ext := linkCreatorBlocksName(r.Context(), h.ACL, h.Store, sh, st, path.Join(node.Path, fh.Filename)); ext != "" {
+			h.refuse(w, r, http.StatusUnsupportedMediaType, map[string]any{"error": "ext_not_allowed", "extension": ext})
 			return
 		}
 	}
@@ -551,6 +572,12 @@ func (h *Drop) failWrite(w http.ResponseWriter, r *http.Request, err error, stag
 		code = "quota_exceeded"
 		status = http.StatusInsufficientStorage
 	}
+	if errors.Is(err, quota.ErrFileTooLarge) {
+		// Not an outage: the link creator's role caps a single file's size
+		// (quotastore.WithOwner holds the drop against the creator).
+		code = "file_too_large"
+		status = http.StatusRequestEntityTooLarge
+	}
 	if errors.Is(err, syspath.ErrReserved) {
 		// Not an outage either: every file was named like filex's own.
 		code = "reserved_name"
@@ -639,6 +666,10 @@ func (h *Drop) resolveKind(w http.ResponseWriter, r *http.Request, tok string) (
 	}
 	if sh.IsExpired(time.Now()) {
 		h.renderDropError(w, r, http.StatusGone, "drop_expired")
+		return nil, false
+	}
+	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh) {
+		h.renderDropError(w, r, http.StatusNotFound, "drop_notfound")
 		return nil, false
 	}
 	return sh, true

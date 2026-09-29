@@ -211,6 +211,11 @@ func (h *Meta) tagOps() tagOps { return tagOps{store: h.Store, acl: h.ACL} }
 // level is the caller's ACL level on a node (lock-aware, so a file an app
 // holds for signature reads as viewer to everyone — its team tags freeze with
 // it, consistently with the row `perm` the client gates on).
+//
+// ⚠ A token without `write` reads as a viewer here (auth/token_verbs.go):
+// a TEAM tag is the file's shared description, and changing it is a write —
+// on the web explorer's route, on /api/ai and in the MCP tool alike. Its
+// personal tags stay its own, like a viewer's.
 func (o tagOps) level(ctx context.Context, n *model.Node) acl.Level {
 	if o.acl == nil {
 		return acl.LevelOwner
@@ -223,7 +228,11 @@ func (o tagOps) level(ctx context.Context, n *model.Node) acl.Level {
 	if err != nil {
 		return acl.LevelNone
 	}
-	return set.Effective(n.Path)
+	lv := set.Effective(n.Path)
+	if lv > acl.LevelViewer && !auth.TokenAllows(ctx, auth.VerbWrite) {
+		lv = acl.LevelViewer
+	}
+	return lv
 }
 
 // tagNode resolves a node for a tag request: tenant, token confinement, then
@@ -631,6 +640,11 @@ func (h *Meta) SetTags(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	case errors.Is(err, errTeamNeedsEdit):
+		if !auth.TokenAllows(r.Context(), auth.VerbWrite) {
+			// Name what is missing: the token's verb, not the account's rights.
+			auth.RefuseVerb(w, auth.VerbWrite)
+			return
+		}
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 		return
 	default:

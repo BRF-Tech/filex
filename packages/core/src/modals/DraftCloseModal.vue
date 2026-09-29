@@ -47,10 +47,15 @@ const emit = defineEmits<{
 const { t } = useLocale(() => props.locale);
 
 const keepBtn = ref<HTMLButtonElement | null>(null);
-// ⚠ immediate: the dialog is mounted already open (v-if in its host), so a
-// plain watch never fired and the focus waited for Modal's 30 ms timer - a
-// test that looked sooner saw nothing focused on a slow CI runner (v0.48.0
-// release run). Modal keeps a focus that is already inside.
+// Keep has the focus the moment the question opens, not after Modal's 30 ms
+// timer (Modal keeps a focus that is already inside). `immediate` covers a
+// host that mounts the question already open; PreviewModal keeps it mounted
+// and flips `open`.
+//
+// ⚠ previewDraft's "Keep is the default" failures on CI (v0.48.0 release run,
+// then again with this watch immediate) were not this watch: the viewer's own
+// Modal timer, BEHIND the question, pulled the focus back into the viewer.
+// Modal now takes the focus only while it is the dialog in front.
 watch(
   () => props.open,
   (open) => {

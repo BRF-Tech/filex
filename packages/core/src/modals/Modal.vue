@@ -142,8 +142,8 @@ function focusFirst() {
   if (!card) return;
   // A dialog that names its default answer (`data-fe-autofocus`) gets it, even
   // in the footer: the draft close question's first footer button is Discard,
-  // and focusing it made Enter throw the draft away. The dialog's own focus
-  // call alone lost the race to this timer under load (v0.48.0 pretag).
+  // and focusing it made Enter throw the draft away (v0.48.0 pretag, after
+  // the viewer behind the question had taken the focus; see wire()).
   const preferred = card.querySelector<HTMLElement>('[data-fe-autofocus]');
   if (preferred) {
     preferred.focus();
@@ -169,8 +169,19 @@ function wire() {
     focusTimer = undefined;
     if (typeof document === 'undefined') return;
     // Only if the focus is not already inside (a component that focuses its
-    // own field on mount keeps it).
-    if (wired && !cardEl.value?.contains(document.activeElement)) {
+    // own field on mount keeps it), and only while this dialog is the one in
+    // FRONT.
+    //
+    // ⚠⚠ A dialog behind another does not take the focus: it belongs to the
+    // one in front. A draft's editor whose close question opened within these
+    // 30 ms (the question is a SIBLING of the viewer's card, so "inside" is
+    // false) pulled the focus off "Keep in Drafts" into its own text box when
+    // this timer fired, until the question's own timer took it back 30 ms
+    // later; an Enter in between went into the draft's text. previewDraft's
+    // focus check landed in that window on the v0.48.0 release run and on a
+    // v0.48.1 CI run (activeElement: the viewer's textarea). Frozen timers
+    // reproduce it every time (previewDraft.test.ts, coreModal.test.ts).
+    if (wired && isTopModal(me) && !cardEl.value?.contains(document.activeElement)) {
       // ⚠ A dialog opened from a MENU row: at wire time the focus is on that
       // row, the menu hands the focus back to its own button a tick later,
       // and the row is gone once the menu's closing transition ends. Keep

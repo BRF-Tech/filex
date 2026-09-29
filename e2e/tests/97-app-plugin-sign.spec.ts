@@ -107,7 +107,21 @@ test.describe('App plugin: sign — install, sign, verify', () => {
 
   test('the menu follows what the app knows about the file', async ({ page }) => {
     await openExplorer(page);
-    const verbs = await menuVerbs(page, QUALIFIED);
+    // ⚠ The app's rows join the menu when /api/files/plugins/actions answers,
+    // after the explorer has drawn its rows: a right-click in between opens a
+    // menu of the core verbs alone. Read the menu again until the app's rows
+    // are in it — an app that never offers them still fails, after the wait
+    // (v0.49.0 release run: the full suite under load opened it too early).
+    let verbs: string[] = [];
+    await expect
+      .poll(
+        async () => {
+          verbs = await menuVerbs(page, QUALIFIED);
+          return /sign|imzala/i.test(verbs.join(', '));
+        },
+        { timeout: 20_000, message: 'a PDF must offer the signing rows' },
+      )
+      .toBe(true);
     const joined = verbs.join(', ');
 
     expect(/sign|imzala/i.test(joined), `a PDF must offer the signing rows: [${joined}]`).toBe(true);

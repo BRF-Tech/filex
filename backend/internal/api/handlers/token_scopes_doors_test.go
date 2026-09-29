@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -78,18 +79,45 @@ func TestTokenDoors_NoTokenWithoutScopes(t *testing.T) {
 }
 
 // A token whose row is empty anyway (written by hand, or by a version before
-// the rule) fails CLOSED on every surface: file routes and the admin surface.
+// the rule) fails CLOSED on every surface a token reaches: the agent surface,
+// the explorer's file routes, the account and its credentials, the caller's
+// own links and bell, the admin area and the ShareX door — read and write
+// alike. An administrator's token, so nothing is refused for the ROLE's sake.
+//
+// ⚠ 0.49.0 doc audit: handlers.normalizeScopes still said "an empty input
+// stays empty (== all scopes)", the pre-0.43 rule. Measured here, on each door
+// kind, that the rule in force is the opposite.
 func TestTokenDoors_AnEmptyRowGrantsNothing(t *testing.T) {
 	srv, _, store := testutil.NewTestServer(t)
 	uid, _ := testutil.SeedAdminUser(t, store)
 	tok := testutil.NewAPIToken(t, store, uid, "")
-	for _, path := range []string{"/api/ai/files?path=", "/api/ai/admin/users"} {
-		req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodGet, "/api/ai/files?path=", ""},
+		{http.MethodGet, "/api/ai/admin/users", ""},
+		{http.MethodPost, "/api/ai/mkdir", `{"path":"x://y"}`},
+		{http.MethodPost, "/api/ai/mcp", `{}`},
+		{http.MethodGet, "/api/files/manager?action=index&path=", ""},
+		{http.MethodPost, "/api/files/manager?action=newfolder", `{"path":"x://","name":"y"}`},
+		{http.MethodPost, "/api/files/share", `{"path":"x://y"}`},
+		{http.MethodGet, "/api/auth/me", ""},
+		{http.MethodPatch, "/api/auth/profile", `{"display_name":"x"}`},
+		{http.MethodGet, "/api/tokens", ""},
+		{http.MethodPost, "/api/tokens", `{"label":"x","scopes":"read"}`},
+		{http.MethodGet, "/api/shares/", ""},
+		{http.MethodGet, "/api/notifications/", ""},
+		{http.MethodGet, "/api/admin/users", ""},
+		{http.MethodGet, "/api/admin/settings", ""},
+		{http.MethodPost, "/api/sharex/upload", ``},
+	} {
+		req, err := http.NewRequest(c.method, srv.URL+c.path, strings.NewReader(c.body))
 		require.NoError(t, err)
 		req.Header.Set("X-Filex-Token", tok)
+		if c.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		_ = resp.Body.Close()
-		assert.Equal(t, http.StatusForbidden, resp.StatusCode, "%s: an empty-scope token got through", path)
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode, "%s %s: an empty-scope token got through", c.method, c.path)
 	}
 }

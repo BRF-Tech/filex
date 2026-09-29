@@ -72,6 +72,10 @@ func Middleware(required bool) func(http.Handler) http.Handler {
 						return
 					}
 					ctx = WithTokenUser(WithToken(ctx, token), username)
+				} else if refuseTwoFactorPending(w, r.WithContext(ctx), user) {
+					// A session whose account a rule requires to enrol 2FA
+					// first (token_perm.go).
+					return
 				}
 				r = r.WithContext(ctx)
 			}

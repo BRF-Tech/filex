@@ -20,6 +20,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/writegate"
 	"github.com/brf-tech/filex/backend/internal/writehook"
@@ -254,8 +255,11 @@ func (a *Archive) Create(w http.ResponseWriter, r *http.Request) {
 	if gate(w, r, a.ACL, destStorageID, writegate.Writes(destRel)) {
 		return
 	}
-	if !aclAllowID(r.Context(), a.ACL, a.Store, destStorageID, destRel, acl.LevelEditor) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+	// A new file at the destination: files.create there (≥editor).
+	if v := aclCanID(r.Context(), a.ACL, a.Store, destStorageID, destRel, perm.FilesCreate); !v.ok {
+		if !v.WritePerm(w, r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		}
 		return
 	}
 	destDriver, err := a.StorageResolver(destStorageID)
@@ -287,8 +291,12 @@ func (a *Archive) Create(w http.ResponseWriter, r *http.Request) {
 		if gate(w, r, a.ACL, storageID, writegate.Names(rel)) {
 			return
 		}
-		if !aclAllowID(r.Context(), a.ACL, a.Store, storageID, rel, acl.LevelViewer) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + raw})
+		// Packing a file takes its bytes, as archive/download does:
+		// files.download on every selected item (≥viewer).
+		if v := aclCanID(r.Context(), a.ACL, a.Store, storageID, rel, perm.FilesDownload); !v.ok {
+			if !v.WritePerm(w, r) {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + raw})
+			}
 			return
 		}
 		drv, err := a.StorageResolver(storageID)

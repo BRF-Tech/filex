@@ -309,9 +309,14 @@ func normalizeTokenKind(raw, def string) (string, error) {
 	return "", fmt.Errorf("unknown token kind %q (valid: %s, %s)", raw, model.TokenKindUser, model.TokenKindApp)
 }
 
-// normalizeScopes trims whitespace around each comma-separated scope, drops
-// empties, and rejects any scope outside the canonical apitoken.ValidScopes
-// allow-list. An empty/blank input stays empty (== all scopes).
+// normalizeScopes is the admin door's form of the one issuance rule
+// (apitoken.ParseIssued): it trims whitespace around each comma-separated
+// scope, drops empties and duplicates, rejects any scope outside the canonical
+// allow-list, and REFUSES a list that names no verb — empty, blank or a `root:`
+// on its own (apitoken.ErrScopesRequired → 400 `scopes_required`). There is no
+// "empty means all" any more: that was the rule before v0.43.0, and a row that
+// is empty anyway grants nothing (model.APIToken.HasScope).
+// token_scopes_doors_test.go holds both halves.
 func normalizeScopes(raw string) (string, error) {
 	verbs, roots, err := apitoken.ParseIssued(raw)
 	if err != nil {

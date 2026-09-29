@@ -202,6 +202,19 @@ func offered(tag string) bool {
 	return false
 }
 
+// Offered reports whether tag names a language filex offers as-is — one it
+// ships or one a running language pack adds — and returns the tag in the
+// form the catalogue keys it (lower case, "-" for "_"). Unlike Resolve it
+// never falls back to a nearby language: what an administrator STORES under
+// a language (a role's name in it) must name that language, not a neighbour.
+func Offered(tag string) (string, bool) {
+	t := norm(tag)
+	if t == "" {
+		return "", false
+	}
+	return t, offered(t)
+}
+
 // Resolve turns a language tag into the offered language that serves it, or
 // "" when nothing does: the tag itself (`es`, `pt-br`), else its primary
 // subtag (`es-MX` → `es`), else the one regional variant on offer (`pt` →

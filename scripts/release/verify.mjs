@@ -245,3 +245,72 @@ export function readmePictures(name = 'every picture README.md shows exists') {
     },
   };
 }
+
+/**
+ * The Windows update feed offers BOTH installers, x64 first.
+ *
+ * ⚠ electron-updater reads one latest.yml on Windows whatever the CPU and
+ * takes the file whose name carries `process.arch`, else the first one (older
+ * updaters: always the first). A feed with the arm64 installer first, or with
+ * `path` naming it, hands every existing x64 install an installer it cannot
+ * run; a feed without it leaves Windows on Arm on the x64 build under
+ * emulation. release.yml joins the two (merge-latest-yml.mjs); this reads
+ * the result back where the apps read it.
+ */
+export function windowsFeedArches(name, url, opts = {}) {
+  return {
+    name,
+    check: async (c) => {
+      const { text, error } = await getText(url, opts);
+      if (error) return { ok: false, detail: error };
+      let feed;
+      try {
+        feed = parseFeed(text);
+      } catch (e) {
+        return { ok: false, detail: `${url}: ${e.message}` };
+      }
+      const urls = feed.files.map((f) => f.url);
+      const top = /^path:\s*['"]?([^'"\s]+)['"]?\s*$/m.exec(text)?.[1] ?? null;
+      const problems = [];
+      if (feed.version !== c.version) problems.push(`offers ${feed.version}, not ${c.version}`);
+      if (!/(^|[-_.])x64([-_.]|$)/.test(urls[0] ?? '')) problems.push(`the first installer is ${urls[0]}, not the x64 one — existing x64 installs would be offered it`);
+      if (!urls.some((u) => /(^|[-_.])arm64([-_.]|$)/.test(u))) problems.push('no arm64 installer — Windows on Arm keeps the x64 build');
+      if (top && top !== urls[0]) problems.push(`path: names ${top}, not the first installer ${urls[0]}`);
+      return problems.length ? { ok: false, detail: `${url}: ${problems.join('; ')}` } : { ok: true, detail: urls.join(' + ') };
+    },
+  };
+}
+
+/**
+ * A snap's revision for THIS version is on a channel for every architecture
+ * (api.snapcraft.io, no account needed). Each release uploads one revision
+ * per architecture; a job that failed or skipped leaves that architecture's
+ * users on the previous version, and nothing else says so.
+ */
+export function snapChannel(name, snap, arches, { channel = 'stable', ...opts } = {}) {
+  return {
+    name,
+    check: async (c) => {
+      const url = `https://api.snapcraft.io/v2/snaps/info/${snap}?fields=version,revision`;
+      const impl = opts.fetch ?? globalThis.fetch;
+      let doc;
+      try {
+        const res = await impl(url, { headers: { 'Snap-Device-Series': '16' }, signal: AbortSignal.timeout(opts.timeout ?? TIMEOUT) });
+        if (!res.ok) return { ok: false, detail: `${url} answered HTTP ${res.status}` };
+        doc = await res.json();
+      } catch (e) {
+        return { ok: false, detail: `could not check — ${url}: ${e?.cause?.code ?? e?.message ?? e}` };
+      }
+      const map = doc?.['channel-map'] ?? [];
+      const lines = [];
+      const problems = [];
+      for (const arch of arches) {
+        const entry = map.find((m) => m?.channel?.name === channel && m?.channel?.architecture === arch);
+        if (!entry) problems.push(`${channel}/${arch}: no revision`);
+        else if (entry.version !== c.version) problems.push(`${channel}/${arch}: ${entry.version} (revision ${entry.revision}), not ${c.version}`);
+        else lines.push(`${channel}/${arch}: ${entry.version} (revision ${entry.revision})`);
+      }
+      return problems.length ? { ok: false, detail: problems.join('\n') } : { ok: true, detail: lines.join(', ') };
+    },
+  };
+}

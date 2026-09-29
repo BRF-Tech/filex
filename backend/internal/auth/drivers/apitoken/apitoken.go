@@ -153,6 +153,11 @@ func (d *Driver) AuthenticateToken(r *http.Request) (*model.User, *model.APIToke
 	if err != nil || user == nil {
 		return nil, nil, auth.ErrUnauthorized
 	}
+	// access.api / access.desktop (package perm): an account that may no
+	// longer use tokens is refused like a token that does not exist.
+	if !auth.TokenMayBeUsed(ctx, d.store, user, tok) {
+		return nil, nil, auth.ErrUnauthorized
+	}
 	// Best-effort usage stamp — never fail the request on a write error.
 	_ = d.store.TouchAPIToken(ctx, tok.ID)
 	return user, tok, nil

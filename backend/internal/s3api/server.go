@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -125,6 +126,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, http.StatusBadRequest, "InvalidRequest", err.Error())
 		return
 	}
+	// A key minted from an API token is that token projected into S3 — its
+	// folder, its expiry and its verbs (protocolauth.IssueRequest.Token). The
+	// verb is asked once, here, before any operation is dispatched.
+	if verb := s3Verb(r, tgt); !principal.HasScope(verb) {
+		WriteError(w, r, http.StatusForbidden, "AccessDenied",
+			"this access key's API token does not grant `"+verb+"`")
+		return
+	}
 
 	switch {
 	case tgt.Bucket == "":
@@ -235,6 +244,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // path-style (endpoint/bucket/key); current SDKs default to virtual-hosted
 // (bucket.endpoint/key). Supporting only one silently excludes half the
 // client ecosystem.
+// s3Verb is the token verb an S3 request needs: reads `read`; deleting an
+// object (DeleteObject, DeleteObjects) `delete`; everything else — PUT, copy,
+// every multipart step including abandoning one's own upload — `write`. An
+// operation this endpoint does not know asks `write`, so an unfamiliar verb can
+// never pass as a read.
+func s3Verb(r *http.Request, tgt target) string {
+	q := r.URL.Query()
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		return auth.VerbRead
+	case http.MethodDelete:
+		if q.Get("uploadId") != "" {
+			return auth.VerbWrite
+		}
+		return auth.VerbDelete
+	case http.MethodPost:
+		if tgt.Key == "" && q.Has("delete") {
+			return auth.VerbDelete
+		}
+	}
+	return auth.VerbWrite
+}
+
 func (h *Handler) parseTarget(r *http.Request) (target, error) {
 	path := strings.TrimPrefix(r.URL.Path, Prefix)
 	path = strings.TrimPrefix(path, "/")

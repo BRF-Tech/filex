@@ -29,6 +29,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 )
 
 func init() {
@@ -214,13 +215,13 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 	role := d.defaultRole
 	mapping := roleClaim != "" && adminGroup != ""
 	claimAdmin := false
-	if mapping {
-		claimSets := []map[string]any{claims}
-		if at, _ := tok.Extra("access_token").(string); at != "" {
-			if ac := parseJWTClaims(at); ac != nil {
-				claimSets = append(claimSets, ac)
-			}
+	claimSets := []map[string]any{claims}
+	if at, _ := tok.Extra("access_token").(string); at != "" {
+		if ac := parseJWTClaims(at); ac != nil {
+			claimSets = append(claimSets, ac)
 		}
+	}
+	if mapping {
 		for _, cs := range claimSets {
 			if claimContains(cs, roleClaim, adminGroup) {
 				role = model.RoleAdmin
@@ -271,6 +272,30 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 	}
 	if mapping && !created {
 		d.syncMappedRole(ctx, user, claimAdmin)
+	}
+	// The groups this login carried, for permission rules that target an SSO
+	// group (package perm). Read from the same claim the admin mapping uses,
+	// in both tokens, and REPLACED at every login: the IdP is the authority,
+	// so somebody removed from a group there leaves it here on their next
+	// sign-in. No claim configured, or none in the tokens, is no groups.
+	var groups []string
+	if roleClaim != "" {
+		for _, cs := range claimSets {
+			groups = append(groups, claimValues(cs, roleClaim)...)
+		}
+	}
+	if err := d.store.SetUserSSOGroups(ctx, user.ID, groups); err != nil {
+		// Not fatal to the sign-in, but loud: a rule that should bind this
+		// account through a group will not until the next successful write.
+		slog.Warn("oidc: could not record the sign-in's SSO groups",
+			slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
+	}
+	// A NEW account whose groups name a role's SSO group starts with that
+	// role (perm.StartingRole). Only at creation: afterwards the role is the
+	// person's, changed on their own page like anyone else's. An account the
+	// admin mapping made an administrator is bound by no role.
+	if created && !user.IsAdmin() && len(groups) > 0 {
+		d.giveStartingRole(ctx, user, groups)
 	}
 	_ = d.store.TouchLastLogin(ctx, user.ID)
 
@@ -433,27 +458,40 @@ func parseJWTClaims(token string) map[string]any {
 // "realm_access.roles") and reports whether the value equals want (a string
 // claim) or contains want (an array-of-strings claim).
 func claimContains(claims map[string]any, path, want string) bool {
+	for _, v := range claimValues(claims, path) {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+// claimValues returns the string value(s) at a dotted claim path: one for a
+// string claim, every string element for an array one, none otherwise.
+func claimValues(claims map[string]any, path string) []string {
 	var cur any = claims
 	for _, seg := range strings.Split(path, ".") {
 		m, ok := cur.(map[string]any)
 		if !ok {
-			return false
+			return nil
 		}
 		if cur, ok = m[seg]; !ok {
-			return false
+			return nil
 		}
 	}
 	switch v := cur.(type) {
 	case string:
-		return v == want
+		return []string{v}
 	case []any:
+		out := make([]string, 0, len(v))
 		for _, x := range v {
-			if s, _ := x.(string); s == want {
-				return true
+			if s, ok := x.(string); ok {
+				out = append(out, s)
 			}
 		}
+		return out
 	}
-	return false
+	return nil
 }
 
 func randString(nBytes int) (string, error) {
@@ -462,4 +500,32 @@ func randString(nBytes int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// giveStartingRole gives a new account the custom role its SSO groups name,
+// and the built-in role that role implies (perm.HolderRole). Failures are
+// logged, not fatal: the account then simply starts with its default role.
+func (d *Driver) giveStartingRole(ctx context.Context, user *model.User, groups []string) {
+	rules, err := d.store.ListPermissionRules(ctx)
+	if err != nil {
+		slog.Warn("oidc: starting role: list roles", slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
+		return
+	}
+	role := perm.StartingRole(rules, groups, user.ProviderID)
+	if role == nil {
+		return
+	}
+	want := perm.RoleHolder(role)
+	if user.Role != want {
+		if err := d.store.UpdateUserRole(ctx, user.ID, want); err != nil {
+			slog.Warn("oidc: starting role: set built-in role", slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
+			return
+		}
+		user.Role = want
+	}
+	if err := d.store.SetUserCustomRole(ctx, user.ID, role.ID); err != nil {
+		slog.Warn("oidc: starting role: give role", slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
+		return
+	}
+	perm.Invalidate()
 }

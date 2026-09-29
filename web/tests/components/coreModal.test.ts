@@ -109,10 +109,9 @@ describe('core Modal — a dialog mounted open', () => {
     expect(document.activeElement?.getAttribute('data-testid')).toBe('keep');
   });
 
-  // v0.48.0 release run: DraftCloseModal is mounted already open, its
-  // `watch(open)` was not immediate, so nothing focused Keep until Modal's
-  // 30 ms timer - which a slow CI runner had not reached when the test
-  // looked. With the timers frozen, only the dialog's own focus call counts.
+  // A host that mounts the draft close question already open: its own focus
+  // call runs on mount (`immediate`), not after Modal's 30 ms timer. With the
+  // timers frozen, only the dialog's own focus call counts.
   it('the draft close question focuses Keep on mount, without waiting for the timer', async () => {
     const w = mount(DraftCloseModal, {
       props: { open: true, locale: 'en', name: 'notes.md', folder: 'docs' },
@@ -122,6 +121,27 @@ describe('core Modal — a dialog mounted open', () => {
     await nextTick();
     await nextTick();
     expect(document.activeElement?.getAttribute('data-testid')).toBe('draft-close-keep');
+  });
+
+  // v0.48.0 release run and a v0.48.1 CI run: the draft close question
+  // opened over its viewer inside the viewer's 30 ms, and the viewer's timer
+  // then pulled the focus off Keep into its own text box (previewDraft.test.ts
+  // walks the real pair). The dialog behind never takes the focus.
+  it('a dialog behind another does not take the focus from the one in front', () => {
+    dialog({ title: 'Back' });
+    vi.advanceTimersByTime(10);
+    const front = mount(Modal, {
+      props: { open: true, title: 'Front' },
+      slots: { default: '<p>Sure?</p>', actions: '<button data-testid="front-ok" data-fe-autofocus>OK</button>' },
+      attachTo: document.body,
+    });
+    mounted.push(front);
+    front.find<HTMLElement>('[data-testid="front-ok"]').element.focus();
+    // 30 ms: the back dialog's timer; 40 ms: the front one's.
+    for (let ms = 11; ms <= 60; ms++) {
+      vi.advanceTimersByTime(1);
+      expect(document.activeElement?.getAttribute('data-testid'), `at ${ms} ms`).toBe('front-ok');
+    }
   });
 
   it('answers Escape with the dialog in FRONT only', () => {

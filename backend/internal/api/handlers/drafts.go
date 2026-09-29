@@ -46,6 +46,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/drafts"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -434,6 +435,11 @@ func (h *Manager) SaveDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	want := path.Join(targetDir, name)
 	if gate(w, r, h.ACL, st.ID, writegate.Names(targetDir), writegate.Writes(want)) {
+		return
+	}
+	// Saving puts a new file there: files.create on that name, which also
+	// holds a role's blocked file types and its folder exceptions to it.
+	if !h.require(w, r, st, want, perm.FilesCreate, "insufficient permission") {
 		return
 	}
 	drv, err := h.StorageResolver(st.ID)

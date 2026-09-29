@@ -116,10 +116,10 @@ features:
     link: /MCP
     linkText: MCP docs
   - icon: 🛡️
-    title: RBAC
-    details: Roles plus per-file and per-folder permissions with inheritance — enforced in the backend, off by default.
-    link: /RBAC
-    linkText: RBAC docs
+    title: Roles and permissions
+    details: Everyone has one role — Administrator, User, Viewer or a custom role that is its own list of 28 permissions, with limits and folder exceptions — plus per-person exceptions, per-file and per-folder grants with inheritance, and the permissions installed apps declare. Enforced in the backend on every door, from the web app and the agent API to WebDAV, SFTP, FTPS, S3 and NFS; an API key is held to its own verbs on each of them.
+    link: /PERMISSIONS
+    linkText: Roles & permissions docs
   - icon: 🔐
     title: End-to-end encrypted folders
     details: "Encrypted in the browser with WebCrypto: the server stores ciphertext and never receives a key. A folder encrypts its contents, or its contents and its names; a folder you already have, or a single file, is encrypted where it is. Each gets a recovery key, shown once, so a forgotten password is not automatically lost data — and an operator can optionally hold an escrow key, with the limits stated rather than implied."

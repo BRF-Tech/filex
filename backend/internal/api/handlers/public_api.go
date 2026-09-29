@@ -44,6 +44,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
@@ -59,6 +60,9 @@ import (
 
 // PublicAPI serves /api/public/*.
 type PublicAPI struct {
+	// ACL, when wired, closes a link whose creator may no longer make it
+	// (link_creator.go). Nil in tests built by hand: every link answers.
+	ACL     *acl.Resolver
 	Store   db.Store
 	Service *share.Service
 	// Brand answers /api/public/branding. Nil-safe: unwired yields the stock
@@ -94,6 +98,9 @@ func (h *PublicAPI) AttachDrop(d *Drop) { h.Drop = d }
 
 // AttachLocale sets the instance's fallback language.
 func (h *PublicAPI) AttachLocale(def string) { h.DefaultLocale = def }
+
+// AttachACL wires the permission resolver for linkCreatorAllows.
+func (h *PublicAPI) AttachACL(r *acl.Resolver) { h.ACL = r }
 
 func (h *PublicAPI) headers(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -1069,6 +1076,12 @@ func (h *PublicAPI) loadShare(w http.ResponseWriter, r *http.Request, wantKind s
 		// The shape is the live one so a client renders "this link is gone"
 		// from the same object it renders everything else from.
 		writeJSON(w, http.StatusGone, h.describe(r, sh, false))
+		return nil, false
+	}
+	// A link whose creator may no longer share answers like an unknown one
+	// (link_creator.go).
+	if !linkCreatorAllows(r.Context(), h.ACL, h.Store, sh) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return nil, false
 	}
 	return sh, true

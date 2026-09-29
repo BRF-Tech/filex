@@ -15,13 +15,14 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/trash"
-	"github.com/brf-tech/filex/backend/internal/writegate"
 )
 
 // The SFTP verbs, mapped onto filex.
@@ -141,7 +142,7 @@ func (f *fs) aclSet(st *model.Storage) (*acl.Set, error) {
 	return s, nil
 }
 
-// canRead / canWrite are the two gates every verb goes through.
+// canRead / canDo are the two gates every verb goes through.
 
 // canTraverse is the LISTING and STAT door, and it is deliberately not
 // canRead.
@@ -160,22 +161,31 @@ func (f *fs) aclSet(st *model.Storage) (*acl.Set, error) {
 // Reading a file's BYTES still requires viewer on the file itself — see
 // canRead — so traversal never becomes access.
 func (f *fs) canTraverse(t target) bool {
-	return t.Set != nil && t.Set.CanSee(t.Rel)
+	return f.principal().HasScope(auth.VerbRead) && t.Set != nil && t.Set.CanSee(t.Rel)
 }
 
 // canRead is the door for a file's CONTENT: viewer on the path itself, never
 // inherited from being on the way to a grant. canTraverse above is what lets a
 // caller walk to their folder; this is what lets them open what is in it.
+//
+// Reading a file's bytes over SFTP IS a download, so it also needs
+// files.download (internal/perm): there is no preview here to leave open.
 func (f *fs) canRead(t target) bool {
-	return t.Set != nil && t.Set.Effective(t.Rel) >= acl.LevelViewer
+	return f.principal().HasScope(auth.VerbRead) && protoperm.CanRead(t.Set, t.Rel)
 }
 
-func (f *fs) canWrite(t target) bool {
-	if t.Storage == nil || t.Storage.ReadOnly ||
-		writegate.RefusesMounted(f.srv.cfg.ACL.Locks(f.ctx, t.Storage.ID), t.Rel) {
-		return false
-	}
-	return t.Set != nil && t.Set.Effective(t.Rel) >= acl.LevelEditor
+// canDo is the door for every change: the storage is writable, no app lock
+// refuses the path, and the caller may take action p there — the level it
+// needs (≥editor for every mutation) AND the per-user permission.
+func (f *fs) canDo(t target, p perm.Perm) bool {
+	return f.principal().HasScope(protoperm.VerbFor(p)) && protoperm.CanDo(f.ctx, t.Set, t.Storage, f.srv.cfg.ACL, t.Rel, p)
+}
+
+// writeNeed is what writing t's bytes is: files.modify when something is
+// there to replace, files.create when not.
+func (f *fs) writeNeed(t target) perm.Perm {
+	drv, err := f.driverFor(t)
+	return protoperm.WriteNeed(f.ctx, drv, err, t.Rel)
 }
 
 // driverFor returns the live driver for a target.
@@ -378,7 +388,7 @@ func (f *fs) setstat(r *sftp.Request) error {
 	}
 	// Even a no-op needs the write gate: a viewer must not be able to touch a
 	// file's timestamp, and answering "fine" to everyone would say they can.
-	if !f.canWrite(t) {
+	if !f.canDo(t, perm.FilesModify) && !f.canDo(t, perm.FilesCreate) {
 		return sftp.ErrSSHFxPermissionDenied
 	}
 	attrs := r.Attributes()
@@ -410,7 +420,7 @@ func (f *fs) mkdir(r *sftp.Request) error {
 		// credentials behind it; `mkdir /newthing` cannot express any of that.
 		return sftp.ErrSSHFxPermissionDenied
 	}
-	if !f.canWrite(t) {
+	if !f.canDo(t, perm.FilesCreate) {
 		return sftp.ErrSSHFxPermissionDenied
 	}
 	drv, err := f.driverFor(t)
@@ -443,7 +453,17 @@ func (f *fs) rename(r *sftp.Request, overwrite bool) error {
 	// ⚠ Both ends, with their own gate. A rename is a delete of one path and a
 	// create of another; checking only the destination would let a caller move
 	// a file OUT of a subtree they may not write.
-	if !f.canWrite(src) || !f.canWrite(dst) {
+	//
+	// A new name in the same folder is files.rename, another folder
+	// files.move, both at once needs both (internal/perm). An overwriting
+	// rename also replaces what is at the destination, which is files.modify
+	// there — the write-temp-then-rename that every sync tool does.
+	for _, p := range perm.RelocateNeeds(src.Storage.ID, src.Rel, dst.Storage.ID, dst.Rel) {
+		if !f.canDo(src, p) || !f.canDo(dst, p) {
+			return sftp.ErrSSHFxPermissionDenied
+		}
+	}
+	if overwrite && f.writeNeed(dst) == perm.FilesModify && !f.canDo(dst, perm.FilesModify) {
 		return sftp.ErrSSHFxPermissionDenied
 	}
 	if src.Storage.ID != dst.Storage.ID {
@@ -486,7 +506,7 @@ func (f *fs) remove(r *sftp.Request) error {
 	if t.isRoot() || t.Rel == "" {
 		return sftp.ErrSSHFxPermissionDenied
 	}
-	if !f.canWrite(t) {
+	if !f.canDo(t, perm.FilesDelete) {
 		return sftp.ErrSSHFxPermissionDenied
 	}
 	drv, err := f.driverFor(t)
@@ -502,6 +522,9 @@ func (f *fs) remove(r *sftp.Request) error {
 		f.srv.syncer.Delete(f.ctx, t.Storage, t.Rel)
 		return os.ErrNotExist
 	case errors.Is(terr, trash.ErrUnsupported):
+		if !f.canDo(t, perm.FilesPurge) {
+			return sftp.ErrSSHFxPermissionDenied
+		}
 		del, ok := drv.(storage.Deleter)
 		if !ok {
 			return sftp.ErrSSHFxOpUnsupported

@@ -205,12 +205,25 @@ access it had — see the CHANGELOG's upgrade note, and review those tokens.
 | `mcp` | the streamable-HTTP MCP server at `/api/ai/mcp` |
 | `admin` | the admin REST surface at `/api/ai/admin/*` **and** the `admin_*` MCP tools — a subset of the admin panel, listed [under Tool set](#tool-set) |
 
+The verbs hold on **every** surface a token reaches, not only here: the web
+explorer's `/api/files` routes (and so `filex client`), WebDAV, SFTP, FTPS, and
+the S3 keys and NFS exports minted from a token — see
+[RBAC.md → API tokens](RBAC.md#api-tokens-verbs-on-every-surface). Changing
+the token's own account — its profile, password or two-factor setup — needs
+`write` as well.
+
+Scopes bound the **token**; the account behind it has its own permissions
+([PERMISSIONS.md](PERMISSIONS.md)), and both must allow a call. The whole
+`/api/ai` surface needs the account's `ai.use`, a public link its
+`share.links`, and so on — a `403` from that layer names the permission
+(see *Failure modes* below).
+
 > **Least privilege.** Give an agent only what it needs — most read/write agents
 > want `read,write,mcp`. `admin` is a superuser scope (it can manage users,
 > storages, settings, replica, queue …); reserve it for trusted operator tools.
 
 > ⚠⚠ **Mint agent and embed tokens on a non-admin account** (`user_id`). Scopes
-> are enforced on `/api/ai`; the admin panel's own `/api/admin/*` routes and
+> are enforced on every surface a token reaches; the admin panel's own `/api/admin/*` routes and
 > `/metrics` are gated on the **account's role**, so a token is only as limited
 > as the account it is bound to.
 
@@ -270,7 +283,7 @@ storage's root (or, when confined, your root).
 | POST | `/api/ai/mkdir` | `write` | `{path}` |
 | POST | `/api/ai/move` | `write` | `{src, dst}` — across storages too (see [below](#moving-files-between-storages)). `409` when `dst` is already taken |
 | POST | `/api/ai/delete` | `delete` | `{path}` → soft-delete to trash |
-| POST | `/api/ai/share` | `write` | `{path, pin?, expires_in_days?, max_downloads?}` → `{url, token, pin?}` |
+| POST | `/api/ai/share` | `write` | `{path, pin?, expires_in_days?, max_downloads?}` → `{url, token, pin?}` — needs edit rights on the item and the account's `share.links`, exactly as the explorer's Share dialog |
 | POST | `/api/ai/unshare` | `write` | `{token}` |
 | POST | `/api/ai/zip` | `write` | `{sources:[…], dest}` (server-side) |
 | POST | `/api/ai/unzip` | `write` | `{src, dest}` (server-side) |
@@ -331,8 +344,13 @@ curl -T ./dataset.parquet 'https://files.example.com/u/9f3c…'
 filex embeds a **Model Context Protocol** server over **streamable HTTP**
 (stateless JSON-RPC: one request → one JSON response; a `GET` opens an SSE
 stream). It is mounted at `POST|GET /api/ai/mcp` behind the `mcp` scope, so any
-token used with it must carry `mcp`. The file tools need nothing more; the
-`admin_*` tools additionally need `admin` (and an unconfined token).
+token used with it must carry `mcp`. Each file tool also needs the verb of its
+REST twin — `read` for `file_list` / `file_info` / `file_read` / `file_search` /
+`file_tags`, `write` for `file_write` / `file_upload_ticket` / `file_mkdir` /
+`file_move` / `file_share` / `file_unshare` / `file_zip` / `file_unzip` (and for
+setting tags), `delete` for `file_delete`; `file_root` needs none. A tool the
+token cannot use is not listed. The `admin_*` tools additionally need `admin`
+(and an unconfined token).
 
 Connect an MCP client by pointing it at the endpoint and supplying the token as a
 header. With the Claude Code CLI:
@@ -366,7 +384,8 @@ sees them in `tools/list` at all.
 
 ## Tool set
 
-**Core file tools** (available to any `mcp`-scoped token, gated by the bound
+**Core file tools** (each listed for a token holding its verb — see above —
+and gated by the bound
 user's role + grants + confinement):
 
 | Tool | What it does |
@@ -382,7 +401,7 @@ user's role + grants + confinement):
 | `file_mkdir` | Create a directory. |
 | `file_search` | Search file/folder names **and** (by default) extracted file contents in a storage. Forgiving on separators and typos; words may be in any order and, with the search index, may be answered by a folder (`main code` finds `Code/main.go`; without the index, or with `content=false`, every word has to be in the file's own name); supports `tag:` / `-tag:` filters (your personal and your team's tag of that name both count); `content=false` restores name-only. |
 | `file_tags` | Read a file's tags (`{path}`), or set them (`{path, set:[{name, kind}]}`). Every tag says its **kind**: `personal` (only the token's user sees it) or `team` (everyone in the tenant who can see the file; adding or removing one needs edit permission — `can_edit_team` says whether you have it). There is **no default kind** on this surface: an agent names the kind of every tag it writes. Other people's personal tags and other tenants' tags are never shown or touched. |
-| `file_share` | Public share link for a file/folder (folders → ZIP); optional PIN/expiry/max-downloads. Use this to hand a file to someone instead of streaming it back. |
+| `file_share` | Public share link for a file/folder (folders → ZIP); optional PIN/expiry/max-downloads. Needs **edit** permission on the item and the account's `share.links` permission, as in the explorer — and the link answers only while the account keeps them ([PERMISSIONS.md](PERMISSIONS.md#public-links-follow-their-creator)). Use this to hand a file to someone instead of streaming it back. |
 | `file_unshare` | Revoke a share by its token. |
 | `file_zip` | Pack files/folders into a `.zip` **on the server** (dest lands in storage; share it to download). |
 | `file_unzip` | Extract a stored `.zip` into a directory **on the server** (zip-slip protected, stays within your root). |
@@ -417,13 +436,51 @@ targets, queue, notifications, audit, and RBAC grants. Each runs the same handle
 the admin SPA calls and every **mutating call is written to the audit log**
 (action prefixed `ai.`).
 
-⚠ **Not the whole panel.** Tenants (providers), webhook targets, storage
-plugins, quotas, version purge, duplicates, protection/antivirus, usage & cost,
-self-update and the AI tokens themselves have no `admin_*` tool and no route
-under `/api/ai/admin`; they are reachable only through the panel's own
-`/api/admin/*` routes. Examples:
+⚠ **Not the whole panel.** Tenants (providers), webhook targets, quotas,
+version purge, duplicates, protection/antivirus, usage & cost, self-update and
+the AI tokens themselves have no `admin_*` tool and no route under
+`/api/ai/admin`; they are reachable only through the panel's own
+`/api/admin/*` routes. Plugins — apps and storage plugins — have tools that
+**read** them and **leave install requests**, and nothing else
+([below](#plugin-tools)). Examples:
 `admin_users_create`, `admin_storages_create`, `admin_settings_set`,
 `admin_grant_set`, `admin_trash_restore`, `admin_queue_retry`.
+
+### Plugin tools
+
+⚠⚠ **An agent cannot install a plugin.** Installing, upgrading, removing,
+switching and re-permissioning a plugin — an app or a storage plugin — need an
+administrator signed in to the admin panel; an API key is refused `403
+session_required` on those routes whatever its scopes. An agent **leaves a
+request**, filex freezes what the source answered (the manifest, the SHA-256,
+the permissions), and an administrator approves or rejects it under **Admin →
+Plugins → Install requests**. Approval installs exactly the frozen bytes, or
+closes the request as `superseded` when the source has changed by then. The
+model: [APP-PLUGINS.md → Install requests](APP-PLUGINS.md#install-requests).
+
+| Tool | What it does |
+|------|--------------|
+| `admin_app_plugins_list` | The installed apps and the runtime: state, version, granted permissions, source, what the last update check found. |
+| `admin_app_plugin_get` | One app (`{id}`): its manifest, the permissions it was granted with their reasons, settings, overrides, schedule, pending update. |
+| `admin_app_plugin_logs` | An app's recent log lines (`{id, after?}`). |
+| `admin_app_plugins_check_updates` | Ask every app's source for a newer version now. Installs nothing. |
+| `admin_plugins_list` | The installed storage plugins: state, version, capabilities, conformance, pending update. |
+| `admin_plugin_get` | One storage plugin (`{id}`). |
+| `admin_plugins_check_updates` | Ask every storage plugin's source for a newer version now. Installs nothing. |
+| `admin_plugin_request_install` | **Leave a request** to install one: `{kind: app, github_repo, ref?, reason}`, `{kind: app, manifest_url, url?, sha256?, reason}`, `{kind: storage, name, source \| url, reason}`. `reason` is required — the administrator reads it. Answers the request (`status: pending`, the frozen permissions and SHA-256) and says it waits for an administrator. |
+| `admin_plugin_request_upgrade` | **Leave a request** to upgrade an installed plugin (`name` or `plugin_id`) to the newer version its own source has. |
+| `admin_plugin_requests_list` | The requests: `filters: {status: pending (default) \| approved \| rejected \| expired \| superseded \| all}`. |
+| `admin_plugin_request_get` | One request with its frozen manifest and review, its status, the decision note and — approved — the installed plugin. |
+
+There is **no tool to approve or reject**, on purpose: approving is the
+decision of an administrator signed in to the panel, and a key is not a
+person. Asking twice
+for the same source answers the waiting request; a request nobody decides
+expires after 14 days. The same reads and requests are REST routes under
+`/api/ai/admin/app-plugins`, `/api/ai/admin/plugins` and
+`/api/ai/admin/plugin-requests`, and the panel's own
+`/api/admin/plugin-requests` takes an admin-scoped key too
+([BACKEND.md](BACKEND.md#admin-plugin-requests)).
 
 ---
 
@@ -437,10 +494,17 @@ under `/api/ai/admin`; they are reachable only through the panel's own
 - **Per-agent confinement.** A `root:<adapter>://<rel>` scope is a hard ceiling
   enforced server-side on every path across `/api/files` and `/api/ai`. In a
   multi-tenant deploy, give each project a token confined to its own folder.
-- **Same ACL as the UI.** Every file op is gated by the bound user's RBAC grants
-  and role ceiling — identically to the interactive `/api/files` surface. A
-  `viewer`-bound token can read but never mutate; a token can only touch what its
-  user was granted. Read-only storages return `403` for any write.
+- **Same ACL as the UI.** Every file op is gated by the bound user's RBAC grants,
+  role ceiling and permissions ([PERMISSIONS.md](PERMISSIONS.md)) —
+  identically to the interactive `/api/files` surface, where the token's verbs
+  hold too. A `viewer`-bound token can read but never mutate; a token can only
+  touch what its user was granted. Read-only storages return `403` for any
+  write.
+- **Administration stays with a person.** An admin-scoped token reads the
+  admin surface and manages ordinary accounts, but it cannot install a plugin,
+  make or change an administrator, or hand out an admin-area permission: those
+  answer `403 session_required` and are done by an administrator signed in to
+  the panel.
 - **Hashed at rest, shown once, revocable.** Only the sha256 hash is stored; the
   plaintext is displayed a single time; any token can be revoked instantly
   (`DELETE`) or aged out with `expires_in_days`.
@@ -484,6 +548,30 @@ hold, a folder outside its `root:`, or an expiry past its own. The message
 names what was too wide. Give the automation a token that holds what it hands
 out, or create the credential from a signed-in browser (a session has no
 ceiling to exceed). Credentials created before v0.43.0 are untouched.
+
+### 403 Forbidden (`session_required`)
+An API key asked for something only an administrator signed in to the panel
+may do. No scope changes that.
+
+- **A plugin route** — installing, upgrading, removing or switching an app or
+  a storage plugin, or approving / rejecting a request. Leave a request with
+  `admin_plugin_request_install` (or `POST /api/admin/plugin-requests`, which
+  the refusal names in `request_endpoint`) and an administrator decides it
+  ([Plugin tools](#plugin-tools)).
+- **An administrator's credential** — `admin_users_create` with the `admin`
+  role, `admin_users_update` promoting an account to administrator or changing
+  an administrator's role or password, `admin_users_reset_password` on an
+  administrator. Managing accounts that are not administrators works with a
+  key ([RBAC.md](RBAC.md#administration-and-plugins-need-a-session)).
+
+### 403 Forbidden (`permission_denied` / `your account lacks the … permission`)
+The account behind the token lacks a permission for this
+([PERMISSIONS.md](PERMISSIONS.md)) — the token's scopes are not the problem.
+Without `ai.use` every `/api/ai` call answers `permission_denied`, naming the
+`permission` and where the answer came from (`source`); a tool refused on one
+file says `access denied: your account lacks the share.links permission` (or
+the file permission it needed). An administrator changes it on the person's
+role or as an exception.
 
 ### 403 Forbidden (path outside confined root
 The path is outside the token's `root:` ceiling, outside an `X-Filex-Root`

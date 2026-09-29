@@ -94,6 +94,16 @@ switch that off with `auth.ldap.protocol_login: false`.
 > key or revoking an export cuts the SFTP/FTPS connection it opened and stops the NFS
 > mount within about half a minute — not only the *next* login.
 
+A **token carries its verbs** onto every protocol: signed in with a token as the
+password (WebDAV, SFTP, FTPS), or through an S3 access key or an NFS export
+minted from a token, `read` lists and downloads, `write` creates, changes,
+renames and moves, `delete` removes — so a `read` token is a read-only mount.
+A key or export minted from a browser session carries every verb. On top of
+that the **account's permissions** apply: `access.webdav`, `access.sftp`,
+`access.ftp`, `access.s3` and `access.nfs` decide who may use each protocol at
+all, and the file permissions each operation
+([PERMISSIONS.md → Where each permission is enforced](PERMISSIONS.md#where-each-permission-is-enforced)).
+
 ---
 
 ## S3

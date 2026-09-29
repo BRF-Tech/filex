@@ -62,7 +62,7 @@ func authHint(err error) error {
 
 // clientCmd builds the `filex client` tree:
 //
-//	filex client login|ls|upload|download|mkdir|rm|mv|search|share
+//	filex client login|ls|upload|download|mkdir|rm|mv|search|share|plugins
 func clientCmd() *cobra.Command {
 	opts := &clientOpts{}
 	c := &cobra.Command{
@@ -87,6 +87,7 @@ func clientCmd() *cobra.Command {
 		clientMvCmd(opts),
 		clientSearchCmd(opts),
 		clientShareCmd(opts),
+		clientPluginsCmd(opts),
 	)
 	return c
 }

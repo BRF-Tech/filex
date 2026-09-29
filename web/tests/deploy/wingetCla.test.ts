@@ -42,7 +42,9 @@ describe('the release agrees to the CLA on its winget pull requests', () => {
   it.runIf(!!DIR)('calls winget-cla.sh for the CLI and for the desktop app', () => {
     const titles = claTitles(release());
     expect(titles).toContain('New version: BRFTech.filex ${VER}');
-    expect(titles).toContain('New version: BRFTech.filex-app ${GITHUB_REF_NAME#v}');
+    // The desktop job also runs by hand (release.yml workflow_dispatch), where
+    // GITHUB_REF_NAME is a branch: its version comes from the plan job as VER.
+    expect(titles).toContain('New version: BRFTech.filex-app ${VER}');
   });
 
   // ⚠ v0.47.0: the step searched for the CLI's pull request 3 s after

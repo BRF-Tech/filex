@@ -859,7 +859,7 @@ func (m *Manager) install(ctx context.Context, name, filename string, r io.Reade
 	if wantSHA != "" && !strings.EqualFold(sum, wantSHA) {
 		// Wrong bytes: say what arrived, and leave nothing behind.
 		_ = os.RemoveAll(dir)
-		return nil, reject("sha256 mismatch: downloaded %s, expected %s", sum[:12], wantSHA[:12])
+		return nil, RejectedError{fmt.Errorf("%w: downloaded %s, expected %s", ErrSHA256Mismatch, sum[:12], wantSHA[:min(12, len(wantSHA))])}
 	}
 	if err := m.checkSignature(sum, signature); err != nil {
 		_ = os.RemoveAll(dir)
@@ -960,6 +960,33 @@ func (e RejectedError) Unwrap() error { return e.err }
 
 func reject(format string, a ...any) error { return RejectedError{fmt.Errorf(format, a...)} }
 
+// ErrSHA256Mismatch: the bytes that arrived are not the ones the install or
+// upgrade was told to expect. Always inside a RejectedError; errors.Is finds
+// it, so a caller that pinned the bytes (internal/pluginreq) can tell "the
+// source changed" from any other refusal without reading the message.
+var ErrSHA256Mismatch = errors.New("sha256 mismatch")
+
+// HashURL downloads rawURL through the guarded download client — the one an
+// install by address uses — and answers the sha256 of what came back and its
+// size. The dry run of an install by address: nothing is written, nothing is
+// run. Capped at the binary size limit.
+func (m *Manager) HashURL(ctx context.Context, rawURL string) (string, int64, error) {
+	resp, err := m.download(ctx, strings.TrimSpace(rawURL))
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, io.LimitReader(resp.Body, m.maxB+1))
+	if err != nil {
+		return "", 0, fmt.Errorf("download: %w", err)
+	}
+	if n > m.maxB {
+		return "", 0, reject("the plugin is larger than %d MiB", m.maxB>>20)
+	}
+	return hex.EncodeToString(h.Sum(nil)), n, nil
+}
+
 // RequiresSignature reports whether this instance will refuse an unsigned
 // plugin. Surfaces show it so nobody discovers the rule from a rejection.
 func (m *Manager) RequiresSignature() bool { return len(m.trusted) > 0 }
@@ -1045,7 +1072,7 @@ func (m *Manager) upgrade(ctx context.Context, id int64, r io.Reader, signature,
 	if wantSHA != "" && !strings.EqualFold(sum, wantSHA) {
 		// Wrong bytes: nothing was stopped or swapped yet.
 		_ = os.Remove(staged)
-		return m.statusOf(ctx, e), reject("sha256 mismatch: downloaded %s, the source names %s", sum[:12], wantSHA[:min(12, len(wantSHA))])
+		return m.statusOf(ctx, e), RejectedError{fmt.Errorf("%w: downloaded %s, the source names %s", ErrSHA256Mismatch, sum[:12], wantSHA[:min(12, len(wantSHA))])}
 	}
 	if err := m.checkSignature(sum, signature); err != nil {
 		_ = os.Remove(staged)

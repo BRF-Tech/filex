@@ -408,6 +408,7 @@ is the honest form of that proof.
 | `/api/admin/providers` | Tenant lifecycle. |
 | `/api/admin/plugins` | Install a process filex runs. The tenancy check runs **before** the `plugins_disabled` 503, so the refusal does not disclose whether plugins are switched on. |
 | `/api/admin/app-plugins` | Apps are instance-wide (the table has no tenant column): install one into every tenant's file menu, change its grants and settings, or force-lift the file locks it holds. |
+| `/api/admin/plugin-requests` | An [install request](APP-PLUGINS.md#install-requests) asks for an instance-wide plugin: leaving, reading, approving and rejecting one are the platform operator's, like the plugins themselves. |
 | `/api/admin/themes` | Themes are instance-wide too: a theme one tenant's admin wrote would paint every other tenant's users. The instance default is the `ui.default_theme` setting, which the per-key classification below already refuses to a tenant admin. |
 | `/api/admin/webhooks`, `/api/admin/notifications/webhook-config` | One target list receives **every tenant's** event stream, so a tenant admin adding a target subscribes to other customers' file paths. Per-tenant targets are a feature — the rows must carry a provider and the emitter must filter by it — not something a gate approximates. Same 503-ordering note as plugins. |
 | `/api/admin/replication-targets`, `/api/admin/replica/*` | Fan every tenant's writes at a backup sink of the caller's choosing. |

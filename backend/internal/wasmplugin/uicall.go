@@ -64,7 +64,8 @@ func (r *Registry) UICall(ctx context.Context, plugin, view string, storageID in
 	in := wire.UICallInput{ViewID: view, Method: method, Params: params,
 		Context: wire.CallContext{Inputs: scope.Inputs(), Locale: locale, Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(p)}}
 	if actor != nil {
-		in.Context.Actor = &wire.Actor{ID: actor.ID, Email: actor.Email, Name: actor.DisplayName, Role: actor.Role, IP: actorIPFrom(ctx)}
+		a := r.wireActor(ctx, p, actor, actorIPFrom(ctx))
+		in.Context.Actor = &a
 	}
 	inb, _ := json.Marshal(in)
 	outb, err := c.Call(WithScope(ctx, scope), "ui_call", inb, 0)

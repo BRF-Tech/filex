@@ -262,7 +262,9 @@ func TestThumb_AuthenticatedConsumersRender(t *testing.T) {
 	})
 
 	t.Run("desktop app — bearer token", func(t *testing.T) {
-		tok := testutil.NewAPIToken(t, f.store, adminID, "")
+		// What a paired desktop holds. A token needs `read` to see a
+		// thumbnail (auth/token_verbs.go); an empty list grants nothing.
+		tok := testutil.NewAPIToken(t, f.store, adminID, "read,write,delete")
 		status, body, ctype := getRaw(t, f.srv.URL+thumbPath(f.node.ID),
 			map[string]string{"Authorization": "Bearer " + tok})
 		require.Equal(t, http.StatusOK, status, string(body))
@@ -272,7 +274,7 @@ func TestThumb_AuthenticatedConsumersRender(t *testing.T) {
 
 	t.Run("embedded explorer — root-confined token, inside its root", func(t *testing.T) {
 		tok := testutil.NewAPIToken(t, f.store, adminID,
-			"root:"+f.storage.Name+"://")
+			"read,root:"+f.storage.Name+"://")
 		status, body, _ := getRaw(t, f.srv.URL+thumbPath(f.node.ID),
 			map[string]string{"Authorization": "Bearer " + tok})
 		require.Equal(t, http.StatusOK, status, string(body))
@@ -289,7 +291,7 @@ func TestThumb_ConfinedTokenCannotLeaveItsRoot(t *testing.T) {
 	adminID, _ := testutil.SeedAdminUser(t, f.store)
 
 	tok := testutil.NewAPIToken(t, f.store, adminID,
-		"root:"+f.storage.Name+"://somewhere-else")
+		"read,root:"+f.storage.Name+"://somewhere-else")
 	status, body, _ := getRaw(t, f.srv.URL+thumbPath(f.node.ID),
 		map[string]string{"Authorization": "Bearer " + tok})
 	require.Equal(t, http.StatusNotFound, status,

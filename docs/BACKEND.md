@@ -20,8 +20,10 @@ All endpoints under `/api/*` return JSON. All write endpoints expect
 - [Operations (long-running)](#operations-long-running)
 - [Admin: storages](#admin-storages)
 - [Admin: plugins](#admin-plugins)
+- [Admin: plugin requests](#admin-plugin-requests)
 - [App plugins](#app-plugins)
 - [Admin: users](#admin-users)
+- [Admin: roles and permissions](#admin-roles-and-permissions)
 - [Admin: quota](#admin-quota)
 - [Admin: external services](#admin-external-services)
 - [Admin: protection & antivirus](#admin-protection--antivirus)
@@ -37,9 +39,16 @@ All endpoints under `/api/*` return JSON. All write endpoints expect
 | ![user](https://img.shields.io/badge/-user-blue)         | Any authenticated user |
 | ![admin](https://img.shields.io/badge/-admin-red)         | Admin role required |
 | ![signed](https://img.shields.io/badge/-signed-yellow)    | A session/token **or** a signed URL — see the route |
+| ![session](https://img.shields.io/badge/-admin%20session-darkred) | An administrator **signed in to the panel**: an API key is refused `403 session_required`, whatever its scopes ([Admin: plugin requests](#admin-plugin-requests)) |
 
 Auth is provided either by a session cookie (`filex_session`) or a Bearer
 token (`Authorization: Bearer <jwt>`). Both are accepted on the same routes.
+An API token (`X-Filex-Token: <token>` or `Authorization: Bearer <token>`) is
+accepted there too, limited by its verbs — `read`, `write`, `delete` — on every
+route: see [RBAC.md → API tokens](RBAC.md#api-tokens-verbs-on-every-surface).
+Every caller is also held to the account's permissions
+([PERMISSIONS.md](PERMISSIONS.md)); a refusal from that layer is
+`403 {"error": "permission_denied", "permission", "source", "message"}`.
 
 ---
 
@@ -94,16 +103,34 @@ the user, sets the session cookie, redirects to `next`.
 ```json
 {
   "user": {
-    "id": 1, "email": "admin@local", "username": "admin",
-    "role": "admin", "groups": ["filex-admin"],
+    "id": 5, "email": "ayse@example.com", "username": "ayse",
+    "role": "user", "groups": ["contractors"],
     "avatar_url": "data:image/jpeg;base64,…"
-  }
+  },
+  "permissions": ["files.download", "files.create", "files.modify", "share.links", "…"],
+  "permissions_in_folders": ["files.delete"],
+  "permissions_by_folder": ["files.delete"],
+  "permission_settings": { "share_link_max_days": 7 },
+  "two_factor_required": false
 }
 ```
+What the account may do ([PERMISSIONS.md](PERMISSIONS.md)), so a client can
+hide what would only answer `403`: `permissions` holds account-wide,
+`permissions_in_folders` only in some folders, and `permissions_by_folder`
+lists every permission whose answer differs from folder to folder — a client
+asks `POST /api/files/manager?action=allowed` about the selected paths before
+offering those. The explorer reads this itself when its host passes no
+`permissions` ([INTEGRATION.md](INTEGRATION.md)). The effective answer with the
+source of each permission is `GET /api/auth/me/permissions`.
 
 ### `PATCH /api/auth/profile` ![user](https://img.shields.io/badge/-user-blue)
 Patches the caller's own `email`, `display_name`, `locale`, `timezone` and
 `avatar_url`. Absent fields are left alone.
+
+Needs the `account.edit` permission; an API token needs `write` too — as do
+`POST /api/auth/password` and `POST /api/auth/totp/enroll`, `…/verify` and
+`…/disable`: a token that may only read cannot change the account it belongs
+to (`403 token missing scope: write`).
 
 `avatar_url` is the **profile picture**: a `data:image/…` URI (≤ 48 KB) or an
 `http(s)` / site-relative URL; an explicit `""` removes it. Anything else is a
@@ -783,6 +810,12 @@ Returns `202 + { operation_id: "op_..." }`.
 PIN-protected, time-limited, optionally download-capped public links.
 
 ### `POST /api/files/share` ![user](https://img.shields.io/badge/-user-blue)
+Needs **editor** on the item and the `share.links` permission (a file request,
+`kind: "drop"`: `share.upload_links`); an API token needs `write`. The same rule
+answers `POST /api/ai/share` and the MCP `file_share` tool. A link then
+answers only while its creator still holds that right on the item —
+[SHARING.md → A link follows its creator](SHARING.md#a-link-follows-its-creator).
+
 **Request**
 ```json
 {
@@ -1074,8 +1107,11 @@ The same gate, the same cookie and the same statuses as the `/s/` PIN.
 be a form field or already answered on this browser (the cookie). Same ingest,
 limits, quota accounting and owner notification as the no-JS form — there is
 one upload path. **401** `bad_pin` · **429** `locked` / `rate_limited` ·
-**410** `expired` · **422** for a limit (`too_many_files`, `file_too_large`,
-`ext_not_allowed`).
+**410** `expired` · **404** `not_found` (also when the link's creator no longer
+holds `share.upload_links` there) · **413** `file_too_large` (the link's own
+limit, or its creator's largest file) · **415** `ext_not_allowed` (outside the
+link's list, or a type its creator's role blocks) · **422** `too_many_files` /
+`exceeds_remaining`.
 
 ### Which answer `/s/` and `/d/` give
 
@@ -1416,6 +1452,12 @@ route answers `503 plugins_disabled`. ⚠ The two are checked in that order: a
 tenant admin is refused *before* being told whether the operator has plugins
 switched on. Full picture: [PLUGINS.md](PLUGINS.md).
 
+⚠⚠ Install, upgrade, `PATCH` and `DELETE` are **session-only**: an API key
+gets `403 {"error": "session_required", "request_endpoint":
+"/api/admin/plugin-requests"}` and may [leave a request](#admin-plugin-requests)
+instead. Reading (the list, one plugin, the update check) and `restart` stay
+open to an admin-scoped key.
+
 ### `GET /api/admin/plugins` ![admin](https://img.shields.io/badge/-admin-red)
 Every registered plugin plus its live state — the row is the admin's intent,
 the state is what the manager sees right now.
@@ -1680,6 +1722,79 @@ create form, which has no storage to name yet.
 
 ---
 
+## Admin: plugin requests
+
+An API key cannot install, upgrade, remove, switch or re-permission a plugin —
+of either kind ([Admin: plugins](#admin-plugins),
+[APP-PLUGINS.md → Admin API](APP-PLUGINS.md#admin-api)). It **leaves a
+request**, and an administrator signed in to the panel approves or rejects it
+(Plugins → Install requests). The model, and why:
+[APP-PLUGINS.md → Install requests](APP-PLUGINS.md#install-requests).
+
+Instance-wide like the plugins: in multi-tenant mode only the supertenant's
+administrators may leave, read or decide one (`403 supertenant_only`).
+
+### `POST /api/admin/plugin-requests` ![admin](https://img.shields.io/badge/-admin-red)
+An API key (scope `admin`) or a session. filex resolves the source now — the
+install review's dry run — and freezes what it answered on the request.
+
+| Kind | Body |
+|---|---|
+| app from GitHub | `{"kind":"app","github_repo":"owner/name","ref":"v1.2.0","reason":"…"}` |
+| app by address | `{"kind":"app","manifest_url":"https://…/filex-app.json","url":"https://…/plugin.wasm","sha256":"…","reason":"…"}` (a language pack or an interface-only app: `manifest_url` alone) |
+| storage plugin from its source | `{"kind":"storage","name":"myfs","source":"owner/name","reason":"…"}` (`name` defaults to the feed's) |
+| storage plugin by address | `{"kind":"storage","name":"myfs","url":"https://…/myfs","reason":"…"}` — `sha256` optional: the server downloads and hashes the binary (it does not run it) and freezes that; a `sha256` that does not match is refused `400 sha256_mismatch` |
+| upgrade | `{"kind":"app"\|"storage","op":"upgrade","name":"…"}` (or `plugin_id`) — the newer version the plugin's own source has; an app may name another `github_repo` / `manifest_url` |
+
+`reason` is required (`400 reason_required`). **201** `{"request": {…},
+"created": true, "message": "…waiting for an administrator's approval…"}`;
+**200** with `"created": false` and the pending request when one is already
+waiting for the same source. `409 already_installed` (request an upgrade
+instead), `409 incompatible`, and the install review's own refusals
+(`fetch_failed`, `manifest_invalid`, …) with their codes.
+
+A request on the wire:
+```json
+{ "id": 7, "kind": "app", "op": "install", "name": "sign",
+  "label": { "en": "e-Signature", "tr": "e-İmza" },
+  "source_kind": "github", "source": { "github_repo": "BRF-Tech/filex-sign", "ref": "v0.1.1" },
+  "version": "0.1.1", "sha256": "4ddd…", "manifest_sha256": "…",
+  "permissions": ["files:read", "…"],
+  "permission_rows": [{ "id": "files:read", "label": "Read your files", "reason": { "en": "…" } }],
+  "requested_by": 3, "requester": "Ayşe", "token_label": "work-agent",
+  "reason": "…", "status": "pending",
+  "expires_at": "2026-10-12T10:00:00Z", "created_at": "2026-09-28T10:00:00Z" }
+```
+`status` is `pending` · `approved` · `rejected` · `expired` · `superseded`;
+once decided, `decided_by` / `decider` / `decided_at`, `decision_note` (a
+rejection's reason, or why it was superseded) and — approved — `result`, the
+installed plugin. `permission_rows` labels each permission in the reader's
+language and carries the app's own reason.
+
+### `GET /api/admin/plugin-requests` ![admin](https://img.shields.io/badge/-admin-red)
+`?status=pending` (the default) · `approved` · `rejected` · `expired` ·
+`superseded` · `all`. **200** `{"requests": [...], "ttl_days": 14}`, newest
+first. A pending request past its expiry is closed as `expired` before the
+answer (and hourly).
+
+### `GET /api/admin/plugin-requests/{id}` ![admin](https://img.shields.io/badge/-admin-red)
+**200** `{"request": {…, "manifest": …, "review": …}}` — the frozen manifest
+(an app's `filex-app.json`, a storage plugin's feed) and the review the dry
+run gave.
+
+### `POST /api/admin/plugin-requests/{id}/approve` ![session](https://img.shields.io/badge/-admin%20session-darkred)
+Installs exactly what the request froze: the source is fetched again, the
+bytes are held to the frozen SHA-256 (an app's manifest to its own), and the
+grant is the frozen permission list. **200** `{"request": {…approved},
+"plugin": {…}}`. **409 `superseded`** with the closed request when the source
+now serves anything else — nothing is installed. `409 not_pending` for a
+request already decided or expired. Any other failure (a network error, a
+name taken since) leaves the request pending, with the refusal in `result`.
+An API key: `403 session_required` — there is no key door and no MCP tool.
+
+### `POST /api/admin/plugin-requests/{id}/reject` ![session](https://img.shields.io/badge/-admin%20session-darkred)
+`{"reason": "…"}` (optional). **200** with the rejected request. Session only.
+
 ## App plugins
 
 The sandboxed WebAssembly apps of [APP-PLUGINS.md](APP-PLUGINS.md). The admin
@@ -1692,11 +1807,14 @@ runtime is off: `404 app_plugins_disabled`.
 ### `GET /api/files/plugins/actions` ![user](https://img.shields.io/badge/-user-blue)
 
 The rows this caller may see: `{actions: [{plugin, id, key, label, icon,
-applies, view, view_placement, confirm, min_role, danger, output_mode}],
-views: [{plugin, id, placement, label, icon, applies}]}`. `key` is
-`plugin:<plugin>/<action>`; `applies` is the manifest rule merged with the
-admin override; admin-only actions are absent for non-administrators, and
-`hidden` actions are absent for everyone (a surface starts those). The
+applies, view, view_placement, confirm, min_role, danger, output_mode,
+requires}], views: [{plugin, id, placement, label, icon, applies, requires}]}`.
+`key` is `plugin:<plugin>/<action>`; `applies` is the manifest rule merged
+with the admin override; admin-only actions are absent for non-administrators,
+`hidden` actions are absent for everyone (a surface starts those), and an
+action or view that `requires` an app permission (`app.<app>.<id>`) is absent
+for a caller who does not hold it
+([PERMISSIONS.md → App permissions](PERMISSIONS.md#app-permissions)). The
 explorer mirrors `applies` client-side — including `state` / `no_state`,
 which it matches against the row's `app_state` — and the server re-checks on
 run. `view_placement` is `modal` (dialog) or `page` (the view opens as a full
@@ -1710,7 +1828,10 @@ storage ownership, ACL ≥ viewer per path (≥ editor when the action writes,
 `min_role` raises it; a file locked by THIS app is judged at the level the
 caller would have without the lock), read-only storage → `409 read_only`,
 encrypted folder → `403 encrypted`, the applies rule — state keys included —
-against the real files → `422 not_applicable`. A hidden action answers `404`
+against the real files → `422 not_applicable`. An action that `requires` an
+app permission the caller does not hold answers `403 permission_denied` with
+`permission: "app.<app>.<id>"` before any of that — as do a view's opening
+and events, and an interface's `save` and `call`. A hidden action answers `404`
 here; only a surface may queue it. Answers `202 {op, job_id}` (queued; the `op` is an ops row
 with `kind: "plugin-action"`, `plugin`, `action`, `label`) or, when the action
 opens a screen and no `params` were sent, `200 {surface}`.
@@ -1808,6 +1929,9 @@ List users. In multi-tenant mode the list is confined to the caller's tenant
 ### `GET /api/admin/users/{id}` ![admin](https://img.shields.io/badge/-admin-red)
 
 ### `POST /api/admin/users` ![admin](https://img.shields.io/badge/-admin-red)
+Creating an account with `"role": "admin"` needs an administrator signed in to
+the panel: an API key gets `403 session_required`
+([RBAC.md](RBAC.md#administration-and-plugins-need-a-session)).
 ```json
 {
   "email": "newuser@example.com",
@@ -1841,6 +1965,13 @@ token it minted is refused. Files, quota and grants are untouched. Disabling
 `provider_id` re-homes the user into another tenant. Restricted to an
 unscoped or supertenant caller (`403` otherwise).
 
+⚠ Promoting an account to `admin`, changing an administrator's `role`, and
+setting an administrator's `password` need an administrator signed in to the
+panel: an API key gets `403 session_required`. So does
+`POST /api/admin/users/{id}/reset-password` on an administrator. The same
+holds on `/api/ai/admin` and the `admin_users_*` MCP tools; a role left as it
+was is not a role change.
+
 ### `GET|POST|PATCH /api/admin/users/{id}/quota` ![admin](https://img.shields.io/badge/-admin-red)
 Read or set one user's quota — see [Admin: quota](#admin-quota). `POST
 /api/admin/users/{id}/quota/recompute` rebuilds `used_bytes` from node sizes.
@@ -1860,19 +1991,52 @@ Precisely, on `DELETE`:
 | Kept, with the user dropped (`SET NULL`) | Removed with the user (`CASCADE`) |
 | --- | --- |
 | `nodes.owner_id` — the files themselves | `sessions` |
-| `shares.created_by` — see below | `api_tokens` |
+| `shares.created_by` of an app's own public page — see below | `api_tokens` |
 | `file_grants.created_by` | `file_grants.user_id` — access granted **to** them |
 | `audit_log.user_id` — history stays readable | `notifications`, `user_node_meta`, `node_comments` |
+| | `shares` the user created — download links and file requests (0.49.0) |
 
-Share links the user created **stay live**: public resolution never looks at
-`created_by`. But revoking one does, and a `NULL` creator matches nobody — so
-an orphaned link can only be revoked by an admin, via
-`DELETE /api/admin/shares/{id}`. Audit those before deleting a user who
-shared a lot.
+**The links the user opened are deleted with the account**, in the same
+transaction (`db.Store.DeleteUser`, so a tenant deletion and every other path
+that deletes an account do the same), and the audit entry of the deletion
+records `links_closed` — how many of them were still open. They used to stay
+with `created_by` set to `NULL`, and a link with no creator has nobody to ask
+whether it may still answer ([SHARING.md → A link follows its creator](SHARING.md#a-link-follows-its-creator)).
+An **app's own public page** (a signing page) stays, with `created_by`
+cleared: the app opened it. Links left without a creator by a deletion before
+0.49.0 still answer; revoking one looks at `created_by`, which matches nobody,
+so only an admin revokes it, via `DELETE /api/admin/shares/{id}`.
 
 Their `usage_bytes` row goes with the account, so those bytes stop counting
 toward any per-user total while the files remain on storage. To keep the
 account's history and quota intact, prefer `enabled: false` over deletion.
+
+---
+
+## Admin: roles and permissions
+
+What each account may **do** — the 28 permissions, the built-in and custom
+roles, a person's exceptions and the permissions installed apps declare. The
+model, the limits and every body are in
+[PERMISSIONS.md → API](PERMISSIONS.md#api); the routes:
+
+| Route | Who | |
+|---|---|---|
+| `GET /api/auth/me/permissions` | any signed-in caller | the caller's effective permissions, each with its source, the role's limits, role ids |
+| `GET /api/admin/roles/catalogue` | `admin.users` | `{permissions, presets, apps}` — `apps` lists every installed app's own permissions: `{key: "app.sign.request", app, app_label, id, label, description, default}` |
+| `GET /api/admin/roles/exceptions` | `admin.users` | user id → that account's exceptions |
+| `GET` · `PUT /api/admin/users/{id}/exceptions` | `admin.users` | `{"overrides": {"files.delete": "deny", "app.sign.request": "allow"}}`, the whole map; the answer's `effective.apps` is each app permission's answer and `inherited` (without the person's exception) |
+| `GET` · `PUT /api/admin/users/{id}/roles` | `admin.users` | the person's one role: `{"role_id": 3}`, `{"role_id": null}` or `{"role": "viewer"}` |
+| `GET /api/admin/roles` | `admin.users` | the custom roles and who holds which |
+| `GET /api/admin/roles/builtin[?role=viewer]` | `admin.users` | `{permissions, preset, apps}` — `apps` is the built-in role's decisions about app permissions |
+| `PUT /api/admin/roles/builtin[?role=viewer]` | admin | `{"permissions": […], "apps": {"app.sign.request": "deny"}}` — `apps` absent keeps them, `{}` hands every one back to the app's default |
+| `POST /api/admin/roles` · `PUT` · `DELETE /api/admin/roles/{id}` | admin | a custom role; its `settings.apps` holds its app decisions, `names` / `descriptions` its name and description in other interface languages. `DELETE …?to=user\|viewer\|<id>` moves its people |
+
+⚠ An API key gets `403 session_required` where a change would make an account
+an administrator in all but name: a role to or from Administrator, and an
+exception, a custom role or a built-in role that **allows** an `admin.*`
+permission. Taking one away stays open to a key. A delegated administrator
+cannot change a person's `app.*` exceptions (`403`).
 
 ---
 
@@ -2173,6 +2337,13 @@ dashboard's `recent_activity` rows as `user_name`, and permission grants as
 `user.password_reset` · `user.quota_recompute` · `user.quota_set` ·
 `user.update` · `version.delete` · `version.restore` — plus AI-admin calls,
 which carry the same names under an `ai.` prefix.
+
+Handlers write rows of their own beside these; among them the plugin install
+requests (`internal/pluginreq`), one row per event whichever door it came in
+by: `plugin_request.create` · `plugin_request.approve` ·
+`plugin_request.reject` · `plugin_request.expire` · `plugin_request.supersede`
+(target `plugin_request` and its id; metadata the plugin, version, SHA-256
+and, when an API key asked, its id and label).
 
 ⚠ Filtering by `?action=` is an exact match, so the eight values this page
 used to list and no code ever writes (`auth.login`, `auth.logout`,

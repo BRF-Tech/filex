@@ -24,6 +24,7 @@ import (
 
 	"github.com/pquerna/otp/totp"
 
+	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -33,6 +34,9 @@ import (
 // AuthSelf wraps the self-service profile/password/TOTP routes.
 type AuthSelf struct {
 	Store db.Store
+	// ACL resolves the caller's per-user permissions for Me (package perm).
+	// Nil (tests) leaves them out of the answer.
+	ACL *acl.Resolver
 }
 
 // NewAuthSelf constructs the handler.
@@ -49,7 +53,28 @@ func (h *AuthSelf) Me(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"user": u})
+	out := map[string]any{"user": u}
+	// What the account may do, so the web app can shape itself — which
+	// admin pages to offer, which file actions to show — without a second
+	// round trip. The stores/auth `permissions` field has always read this;
+	// the server had never sent it. Account-wide: a rule limited to paths
+	// is decided per path by the server (GET /api/auth/me/permissions lists
+	// those rules).
+	if h.ACL != nil {
+		if res, err := h.ACL.Perms(r.Context(), u); err == nil && res != nil {
+			out["permissions"] = res.Allowed.Strings()
+			// …and what the role allows only in some folders: the web app
+			// shows those actions, and the server decides per path.
+			out["permissions_in_folders"] = res.AllowedInFolders().Strings()
+			// …and every action whose answer differs from folder to folder:
+			// the file browser asks POST /api/files/manager?action=allowed
+			// about the selection before offering these.
+			out["permissions_by_folder"] = res.VariesByFolder().Strings()
+			out["permission_settings"] = res.Settings
+			out["two_factor_required"] = res.Settings.Require2FA && !u.TOTPEnabled && u.OIDCSubject == "" && !u.IsAdmin()
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 type profileReq struct {

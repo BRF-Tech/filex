@@ -31,12 +31,18 @@ const DRAFT = {
 const node = (path: string): FileNode =>
   ({ path, basename: path.slice(path.lastIndexOf('/') + 1), type: 'file', extension: 'md', size: 0 }) as FileNode;
 
+/** Lets the pending work run. With the timers frozen it runs what is due NOW
+ *  and never moves the clock: a test that walks time does so itself. */
 const settle = async () => {
   for (let i = 0; i < 6; i++) {
-    await new Promise((r) => setTimeout(r, 0));
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
+    else await new Promise((r) => setTimeout(r, 0));
     await flushPromises();
   }
 };
+
+/** Which control has the focus, by its test id (null: one without). */
+const focused = () => document.activeElement?.getAttribute('data-testid') ?? null;
 
 interface Call {
   url: string;
@@ -76,6 +82,7 @@ afterEach(() => {
   mounted?.unmount();
   mounted = null;
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   document.body.innerHTML = '';
 });
 
@@ -143,13 +150,43 @@ describe('a draft’s editor', () => {
     expect(dialog).not.toBeNull();
     expect(q('[data-testid="draft-close-save"]')?.textContent?.trim()).toBe('Save to disk');
     expect(q('[data-testid="draft-close-discard"]')?.textContent?.trim()).toBe('Discard');
-    expect(document.activeElement?.getAttribute('data-testid')).toBe('draft-close-keep');
+    await vi.waitFor(() => expect(focused()).toBe('draft-close-keep'));
 
     q('[data-testid="draft-close-keep"]')!.click();
     await settle();
     expect(w.emitted('close')).toHaveLength(1);
     expect(s.calls.some((c) => c.method === 'DELETE' || c.url.endsWith('/save'))).toBe(false);
   });
+
+  // ⚠ The viewer is a dialog too, and Modal focuses a dialog 30 ms after it
+  // opens. A close question that opened before the viewer's 30 ms were up
+  // lost "Keep in Drafts" to the viewer's text box when that timer fired, and
+  // got it back from its own timer 30 ms later: the check above failed on the
+  // v0.48.0 release run and on a v0.48.1 CI run (focus: the textarea), and 2
+  // of 100 real-timer loops failed on a dev machine. Here the clock is
+  // frozen and walked one millisecond at a time, so no machine is too fast or
+  // too slow for it.
+  it.each([5, 15, 25, 40])(
+    'nothing takes the focus off “Keep in Drafts” while the question is up (closed %i ms after the editor opened)',
+    async (closeAt) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      server();
+      const w = await editor(DRAFT_PATH);
+      await vi.advanceTimersByTimeAsync(closeAt);
+      await w.get('[data-testid="viewer-close"]').trigger('click');
+      await settle();
+      expect(focused()).toBe('draft-close-keep');
+      const lost: string[] = [];
+      for (let ms = 1; ms <= 60; ms++) {
+        await vi.advanceTimersByTimeAsync(1);
+        if (focused() !== 'draft-close-keep') {
+          const el = document.activeElement;
+          lost.push(`+${ms} ms: ${el?.tagName.toLowerCase()}.${el?.className}`);
+        }
+      }
+      expect(lost).toEqual([]);
+    },
+  );
 
   it('Escape takes back the question, not the draft', async () => {
     server();

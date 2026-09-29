@@ -229,7 +229,24 @@ type Store interface {
 	UpdateUserLocale(ctx context.Context, id int64, locale, tz string) error
 	UpdateUserRole(ctx context.Context, id int64, role string) error
 	TouchLastLogin(ctx context.Context, id int64) error
+	// DeleteUser removes the account AND, in the same transaction, the public
+	// links it opened (`shares.created_by` = the account): download links and
+	// file requests (Burak, 2026-09-28: "Kapansın"). Every door that deletes
+	// an account — an administrator, a tenant deletion, a rolled-back
+	// provisioning — goes through here, so none of them can leave a working
+	// link behind. It used to keep the rows and clear `created_by` (ON DELETE
+	// SET NULL), and a link with no creator is a link nobody answers for.
+	//
+	// ⚠ An app's own public page (a signer's page — plugin_id > 0 with a
+	// page_id, model.Share.IsApp) stays, as it stays when its requester loses
+	// sharing (handlers.linkCreatorAllows): the app opened it. Links made
+	// before shares recorded a creator have none to match and are untouched.
 	DeleteUser(ctx context.Context, id int64) error
+	// DeleteUserWithLinks is DeleteUser that also says how many of the
+	// account's links were still open (not expired, not revoked) when they
+	// went — the number the audit row records. Removed rows of links that had
+	// already ended are not counted.
+	DeleteUserWithLinks(ctx context.Context, id int64) (closedLinks int64, err error)
 
 	// TOTP / 2FA
 	SetTotpPendingSecret(ctx context.Context, id int64, secret string, recoveryCodes []string) error
@@ -427,6 +444,37 @@ type Store interface {
 	CreateFileGrant(ctx context.Context, g *model.FileGrant) (*model.FileGrant, error)
 	UpdateFileGrantLevel(ctx context.Context, id int64, level string) error
 	DeleteFileGrant(ctx context.Context, id int64) error
+
+	// Per-user permissions (migration 00069, see internal/perm). Overrides
+	// are keyed by permission name; values are model.PermAllow/PermDeny. The
+	// store persists what it is handed — perm.ValidateEffects runs first.
+	// GetUserPermissionOverrides returns an empty map (never an error) for a
+	// user with no row. SetUserPermissionOverrides with an empty map removes
+	// the row. ListUserPermissionOverrides returns every user that has one.
+	GetUserPermissionOverrides(ctx context.Context, userID int64) (map[string]string, error)
+	SetUserPermissionOverrides(ctx context.Context, userID int64, overrides map[string]string, updatedBy *int64) error
+	ListUserPermissionOverrides(ctx context.Context) (map[int64]map[string]string, error)
+
+	// Permission rules (migration 00069). ListPermissionRules is id order —
+	// the order perm.Resolve reports "the first rule that denied it" in.
+	// GetPermissionRule returns sql.ErrNoRows for an unknown id.
+	ListPermissionRules(ctx context.Context) ([]*model.PermissionRule, error)
+	GetPermissionRule(ctx context.Context, id int64) (*model.PermissionRule, error)
+	CreatePermissionRule(ctx context.Context, r *model.PermissionRule) (*model.PermissionRule, error)
+	UpdatePermissionRule(ctx context.Context, r *model.PermissionRule) error
+	DeletePermissionRule(ctx context.Context, id int64) error
+
+	// SSO groups from a user's most recent SSO login (migration 00069).
+	// SetUserSSOGroups replaces the whole set.
+	ListUserSSOGroups(ctx context.Context, userID int64) ([]string, error)
+	SetUserSSOGroups(ctx context.Context, userID int64, groups []string) error
+
+	// A person's one custom role (migration 00069). GetUserCustomRole is 0
+	// for none; SetUserCustomRole with 0 takes it away. Deleting the role
+	// takes it from everyone who held it (ON DELETE CASCADE).
+	GetUserCustomRole(ctx context.Context, userID int64) (int64, error)
+	SetUserCustomRole(ctx context.Context, userID, roleID int64) error
+	ListUserCustomRoles(ctx context.Context) (map[int64]int64, error)
 
 	// Shares
 	CreateShare(ctx context.Context, share *model.Share) (*model.Share, error)
@@ -845,6 +893,21 @@ type Store interface {
 	// limit check and the navigation panel's badge.
 	CountLiveDrafts(ctx context.Context, userID int64) (int, error)
 	DeleteDraft(ctx context.Context, id int64) error
+
+	// Plugin install requests (migration 00070, internal/pluginreq) — what an
+	// API key leaves instead of installing a plugin, for an administrator to
+	// approve or reject. Written once for every engine (PluginRequestSQL).
+	CreatePluginRequest(ctx context.Context, r *model.PluginRequest) (*model.PluginRequest, error)
+	// GetPluginRequest answers sql.ErrNoRows when there is no such request.
+	GetPluginRequest(ctx context.Context, id int64) (*model.PluginRequest, error)
+	// ListPluginRequests: one state ("" = all), newest first, at most limit.
+	ListPluginRequests(ctx context.Context, status string, limit int) ([]*model.PluginRequest, error)
+	// PendingPluginRequestBySource answers sql.ErrNoRows when no request for
+	// that source is pending.
+	PendingPluginRequestBySource(ctx context.Context, sourceKey string) (*model.PluginRequest, error)
+	// UpdatePluginRequest writes the decision fields; with onlyIfPending only
+	// while the stored row is still pending (ok = it was written).
+	UpdatePluginRequest(ctx context.Context, r *model.PluginRequest, onlyIfPending bool) (bool, error)
 
 	// Providers (tenants). See docs/MULTI-TENANCY.md. Inert while multi-tenant
 	// mode is off; a single "default" provider always exists (migration 00014).

@@ -34,6 +34,7 @@ import { actionIconSvg } from '../lib/actionIcons';
 import { appliesToNodes } from '../lib/pluginApplies';
 import { lockedRefusal, lockOf, lockWords } from '../lib/appLock';
 import { linkWordsFor } from '../lib/symlink'; /* issue #34 */
+import { ALL_SHARING, type SharingHeld } from '../lib/sharingHeld';
 import { personInitial as initialOfPerson, personName as nameOfPerson } from '../lib/personName';
 import TagPicker from './TagPicker.vue';
 import type { TagKind } from '../lib/tags';
@@ -76,6 +77,14 @@ const props = withDefaults(
    * which is the safe answer for an embed that never asks the server.
    */
   callerAdmin?: boolean;
+  /**
+   * Which kinds of sharing the account may use on the ONE selected item
+   * (lib/sharingHeld). "Create link" is drawn only with `links`, "Manage"
+   * (the people with access) only with `users` — the doors here make what
+   * the share dialog makes, and ask the same permissions. Absent = all
+   * three: the server decides.
+   */
+  sharing?: SharingHeld;
   /** Authenticated thumbnail resolver (useThumbs.src). Optional. */
   thumbSrc?: (n: FileNode) => string | null;
   /* === surucu:d1 — the Drive shell's details panel ===================== */
@@ -370,7 +379,11 @@ const effectivePerm = computed<string>(() => {
  * dialog with no permissions in it, and the refusal was swallowed (QA,
  * 2026-09-21). An editor shares from the row's "Share" like everybody else.
  */
-const canManagePerms = computed(() => effectivePerm.value === 'owner');
+/** The sharing kinds this account may use on the item (lib/sharingHeld). */
+const mayShare = computed<SharingHeld>(() => props.sharing ?? ALL_SHARING);
+// …and without `share.users` the people in that dialog are not theirs to
+// change either, so the button that opens it for them is not drawn.
+const canManagePerms = computed(() => effectivePerm.value === 'owner' && mayShare.value.users);
 function permLabel(level: string): string {
   return t(`inspector.perm.${level}`) === `inspector.perm.${level}`
     ? level
@@ -566,7 +579,7 @@ const shareBusy = ref(false);
 
 async function createLink(): Promise<void> {
   const node = single.value;
-  if (!node || shareBusy.value) return;
+  if (!node || shareBusy.value || !mayShare.value.links) return;
   shareBusy.value = true;
   try {
     const r = await props.api.createShare({ path: node.path });
@@ -1118,6 +1131,7 @@ watch(
           <span class="fe-inspector__linkicon" aria-hidden="true" v-html="actionIconSvg('link')"></span>
           <span class="fe-inspector__linknone">{{ t('inspector.link.none') }}</span>
           <button
+            v-if="mayShare.links"
             type="button"
             class="fe-btn fe-btn--sm"
             :disabled="shareBusy || !single"

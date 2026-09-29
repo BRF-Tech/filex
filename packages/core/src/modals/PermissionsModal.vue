@@ -47,6 +47,7 @@ import { splitList } from '../lib/listInput';
 import { actionIconSvg } from '../lib/actionIcons';
 import { fileIconTile } from '../lib/fileIcons';
 import { gateOnService } from '../lib/serviceGate';
+import { ALL_SHARING, type SharingHeld } from '../lib/sharingHeld';
 
 const props = defineProps<{
   api: FileApi;
@@ -86,8 +87,19 @@ const props = defineProps<{
    * already answered, asked again on every open. Absent = ask.
    */
   perm?: string;
+  /**
+   * Which kinds of sharing the account may use on this item
+   * (lib/sharingHeld): a public link (`share.links`), a file request
+   * (`share.upload_links`) and access for people (`share.users`). A section
+   * the account may not use is not drawn — the link switch and its options,
+   * the "Request files" section, the people section — so no button here makes
+   * something the server refuses. Absent = all three: the server decides.
+   */
+  sharing?: SharingHeld;
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
+
+const mayShare = computed<SharingHeld>(() => props.sharing ?? ALL_SHARING);
 
 /**
  * "Send by email", when mail cannot be sent — the owner's rule for a missing
@@ -168,7 +180,7 @@ function levelLabel(v: string): string {
 const rbacGate = computed(() =>
   storageRbac.value ? {} : gateOnService(false, props.canConfigure === true, t('access.ui.rbac_off_here')),
 );
-const peopleShown = computed(() => canManage.value && rbacGate.value.hidden !== true);
+const peopleShown = computed(() => mayShare.value.users && canManage.value && rbacGate.value.hidden !== true);
 const addBlocked = computed(() => rbacGate.value.disabled === true);
 
 // ── share state ──
@@ -291,7 +303,9 @@ function mailResultNotice(res: { sent?: string[]; failed?: string[] }): string {
 async function reload() {
   loading.value = true;
   err.value = '';
-  if (props.perm && props.perm !== 'owner') {
+  // Not an owner, or not allowed to give people access here: the grant list
+  // is not this person's to read, so it is not asked for.
+  if ((props.perm && props.perm !== 'owner') || !mayShare.value.users) {
     canManage.value = false;
     open.value = { ...open.value, people: false };
     loading.value = false;
@@ -491,6 +505,7 @@ function expiresAtISO(): string | null {
  * working and the new one carries the new options.
  */
 async function createLink() {
+  if (!mayShare.value.links) return;
   shareBusy.value = true;
   shareErr.value = '';
   shareMailNotice.value = '';
@@ -533,7 +548,7 @@ async function createLink() {
  * turned off downloads is not what either control says.
  */
 async function toggleLink() {
-  if (shareBusy.value) return;
+  if (shareBusy.value || !mayShare.value.links) return;
   if (linkOn.value) {
     shareBusy.value = true;
     shareErr.value = '';
@@ -594,6 +609,7 @@ function dropExpiresAtISO(): string | null {
   return new Date(Date.now() + dropExpiry.value * 86400000).toISOString();
 }
 async function createDropLink() {
+  if (!mayShare.value.uploadLinks) return;
   dropBusy.value = true;
   dropErr.value = '';
   dropResult.value = null;
@@ -849,7 +865,7 @@ async function nativeShare(body: { title: string; text: string }) {
 
       <div class="fe-share__body">
         <!-- ───────── tier 1: the link, the whole reason people open this ───── -->
-        <div class="fe-share__lead">
+        <div v-if="mayShare.links" class="fe-share__lead" data-testid="share-lead">
           <div class="fe-share__switchrow">
             <span class="fe-share__leadicon" aria-hidden="true" v-html="actionIconSvg('access')"></span>
             <span class="fe-share__leadlabel">{{ t('access.link.switch') }}</span>
@@ -890,7 +906,7 @@ async function nativeShare(body: { title: string; text: string }) {
         <!-- ───────── tier 2: named sections, one click each ───────────────── -->
         <div class="fe-share__sections">
           <!-- Link options: PIN · expiry · download cap · curl · e-mail · links -->
-          <section class="fe-share__section">
+          <section v-if="mayShare.links" class="fe-share__section" data-testid="share-link-section">
             <button
               type="button"
               class="fe-share__sechead"
@@ -1061,7 +1077,7 @@ async function nativeShare(body: { title: string; text: string }) {
                       {{ t('access.ui.create_user_grant') }}
                     </button>
                   </div>
-                  <button type="button" class="fe-share__linkbtn" :disabled="busy" @click="gotoShareWithMail">
+                  <button v-if="mayShare.links" type="button" class="fe-share__linkbtn" data-testid="share-send-link-instead" :disabled="busy" @click="gotoShareWithMail">
                     {{ t('access.ui.just_send_a_share_link') }}
                   </button>
                 </div>
@@ -1101,7 +1117,7 @@ async function nativeShare(body: { title: string; text: string }) {
           </section>
 
           <!-- Request files: the inbound drop link (folders only) -->
-          <section v-if="isDir" class="fe-share__section">
+          <section v-if="isDir && mayShare.uploadLinks" class="fe-share__section" data-testid="share-drop">
             <button
               type="button"
               class="fe-share__sechead"

@@ -19,6 +19,9 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Modal from '@/components/ui/Modal.vue';
 import ResetPasswordModal from '@/components/ResetPasswordModal.vue';
+import UserRolesCard from '@/components/UserRolesCard.vue';
+import { RolesApi, type PermissionRule } from '@/api/roles';
+import { roleName } from '@/lib/roleName';
 import Spinner from '@/components/ui/Spinner.vue';
 
 const { t, locale } = useI18n();
@@ -34,7 +37,20 @@ const saving = ref(false);
 
 const email = ref('');
 const displayName = ref('');
-const role = ref<UserRole>('viewer');
+// The Role field: a built-in role ("admin" | "user" | "viewer") or a custom
+// role as "custom:<id>". One per person.
+const role = ref<string>('viewer');
+const customRoles = ref<PermissionRule[]>([]);
+const heldRoleId = ref<number | null>(null);
+const heldRole = computed(() => customRoles.value.find((r) => r.id === heldRoleId.value) ?? null);
+const CUSTOM = 'custom:';
+/** The choice as saved, to tell whether the Role field changed. */
+const savedRole = ref('');
+function currentChoice(): string {
+  const u = user.value;
+  if (!u) return '';
+  return heldRoleId.value != null && u.role !== 'admin' ? `${CUSTOM}${heldRoleId.value}` : u.role;
+}
 
 const showReset = ref(false);
 
@@ -44,11 +60,20 @@ const deleting = ref(false);
 async function load() {
   loading.value = true;
   try {
-    const u = await UsersApi.get(id.value);
+    const [u, list, held] = await Promise.all([
+      UsersApi.get(id.value),
+      // Best effort: without the roles list the field offers the built-in
+      // roles only.
+      RolesApi.listRules().catch(() => ({ rules: [] as PermissionRule[], assignments: {} })),
+      RolesApi.userRole(id.value).catch(() => null),
+    ]);
     user.value = u;
     email.value = u.email;
     displayName.value = u.display_name;
-    role.value = u.role;
+    customRoles.value = list.rules;
+    heldRoleId.value = held;
+    role.value = currentChoice();
+    savedRole.value = role.value;
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
     router.replace({ name: 'users' });
@@ -60,11 +85,21 @@ async function load() {
 async function save() {
   saving.value = true;
   try {
-    const updated = await users.update(id.value, {
-      display_name: displayName.value.trim(),
-      role: role.value,
-    });
-    user.value = updated;
+    const picked = role.value;
+    if (displayName.value.trim() !== user.value?.display_name) {
+      await users.update(id.value, { display_name: displayName.value.trim() });
+    }
+    // The role is one server call (it also guards the last administrator),
+    // and only made when the choice changed — no audit entry for a no-op.
+    if (picked !== savedRole.value) {
+      const res = await RolesApi.setUserRole(
+        id.value,
+        picked.startsWith(CUSTOM) ? Number(picked.slice(CUSTOM.length)) : (picked as UserRole),
+      );
+      heldRoleId.value = res.role_id;
+    }
+    user.value = await UsersApi.get(id.value);
+    savedRole.value = currentChoice();
     toast.success(t('users.updatedOk'));
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
@@ -93,6 +128,7 @@ const roleOptions = computed(() => [
   { value: 'admin', label: t('users.roles.admin') },
   { value: 'user', label: t('users.roles.user') },
   { value: 'viewer', label: t('users.roles.viewer') },
+  ...customRoles.value.map((r) => ({ value: `${CUSTOM}${r.id}`, label: roleName(r, locale.value) })),
 ]);
 
 // ── koru:k3 — storage quota card ─────────────────────────────────
@@ -183,7 +219,7 @@ onMounted(() => {
         <h1 class="text-xl font-semibold flex items-center gap-2">
           {{ personName(user) }}
           <!-- ⚠ The role in words (it printed "user" under the name). -->
-          <Badge size="xs" data-testid="user-edit-role">{{ t(`users.roles.${user.role}`) }}</Badge>
+          <Badge size="xs" data-testid="user-edit-role">{{ heldRole && user.role !== 'admin' ? roleName(heldRole, locale) : t(`users.roles.${user.role}`) }}</Badge>
         </h1>
         <p class="text-sm text-zinc-500">{{ user.email }}</p>
       </div>
@@ -217,6 +253,10 @@ onMounted(() => {
         </div>
       </div>
     </form>
+
+    <!-- Per-user permissions (backend internal/perm). Keyed on the SAVED
+         role, not the form's: the card describes what the server holds. -->
+    <UserRolesCard :user-id="user.id" :role="user.role" :custom-role="user.role !== 'admin' ? heldRole : null" />
 
     <!-- koru:k3 — storage quota -->
     <div class="card card-body space-y-3">

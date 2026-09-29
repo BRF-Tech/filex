@@ -67,6 +67,22 @@ test('winget: versioned URL, upper-case hash, per-user NSIS, the stable product 
   assert.match(files[`${WINGET_ID}.locale.tr-TR.yaml`], /Kendi sunucunuzda çalışan dosya yöneticisi/);
 });
 
+// Windows on Arm gets its own installer (0.48.1). winget picks the entry for
+// the machine's architecture; without one an arm64 PC is handed the x64
+// installer and runs the whole app under emulation.
+test('winget: the arm64 installer beside the x64 one, each with its own hash', () => {
+  const ARM = 'cd'.repeat(32);
+  const inst = wingetManifests({ version: '0.48.1', sha: SHA, shaArm64: ARM })[`${WINGET_ID}.installer.yaml`];
+  const entries = inst.split(/^- Architecture: /m).slice(1);
+  assert.equal(entries.length, 2);
+  assert.match(entries[0], /^x64\n  InstallerUrl: \S+\/v0\.48\.1\/filex-desktop-x64\.exe\n  InstallerSha256: AB/);
+  assert.match(entries[1], /^arm64\n  InstallerUrl: \S+\/v0\.48\.1\/filex-desktop-arm64\.exe\n  InstallerSha256: CD/);
+  // Without the arm64 hash, the manifest is what it always was: x64 alone.
+  const x64only = wingetManifests({ version: '0.48.1', sha: SHA })[`${WINGET_ID}.installer.yaml`];
+  assert.equal(x64only.split(/^- Architecture: /m).length - 1, 1);
+  assert.doesNotMatch(x64only, /arm64/);
+});
+
 test('winget-pkgs directory layout', () => {
   assert.equal(wingetDir('0.43.3').split(path.sep).join('/'), 'manifests/b/BRFTech/filex-app/0.43.3');
 });
@@ -101,6 +117,12 @@ test('run(): hashes the real files and writes both trees', () => {
     assert.match(inst, new RegExp(hash(exe).toUpperCase()));
     const rb = fs.readFileSync(path.join(out, 'homebrew', 'Casks', `${CASK_TOKEN}.rb`), 'utf8');
     assert.match(rb, new RegExp(`sha256 "${hash(dmg)}"`));
+    const arm = path.join(dir, 'setup-arm64.exe');
+    fs.writeFileSync(arm, 'arm64 bytes');
+    run(['--version', '1.1.1', '--windows', exe, '--windows-arm64', arm, '--out', out]);
+    const both = fs.readFileSync(path.join(out, 'winget', wingetDir('1.1.1'), `${WINGET_ID}.installer.yaml`), 'utf8');
+    assert.match(both, new RegExp(`- Architecture: arm64\n.*\n  InstallerSha256: ${hash(arm).toUpperCase()}`));
+    assert.throws(() => run(['--version', '1.1.1', '--windows-arm64', arm, '--out', out]), /--windows-arm64 needs --windows/);
     assert.throws(() => run(['--version', 'v1.1.0', '--windows', exe, '--out', out]), /x\.y\.z/);
     assert.throws(() => run(['--version', '1.1.0', '--out', out]), /--windows and\/or --mac/);
   } finally {

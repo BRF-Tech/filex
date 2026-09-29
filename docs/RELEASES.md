@@ -46,41 +46,41 @@ folder you already have — or from a single file — and the desktop app gets t
 notification bell and the account menu in its window. Every newer version of
 an app now waits for an administrator, and the iframe converter is gone.
 
-> ⚠ **Nothing updates itself any more** ([Changed](#changed)): 0.47 installed
+> ⚠ **Nothing updates itself any more** (Changed): 0.47 installed
 > a newer version of an app by itself when it asked for no new permission.
 > Now every version waits for an administrator's **Review update**; the
 > per-app automatic-update switch is gone and `PATCH …/app-plugins/{id}` with
 > `auto_update` answers `400`.
 
-> ⚠ **filex in someone else's frame** ([Changed](#changed)): a dashboard that
+> ⚠ **filex in someone else's frame** (Changed): a dashboard that
 > shows filex in an `<iframe>` (Homarr, Organizr and the like) needs its
 > origin in the new `FILEX_FRAME_ANCESTORS`; otherwise the browser refuses the
 > frame. The embedded explorer is not a frame and is not affected.
 
-> ⚠ **The iframe converter is removed** ([Removed](#removed)): conversion is
+> ⚠ **The iframe converter is removed** (Removed): conversion is
 > the Convert app. `FILEX_CONVERT_URL`, the compose `convert` profile and the
 > Helm `convert` values are gone; a server that still sets the variable says
 > so once, at start.
 
-> ⚠ **For app authors** ([Changed](#changed)): the app platform API is
+> ⚠ **For app authors** (Changed): the app platform API is
 > narrower — paths an app passes must be the call's inputs or files it keeps
 > state on, `share_create` and `file_lock` need **editor**, an `http:`
 > permission names a host, and screen calls are capped per app. The two
 > published apps are unaffected.
 
-> ⚠ **For integrators** ([Changed](#changed)): `@brftech/filex-core` now
+> ⚠ **For integrators** (Changed): `@brftech/filex-core` now
 > depends on `@headlessui/vue`, `lucide-vue-next` and the new
 > `@brftech/filex-app-ui`.
 
 > ⚠ **Encrypted folders get a level, and level 2 is refused by older filex**
-> ([Added](#added)): level 1 (contents only) stays the default and keeps its
+> (Added): level 1 (contents only) stays the default and keeps its
 > v2 key file, which every filex since 0.31 opens. Level 2 (contents and
 > names) — chosen in the create dialog, or later in the folder's settings —
 > writes marker v3, which filex 0.47 and older will not open: on purpose,
 > because they would upload files under their plaintext names next to the
 > encrypted ones. Every folder that already exists stays at level 1.
 
-> ⚠ **Large and single encrypted files need filex 0.48** ([Added](#added)): a
+> ⚠ **Large and single encrypted files need filex 0.48** (Added): a
 > file over 200 MB in an encrypted folder is now written as a stream (header
 > `0x02`) and a single encrypted file is a `.fxe`; filex 0.47 and older open
 > neither. The folder, and its files up to 200 MB, still open there.
@@ -352,23 +352,23 @@ from an audit of a production install where a person reported "no positive
 or negative message, nothing at all". A review of them found and closed a
 few older holes in the operations queue on the way in.
 
-> ⚠ **Security fixes in the operations queue** ([Security](#security)): the
+> ⚠ **Security fixes in the operations queue** (Security): the
 > generic queue endpoint took any job kind a client named and ignored a
 > folder-confined token's root, a trash restore did not check the entry's
 > tenant, and every member of a storage could read every other member's
 > queued operations. Upgrade.
 >
-> ⚠ **For integrators** ([Changed](#changed)): `POST /api/files/ops` now
+> ⚠ **For integrators** (Changed): `POST /api/files/ops` now
 > takes only `copy`, `move` and `delete` (`400 BAD_KIND` for anything else),
 > and a refused change is also said inside the explorer; hosts that show
 > their own message can turn that off with `refusalToasts: false`.
 >
-> ⚠ **Behind a proxy that strips a path** ([Added](#added)): if
+> ⚠ **Behind a proxy that strips a path** (Added): if
 > `FILEX_PUBLIC_URL` has a path (`https://example.com/filex`) and the proxy
 > takes it off before filex sees the request, switch the proxy to pass the
 > full path — that path is now filex's base, and filex takes it off itself.
 >
-> ⚠ **For app authors** ([Added](#added)): a `filex-app.json` that declares
+> ⚠ **For app authors** (Added): a `filex-app.json` that declares
 > the new `filex` version range installs on filex 0.47 and later only; 0.46
 > and earlier refuse a manifest field they do not know.
 
@@ -1458,7 +1458,7 @@ caller.
 
 > ⚠⚠ **Security — upgrade promptly.** Every filex up to v0.42.2 with ONLYOFFICE
 > configured accepts an unsigned save callback, which lets anybody who can
-> reach the server overwrite a file ([Security](#security)). filex has never
+> reach the server overwrite a file (Security). filex has never
 > enabled the editor without a JWT secret — an install with no secret has
 > editing off and is unaffected — so the one thing to check is the other
 > side: a Document Server running with `JWT_ENABLED` off sends unsigned
@@ -1470,7 +1470,7 @@ caller.
 > access keys, NFS exports and SSH keys — measured the account behind the
 > caller instead of the caller itself, so a token restricted to reading, or
 > confined to one folder, could create a full-rights credential for the same
-> account and then use it ([Security](#security)). Every one of them now
+> account and then use it (Security). Every one of them now
 > refuses with `403 token_ceiling`. The desktop door was found and fixed by
 > Berk Başarır ([#35](https://github.com/BRF-Tech/filex/pull/35)).
 >
@@ -1480,7 +1480,7 @@ caller.
 > `202 "preparing"` status report to disk as the file and uploading it over
 > the original, conflict copies nesting by the thousand, a stale mirror
 > re-uploaded over a cleaned-up server, and a rename onto a taken name
-> destroying the file that had it ([Fixed](#fixed)). The server fix protects
+> destroying the file that had it (Fixed). The server fix protects
 > every client already installed; the new desktop build carries the rest.
 >
 > ⚠⚠ **A cache in front of filex could hand one person's answers to
@@ -1488,17 +1488,17 @@ caller.
 > caches everything kept `GET /api/auth/me` for two hours and served one
 > administrator's identity to every visitor. Every `/api` answer is now
 > `no-store` unless it is one of the four answers that say who the instance
-> is ([Security](#security)). Found and fixed by Berk Başarır
+> is (Security). Found and fixed by Berk Başarır
 > ([#41](https://github.com/BRF-Tech/filex/pull/41)).
 >
 > ⚠⚠ **The notification bell named files its reader could not open.** Queued
 > copies, moves and deletes were announced to every account, a member of an
 > RBAC storage read the names of files in folders they have no grant on, one
 > person's "mark all read" read everybody's alerts, and a tenant admin could
-> read every tenant's notification history ([Security](#security)). Found and
+> read every tenant's notification history (Security). Found and
 > fixed by Berk Başarır ([#42](https://github.com/BRF-Tech/filex/pull/42), [#43](https://github.com/BRF-Tech/filex/pull/43)).
 >
-> ⚠ **Before upgrading, read [Upgrade notes](#upgrade-notes)**: API/MCP tokens
+> ⚠ **Before upgrading, read Upgrade notes**: API/MCP tokens
 > created with no scopes are rewritten to an explicit list that includes
 > `admin` — review and narrow them; identity providers saved on the admin
 > page come back switched off; existing tags become team tags, and a client

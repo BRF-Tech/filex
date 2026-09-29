@@ -24,6 +24,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -179,19 +181,106 @@ func TestDesktopPairing_SessionBearerIsStillASession(t *testing.T) {
 	assert.Equal(t, model.TokenKindUser, onlyDesktopToken(t, store, uid).Kind)
 }
 
-// TestDesktopPairing_ViewerGetsAReadOnlyToken — the desktop gets what its
-// owner could mint for themselves at /api/tokens, and a viewer can mint only
-// read-only tokens there.
-func TestDesktopPairing_ViewerGetsAReadOnlyToken(t *testing.T) {
+// TestDesktopPairing_ViewerDesktopActsLikeTheViewersBrowser — a viewer's
+// desktop does what the same viewer does in a browser: it changes the account
+// (profile, password, two-factor) and it changes no file.
+//
+// ⚠ Measured before the fix (0.49.0 doc audit): changing the account asks the
+// token for `write` (routes.go, accountWrite) and the pairing gave a viewer
+// `read` only, so the desktop's account dialog answered 403 on every save while
+// the browser saved. The pairing now gives a viewer read,write; the ROLE keeps
+// refusing every file change, with the role's answer, not the token's.
+func TestDesktopPairing_ViewerDesktopActsLikeTheViewersBrowser(t *testing.T) {
 	srv, _, store := testutil.NewTestServer(t)
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(root, "Inbox"), 0o755))
+	cfg, err := json.Marshal(map[string]string{"root": root})
+	require.NoError(t, err)
+	vdesk, err := store.CreateStorage(context.Background(), &model.Storage{
+		Name: "vdesk", Driver: "local", MountPath: "/vdesk", ConfigJSON: cfg,
+		SyncMode: model.SyncModeOnDemand, Enabled: true,
+	})
+	require.NoError(t, err)
+	// Catalogued, so a link request reaches the permission question instead
+	// of answering "not indexed yet".
+	seedNode(t, store, vdesk, "a.txt", false)
+	seedNode(t, store, vdesk, "Inbox", true)
 	client, uid, _ := desktopSession(t, srv.URL, store, model.RoleViewer, "desk-viewer@test.local")
 
-	st, body, _ := desktopPair(t, srv.URL, postWith(t, client))
+	st, body, tok := desktopPair(t, srv.URL, postWith(t, client))
 	require.Equal(t, http.StatusOK, st, body)
-
 	row := onlyDesktopToken(t, store, uid)
 	assert.Equal(t, model.TokenKindUser, row.Kind)
-	assert.Equal(t, "read", row.Scopes, "a viewer's desktop must not carry write or delete")
+	assert.Equal(t, "read,write", row.Scopes, "a viewer's desktop carries write for the account, and never delete")
+
+	// Reading works, and catalogues the folder for the requests below.
+	status, body := callWithToken(t, http.MethodGet, srv.URL+"/api/files/manager?action=index&path=vdesk://", tok, "")
+	require.Equal(t, http.StatusOK, status, "a viewer's desktop lists: %s", body)
+
+	// Files: refused by the ROLE — the answer the viewer's browser gets — and
+	// never by the token's verbs.
+	fileChanges := []struct {
+		what     string
+		do       func() (int, string)
+		verbGone string
+	}{
+		{"new folder", func() (int, string) {
+			return fxMutate(t, srv.URL, tok, "newfolder", map[string]any{"path": "vdesk://", "name": "nope"})
+		}, "write"},
+		{"upload", func() (int, string) { return fxUploadStatus(t, srv.URL, tok, "vdesk://", "nope.txt", "x") }, "write"},
+		{"rename", func() (int, string) {
+			return fxMutate(t, srv.URL, tok, "rename", map[string]any{"path": "vdesk://", "item": "vdesk://a.txt", "name": "b.txt"})
+		}, "write"},
+		{"public link", func() (int, string) {
+			return fxPost(t, srv.URL+"/api/files/share", tok, map[string]any{"path": "vdesk://a.txt"})
+		}, "write"},
+		{"file request", func() (int, string) {
+			return fxPost(t, srv.URL+"/api/files/share", tok, map[string]any{"path": "vdesk://Inbox", "kind": "drop"})
+		}, "write"},
+		{"save text", func() (int, string) {
+			return fxPost(t, srv.URL+"/api/files/save-text", tok, map[string]any{"path": "vdesk://a.txt", "content": "changed"})
+		}, "write"},
+		{"agent mkdir", func() (int, string) {
+			return callWithToken(t, http.MethodPost, srv.URL+"/api/ai/mkdir", tok, `{"path":"vdesk://nope"}`)
+		}, "write"},
+		{"delete", func() (int, string) {
+			return fxPost(t, srv.URL+"/api/files/delete", tok, map[string]any{"source": []string{"vdesk://a.txt"}})
+		}, "delete"},
+	}
+	for _, c := range fileChanges {
+		status, body := c.do()
+		assert.Equal(t, http.StatusForbidden, status, "%s by a viewer's desktop: %s", c.what, body)
+		if c.verbGone == "write" {
+			assert.NotContains(t, body, "token missing scope", "%s: refused by the role, not by the token", c.what)
+		} else {
+			assert.Contains(t, body, "token missing scope: delete", "%s: a viewer's desktop carries no delete", c.what)
+		}
+	}
+	entries, err := os.ReadDir(root)
+	require.NoError(t, err)
+	require.Len(t, entries, 2, "the storage is exactly as it was")
+	got, err := os.ReadFile(filepath.Join(root, "a.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "a", string(got))
+
+	// The account: the desktop does what the browser does.
+	status, body = callWithToken(t, http.MethodPatch, srv.URL+"/api/auth/profile", tok, `{"display_name":"Desk Viewer"}`)
+	assert.Equal(t, http.StatusOK, status, "profile from the desktop: %s", body)
+	status, body = callWithToken(t, http.MethodPost, srv.URL+"/api/auth/totp/enroll", tok, "")
+	assert.Equal(t, http.StatusOK, status, "two-factor from the desktop: %s", body)
+	status, body = callWithToken(t, http.MethodPost, srv.URL+"/api/auth/password", tok,
+		`{"old_password":"`+desktopPW+`","new_password":"DesktopPairPass!2"}`)
+	assert.Equal(t, http.StatusOK, status, "password from the desktop: %s", body)
+
+	// …exactly as the viewer's browser session answers.
+	req, err := http.NewRequest(http.MethodPatch, srv.URL+"/api/auth/profile", strings.NewReader(`{"display_name":"Web Viewer"}`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "profile from the browser")
 }
 
 // TestDesktopPairing_RefusesEveryAPIToken — the browser half is for a signed-in

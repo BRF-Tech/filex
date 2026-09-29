@@ -55,6 +55,12 @@ type ActionRow struct {
 	// UI: the action opens the app's own interface (its view has a `ui`
 	// file) — the explorer draws the frame; nothing is queued.
 	UI *UIRef `json:"ui,omitempty"`
+	// Requires is the app's user permission the action needs
+	// (app.<app>.<id>, perm/app.go), empty for none; RequiresDefault is who
+	// holds it until decided. The list handler drops what the caller does
+	// not hold, so the menu never offers what the run would refuse.
+	Requires        string `json:"requires,omitempty"`
+	RequiresDefault string `json:"-"`
 }
 
 // UIRef is how a client opens an app's own interface.
@@ -95,6 +101,11 @@ type ViewRow struct {
 	Applies   wire.Applies `json:"applies"`
 	// UI: the view is the app's own interface.
 	UI *UIRef `json:"ui,omitempty"`
+	// Requires is the app's user permission the view needs
+	// (app.<app>.<id>), empty for none. The list handler drops what the
+	// caller does not hold.
+	Requires        string `json:"requires,omitempty"`
+	RequiresDefault string `json:"-"`
 }
 
 // ActionsAnswer is the whole list for one caller.
@@ -128,6 +139,12 @@ func (r *Registry) ActionsFor(ctx context.Context, isAdmin bool) (*ActionsAnswer
 			if isAdmin {
 				row.Gated = e.Gated
 			}
+			if e.Action.Requires != "" {
+				if up, ok := p.Manifest.UserPermission(e.Action.Requires); ok {
+					row.Requires = AppPermKey(p.Row.Name, up.ID)
+					row.RequiresDefault = up.Default
+				}
+			}
 			if v, ok := p.Manifest.View(e.Action.View); ok {
 				row.ViewPlacement = v.Placement
 				row.UI = r.uiRef(p, v)
@@ -138,7 +155,14 @@ func (r *Registry) ActionsFor(ctx context.Context, isAdmin bool) (*ActionsAnswer
 			if v.Placement == "modal" || v.Placement == "page" {
 				continue
 			}
-			out.Views = append(out.Views, ViewRow{Plugin: p.Row.Name, ID: v.ID, Placement: v.Placement, Label: v.Label, Icon: p.Manifest.Icon, Applies: v.Applies, UI: r.uiRef(p, &v)})
+			row := ViewRow{Plugin: p.Row.Name, ID: v.ID, Placement: v.Placement, Label: v.Label, Icon: p.Manifest.Icon, Applies: v.Applies, UI: r.uiRef(p, &v)}
+			if v.Requires != "" {
+				if up, ok := p.Manifest.UserPermission(v.Requires); ok {
+					row.Requires = AppPermKey(p.Row.Name, up.ID)
+					row.RequiresDefault = up.Default
+				}
+			}
+			out.Views = append(out.Views, row)
 		}
 	}
 	return out, nil
@@ -469,7 +493,7 @@ func (r *Registry) runJob(ctx context.Context, job *model.AppPluginJob, live fun
 	in := wire.ActionRunInput{
 		JobID: job.ID, ActionID: job.ActionID, Params: params, Inputs: scope.Inputs(),
 		Output: action.Output,
-		Actor:  wire.Actor{ID: actor.ID, Email: actor.Email, Name: actor.DisplayName, Role: actor.Role},
+		Actor:  r.wireActor(ctx, p, actor, ""),
 		Locale: job.Locale, Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(p),
 		ShareMaxTTLDays: r.linkCeiling(ctx, p),
 	}
@@ -838,8 +862,8 @@ func (r *Registry) ViewEvent(ctx context.Context, plugin, view string, storageID
 		in.Context.Home = r.home(ctx, actor)
 	}
 	if actor != nil {
-		in.Context.Actor = &wire.Actor{ID: actor.ID, Email: actor.Email, Name: actor.DisplayName, Role: actor.Role,
-			IP: actorIPFrom(ctx)}
+		a := r.wireActor(ctx, p, actor, actorIPFrom(ctx))
+		in.Context.Actor = &a
 	}
 	inb, _ := json.Marshal(in)
 	outb, err := c.Call(WithScope(ctx, scope), "view_event", inb, 0)
@@ -885,4 +909,42 @@ func (r *Registry) storageFacts(ctx context.Context, storageID int64) (name stri
 		return "", false
 	}
 	return st.Name, st.ReadOnly
+}
+
+// AppPermKey is an app's user permission key, app.<app>.<id> — the same
+// spelling as perm.AppKey (kept here so this package needs no perm import).
+func AppPermKey(app, id string) string { return "app." + app + "." + id }
+
+// UserPermRow is one app user permission as the role editor lists it.
+type UserPermRow struct {
+	Key         string    `json:"key"` // app.<app>.<id>
+	App         string    `json:"app"`
+	AppLabel    wire.Text `json:"app_label"`
+	ID          string    `json:"id"`
+	Label       wire.Text `json:"label"`
+	Description wire.Text `json:"description,omitempty"`
+	Default     string    `json:"default"`
+}
+
+// UserPermissions lists every installed app's user permissions (manifest
+// `user_permissions`), app by app in install order — what the role editor
+// and a person's exceptions offer under the app's name. A stopped app's are
+// listed too: the decision outlives a restart.
+func (r *Registry) UserPermissions() []UserPermRow {
+	out := []UserPermRow{}
+	if r == nil {
+		return out
+	}
+	for _, p := range r.All() {
+		if p.Manifest == nil {
+			continue
+		}
+		for _, up := range p.Manifest.UserPermissions {
+			out = append(out, UserPermRow{
+				Key: AppPermKey(p.Row.Name, up.ID), App: p.Row.Name, AppLabel: p.Manifest.Label,
+				ID: up.ID, Label: up.Label, Description: up.Description, Default: up.Default,
+			})
+		}
+	}
+	return out
 }

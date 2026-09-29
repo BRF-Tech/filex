@@ -77,6 +77,8 @@ export interface EndpointMap {
   shareDelete: string | null;
   limits: string | null;
   capabilities: string | null;
+  /** The signed-in account (`/api/auth/me`): its role and permissions. */
+  me: string | null;
   archiveList: string | null;
   archiveExtract: string | null;
   archiveCreate: string | null;
@@ -140,6 +142,13 @@ export interface ExplorerConfig {
 
   limits?: string;
   capabilities?: string;
+  /**
+   * `/api/auth/me` — the explorer reads the account's permissions from it
+   * when the host passes none (`permissions` below), so every surface
+   * (the web app, the desktop app, work and fishapp embeds) hides the same
+   * actions without each host wiring it.
+   */
+  me?: string;
 
   archiveList?: string;
   archiveExtract?: string;
@@ -721,6 +730,32 @@ export interface ExplorerConfig {
    * before any preference is consulted.
    */
   rememberFolderView?: boolean;
+  /**
+   * The signed-in account's effective permissions (filex backend
+   * `internal/perm` — "files.delete", "share.links", …), as the host read
+   * them from `/api/auth/me`. The explorer hides the actions the account may
+   * not take — the same ones the server would refuse with 403
+   * `permission_denied` — whether the host passes the list or not.
+   *
+   * Absent: the explorer reads `/api/auth/me` itself, through the same
+   * `apiBase` as every other call, so every host hides the same actions
+   * (0.49.0). Only when that answer is unusable too — the endpoint is off, the
+   * request fails, or it carries no permissions — does every action stay and
+   * the server decide. The fetched answer never narrows an administrator.
+   *
+   * Passed: this list wins and nothing is fetched. A rule that differs from
+   * folder to folder is `permissionsByFolder`'s, asked of the server per path.
+   */
+  permissions?: string[];
+  /**
+   * The permissions whose answer differs from folder to folder (filex
+   * `/api/auth/me` → `permissions_by_folder`): a role that allows Delete only
+   * in Scratch, or denies it only in Finance. The explorer asks the server
+   * about the selected paths (`?action=allowed`) before offering these, so
+   * Delete shows in Scratch and not elsewhere. Ignored without `permissions`
+   * (the explorer then uses the list it read from `/api/auth/me` itself).
+   */
+  permissionsByFolder?: string[];
   storages?: Array<{
     name: string;
     /**

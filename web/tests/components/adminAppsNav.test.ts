@@ -155,6 +155,7 @@ async function router(at = '/dashboard'): Promise<Router> {
       { path: '/tagged', name: 'tagged', component: Blank },
       { path: '/users', name: 'users', component: Blank },
       { path: '/grants', name: 'grants', component: Blank },
+      { path: '/roles', name: 'roles', component: Blank },
       { path: '/auth-providers', name: 'auth-providers', component: Blank },
       { path: '/api-mcp', name: 'api-mcp', component: Blank },
       { path: '/settings', name: 'settings', component: Blank },

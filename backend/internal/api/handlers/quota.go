@@ -132,6 +132,17 @@ func (h *Quota) AdminSet(w http.ResponseWriter, r *http.Request) {
 	if !ownsUser(w, r, h.Store, id, "user") {
 		return
 	}
+	// A delegated administrator does not set an administrator's quota.
+	if !callerIsFullAdmin(r.Context()) {
+		target, err := h.Store.GetUser(r.Context(), id)
+		if err != nil || target == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+			return
+		}
+		if refuseAdminTarget(w, r, target, "") {
+			return
+		}
+	}
 	var req setQuotaReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})

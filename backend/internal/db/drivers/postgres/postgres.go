@@ -82,6 +82,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.DraftSQL = &db.DraftSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Rows deleted where they stood (issue #74), written once in internal/db.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// Plugin install requests (00070), written once in internal/db.
+	s.PluginRequestSQL = &db.PluginRequestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	return s
 }
 
@@ -103,6 +105,8 @@ type Store struct {
 	*db.DraftSQL
 	// ListVanishedNodeIDs, CountChildRows (internal/db vanished_sql.go).
 	*db.VanishedSQL
+	// The plugin install requests (internal/db plugin_requests_sql.go).
+	*db.PluginRequestSQL
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
@@ -1149,9 +1153,36 @@ func (s *Store) TouchLastLogin(ctx context.Context, id int64) error {
 	return err
 }
 
+// DeleteUser implements db.Store: the account and the public links it
+// opened, in one transaction (see the interface for the rule).
 func (s *Store) DeleteUser(ctx context.Context, id int64) error {
-	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM users WHERE id=$1`, id)
+	_, err := s.DeleteUserWithLinks(ctx, id)
 	return err
+}
+
+// personLinks matches the links an account opened itself — every row it
+// created except an app's own public page (model.Share.IsApp).
+const personLinks = `created_by=$1 AND NOT (plugin_id > 0 AND page_id <> '')`
+
+// DeleteUserWithLinks implements db.Store.
+func (s *Store) DeleteUserWithLinks(ctx context.Context, id int64) (int64, error) {
+	var closed int64
+	err := s.WithTx(ctx, func(ctx context.Context) error {
+		if err := s.conn(ctx).QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM shares WHERE `+personLinks+` AND (expires_at IS NULL OR expires_at > NOW())`,
+			id).Scan(&closed); err != nil {
+			return err
+		}
+		if _, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM shares WHERE `+personLinks, id); err != nil {
+			return err
+		}
+		_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM users WHERE id=$1`, id)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return closed, nil
 }
 
 func (s *Store) CreateSession(ctx context.Context, userID int64, token string, expiresAt time.Time, ip, ua string) (*model.Session, error) {
@@ -1207,8 +1238,8 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context) error {
 func (s *Store) CreateAPIToken(ctx context.Context, t *model.APIToken) (*model.APIToken, error) {
 	var id int64
 	err := s.conn(ctx).QueryRowContext(ctx,
-		`INSERT INTO api_tokens (user_id, label, token_hash, scopes, usernames, kind, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		t.UserID, t.Label, t.TokenHash, t.Scopes, t.Usernames, model.NormalizeTokenKind(t.Kind), t.ExpiresAt).Scan(&id)
+		`INSERT INTO api_tokens (user_id, label, token_hash, scopes, usernames, kind, source, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+		t.UserID, t.Label, t.TokenHash, t.Scopes, t.Usernames, model.NormalizeTokenKind(t.Kind), t.Source, t.ExpiresAt).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
@@ -1452,19 +1483,19 @@ func (s *Store) DeleteNFSExport(ctx context.Context, id, userID int64) error {
 
 func (s *Store) GetAPITokenByHash(ctx context.Context, tokenHash string) (*model.APIToken, error) {
 	return scanAPIToken(s.conn(ctx).QueryRowContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens WHERE token_hash=$1`,
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), COALESCE(source,''), last_used_at, expires_at, created_at FROM api_tokens WHERE token_hash=$1`,
 		tokenHash))
 }
 
 // GetAPITokenByID fetches a token by primary key — see the sqlite driver.
 func (s *Store) GetAPITokenByID(ctx context.Context, id int64) (*model.APIToken, error) {
 	return scanAPIToken(s.conn(ctx).QueryRowContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens WHERE id=$1`, id))
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), COALESCE(source,''), last_used_at, expires_at, created_at FROM api_tokens WHERE id=$1`, id))
 }
 
 func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
 	rows, err := s.conn(ctx).QueryContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens ORDER BY created_at DESC`)
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), COALESCE(source,''), last_used_at, expires_at, created_at FROM api_tokens ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -1482,7 +1513,7 @@ func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
 
 func (s *Store) ListAPITokensByUser(ctx context.Context, userID int64) ([]*model.APIToken, error) {
 	rows, err := s.conn(ctx).QueryContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC`,
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), COALESCE(source,''), last_used_at, expires_at, created_at FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC`,
 		userID)
 	if err != nil {
 		return nil, err
@@ -1533,7 +1564,7 @@ func (s *Store) DeleteAPIToken(ctx context.Context, id int64) error {
 func scanAPIToken(r rowScanner) (*model.APIToken, error) {
 	t := &model.APIToken{}
 	var lastUsed, expires sql.NullTime
-	if err := r.Scan(&t.ID, &t.UserID, &t.Label, &t.TokenHash, &t.Scopes, &t.Usernames, &t.Kind, &lastUsed, &expires, &t.CreatedAt); err != nil {
+	if err := r.Scan(&t.ID, &t.UserID, &t.Label, &t.TokenHash, &t.Scopes, &t.Usernames, &t.Kind, &t.Source, &lastUsed, &expires, &t.CreatedAt); err != nil {
 		return nil, err
 	}
 	t.Kind = model.NormalizeTokenKind(t.Kind)

@@ -11,12 +11,21 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/perm"
 )
 
 // ErrQuotaExceeded is returned by CheckCanWrite when the user is out of room.
 var ErrQuotaExceeded = errors.New("quota: exceeded")
+
+// ErrFileTooLarge is returned by CheckFile when one file is larger than the
+// per-file limit a permission rule sets (package perm, max_upload_bytes). It
+// wraps ErrQuotaExceeded on purpose: every write surface already turns that
+// into its protocol's "over the limit" answer (507, QuotaExceeded, ENOSPC…),
+// and that is the right class of answer — only the sentence differs.
+var ErrFileTooLarge = fmt.Errorf("%w: the file is larger than your per-file upload limit", ErrQuotaExceeded)
 
 // ErrUserNotFound means the id doesn't name a user.
 //
@@ -39,6 +48,47 @@ func (s *Service) lookupUsage(ctx context.Context, userID int64) (int64, int64, 
 // Service is the quota façade exposed to the rest of the codebase.
 type Service struct {
 	Store db.Store
+
+	permsOnce sync.Once
+	perms     *perm.Loader
+}
+
+// loader is the permission loader for the per-file limit, built on first use
+// so a Service literal ({Store: s}) keeps working.
+func (s *Service) loader() *perm.Loader {
+	s.permsOnce.Do(func() { s.perms = perm.NewLoader(s.Store) })
+	return s.perms
+}
+
+// CheckFile is the check every single-file write makes: fileSize against
+// the per-file upload limit of the rules binding userID, then addBytes (the
+// bytes the write adds — usually the same number) against the quota.
+func (s *Service) CheckFile(ctx context.Context, userID int64, fileSize, addBytes int64) error {
+	if err := s.CheckFileSize(ctx, userID, fileSize); err != nil {
+		return err
+	}
+	return s.CheckCanWrite(ctx, userID, addBytes)
+}
+
+// CheckFileSize returns ErrFileTooLarge when size exceeds the per-file limit
+// of the permission rules binding userID. No limit, anonymous and system
+// writes, and administrators (bound by no rule) pass.
+func (s *Service) CheckFileSize(ctx context.Context, userID int64, size int64) error {
+	if s == nil || s.Store == nil || userID <= 0 || size <= 0 {
+		return nil
+	}
+	u, err := s.Store.GetUser(ctx, userID)
+	if err != nil || u == nil {
+		return nil // no account to hold a limit — as CheckCanWrite
+	}
+	res, err := s.loader().Load(ctx, u)
+	if err != nil {
+		return fmt.Errorf("quota: read upload limit: %w", err)
+	}
+	if max := res.Settings.MaxUploadBytes; max != nil && size > *max {
+		return ErrFileTooLarge
+	}
+	return nil
 }
 
 // New constructs a Service.

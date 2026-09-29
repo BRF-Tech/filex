@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { AuthApi } from '@/api/auth';
 import type { LoginRequest, User } from '@/api/types';
+import type { PermRuleSettings } from '@/api/roles';
 import { extractError } from '@/api/client';
 import { attachViewPrefsHttp, detachViewPrefsStore, forgetPersonalPrefs } from '@brftech/filex-core';
 import { getBearerToken, getServerRoot, getUseCredentials } from '@/api/runtimeConfig';
@@ -41,6 +42,12 @@ import { applyAccountTimeZone } from '@/lib/timezone';
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null);
   const permissions = ref<string[]>([]);
+  /** Allowed only in some folders (a role's folder part) — offered, decided per file by the server. */
+  const permissionsInFolders = ref<string[]>([]);
+  /** Differ from folder to folder — the file browser asks per path. */
+  const permissionsByFolder = ref<string[]>([]);
+  const permissionSettings = ref<PermRuleSettings>({});
+  const twoFactorRequired = ref(false);
   const loading = ref(false);
   const error = ref<string | null>(null);
   const ready = ref(false);
@@ -54,6 +61,10 @@ export const useAuthStore = defineStore('auth', () => {
       const me = await AuthApi.me();
       user.value = me.user;
       permissions.value = me.permissions ?? [];
+      permissionsInFolders.value = me.permissions_in_folders ?? [];
+      permissionsByFolder.value = me.permissions_by_folder ?? [];
+      permissionSettings.value = me.permission_settings ?? {};
+      twoFactorRequired.value = me.two_factor_required === true;
       // ⚠ The account's saved language, applied at the one place every entry
       // path passes through — a cold load, a login and a re-hydration all end
       // up here. Putting it in login() alone would leave a returning session
@@ -72,6 +83,9 @@ export const useAuthStore = defineStore('auth', () => {
       // 401 is the normal "not logged in" path; don't surface as error.
       user.value = null;
       permissions.value = [];
+      permissionsInFolders.value = [];
+      permissionsByFolder.value = [];
+      twoFactorRequired.value = false;
       return null;
     } finally {
       loading.value = false;
@@ -114,6 +128,9 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       user.value = null;
       permissions.value = [];
+      permissionsInFolders.value = [];
+      permissionsByFolder.value = [];
+      twoFactorRequired.value = false;
       sessionStorage.removeItem('filex.bearer');
       attachViewPrefsFor(null);
       // ⚠⚠ And this browser's copy of what the PERSON liked — the palette,
@@ -143,14 +160,27 @@ export const useAuthStore = defineStore('auth', () => {
     return permissions.value.includes(perm);
   }
 
+  /**
+   * May this account open the admin panel at all: an administrator, or a
+   * delegated one holding at least one admin.* permission (users, grants,
+   * shares, audit, monitor). Each page then asks for its own — see the
+   * router's `adminPerm` meta.
+   */
+  const hasAdminArea = computed(() => isAdmin.value || permissions.value.some((p) => p.startsWith('admin.')));
+
   return {
     user,
     permissions,
+    permissionsInFolders,
+    permissionsByFolder,
     loading,
     error,
     ready,
     isAuthenticated,
     isAdmin,
+    hasAdminArea,
+    permissionSettings,
+    twoFactorRequired,
     fetchMe,
     login,
     logout,

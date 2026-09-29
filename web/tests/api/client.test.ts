@@ -1,6 +1,6 @@
 // Tests for src/api/client.ts — mainly the interceptor behaviour
 // (CSRF header injection, bearer fallback, 401 → onUnauthorized).
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Router } from 'vue-router';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,6 +25,16 @@ async function freshClient() {
   vi.resetModules();
   return await import('@/api/client');
 }
+
+// ⚠ The first import of the client transforms its whole module graph (the
+// locale catalogues included). That cost landed on whichever test called
+// freshClient() first — "extractError says a queue refusal…" timed out at
+// 5387 ms with the full suite on a loaded machine (2026-09-28) and passed
+// alone. Pay it once, here, with a budget of its own; every test's fresh
+// import then only re-evaluates.
+beforeAll(async () => {
+  await import('@/api/client');
+}, 30_000);
 
 // Runs a request config through EVERY request interceptor, in the order axios
 // runs them (last registered first), and returns what the request would carry.

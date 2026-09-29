@@ -1551,7 +1551,7 @@ export const en: Record<string, string> = {
   'storages.fields.prefix': 'Prefix',
   'storages.fields.privateKey': 'Private key (PEM)',
   'storages.fields.rbac': 'Per-item access control (RBAC)',
-  'storages.fields.rbacHint': 'When on, non-admins see only files/folders explicitly granted to them via the permissions panel. When off, the storage is open to all users (capability by role).',
+  'storages.fields.rbacHint': 'When on, non-admins see only the files and folders granted to them (listed under Folder access). When off, everyone opens the storage according to their role.',
   'storages.fields.readOnly': 'Read-only mount',
   'storages.fields.region': 'Region',
   'storages.fields.root': 'Base path',

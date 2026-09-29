@@ -9,16 +9,22 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
 // Users handles /api/admin/users.
 type Users struct {
 	Store db.Store
+	// ACL resolves per-user permissions, for the delegated administrator's
+	// lines (refuseGain, refuseTakeover). Unset, a delegated administrator is
+	// refused those changes; a full administrator never needs it.
+	ACL *acl.Resolver
 }
 
 // NewUsers constructs a Users handler.
@@ -156,6 +162,19 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid role: " + req.Role})
 		return
 	}
+	if req.Role == model.RoleAdmin && !adminCredentialBySession(w, r, "Creating an administrator") {
+		return
+	}
+	// A delegated administrator (admin.users) creates accounts at or below
+	// their own role — never an administrator.
+	if refuseAdminTarget(w, r, nil, req.Role) {
+		return
+	}
+	// …and never one that holds more than they do: a new User account holds
+	// the whole built-in User role (refuseGain).
+	if refuseGain(w, r, h.ACL, nil, func(in *perm.Input) { in.Role = req.Role }) {
+		return
+	}
 	if req.Locale == "" {
 		req.Locale = "en"
 	}
@@ -245,9 +264,41 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	// Before ANY mutation: a confined caller may only touch its own tenant's
 	// users. Runs first so a refused request cannot have written half of the
 	// body's fields already.
-	if _, status, msg := h.tenantGate(r.Context(), id); status != 0 {
+	target, status, msg := h.tenantGate(r.Context(), id)
+	if status != 0 {
 		writeJSON(w, status, map[string]string{"error": msg})
 		return
+	}
+	// A delegated administrator never edits an administrator's account and
+	// never raises a role above their own (refuseAdminTarget). Before the
+	// role validation below so the refusal does not depend on it.
+	newRole := ""
+	if req.Role != nil {
+		newRole = *req.Role
+	}
+	if refuseAdminTarget(w, r, target, newRole) {
+		return
+	}
+	// An administrator's credential is handed out in a session only
+	// (session_gate.go): promoting an account to administrator, changing an
+	// administrator's role, setting an administrator's password. Asked before
+	// anything is written. An unchanged role is not a role change.
+	if target != nil {
+		roleChange := req.Role != nil && *req.Role != target.Role
+		switch {
+		case roleChange && *req.Role == model.RoleAdmin:
+			if !adminCredentialBySession(w, r, "Promoting an account to administrator") {
+				return
+			}
+		case roleChange && target.IsAdmin():
+			if !adminCredentialBySession(w, r, "Changing an administrator's role") {
+				return
+			}
+		case req.Password != nil && target.IsAdmin():
+			if !adminCredentialBySession(w, r, "Setting an administrator's password") {
+				return
+			}
+		}
 	}
 	// Reject an unknown role up-front, and refuse to demote the last admin
 	// out of the admin role (which would otherwise lock everyone out of the
@@ -263,6 +314,21 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+	// A delegated administrator is judged by the result as well: a built-in
+	// role ends the custom one (below), which can hand back what it took away
+	// (refuseGain); and a password they set is an account they can sign in
+	// as (refuseTakeover). Before any field is written.
+	if req.Role != nil && target != nil && target.Role != *req.Role {
+		if refuseGain(w, r, h.ACL, target, func(in *perm.Input) {
+			in.Role = *req.Role
+			in.CustomRoleID = 0
+		}) {
+			return
+		}
+	}
+	if req.Password != nil && refuseTakeover(w, r, h.ACL, target) {
+		return
 	}
 	// Disabling the final admin locks everyone out of the admin surface just
 	// as surely as deleting or demoting them, both of which are already
@@ -307,6 +373,13 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Role != nil {
 		_ = h.Store.UpdateUserRole(r.Context(), id, *req.Role)
+		// A custom role is "its base role plus changes"; picking a built-in
+		// role by hand is picking THAT role, so the custom one ends.
+		// (PutUserRoles is how a custom role is given.)
+		if target == nil || target.Role != *req.Role {
+			_ = h.Store.SetUserCustomRole(r.Context(), id, 0)
+			perm.Invalidate()
+		}
 	}
 	if req.Enabled != nil {
 		if err := h.Store.SetUserEnabled(r.Context(), id, *req.Enabled); err != nil {
@@ -348,6 +421,9 @@ func (h *Users) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, map[string]string{"error": msg})
 		return
 	}
+	if refuseAdminTarget(w, r, target, "") {
+		return
+	}
 	if target.IsAdmin() {
 		if last, err := h.isLastAdmin(r.Context(), id); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -357,12 +433,16 @@ func (h *Users) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := h.Store.DeleteUser(r.Context(), id); err != nil {
+	// The account's own public links go with it (db.Store.DeleteUser), and
+	// the audit row says how many were still open.
+	closed, err := h.Store.DeleteUserWithLinks(r.Context(), id)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	// The row is gone once the log is read: keep who it was.
 	auth.SetAuditTarget(r.Context(), "", target.Email)
+	auth.AddAuditDetail(r.Context(), "links_closed", closed)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -371,7 +451,13 @@ func (h *Users) Delete(w http.ResponseWriter, r *http.Request) {
 // (operator accounts), so a full ListUsers scan is cheaper than threading a
 // dedicated COUNT through every Store implementation.
 func (h *Users) isLastAdmin(ctx context.Context, userID int64) (bool, error) {
-	users, err := h.Store.ListUsers(ctx)
+	return isLastAdmin(ctx, h.Store, userID)
+}
+
+// isLastAdmin reports whether userID is the only administrator the store
+// lists (tenant-confined stores list the tenant's).
+func isLastAdmin(ctx context.Context, store db.Store, userID int64) (bool, error) {
+	users, err := store.ListUsers(ctx)
 	if err != nil {
 		return false, err
 	}

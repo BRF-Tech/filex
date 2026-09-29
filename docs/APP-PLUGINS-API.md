@@ -57,6 +57,39 @@ What applies to the caller. Cached client-side for 5 min.
 mirrors `Matches` (kind/ext/mime/multi/min/max/state/no_state) to decide
 which rows to show; the server re-checks on every run.
 
+**App user permissions (0.49.0).** An action or a view whose manifest entry
+`requires` one of the app's `user_permissions` carries it as `"requires":
+"app.<app>.<id>"`, and is **absent** from this answer for a caller who does
+not hold it — decided per caller by `perm.Result.AppAllowed`: an
+administrator, else the person's exception, else their custom role
+(`settings.apps`), else the built-in role's decision
+(`permissions.app_defaults`), else the manifest's `default`
+([PERMISSIONS.md → App permissions](PERMISSIONS.md#app-permissions)). The same
+question is asked again by `run`, the view `GET` and every `…/event` (so a job
+a surface queues), and the interface's `save` and `call`; a refusal is
+
+```json
+{"error": "permission_denied", "permission": "app.sign.request",
+ "source": {"kind": "rule", "rule_id": 3, "rule_name": "Contractor"},
+ "message": "You do not have the “Request signatures” permission of e-Signature."}
+```
+
+before the module is called. A manifest names them as
+`"user_permissions": [{"id", "label", "description"?, "default": "viewer" |
+"user" | "admin"}]` (default `user`) and `"requires": "<id>"` on an action or
+a view; an unknown id, a dotted id, a duplicate, another default or a label
+missing a declared language is refused at install (`manifest_invalid`). filex
+before 0.49.0 refuses both fields as unknown.
+
+The module is told the answer too: `action_run`'s `actor`, and the `context.actor`
+of a view event and of a `ui_call`, carry `"permissions": ["request"]` — the
+ids (not the keys) of the app's `user_permissions` that person holds, each
+decided by the same question the door asks (`handlers.appPermHeld`; an
+administrator holds every one). Absent when the person holds none, on a
+public page's `page_event` (no actor) and on work nobody started (a
+wake-up's job). It is what the app uses to leave out a hint to an action the
+reader cannot run; the doors above still decide.
+
 **Engine-gated extensions (v3.1).** A manifest rule may add
 `"engine_ext": {"libreoffice": ["docx", "odt", …]}` to a non-empty
 `ext`/`mime` list: those extensions apply only while that engine is
@@ -153,8 +186,10 @@ Answers:
 - `200 {"surface": {…}}` — the action declares a `view` and no `params` were
   sent; open the surface first. The surface's `submit` comes back through
   the view event route, which queues when the answer carries `job`.
-- `400` bad body / mixed adapters, `403 permission_denied | encrypted`,
-  `404 not_found`, `409 read_only`, `422 not_applicable`.
+- `400` bad body / mixed adapters, `403 permission_denied | encrypted`
+  (`permission_denied` also when the action `requires` an app user permission
+  the caller does not hold — above), `404 not_found`, `409 read_only`,
+  `422 not_applicable`.
 
 ### `GET /api/files/plugins/views/{plugin}/{view}?path=docs://x.pdf`
 Initial surface (event `open`). `POST …/event`:
@@ -203,7 +238,8 @@ ran on that file alone.
 **v3.1:** `?section=<id>` on the opening `GET` hands the plugin
 `data.section` (a home page's menu — see *Placements*), and every view
 event's `context.actor` carries `ip`: the address the person's request
-came from, read the way a public page's `data.page.visitor_ip` is. ⚠ It is
+came from, read the way a public page's `data.page.visitor_ip` is (and,
+since 0.49.0, `permissions` — see *App user permissions* above). ⚠ It is
 personal data. The signing app prints it under a signature only when the
 requester chose that line, and only after the signer has seen it on the
 step where they approve what will be printed.
@@ -388,6 +424,17 @@ no wake-up is armed, no pass looks at a row, and `tick` answers `refused`.
 
 ## Admin surface (`/api/admin/app-plugins`, supertenant admin, demo-refused)
 
+⚠⚠ Install and upgrade (except `?dry_run=1`), `PATCH`, `POST …/rollback`,
+`DELETE` and `PUT …/overrides` need an administrator **signed in to the
+panel**: an API key gets `403 {"error": "session_required",
+"request_endpoint": "/api/admin/plugin-requests"}`, whatever its scopes. A key
+leaves an install request there instead — the shapes are in
+[BACKEND.md → Admin: plugin requests](BACKEND.md#admin-plugin-requests), the
+model in [APP-PLUGINS.md → Install requests](APP-PLUGINS.md#install-requests).
+A request freezes the `wasm_sha256` (or `manifest_sha256`) and the
+`permissions` ids of the dry run below, and approval installs with exactly
+those as the pin and the grant.
+
 ### `GET /api/admin/app-plugins`
 ```json
 {
@@ -414,7 +461,13 @@ no wake-up is armed, no pass looks at a row, and `tick` answers `refused`.
 ```
 
 `filex_version` is the filex app ranges are judged against; `compat_enforced`
-is false on a development build (no range is checked). `compat` is absent
+is false on a development build (no range is checked). `update.status:
+"incompatible"` names the newest newer `version` this filex cannot run and
+what it `requires`: the range it declares, or `">"` this filex when its
+manifest carries a field (or a `manifest_version`) this filex does not know —
+the check reads such a manifest leniently for its name, version and range
+only (0.49.0; before, it answered `check_failed`), and install and upgrade
+still refuse it. `compat` is absent
 when the manifest declares no range; `ok: false` on an installed app is a
 warning — it keeps running. `update_source` is absent for an app installed
 from a file (nothing to check). `update` is what the last update check found

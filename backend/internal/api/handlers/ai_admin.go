@@ -25,11 +25,14 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/plugin"
+	"github.com/brf-tech/filex/backend/internal/pluginreq"
 	"github.com/brf-tech/filex/backend/internal/queue"
 	"github.com/brf-tech/filex/backend/internal/replica"
 	"github.com/brf-tech/filex/backend/internal/search"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
 
 // AIAdmin exposes the full admin panel over the token-authenticated AI
@@ -72,6 +75,12 @@ type AIAdmin struct {
 	notif       *Notifications
 	audit       *Audit
 	grants      *Grants
+	// Plugins: READ and REQUEST only (plugin_requests.go). The install,
+	// upgrade, remove, switch and approve handlers are deliberately not
+	// mounted here and have no tool — they need a signed-in administrator.
+	plugins    *Plugins
+	appPlugins *AppPluginsAdmin
+	pluginReqs *PluginRequests
 }
 
 // AIAdminDeps carries the shared services the wrapped admin handlers need.
@@ -108,6 +117,13 @@ type AIAdminDeps struct {
 	// tools change sign-in through the same handler, with the same guards, as
 	// the page (handlers/auth_providers.go).
 	AuthLive *authsetup.Live
+	// Plugins / AppPlugins / PluginRequests back the plugin tools: reading
+	// the installed plugins and leaving install requests. Nil = that kind is
+	// off (the handlers answer 503, as on the panel's routes).
+	Plugins                  *plugin.Manager
+	AppPlugins               *wasmplugin.Registry
+	AppPluginsDisabledReason string
+	PluginRequests           *pluginreq.Service
 }
 
 // newTrashWithOps is the trash handler with the queue "empty the trash now"
@@ -142,7 +158,20 @@ func NewAIAdmin(d AIAdminDeps) *AIAdmin {
 		notif:       NewNotifications(d.Notify, d.Store, acl.New(d.Store)),
 		audit:       newDemoAwareAudit(d),
 		grants:      NewGrants(d.Store, acl.New(d.Store)),
+		plugins:     NewPlugins(d.Plugins, false),
+		appPlugins:  NewAppPluginsAdmin(d.AppPlugins, d.AppPluginsDisabledReason),
+		pluginReqs:  newAIPluginRequests(d),
 	}
+}
+
+// newAIPluginRequests is the request handler the admin tools use: the
+// panel's service when one is wired, else one built from the same parts.
+func newAIPluginRequests(d AIAdminDeps) *PluginRequests {
+	svc := d.PluginRequests
+	if svc == nil {
+		svc = pluginreq.New(pluginreq.Options{Store: d.Store, Apps: d.AppPlugins, Plugins: d.Plugins, Notify: d.Notify})
+	}
+	return NewPluginRequests(svc)
 }
 
 // elevatedPrincipal returns an admin-authorized principal for in-process
@@ -299,6 +328,27 @@ func (a *AIAdmin) Register(r chi.Router) {
 		r.Get("/", a.grants.AdminList)
 		r.Post("/", a.grants.Create)
 		r.Delete("/{id}", a.grants.AdminDelete)
+	})
+
+	// Plugins: read them, and leave install requests. ⚠⚠ Nothing here
+	// installs, upgrades, removes, switches or approves — those need an
+	// administrator signed in to the panel (plugin_session_gate.go), and a
+	// key that could approve its own request would be the old hole again.
+	r.Route("/plugins", func(r chi.Router) {
+		r.Get("/", a.plugins.List)
+		r.Post("/updates/check", a.plugins.CheckUpdates)
+		r.Get("/{id}", a.plugins.Get)
+	})
+	r.Route("/app-plugins", func(r chi.Router) {
+		r.Get("/", a.appPlugins.List)
+		r.Post("/updates/check", a.appPlugins.CheckUpdates)
+		r.Get("/{id}", a.appPlugins.Get)
+		r.Get("/{id}/logs", a.appPlugins.Logs)
+	})
+	r.Route("/plugin-requests", func(r chi.Router) {
+		r.Get("/", a.pluginReqs.List)
+		r.Post("/", a.pluginReqs.Create)
+		r.Get("/{id}", a.pluginReqs.Get)
 	})
 }
 
@@ -838,6 +888,126 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(in adminIDIn) reqSpec {
 			return reqSpec{handler: a.grants.AdminDelete, method: http.MethodDelete, path: "/api/ai/admin/grants/" + itoa(in.ID),
 				urlParams: idParam(in.ID)}
+		})
+
+	registerPluginTools(r, a)
+}
+
+// pluginModel is said in every plugin tool's description, so an agent learns
+// the rule from the catalogue rather than from a refusal.
+const pluginModel = " Plugins are installed by an administrator, never by an API key: you can read them and LEAVE A REQUEST " +
+	"(admin_plugin_request_install / admin_plugin_request_upgrade), which waits for an administrator signed in to the " +
+	"admin panel (Plugins → Install requests) to approve or reject. There is no tool to approve, reject, install, upgrade, remove " +
+	"or switch a plugin."
+
+// pluginRequestIn is a plugin request as an agent leaves it. The source is
+// the install endpoints' own shape: an app from a GitHub repository or from
+// addresses; a storage plugin from its source feed or from an address.
+type pluginRequestIn struct {
+	Kind        string `json:"kind" jsonschema:"app (a WebAssembly app: actions, screens, a language pack) or storage (a storage plugin: a driver process)"`
+	Name        string `json:"name,omitempty" jsonschema:"storage install: the name to install it under (default: the name its feed gives); upgrade: the installed plugin's name"`
+	PluginID    int64  `json:"plugin_id,omitempty" jsonschema:"upgrade: the installed plugin's id, instead of name"`
+	GitHubRepo  string `json:"github_repo,omitempty" jsonschema:"app: owner/name of a public GitHub repository whose root holds filex-app.json"`
+	Ref         string `json:"ref,omitempty" jsonschema:"app: git tag or branch (default: main, then master)"`
+	ManifestURL string `json:"manifest_url,omitempty" jsonschema:"app: the https address of its filex-app.json"`
+	URL         string `json:"url,omitempty" jsonschema:"app: the module's address (with manifest_url); storage: the plugin binary's https address"`
+	SHA256      string `json:"sha256,omitempty" jsonschema:"the sha256 the bytes at url must have; optional — the server hashes what it finds and freezes that"`
+	Source      string `json:"source,omitempty" jsonschema:"storage: owner/name of a GitHub repository whose latest release has filex-storage.json, or the https address of a filex-storage.json"`
+	Reason      string `json:"reason" jsonschema:"why the plugin is needed, in a sentence or two — the administrator reads it before deciding (required)"`
+}
+
+func (in pluginRequestIn) body(op string) map[string]any {
+	b := map[string]any{"kind": in.Kind, "op": op, "reason": in.Reason}
+	for k, v := range map[string]string{
+		"name": in.Name, "github_repo": in.GitHubRepo, "ref": in.Ref, "manifest_url": in.ManifestURL,
+		"url": in.URL, "sha256": in.SHA256, "source": in.Source,
+	} {
+		if v != "" {
+			b[k] = v
+		}
+	}
+	if in.PluginID > 0 {
+		b["plugin_id"] = in.PluginID
+	}
+	return b
+}
+
+// adminAppLogsIn reads an app's log from a line on.
+type adminAppLogsIn struct {
+	ID    int64 `json:"id" jsonschema:"the app's numeric id (from admin_app_plugins_list)"`
+	After int64 `json:"after,omitempty" jsonschema:"only lines after this sequence number (the previous answer's next)"`
+}
+
+// registerPluginTools wires the plugin tools: reading, and leaving requests.
+func registerPluginTools(r *adminReg, a *AIAdmin) {
+	regAdminTool(r, "admin_plugins_list", "List the installed STORAGE plugins (driver processes): state, version, capabilities, "+
+		"conformance, and what the last update check found (`update`)."+pluginModel,
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.plugins.List, method: http.MethodGet, path: "/api/ai/admin/plugins"}
+		})
+	regAdminTool(r, "admin_plugin_get", "One storage plugin by id: state, version, capabilities, conformance report, pending update."+pluginModel,
+		func(in adminIDIn) reqSpec {
+			return reqSpec{handler: a.plugins.Get, method: http.MethodGet, path: "/api/ai/admin/plugins/" + itoa(in.ID), urlParams: idParam(in.ID)}
+		})
+	regAdminTool(r, "admin_plugins_check_updates", "Ask every storage plugin's source for a newer version now and answer the list with "+
+		"what was found. Installs nothing: a newer version waits for an administrator — request it with admin_plugin_request_upgrade."+pluginModel,
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.plugins.CheckUpdates, method: http.MethodPost, path: "/api/ai/admin/plugins/updates/check"}
+		})
+	regAdminTool(r, "admin_app_plugins_list", "List the installed APPS (WebAssembly app plugins, language packs) and the runtime they "+
+		"run in: state, version, granted permissions, source, and what the last update check found (`update`)."+pluginModel,
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.appPlugins.List, method: http.MethodGet, path: "/api/ai/admin/app-plugins"}
+		})
+	regAdminTool(r, "admin_app_plugin_get", "One app by id: state, version, its manifest, the permissions it was granted (each with "+
+		"its label and the app's reason), settings, action overrides, schedule, pending update."+pluginModel,
+		func(in adminIDIn) reqSpec {
+			return reqSpec{handler: a.appPlugins.Get, method: http.MethodGet, path: "/api/ai/admin/app-plugins/" + itoa(in.ID), urlParams: idParam(in.ID)}
+		})
+	regAdminTool(r, "admin_app_plugin_logs", "An app's recent log lines ({lines, next}); pass `after` = the previous answer's next to follow it.",
+		func(in adminAppLogsIn) reqSpec {
+			var q url.Values
+			if in.After > 0 {
+				q = url.Values{"after": {strconv.FormatInt(in.After, 10)}}
+			}
+			return reqSpec{handler: a.appPlugins.Logs, method: http.MethodGet, path: "/api/ai/admin/app-plugins/" + itoa(in.ID) + "/logs",
+				urlParams: idParam(in.ID), query: q}
+		})
+	regAdminTool(r, "admin_app_plugins_check_updates", "Ask every app's source for a newer version now and answer the list with "+
+		"what was found. Installs nothing: every newer version waits for an administrator — request it with admin_plugin_request_upgrade."+pluginModel,
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.appPlugins.CheckUpdates, method: http.MethodPost, path: "/api/ai/admin/app-plugins/updates/check"}
+		})
+
+	regAdminTool(r, "admin_plugin_request_install", "Ask an administrator to INSTALL a plugin. filex fetches the source now "+
+		"(the install review's dry run) and freezes what it found — the manifest, the sha256, the permissions it asks for — "+
+		"then the request waits for an administrator signed in to the admin panel (Plugins → Install requests). Nothing is installed "+
+		"by this call, and you cannot approve it: the administrator installs exactly the frozen bytes, or the request becomes "+
+		"`superseded` when the source has changed by then. Asking again for the same source answers the pending request. "+
+		"Requests expire after 14 days (FILEX_PLUGIN_REQUEST_TTL_DAYS). An app: github_repo (+ ref), or manifest_url (+ url "+
+		"[+ sha256]). A storage plugin: source (owner/name or a filex-storage.json address) or url (+ sha256), and name. "+
+		"Answers {request: {id, status: pending, permissions, sha256, …}, created, message}; follow it with admin_plugin_request_get.",
+		func(in pluginRequestIn) reqSpec {
+			return reqSpec{handler: a.pluginReqs.Create, method: http.MethodPost, path: "/api/ai/admin/plugin-requests", body: in.body("install")}
+		})
+	regAdminTool(r, "admin_plugin_request_upgrade", "Ask an administrator to UPGRADE an installed plugin (name or plugin_id) — by "+
+		"default to the newer version its own source has (what admin_app_plugins_check_updates / admin_plugins_check_updates "+
+		"reported); an app may name another github_repo or manifest_url. Like admin_plugin_request_install, it freezes what "+
+		"the source answers now (version, sha256, the permissions — the ones it ADDS are what the administrator approves) and "+
+		"waits for an administrator in the admin panel; nothing is upgraded by this call and you cannot approve it.",
+		func(in pluginRequestIn) reqSpec {
+			return reqSpec{handler: a.pluginReqs.Create, method: http.MethodPost, path: "/api/ai/admin/plugin-requests", body: in.body("upgrade")}
+		})
+	regAdminTool(r, "admin_plugin_requests_list", "List plugin requests: filters {status: pending (default) | approved | rejected | "+
+		"expired | superseded | all}. Each says who asked, why, what was frozen and — once decided — who decided and why."+pluginModel,
+		func(in adminFiltersIn) reqSpec {
+			return reqSpec{handler: a.pluginReqs.List, method: http.MethodGet, path: "/api/ai/admin/plugin-requests", query: filtersToQuery(in.Filters)}
+		})
+	regAdminTool(r, "admin_plugin_request_get", "One plugin request by id, with its frozen manifest and review: status "+
+		"(pending | approved | rejected | expired | superseded), decision_note (a rejection's reason, or why it was superseded) "+
+		"and, once approved, the installed plugin (`result`)."+pluginModel,
+		func(in adminIDIn) reqSpec {
+			return reqSpec{handler: a.pluginReqs.Get, method: http.MethodGet, path: "/api/ai/admin/plugin-requests/" + itoa(in.ID), urlParams: idParam(in.ID)}
 		})
 }
 

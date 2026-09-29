@@ -366,4 +366,11 @@ export const SCREENSHOTS = [
     file: `${SHOTS_ROOT_REL}/sidenav/view-trash-1440.png`,
     depicts: ['packages/core/src/components/ListView.vue', 'packages/core/src/lib/trashTimeLeft.ts'],
   },
+  // ── v0.49.0: roles (e2e/shots/roles.mjs) ──────────────────────────────
+  {
+    // Admin → Roles: the built-in roles and the custom ones in the
+    // explorer's table, each row's name read in the panel's language.
+    file: `${SHOTS_ROOT_REL}/roles/roles-list-1440.png`,
+    depicts: ['web/src/views/Roles.vue', 'web/src/lib/roleName.ts'],
+  },
 ];

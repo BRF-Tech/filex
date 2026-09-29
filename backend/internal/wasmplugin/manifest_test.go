@@ -186,3 +186,40 @@ func TestManifest_TheHostsOwnDirectoriesAreNotAppNames(t *testing.T) {
 		}
 	}
 }
+
+// TestParseManifest_UserPermissions — an app declares what the administrator
+// can grant per role and per person (perm/app.go); actions and views name one
+// in `requires`. Signing needs no permission, asking people to sign does.
+func TestParseManifest_UserPermissions(t *testing.T) {
+	m, err := ParseManifest([]byte(`{"manifest_version":1,"name":"sign","version":"0.2.0","label":{"en":"Sign","tr":"İmza"},
+	  "languages":["en","tr"],"permissions":["files:read"],
+	  "user_permissions":[{"id":"request","label":{"en":"Request signatures","tr":"İmza isteme"}}],
+	  "actions":[
+	    {"id":"sign","label":{"en":"Sign…","tr":"İmzala…"},"applies":{"ext":["pdf"]}},
+	    {"id":"request","label":{"en":"Request signatures…","tr":"İmza iste…"},"applies":{"ext":["pdf"]},"view":"request","requires":"request"}],
+	  "views":[{"id":"request","label":{"en":"Request","tr":"İste"},"placement":"page","requires":"request"}]}`))
+	require.NoError(t, err)
+	up, ok := m.UserPermission("request")
+	require.True(t, ok)
+	assert.Equal(t, "user", up.Default, "no default is the usual one: accounts that can change files")
+	assert.Equal(t, "", m.Actions[0].Requires, "signing itself needs nothing")
+	assert.Equal(t, "request", m.Actions[1].Requires)
+	assert.Equal(t, "app.sign.request", AppPermKey("sign", "request"))
+
+	base := func(extra string) string {
+		return `{"manifest_version":1,"name":"sign","version":"1","label":{"en":"Sign"},"permissions":[]` + extra + `}`
+	}
+	refused := map[string]string{
+		"requires an undeclared permission": base(`,"actions":[{"id":"a","label":{"en":"A"},"applies":{},"requires":"nope"}]`),
+		"a view requires an undeclared one": base(`,"views":[{"id":"v","label":{"en":"V"},"requires":"nope"}]`),
+		"a default outside the three":       base(`,"user_permissions":[{"id":"request","label":{"en":"R"},"default":"owner"}]`),
+		"a dotted id":                       base(`,"user_permissions":[{"id":"re.quest","label":{"en":"R"}}]`),
+		"a duplicate id":                    base(`,"user_permissions":[{"id":"r","label":{"en":"R"}},{"id":"r","label":{"en":"R2"}}]`),
+		"a label missing a declared language": `{"manifest_version":1,"name":"sign","version":"1","label":{"en":"Sign","tr":"İmza"},"languages":["en","tr"],"permissions":[],
+		  "user_permissions":[{"id":"request","label":{"en":"Request signatures"}}]}`,
+	}
+	for name, raw := range refused {
+		_, err := ParseManifest([]byte(raw))
+		assert.Error(t, err, name)
+	}
+}

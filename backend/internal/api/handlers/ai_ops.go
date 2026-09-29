@@ -23,6 +23,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
@@ -115,6 +116,41 @@ func (a *aiOps) lockView(ctx context.Context, s *model.Storage) writegate.Locks 
 		return nil
 	}
 	return a.acl.Locks(ctx, s.ID)
+}
+
+// can is allow for an action with a per-user permission: the level
+// acl.NeedLevel(p) on rel AND p itself. It returns nil or the refusal, which
+// names the permission so the agent (and whoever reads its log) learns what
+// was missing rather than a bare "insufficient permission".
+func (a *aiOps) can(ctx context.Context, s *model.Storage, rel string, p perm.Perm) error {
+	if a.acl == nil {
+		return nil
+	}
+	set, err := a.acl.LoadSet(ctx, auth.UserFrom(ctx), s)
+	if err != nil || set == nil {
+		return errAIForbidden
+	}
+	if set.Can(rel, p) {
+		return nil
+	}
+	if ext := set.BlockedExtension(rel); ext != "" && set.Effective(rel) >= acl.NeedLevel(p) {
+		return denied(errAIForbidden, "access denied: files of type .%s are blocked for your account", ext)
+	}
+	if set.Effective(rel) >= acl.NeedLevel(p) && !set.AllowsAt(rel, p) {
+		return denied(errAIForbidden, "access denied: your account lacks the %s permission", p)
+	}
+	return errAIForbidden
+}
+
+// writeNeed is the permission a write to rel needs: files.modify when a file
+// is already there, files.create when it is not.
+func (a *aiOps) writeNeed(ctx context.Context, s *model.Storage, rel string) perm.Perm {
+	if drv, err := a.resolver(s.ID); err == nil {
+		if _, serr := drv.Stat(ctx, rel); serr == nil {
+			return perm.FilesModify
+		}
+	}
+	return perm.FilesCreate
 }
 
 func (a *aiOps) allow(ctx context.Context, s *model.Storage, rel string, need acl.Level) bool {
@@ -422,6 +458,9 @@ func (a *aiOps) Read(ctx context.Context, p string) (io.ReadCloser, string, int6
 	if rel == "" {
 		return nil, "", 0, errors.New("path required")
 	}
+	if err := a.can(ctx, s, rel, perm.FilesDownload); err != nil {
+		return nil, "", 0, err
+	}
 	drv, err := a.resolver(s.ID)
 	if err != nil {
 		return nil, "", 0, err
@@ -510,8 +549,11 @@ func (a *aiOps) WriteStream(ctx context.Context, p string, src io.Reader, size i
 	if err := a.gate(ctx, s, writegate.Writes(rel)); err != nil {
 		return nil, err
 	}
-	if !a.allow(ctx, s, rel, acl.LevelEditor) {
-		return nil, errAIForbidden
+	if err := a.can(ctx, s, rel, a.writeNeed(ctx, s, rel)); err != nil {
+		return nil, err
+	}
+	if err := checkUploadSize(ctx, a.store, size); err != nil {
+		return nil, err
 	}
 	name := path.Base(rel)
 	if name == "" || name == "." || name == "/" {
@@ -619,8 +661,8 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 	if err := a.gate(ctx, s, writegate.Writes(rel)); err != nil {
 		return err
 	}
-	if !a.allow(ctx, s, rel, acl.LevelEditor) {
-		return errAIForbidden
+	if err := a.can(ctx, s, rel, perm.FilesDelete); err != nil {
+		return err
 	}
 	drv, err := a.resolver(s.ID)
 	if err != nil {
@@ -778,8 +820,16 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	if err := a.gate(ctx, sDst, writegate.Writes(relDst)); err != nil {
 		return nil, err
 	}
-	if !a.allow(ctx, sSrc, relSrc, acl.LevelEditor) || !a.allow(ctx, sDst, relDst, acl.LevelEditor) {
-		return nil, errAIForbidden
+	// A new name in the same folder is files.rename, another folder (or
+	// storage) files.move, both at once needs both — at both ends.
+	needs := perm.RelocateNeeds(sSrc.ID, relSrc, sDst.ID, relDst)
+	for _, p := range needs {
+		if err := a.can(ctx, sSrc, relSrc, p); err != nil {
+			return nil, err
+		}
+		if err := a.can(ctx, sDst, relDst, p); err != nil {
+			return nil, err
+		}
 	}
 	/* wiring:e2 — the AI/MCP surface obeys the same encryption boundary as
 	 * the web UI. `dst` here is a full path (move is also rename), so the
@@ -863,8 +913,10 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	// effective()), so "editor on docs/a.txt" says nothing about
 	// docs/a-copy.txt. Re-assert here, or de-colliding would quietly convert a
 	// refused overwrite into a write nobody authorised.
-	if !a.allow(ctx, sDst, relDst, acl.LevelEditor) {
-		return nil, errAIForbidden
+	for _, p := range needs {
+		if err := a.can(ctx, sDst, relDst, p); err != nil {
+			return nil, err
+		}
 	}
 	if err := mv.Move(ctx, relSrc, relDst); err != nil {
 		return nil, err
@@ -936,8 +988,10 @@ func (a *aiOps) moveAcross(ctx context.Context, sSrc *model.Storage, relSrc stri
 	// ⚠ Same reason as the same-storage arm: Move's grant check named the
 	// path the CALLER asked for, and a file-scoped grant does not extend to
 	// the sibling we just picked. Refused here, before a byte travels.
-	if !a.allow(ctx, sDst, relDst, acl.LevelEditor) {
-		return nil, errAIForbidden
+	// Move judged the caller's name (rename or not); here the question is
+	// only whether this sibling may be written, and another storage is a move.
+	if err := a.can(ctx, sDst, relDst, perm.FilesMove); err != nil {
+		return nil, err
 	}
 
 	hooks := ops.TransferHooks{
@@ -1004,8 +1058,8 @@ func (a *aiOps) Mkdir(ctx context.Context, p string) (*aiEntry, error) {
 	if err := a.gate(ctx, s, writegate.Writes(rel)); err != nil {
 		return nil, err
 	}
-	if !a.allow(ctx, s, rel, acl.LevelEditor) {
-		return nil, errAIForbidden
+	if err := a.can(ctx, s, rel, perm.FilesCreate); err != nil {
+		return nil, err
 	}
 	drv, err := a.resolver(s.ID)
 	if err != nil {
@@ -1135,6 +1189,20 @@ func (a *aiOps) CreateShare(ctx context.Context, p string, pin bool, expiresInDa
 	if err != nil || node == nil {
 		return nil, fmt.Errorf("not indexed yet: %s — write or list it first so filex caches the entry", joinAdapterPath(s.Name, rel))
 	}
+	// The same rule the web explorer's share door asks (public_link_rule.go):
+	// never filex's own names, edit rights on the file and the share.links
+	// permission — resolveStorage above asks only whether the caller may SEE
+	// it, which let an agent mint a public link where its owner could not.
+	if err := publicLinkRefusal(ctx, a.acl, a.store, s.ID, node.Path, perm.ShareLinks); err != nil {
+		var lr *linkRefusal
+		if errors.As(err, &lr) && lr.v.ByPerm() {
+			return nil, denied(errAIForbidden, "access denied: your account lacks the %s permission", perm.ShareLinks)
+		}
+		if errors.Is(err, errLinkNeedsEdit) {
+			return nil, denied(errAIForbidden, "access denied: a public link to %s needs edit permission on it", joinAdapterPath(s.Name, rel))
+		}
+		return nil, err
+	}
 	pinVal, pinGen := "", ""
 	if pin {
 		pinVal = randomPIN(8)
@@ -1152,6 +1220,10 @@ func (a *aiOps) CreateShare(ctx context.Context, p string, pin bool, expiresInDa
 	}
 	if maxDownloads > 0 {
 		opts.MaxDownloads = &maxDownloads
+	}
+	// Permission-rule settings (link_policy.go), as on the explorer's door.
+	if gen := applyLinkPolicy(&opts, linkSettings(ctx, a.acl), time.Now()); gen != "" {
+		pinGen = gen
 	}
 	sh, err := a.share.Create(ctx, opts)
 	if err != nil {
@@ -1213,8 +1285,8 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 	if err := a.gate(ctx, sDest, writegate.Writes(relDest)); err != nil {
 		return nil, err
 	}
-	if !a.allow(ctx, sDest, relDest, acl.LevelEditor) {
-		return nil, errAIForbidden
+	if err := a.can(ctx, sDest, relDest, a.writeNeed(ctx, sDest, relDest)); err != nil {
+		return nil, err
 	}
 	drvDest, err := a.resolver(sDest.ID)
 	if err != nil {
@@ -1396,8 +1468,8 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 	if sDst.ReadOnly {
 		return 0, refused, storage.ErrReadOnly
 	}
-	if !a.allow(ctx, sDst, relDst, acl.LevelEditor) {
-		return 0, refused, errAIForbidden
+	if err := a.can(ctx, sDst, relDst, perm.FilesCreate); err != nil {
+		return 0, refused, err
 	}
 	drv, err := a.resolver(sSrc.ID)
 	if err != nil {

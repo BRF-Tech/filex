@@ -96,6 +96,26 @@ def migration_releases(repo_dir: str) -> tuple[set, set]:
     return marked, {t.lstrip("v") for t in tags}
 
 
+def carry_unpublished(marked: set, tags: set, published: set) -> set:
+    """Marks of tags that were never published, moved onto the next published tag.
+
+    ⚠ v0.48.0 was tagged but its release run failed, so it has no GitHub
+    release and is not in the manifest; the migrations it added (00064-00068)
+    ship in v0.48.1, whose tree holds no migration file v0.48.0 did not. Left
+    alone, v0.48.1 read `migrations: false` and an install on 0.47 would have
+    taken five schema changes without the confirmation that takes a backup.
+    """
+    key = lambda v: tuple(int(x) for x in v.split("."))
+    order = sorted(tags, key=key)
+    out = set(marked)
+    for v in order:
+        if v in marked and v not in published:
+            nxt = next((w for w in order if key(w) > key(v) and w in published), None)
+            if nxt:
+                out.add(nxt)
+    return out
+
+
 def is_bare_title(notes: str, tag: str) -> bool:
     """The release body's heading ("filex v0.41.1") says nothing about the release."""
     return notes.strip().lower() in {f"filex {tag}".lower(), tag.lower(), tag.lstrip("v").lower()}
@@ -264,6 +284,13 @@ def main() -> int:
         metavar="VERSION",
         help="mark a version as a security release",
     )
+    ap.add_argument(
+        "--published",
+        action="append",
+        default=[],
+        metavar="VERSION",
+        help="with --print-migrations: the versions that have a release (a mark on an unpublished tag moves to the next one)",
+    )
     ap.add_argument("--min-version", action="append", default=[], metavar="VERSION=MIN",
                     help="a version that must not be jumped to directly, e.g. v1.0.0=v0.9.0")
     ap.add_argument("--previous", metavar="FILE_OR_URL",
@@ -273,6 +300,8 @@ def main() -> int:
     derived, local_tags = migration_releases(args.repo_dir)
     if args.print_migrations:
         key = lambda v: tuple(int(x) for x in v.split("."))
+        if args.published:
+            derived = carry_unpublished(derived, local_tags, {v.lstrip("v") for v in args.published})
         for v in sorted(derived, key=key):
             print(f"v{v}")
         return 0
@@ -298,6 +327,10 @@ def main() -> int:
         if len(batch) < 100 or (args.limit and len(releases) >= args.limit):
             break
         page += 1
+    published = {
+        r["tag_name"].lstrip("v") for r in releases if not r.get("draft") and not r.get("prerelease")
+    }
+    migrations = carry_unpublished(migrations, local_tags, published)
     out = []
     for rel in releases:
         if rel.get("draft") or rel.get("prerelease"):

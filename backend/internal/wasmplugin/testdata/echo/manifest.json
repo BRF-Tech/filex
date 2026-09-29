@@ -289,6 +289,37 @@
         "name": "{stem}-gathered{ext}"
       },
       "view": "picks"
+    },
+    {
+      "id": "request",
+      "label": {
+        "en": "Request signatures probe",
+        "tr": "İmza isteme denemesi"
+      },
+      "applies": {
+        "kind": "file",
+        "ext": [
+          "txt"
+        ]
+      },
+      "output": {
+        "mode": "none"
+      },
+      "requires": "request"
+    }
+  ],
+  "user_permissions": [
+    {
+      "id": "request",
+      "label": {
+        "en": "Request signatures",
+        "tr": "İmza isteme"
+      },
+      "description": {
+        "en": "Ask other people to sign a document.",
+        "tr": "Başkalarından bir belgeyi imzalamalarını isteme."
+      },
+      "default": "user"
     }
   ],
   "views": [

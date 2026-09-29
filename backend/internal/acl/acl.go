@@ -27,6 +27,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
@@ -109,10 +110,41 @@ func prefixContains(prefix, rel string) bool {
 // Resolver loads grants from the store and builds request-scoped ACL Sets.
 type Resolver struct {
 	store db.Store
+	// perms resolves the caller's per-user permissions (package perm). It is
+	// built by New from the same store, so every Resolver — the router's,
+	// the protocol servers', the app-plugin host's — enforces them; there is
+	// no separate wiring step to forget. Nil only for a nil store (tests),
+	// where Set.Can falls back to the level check alone.
+	perms *perm.Loader
 }
 
 // New returns a Resolver backed by store.
-func New(store db.Store) *Resolver { return &Resolver{store: store} }
+func New(store db.Store) *Resolver {
+	r := &Resolver{store: store}
+	if store != nil {
+		r.perms = perm.NewLoader(store)
+	}
+	return r
+}
+
+// Perms resolves u's per-user permissions — for the checks that are not about
+// a path (comments, tokens, protocol access, the admin area). A nil Resolver
+// or one without a store answers nil, which Allows reads as "not enforced".
+func (r *Resolver) Perms(ctx context.Context, u *model.User) (*perm.Result, error) {
+	if r == nil || r.perms == nil {
+		return nil, nil
+	}
+	return r.perms.Load(ctx, u)
+}
+
+// PermsPreview is Perms for a state that is not stored yet (perm.Loader.
+// Preview): what u would hold after change. Nil, like Perms, when unwired.
+func (r *Resolver) PermsPreview(ctx context.Context, u *model.User, change func(*perm.Input)) (*perm.Result, error) {
+	if r == nil || r.perms == nil {
+		return nil, nil
+	}
+	return r.perms.Preview(ctx, u, change)
+}
 
 // Set is the resolved ACL for one (user, storage) pair for the duration of a
 // request. Grants are batch-loaded once by LoadSet; Effective / CanSee /
@@ -122,6 +154,9 @@ type Set struct {
 	storage *model.Storage
 	grants  []*model.FileGrant
 	ceiling Level
+	// perms is the caller's resolved per-user permissions; nil when the
+	// Resolver has none wired (tests), in which case Can is the level check.
+	perms *perm.Result
 	// locks are the live app-plugin locks on this storage, keyed by clean
 	// rel. A locked path is capped at LevelViewer for EVERY caller —
 	// administrators and owners included — which is the one place the
@@ -136,6 +171,15 @@ func (r *Resolver) LoadSet(ctx context.Context, u *model.User, s *model.Storage)
 	set := &Set{user: u, storage: s}
 	if u != nil {
 		set.ceiling = RoleCeiling(u.Role)
+		if r.perms != nil {
+			// A failure here denies (the caller treats a LoadSet error as
+			// "no access"), like a failed grants query below.
+			p, err := r.perms.Load(ctx, u)
+			if err != nil {
+				return nil, err
+			}
+			set.perms = p
+		}
 	}
 	if s != nil {
 		// Locks come before the admin/RBAC-off short-circuit on purpose:
@@ -361,4 +405,114 @@ func capLevel(l, ceil Level) Level {
 		return ceil
 	}
 	return l
+}
+
+// NeedLevel is the path capability a file-scoped permission also requires:
+// holding files.delete lets a user delete only where acl already lets them
+// write. Permissions that are not about a path answer LevelNone.
+//
+// The levels are the ones the handlers demanded before permissions existed:
+// reads are viewer, every mutation is editor, sharing a public link is editor
+// (handlers/share.go) and sharing with a person is owner (handlers/grants.go).
+func NeedLevel(p perm.Perm) Level {
+	switch p {
+	case perm.FilesDownload, perm.FilesTag:
+		return LevelViewer
+	case perm.FilesCreate, perm.FilesModify, perm.FilesRename, perm.FilesMove, perm.FilesDelete, perm.FilesPurge,
+		perm.ShareLinks, perm.ShareUploadLinks:
+		return LevelEditor
+	case perm.ShareUsers:
+		return LevelOwner
+	default:
+		return LevelNone
+	}
+}
+
+// Can reports whether the caller may take action p on rel: the path level p
+// needs (NeedLevel, which includes the app-plugin lock cap) AND the per-user
+// permission itself.
+//
+// A file type a permission rule blocks (blocked_extensions) is refused here
+// for every action that would produce a file of that name — adding, changing
+// or renaming/moving to it — so every door that asks Can refuses it without
+// knowing rules exist. What such a file already there can still do is be
+// read and deleted.
+func (s *Set) Can(rel string, p perm.Perm) bool {
+	if s == nil || s.user == nil {
+		return false
+	}
+	if need := NeedLevel(p); need > LevelNone && s.Effective(rel) < need {
+		return false
+	}
+	switch p {
+	case perm.FilesCreate, perm.FilesModify, perm.FilesRename, perm.FilesMove:
+		if s.BlockedExtension(rel) != "" {
+			return false
+		}
+	}
+	return s.AllowsAt(rel, p)
+}
+
+// AllowsAt is Allows for an action on rel: the same answer, except where a
+// permission rule limited to storages or paths (perm.Result.CanAt) matches
+// this storage and rel. Every check that has the path should ask this one.
+func (s *Set) AllowsAt(rel string, p perm.Perm) bool {
+	if s == nil || s.user == nil {
+		return false
+	}
+	if s.perms == nil {
+		return true
+	}
+	return s.perms.CanAt(s.storageID(), CleanRel(rel), p)
+}
+
+// WhyAt is where AllowsAt's answer came from.
+func (s *Set) WhyAt(rel string, p perm.Perm) perm.Source {
+	if s == nil || s.perms == nil {
+		return perm.Source{}
+	}
+	return s.perms.WhyAt(s.storageID(), CleanRel(rel), p)
+}
+
+func (s *Set) storageID() int64 {
+	if s.storage == nil {
+		return 0
+	}
+	return s.storage.ID
+}
+
+// BlockedExtension returns the extension of rel's name that a permission
+// rule binding this caller blocks ("exe", "tar.gz"), or "". Compared on the
+// lowercase name, so "Setup.EXE" is caught by "exe".
+func (s *Set) BlockedExtension(rel string) string {
+	if s == nil || s.perms == nil || len(s.perms.Settings.BlockedExtensions) == 0 {
+		return ""
+	}
+	name := strings.ToLower(path.Base(CleanRel(rel)))
+	for _, ext := range s.perms.Settings.BlockedExtensions {
+		if strings.HasSuffix(name, "."+ext) {
+			return ext
+		}
+	}
+	return ""
+}
+
+// Allows reports whether the caller holds per-user permission p, regardless
+// of path. Nil permissions (no loader wired — tests only) allow.
+func (s *Set) Allows(p perm.Perm) bool {
+	if s == nil || s.user == nil {
+		return false
+	}
+	if s.perms == nil {
+		return true
+	}
+	return s.perms.Can(p)
+}
+
+// Perms returns the caller's resolved permissions (nil when unwired).
+func (s *Set) Perms() *perm.Result {
+	if s == nil {
+		return nil
+	}
+	return s.perms
 }

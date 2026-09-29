@@ -168,7 +168,15 @@ test.describe('App plugins — install, run, output, public page', () => {
 
   test('the menu offers the action where it applies and a job writes the sibling', async ({ page, request }) => {
     await openExplorer(page);
-    const txtVerbs = await menuVerbs(page, `${STORAGE}://${TXT}`);
+    // The app's rows join the menu when /api/files/plugins/actions answers —
+    // read it again until they do (see 97-app-plugin-sign.spec.ts).
+    let txtVerbs: string[] = [];
+    await expect
+      .poll(async () => (txtVerbs = await menuVerbs(page, `${STORAGE}://${TXT}`)).some((v) => /upper-case|büyük harf/i.test(v)), {
+        timeout: 20_000,
+        message: 'the app row on .txt',
+      })
+      .toBe(true);
     expect(txtVerbs.some((v) => /upper-case|büyük harf/i.test(v)), `menu on .txt: [${txtVerbs.join(', ')}]`).toBe(true);
     const pngVerbs = await menuVerbs(page, `${STORAGE}://${PNG}`);
     expect(pngVerbs.some((v) => /upper-case|büyük harf/i.test(v)), `menu on .png: [${pngVerbs.join(', ')}]`).toBe(false);

@@ -92,7 +92,7 @@ when a newer version is there, and an administrator approves it
 5. The wizard ends on *"The app is installed and running."* The app's rows are
    in the file menu from the next time it is opened.
 
-![The install wizard stopped at the permission review](screenshots/v0.48.0/apps/apps-install-review-1440.png)
+![The install wizard stopped at the permission review](screenshots/v0.49.0/apps/apps-install-review-1440.png)
 
 ### The permission review
 
@@ -146,6 +146,96 @@ and an unsigned or badly signed module is refused at install and at upgrade.
 signature, so on such an instance install with **Upload files** and paste the
 signature beside the module.
 
+## Install requests
+
+**An API key cannot install a plugin.** Installing, upgrading, going back,
+switching an app on or off, removing it and changing its action overrides need
+an administrator **signed in to the admin panel**. An API key — an agent, a
+script, the CLI — is refused `403 session_required` whatever its scopes, and
+the refusal says where to go instead: it can **leave a request**, and an
+administrator decides it. The same holds for [storage
+plugins](PLUGINS.md#install-requests).
+
+Why a session, and not "a key with the `admin` scope": the permission review
+above is the security boundary of the whole app model — *the SHA-256 protects
+the administrator, the sandbox protects the user* — and its approval is a
+person's decision. A key is held by a program, so the install itself waits for
+an administrator who has read the review.
+
+A key can still **read** everything — the list, one app with its grant, its
+log, **Check for updates** — and run the review itself (`?dry_run=1` installs
+nothing): that is how it sees what it would be asking for.
+
+### What a request freezes
+
+When a request is left, filex runs the install review against the source and
+keeps what it answered on the request:
+
+- the manifest as fetched, and its SHA-256;
+- the SHA-256 the bytes must have — the module's, or the manifest's for an
+  app without one (a language pack, an app that is only an interface);
+- the permissions it asks to grant — for an upgrade, the ones it **adds** are
+  marked;
+- who asked (the account, and the label of the key it came through) and their
+  reason, which is required.
+
+**Approve and install** fetches the source again and installs **exactly those
+bytes with exactly those permissions**. When the source serves anything else
+by then — a new release under the same tag, a changed manifest — nothing is
+installed and the request is closed as **Source changed** (`superseded`); the
+requester can ask again, and the new request freezes the new bytes. A failure
+of any other kind (the source unreachable, the name taken since) leaves the
+request waiting, with the refusal shown on it.
+
+- Asking twice for the same source answers the waiting request; nothing new
+  is opened and nobody is told twice.
+- A request nobody decides **expires** after 14 days
+  ([`FILEX_PLUGIN_REQUEST_TTL_DAYS`](#configuration)).
+- The administrators are told in the bell — and by every webhook that carries
+  operator alarms — with the `plugin_requested` event
+  ([NOTIFICATIONS.md](NOTIFICATIONS.md)).
+- Every step is in the audit log: `plugin_request.create`, `.approve`,
+  `.reject`, `.expire`, `.supersede`.
+- In multi-tenant mode only the platform operator's administrators may leave,
+  read or decide requests; a tenant administrator gets `403`.
+
+### Deciding one
+
+**Admin → Plugins → Install requests** is above both tabs. Each row says the
+plugin, the version (an upgrade: from → to), who asked through which key, their
+reason, how many permissions it asks for and when. **Review** opens the frozen
+SHA-256, the source, the requester's words and the permission list the install
+wizard shows — each permission with the app's own reason; a storage plugin's
+request carries the warning that it runs with filex's rights. Tick **I
+understand what this app can do and want to install it** and press **Approve
+and install**, or **Reject** with an optional reason the requester can read.
+**Show decided requests** lists the rest: approved, rejected, expired and
+source changed.
+
+![Plugins → Install requests: two requests an agent's API key left](screenshots/v0.49.0/pluginrequests/requests-1440.png)
+
+![One request's review: the frozen SHA-256, the source, the reason and the permissions](screenshots/v0.49.0/pluginrequests/review.png)
+
+### Leaving one
+
+| From | How |
+|---|---|
+| REST | `POST /api/admin/plugin-requests` with an admin-scoped key — [BACKEND.md → Admin: plugin requests](BACKEND.md#admin-plugin-requests) has every body |
+| MCP | `admin_plugin_request_install` / `admin_plugin_request_upgrade`, and `admin_plugin_request_get` to follow it ([MCP.md → Plugin tools](MCP.md#plugin-tools)) |
+| CLI | `filex client plugins request --kind app --github-repo BRF-Tech/filex-sign --ref v0.1.1 --reason "…"`, and `filex client plugins requests` ([CLI.md](CLI.md#plugin-requests)) |
+
+```bash
+curl -sS -H "Authorization: Bearer $FILEX_KEY" -H 'Content-Type: application/json' \
+  -d '{"kind":"app","github_repo":"BRF-Tech/filex-sign","ref":"v0.1.1","reason":"The legal team signs contracts here"}' \
+  https://files.example.com/api/admin/plugin-requests
+```
+
+The answer is the request (`status: "pending"`, the permissions and the SHA-256
+it froze) and a sentence saying it waits for an administrator. There is no key
+door to approve or reject — `/approve` and `/reject` refuse an API key too —
+and no MCP tool for either: approving is the administrator's decision, made in
+the panel.
+
 ## What the administrator controls after install
 
 The **Apps** tab lists every installed app: its name (with the source, and
@@ -160,7 +250,7 @@ here, which engines this host has, whether signatures are required, and when
 the apps' sources were last checked for updates; **Check for updates** beside
 **Refresh** asks them now.
 
-![The Apps tab, a language pack among the apps](screenshots/v0.48.0/langpack/apps-list-1440.png)
+![The Apps tab, a language pack among the apps](screenshots/v0.49.0/langpack/apps-list-1440.png)
 
 A **language pack** (below) sits in the same list and is read the same way —
 its row says what it is, and, per language, how much of THIS filex it
@@ -188,7 +278,7 @@ translates.
 **Details** opens the app's own page — `/admin/plugins/apps/<name>`, one
 section per card, **Back** returns to the Apps tab:
 
-![An installed app's details](screenshots/v0.48.0/apps/apps-detail-1440.png)
+![An installed app's details](screenshots/v0.49.0/apps/apps-detail-1440.png)
 
 - **The facts** — name, version, the version kept to go back to, source (for
   a GitHub install, `https://github.com/<repo>@<tag>`), signed or unsigned,
@@ -237,6 +327,73 @@ section per card, **Back** returns to the Apps tab:
   refreshed every two seconds while the page is open. The ring is in memory:
   a restart empties it.
 
+## App permissions
+
+An app may declare **permissions of its own** — the actions an organisation
+would want to limit to some people — and you hand them out per role and per
+person, like the permissions filex has itself. A signing app can put
+*Request signatures* behind one: everybody may sign what they were sent, and
+only the roles you choose may send documents round for signature.
+
+![Admin → Roles → the User role: the Apps group, e-Signature's "Request signatures" set to Default (allowed)](screenshots/v0.49.0/apppermissions/role-user.png)
+
+- **What the app declares.** Its manifest lists them (`user_permissions`: an
+  id, a label and a description in every language the app speaks, and a
+  default), and names one on each action or screen that needs it
+  (`requires`). Writing one: [PLUGIN-KIT.md → User permissions](PLUGIN-KIT.md#user-permissions-what-an-administrator-hands-out).
+- **The default** is the app's: `viewer` (every account), `user` (accounts
+  that can change files — the usual choice, and what an app gets when it
+  names none) or `admin` (administrators only, until you grant it). It holds
+  until you decide otherwise.
+- **Deciding it.** A permission is `app.<app>.<id>` — `app.sign.request` —
+  and the answer is, first match wins: an administrator always holds it; else
+  the person's own exception; else their custom role's decision; else the
+  built-in role's (User or Viewer); else the app's default. Where each is set,
+  and the API: [PERMISSIONS.md → App permissions](PERMISSIONS.md#app-permissions).
+  They are set on **Admin → Roles** (an **Apps** group in every role's editor,
+  *Default (…)* / *Allow* / *Deny*) and on a person's page among their
+  exceptions; `GET /api/admin/roles/catalogue` lists every installed app's
+  under `apps`.
+- **What a person without it sees.** The action is not in their file menu, and
+  a screen, details section or home screen that needs it is not drawn. Every
+  door that starts the app's work for a person asks again — running the
+  action, opening the screen and each of its events, an interface's save and
+  its calls to its module — and refuses with `403`:
+
+  ```json
+  {
+    "error": "permission_denied",
+    "permission": "app.sign.request",
+    "source": { "kind": "app_default" },
+    "message": "You do not have the “Request signatures” permission of e-Signature."
+  }
+  ```
+
+  `source.kind` says where the answer came from: `override` (the person's
+  exception), `rule` (their custom role, with `rule_id` and `rule_name`),
+  `base` (the built-in role) or `app_default`. The message is in the reader's
+  language.
+- **What the app is told.** Every job, screen event and interface call tells
+  the app which of its permissions the person holds, decided exactly as the
+  doors decide them — so the app's own screens can leave out a hint to
+  something the reader cannot do. The signing app's Signatures panel, Verify
+  screen and Signatures screen suggest *Request signatures…* only to people
+  who hold it.
+- **A delegated administrator** leaves a person's app permissions as they
+  are: what an app key grants depends on the app, so "only what you hold"
+  cannot be judged for it.
+- **Removing the app** takes its permissions out of the list; decisions about
+  them stay stored and are simply never asked, so reinstalling it brings them
+  back.
+- **Older filex.** A manifest that declares `user_permissions` or `requires` is
+  refused by filex before 0.49.0 (unknown fields are refused), so such an app
+  says `"filex": ">=0.49.0"` ([Which filex an app works with](#which-filex-an-app-works-with)).
+  filex 0.47 and 0.48 cannot read even that range: their update check steps
+  over such a release, or says *Could not check* when nothing older fits.
+  From 0.49.0 the update check reads the name, version and range of a newer
+  version whose manifest carries fields this filex does not know, and lists
+  it as needing a newer filex; installing it is still refused.
+
 ## Updates
 
 An app installed from a GitHub repository or an address **follows it**. Once
@@ -255,7 +412,7 @@ version decides the next one.)
 
 | Installed from | Where filex looks for a newer version |
 |---|---|
-| a GitHub repository at a **release tag** (`v0.1.1` — how apps with a module are released) | the repository's **releases**: the newest one that is neither a draft nor a pre-release, whose `filex-app.json` at that tag names the same app and whose [`filex` range](PLUGIN-KIT.md#which-filex-it-works-with) lets this filex in. A release that needs a newer filex is stepped over to the newest one that does not (up to five are read per check). The release's notes come with it, for the review |
+| a GitHub repository at a **release tag** (`v0.1.1` — how apps with a module are released) | the repository's **releases**: the newest one that is neither a draft nor a pre-release, whose `filex-app.json` at that tag names the same app and whose [`filex` range](PLUGIN-KIT.md#which-filex-it-works-with) lets this filex in. A release that needs a newer filex — by its range, or because its manifest carries fields this filex does not know — is stepped over to the newest one that does not (up to five are read per check). The release's notes come with it, for the review |
 | a GitHub repository at a **branch** (`main` — how language packs are published) | that branch's `filex-app.json`, when its `version` is higher |
 | an **address** | the manifest's address again; the module from the new manifest's `wasm.url` when that is a full address, else from the address it was installed from |
 | **uploaded files** | nowhere — the row says *Installed from a file: there is no source to check for updates* |
@@ -409,8 +566,10 @@ database — is [APP-PLUGINS-API.md → The scheduled wake-up](APP-PLUGINS-API.m
   accepts the selection appear under the built-in ones. An action that
   writes needs *editor* on the file; a storage that is read-only refuses
   writing actions; files inside an encrypted folder are never offered — the
-  server has no key to hand the app. The menu's filter is a convenience; the
-  server checks all of this again when the action runs. Rows can follow the
+  server has no key to hand the app; and an action that needs one of the
+  app's own permissions is offered only to the people who hold it
+  ([App permissions](#app-permissions)). The menu's filter is a convenience;
+  the server checks all of this again when the action runs. Rows can follow the
   file's state: e-Signature offers *Request signatures…* on a document with
   nothing pending and *Sign / Fill* on one with a request open — the built-in
   actions stay beside them.
@@ -616,11 +775,11 @@ permission and stops at the review like any other.
 
 | The review of an app with its own interface | Its kind of file in **New document**, under **Apps** |
 |---|---|
-| ![The install review's Interface group](screenshots/v0.48.0/apps/app-interface-review-1440.png) | ![New document offering the app's kind of file](screenshots/v0.48.0/apps/app-new-document-1440.png) |
+| ![The install review's Interface group](screenshots/v0.49.0/apps/app-interface-review-1440.png) | ![New document offering the app's kind of file](screenshots/v0.49.0/apps/app-new-document-1440.png) |
 
 | …and the interface open on its file type, where filex's preview would be (a small example app, written for these pictures) |
 |---|
-| ![An app's own interface open as a file's viewer](screenshots/v0.48.0/apps/app-interface-viewer-1440.png) |
+| ![An app's own interface open as a file's viewer](screenshots/v0.49.0/apps/app-interface-viewer-1440.png) |
 
 ### An origin of their own
 
@@ -717,7 +876,7 @@ an optional reason. On an office document the first screen offers to
    purpose: what is being asked of whom is one decision, where it goes is
    the next. Every signer needs at least one signature box.
 
-   ![Defining the boxes](screenshots/v0.48.0/signing/sign-define-1440.png)
+   ![Defining the boxes](screenshots/v0.49.0/signing/sign-define-1440.png)
 
 4. **Place them** — the document, and the boxes that still need a place.
    Choose one, then tap the page where it goes, or drag to size it as you
@@ -725,7 +884,7 @@ an optional reason. On an office document the first screen offers to
    again, copied to another page or deleted. The step cannot be left while a
    box has nowhere to go.
 
-   ![Placing the boxes on the document](screenshots/v0.48.0/signing/sign-place-1440.png)
+   ![Placing the boxes on the document](screenshots/v0.49.0/signing/sign-place-1440.png)
 
 5. **Time** — *How long do they have?* How many days the links are valid
    (14 by default, at most 90 — both pulled down to the instance's maximum
@@ -796,7 +955,7 @@ during which even the right PIN is refused.
 
 | The partner's link, behind its PIN | …and what it opens: only their own boxes |
 |---|---|
-| ![The outside signer's PIN gate](screenshots/v0.48.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](screenshots/v0.48.0/signing/sign-outside-fill-1440.png) |
+| ![The outside signer's PIN gate](screenshots/v0.49.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](screenshots/v0.49.0/signing/sign-outside-fill-1440.png) |
 
 Both kinds of signer then walk the same three steps:
 
@@ -826,7 +985,7 @@ fingerprint, and the certificate files to keep.
   file), and the audit trail saved. These controls are offered to anybody who
   may edit the document, not only to the requester.
 
-  ![The document frozen, its Signatures panel open](screenshots/v0.48.0/signing/sign-status-1440.png)
+  ![The document frozen, its Signatures panel open](screenshots/v0.49.0/signing/sign-status-1440.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* — and,
@@ -837,7 +996,7 @@ fingerprint, and the certificate files to keep.
   asked for, only the requester's own links listed, and every read written to
   filex's audit trail.
 
-  ![The Signatures screen's PINs section](screenshots/v0.48.0/signing/sign-pins-1440.png)
+  ![The Signatures screen's PINs section](screenshots/v0.49.0/signing/sign-pins-1440.png)
 - **The bell** tells the requester when an outside signer opened the
   document, when somebody signed or refused, and when everything is done.
 
@@ -1001,7 +1160,7 @@ short wizard in a dialog, with only the steps that have something to ask:
 4. **Review** — what will happen, including the route the conversion takes,
    then **Convert**.
 
-![The converter's wizard](screenshots/v0.48.0/apps/convert-wizard-1440.png)
+![The converter's wizard](screenshots/v0.49.0/apps/convert-wizard-1440.png)
 
 The result lands **beside the input**, as `<name>.<new extension>` (pages and
 frames as `<name>-1.png`, `<name>-2.png`, …); a taken name gets a suffix, and
@@ -1154,8 +1313,9 @@ admin surface refuses installs regardless.
 | `FILEX_APP_PLUGIN_MAX_OUTPUT_MB` | `512` | Per-file output ceiling for a job |
 | `FILEX_APP_PLUGIN_MAX_WASM_MB` | `64` | Largest module an install accepts |
 | `FILEX_APP_PLUGIN_MAX_UI_MB` | `128` | Largest interface bundle (zipped) an install accepts |
-| `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every app's source for a newer version and installs the ones that ask for nothing new ([Updates](#updates)). `0` = no request leaves the server for it; **Check for updates** still works. Off on a demo regardless |
+| `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every app's source for a newer version and **tells the administrators** — it installs nothing: every newer version waits for an approval ([Updates](#updates)). `0` = no request leaves the server for it; **Check for updates** still works. Off on a demo regardless |
 | `FILEX_PLUGIN_TRUSTED_KEYS` | — | Shared with storage plugins: set it and every module must carry a detached ed25519 signature over its sha256 |
+| `FILEX_PLUGIN_REQUEST_TTL_DAYS` | `14` | How long an [install request](#install-requests) waits for an administrator before it expires (both kinds of plugin) |
 | `FILEX_SECRET_KEY` | — | Seals secret settings, the signing authority's key and share PINs; without it secret settings and signing answer *unavailable*, and a PIN cannot be read back later. The public-link unlock cookie falls back to a per-process key: it works, but a restart signs visitors out and two instances behind one address do not share it |
 
 Apps need an **amd64 or arm64** host: the WebAssembly compiler has no
@@ -1193,7 +1353,10 @@ record — there is no separate page table any more. `app_plugins` also keeps
 the manifest address of a URL install, the signature it was installed with,
 the interface bundle's SHA-256 and what the last update check found;
 `app_plugin_versions` keeps the version the last approval replaced (the
-`auto_update` column filex 0.47 used is no longer read). Audit entries:
+`auto_update` column filex 0.47 used is no longer read); `plugin_requests`
+keeps the [install requests](#install-requests) of both kinds of plugin, with
+what each froze and how it was decided. Audit entries: `plugin_request.create`,
+`.approve`, `.reject`, `.expire` and `.supersede`,
 `app_plugin.action_run`, `app_plugin.page_job`, `app_plugin.unlock`,
 `app_plugin.upgrade` and `app_plugin.rollback` (an administrator's approved
 change, by whom), `app_plugin.update` (an automatic update, written only by
@@ -1206,7 +1369,13 @@ hash, never the token).
 
 All under `/api/admin/app-plugins` (supertenant administrator; `503` when the
 runtime is off, with the reason; the list itself still answers `200` so the
-panel can explain):
+panel can explain).
+
+⚠⚠ Install and upgrade (unless `?dry_run=1`), `PATCH`, `rollback`, `DELETE`
+and `PUT /{id}/overrides` need an administrator **signed in to the panel**: an
+API key gets `403 session_required` and is pointed at
+[`/api/admin/plugin-requests`](#install-requests). Everything else here stays
+open to an admin-scoped key.
 
 | Route | Purpose |
 |---|---|
@@ -1227,6 +1396,10 @@ panel can explain):
 | `POST /signing/ca/import` | multipart `cert` + `key` (PEM), or JSON `{cert_pem, key_pem}`: sign with an authority you already have. The current one is retired, never deleted |
 | `GET /shares[?plugin=&active=&limit=&offset=]` | the public links apps opened — the same rows, envelope and tenant filter as `GET /api/admin/shares` |
 | `GET /locks[?storage_id=]` · `DELETE /locks {storage_id, path}` | live file locks apps hold; the DELETE lifts one by force (audited `app_plugin.unlock`) |
+
+Who may use an app's actions per role and per person is not here: an app's
+own permissions are decided on the roles API with the rest
+([App permissions](#app-permissions)).
 
 Errors carry a code the wizard switches on: `manifest_invalid`,
 `sha256_mismatch`, `sha256_required`, `signature_required`, `signature_invalid`,
@@ -1256,11 +1429,15 @@ readable examples; to start your own, copy the template repository
 | Symptom | Where to look |
 |---|---|
 | The tab says *disabled* | `FILEX_APP_PLUGINS_DISABLED`, or demo mode; on an unsupported CPU the banner says which |
+| An install through an API key answers `403 session_required` | by design: a key cannot install — [leave a request](#install-requests) and an administrator approves it on the Plugins page |
+| An approval answers `409 superseded` | the source serves different bytes than the request froze (a re-tagged release, a changed manifest); nothing was installed — ask again for the new bytes |
 | A GitHub install answers `fetch_failed` | the ref is empty or wrong: give the release's tag, not a branch (the module's address in the manifest names a release) |
 | Install answers `sha256_mismatch` | the module at the manifest's address is not the one the manifest describes — the release asset and the manifest at that tag disagree |
 | Install answers `signature_required` | the instance sets `FILEX_PLUGIN_TRUSTED_KEYS`; install with **Upload files** and the detached signature |
 | Install answers `describe_mismatch` | the module was built from a different manifest than the one installed — rebuild, or fix `name`/`version`/`permissions`; a `schedule` grant also needs a `tick` export |
-| A menu row never appears | the action's *applies* rule (extension, MIME, multi) — check the override; the action may be switched off or reserved to administrators; a read-only storage hides writing actions; encrypted folders hide everything |
+| A menu row never appears | the action's *applies* rule (extension, MIME, multi) — check the override; the action may be switched off or reserved to administrators; it may need one of the app's own permissions the person does not hold ([App permissions](#app-permissions)); a read-only storage hides writing actions; encrypted folders hide everything |
+| An action or screen answers `403 permission_denied` with `permission: "app.<app>.<id>"` | the person does not hold that app permission; `source` says which layer decided — their exception, their custom role, the built-in role or the app's default ([App permissions](#app-permissions)) |
+| An install of a newer app answers `manifest_invalid` … `unknown field "user_permissions"` | this filex is older than 0.49.0, and the app declares its own permissions — upgrade filex, or install a version of the app from before them |
 | *Request signatures…* is missing on a document | a request is already open on it — the document offers **Sign / Fill** until that one ends |
 | A job fails with *the plugin ran out of memory / time* | raise `limits.memory_pages` / `limits.timeout_s` in the manifest (up to the ceilings above), or make the job smaller |
 | Mail from an app never arrives | SMTP must be configured **and verified** (Admin → Settings → **Email (SMTP)**); the app is told *unavailable* until then; then the 60/hour window |

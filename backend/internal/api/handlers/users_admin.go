@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/acl"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
 )
@@ -19,6 +20,10 @@ import (
 // UsersAdmin holds admin-only user actions.
 type UsersAdmin struct {
 	Store db.Store
+	// ACL resolves per-user permissions for the delegated administrator's
+	// takeover line (refuseTakeover). Unset, a delegated administrator is
+	// refused; a full administrator never needs it.
+	ACL *acl.Resolver
 }
 
 // NewUsersAdmin constructs the handler.
@@ -47,8 +52,26 @@ func (h *UsersAdmin) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	// password + updates 0 rows + returns 200, leaking the cleartext
 	// password into the caller's response for a user that does not
 	// exist. (Found by Cypress 41-users-crud sweep, 2026-05-18.)
-	if _, gerr := h.Store.GetUser(r.Context(), id); gerr != nil {
+	target, gerr := h.Store.GetUser(r.Context(), id)
+	if gerr != nil || target == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+	// The new password comes back in the answer, so resetting an
+	// ADMINISTRATOR's is handing out an administrator's credential: a
+	// session only (session_gate.go). An ordinary account's stays open to a key.
+	if target.IsAdmin() && !adminCredentialBySession(w, r, "Resetting an administrator's password") {
+		return
+	}
+	// ⚠⚠ The takeover this route would otherwise be: a delegated
+	// administrator (admin.users) resetting an administrator's password is
+	// handed that administrator's new password in the response.
+	if refuseAdminTarget(w, r, target, "") {
+		return
+	}
+	// …and the same takeover of any account that holds more than they do:
+	// its new password is its permissions (refuseTakeover).
+	if refuseTakeover(w, r, h.ACL, target) {
 		return
 	}
 	pw, err := generateRandomPassword(16)

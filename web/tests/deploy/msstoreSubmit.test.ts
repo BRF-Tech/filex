@@ -78,9 +78,13 @@ describe('the release submits its desktop package to the Microsoft Store', () =>
     expect(wf).toMatch(/workflow_dispatch:/);
     expect(wf).toMatch(/gh run download \$run [^\n]*-n "msix-\$env:TAG"/);
     expect(wf).toMatch(/msstore-submit\.ps1 -Msix \$msix -Version \$env:TAG\.TrimStart\('v'\)/);
-    // The input reaches the shell through env, not spliced into a script.
+    // The inputs reach the shell through env, never spliced into a script:
+    // every line that reads one is an env mapping (the tag, and the run id of
+    // a run that only added the ARM packages, release.yml -f only=arm64).
     expect(wf).toMatch(/TAG: \$\{\{ inputs\.tag \}\}/);
-    expect(wf.split('\n').filter((l) => /\$\{\{\s*inputs\./.test(l))).toHaveLength(1);
+    const reads = wf.split('\n').filter((l) => /\$\{\{\s*inputs\./.test(l));
+    expect(reads.length).toBeGreaterThanOrEqual(1);
+    for (const l of reads) expect(l, 'an input read outside env').toMatch(/^\s+[A-Z_]+: \$\{\{ inputs\.[a-z_]+ \}\}\s*$/);
     for (const s of ['MSSTORE_TENANT_ID', 'MSSTORE_SELLER_ID', 'MSSTORE_CLIENT_ID', 'MSSTORE_CLIENT_SECRET']) {
       expect(wf).toContain(`${s}: \${{ secrets.${s} }}`);
     }

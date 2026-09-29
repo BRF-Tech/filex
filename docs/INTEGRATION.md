@@ -132,6 +132,20 @@ const config = {
   // ⚠ Proxying with one shared token (below) is exactly the 'app' case.
   callerKind: 'app',
 
+  // What the signed-in account may do (filex roles and per-user permissions,
+  // docs/PERMISSIONS.md). LEAVE IT OUT: the explorer then reads
+  // GET /api/auth/me itself (derived from apiBase like every other endpoint,
+  // so it travels through your proxy too) and hides the actions the account's
+  // role refuses — Delete, Rename, Share… — exactly as the web app does. Pass
+  // it only if the host already holds the answer. An administrator is not
+  // narrowed, and an answer without permissions changes nothing: every action
+  // stays and the server decides. `permissionsByFolder` names the permissions
+  // whose answer differs by folder; the explorer asks the server about the
+  // selected paths before offering those. `me` overrides the endpoint.
+  // permissions: ['files.download', 'files.create', 'share.links'],
+  // permissionsByFolder: ['files.delete'],
+  // me: '/api/auth/me',
+
   // How a MOUSE opens an item. 'double' (default) — a single click selects, a
   // double click opens (Enter opens the selection). 'single' — the first click
   // opens. ⚠ TOUCH is not governed by this: a tap always opens (there is no
@@ -541,6 +555,13 @@ only cosmetic.** filex enforces confinement on `/api/files` from two sources
 Any request touching a path outside the root → `403`. A root/empty path snaps to
 the confined folder, so listings open there. This covers manager / move / copy /
 delete / upload / download / share / archive / trash.
+
+⚠ The token's **verbs** bound the embed too: a token with `read` alone gives a
+read-only explorer (uploads, renames and moves answer `403 token missing scope:
+write`, deletes `…: delete`), and one without `write` opens documents
+read-only in the editor. Give the proxy's token the verbs the embed is meant to
+have — `read,write,delete` for a full file manager
+([RBAC.md → API tokens](RBAC.md#api-tokens-verbs-on-every-surface)).
 
 Recommended: one root-scoped token **per tenant/folder** (or a single service
 token + a per-request `X-Filex-Root`), injected by your proxy.

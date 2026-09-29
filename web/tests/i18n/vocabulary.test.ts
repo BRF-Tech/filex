@@ -91,6 +91,19 @@ const SCOPE_IS_THEIRS: Record<string, string> = {
   'authProviders.fields.scopesHint': 'the extra OIDC scopes sent to the identity provider',
 };
 
+/* "Override" where it is not a person's exception: a setting the environment
+   pins, a stylesheet over the theme's variables, an app's per-action settings.
+   What an administrator sets for ONE person on the Roles side is an exception
+   (docs/CONTRIBUTING.md → Words); the resolver's source kind is still called
+   `override` in the code, which is exactly how "set for this account" and
+   "override" reached the screen in PR #75. */
+const OVERRIDE_IS_ANOTHER_THING: Record<string, string> = {
+  'authProviders.envReadOnly': 'an environment variable pins the setting; the page cannot replace it',
+  'server.auth_provider.environment_managed': 'an environment variable pins the setting (see authProviders.envReadOnly)',
+  'appPlugins.deleteConfirm': 'an app\'s per-action settings, not a person\'s permission',
+  'appearance.css.hint': 'CSS overriding the theme\'s --fe-* variables',
+};
+
 const ENGLISH: Rule[] = [
   { use: 'API key', wrong: /\bAPI tokens?\b/i },
   { use: 'API key', wrong: /\btokens?\b/i, except: TOKEN_IS_THEIRS },
@@ -113,6 +126,7 @@ const ENGLISH: Rule[] = [
   { use: 'what the preview can show — not the library behind it', wrong: /model-viewer/i },
   { use: 'email', wrong: /(?<![\w-])e-mails?\b/i },
   { use: 'Synchronous / Asynchronous (a write mode — "sync" is the scan)', wrong: /^(Sync|Async) \(|\bAsync\b/ },
+  { use: 'exception (an Allow or Deny set for one person, beating their role)', wrong: /\boverrid(e|es|den|ing)\b/i, except: OVERRIDE_IS_ANOTHER_THING },
 ];
 
 /* ⚠ `\b` is an ASCII word boundary in JavaScript, even under `u`: before "ş"
@@ -156,6 +170,20 @@ const TURKISH: Rule[] = [
     wrong: tr('<klasör senkron|<çift yönlü senkron|<senkron araçları|<senkronizasyon'),
   },
   { use: 'eşzamanlı / eşzamansız (a write mode)', wrong: tr('<asenkron|^senkron \\(') },
+  /* The Viewer role is "İzleyici" on every screen that names it (PR #75
+     review, 2026-09-28: the Roles subtitle and the viewer note said
+     "Görüntüleyici" under a list that said "İzleyici"). Case-sensitive: a
+     file viewer is "görüntüleyici" in lower case, and stays. */
+  { use: 'İzleyici (the Viewer role)', wrong: /(?<!\p{L})Görüntüleyici/u },
+  { use: 'istisna (an Allow or Deny set for one person)', wrong: tr('<geçersiz kıl'), except: OVERRIDE_IS_ANOTHER_THING },
+  /* ⚠ Turkish letters, never their ASCII look-alikes (G:/mail CLAUDE.md, the
+     2026-07-10 "Altyapi" report). 0.49's role editor shipped the example
+     folders "Arsiv veya Musteriler/…/Sozlesmeler". A regex cannot know every
+     word; these are the ones interface text keeps reaching for. */
+  {
+    use: 'the Turkish letters ı İ ş ğ ü ö ç — never an ASCII spelling',
+    wrong: tr('<(arsiv|musteri|sozlesme|yonetici|yonetim|kullanici|guvenlik|olustur|degistir|gorunum|sifre|klasoru|klasorler|dosyalari|ayarlari|altyapi|islem|ozel)'),
+  },
 ];
 
 /**
@@ -223,9 +251,22 @@ describe('one term per concept (docs/CONTRIBUTING.md → Words)', () => {
     expect(offenders({ ok: 'Kaydet', ok2: 'Tekrar deneyin.', ok3: 'Emin misiniz?' }, SEN)).toEqual([]);
   });
 
+  it('the role words still see what PR #75 shipped (a detector that finds nothing proves nothing)', () => {
+    const bad = {
+      paths: 'Klasörler (ör. Arsiv veya Musteriler/*/Sozlesmeler)',
+      viewer: 'Bir Görüntüleyici asla dosya ekleyemez',
+      override: 'bu hesap için geçersiz kılındı',
+    };
+    expect(offenders(bad, TURKISH).map((x) => x.split(':')[0]).sort()).toEqual(['override', 'paths', 'viewer']);
+    expect(offenders({ ok: 'Bu dosyanın görüntüleyicisi başlatılamadı.', ok2: 'Arşiv veya Müşteriler/*/Sözleşmeler', ok3: 'İzleyici' }, TURKISH)).toEqual([]);
+    expect(offenders({ src: 'set by an override' }, ENGLISH).length).toBe(1);
+  });
+
   it('an exception names a key that exists — a stale exemption hides the next copy', () => {
     const stale = Object.keys(TOKEN_IS_THEIRS).filter((k) => !(k in english));
     expect(stale).toEqual([]);
+    const staleOverride = Object.keys(OVERRIDE_IS_ANOTHER_THING).filter((k) => !(k in english));
+    expect(staleOverride).toEqual([]);
   });
 });
 
@@ -249,6 +290,19 @@ const SAME: Array<[string, string[]]> = [
      named (v0.43.0 — the connections surface has no storage half any more).
      The four survivors are the four places the word still appears. */
   ['storages', ['sidenav.storages', 'storages.title', 'nav.storages', 'destpicker.drives']],
+  /* Roles and permissions (0.49, PR #75). The per-file and per-folder grants
+     page was "Permissions / İzinler" until Roles came; now "permission" is a
+     role's word, and the grants page, its menu entry and its audit rows are
+     Folder access. */
+  ['folder access (the grants page)', ['nav.grants', 'grants.title', 'audit.resource.grants']],
+  ['roles', ['nav.roles', 'permissions.title']],
+  ['built-in role', ['audit.resource.permissions', 'audit.target.permissions']],
+  ['role', ['common.role', 'audit.resource.permission_rule', 'audit.target.permission_rule']],
+  /* A permission that opens a door the connections page manages is called
+     what that page calls the thing. */
+  ['API keys (the access permission)', ['conn.tokens.title', 'permissions.items.access.api.label']],
+  ['S3 access keys', ['conn.s3keys.title', 'permissions.items.access.s3.label']],
+  ['NFS exports', ['conn.nfs.title', 'permissions.items.access.nfs.label']],
 ];
 
 describe('one concept, one label', () => {

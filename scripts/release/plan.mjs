@@ -16,7 +16,7 @@ import path from 'node:path';
 
 import { nativeGo, wslGo, wslMirrorCd } from '../lib/go-build.mjs';
 import { docker, dockerArgv, run, shq, slash } from './engine.mjs';
-import { desktopFeeds, docsSite, readmePictures, runningRelease, updateManifest } from './verify.mjs';
+import { desktopFeeds, docsSite, readmePictures, runningRelease, snapChannel, updateManifest, windowsFeedArches } from './verify.mjs';
 
 const IS_WIN = process.platform === 'win32';
 
@@ -69,7 +69,108 @@ const WORKFLOW_GUARDS = [
   'commits the submission through msstore-submit.ps1, never as a draft',
   'leaves a submission still in certification alone, and never fails the release',
   'keeps the Store package check soft on the runner; the local release run is the strict one',
+  // 0.48.1: every release builds, checks and ships the arm64 packages, and a
+  // run started by hand publishes nothing unless asked to.
+  'builds the Linux arm64 packages natively on ubuntu-24.04-arm',
+  'builds Windows arm64 beside x64 and joins the two update feeds, x64 first',
+  'bundles both Store packages and submits the bundle',
+  'checks every binary inside a package is the architecture on its label',
+  "uploads each Linux architecture's snap to the Snap Store",
+  'runs the arm64 CLI, server and images on arm64 machines',
+  'installs and opens the arm64 desktop packages on arm64 machines',
+  'names the arm64 installer in the winget manifest',
+  'a dry run publishes nothing',
+  'a full release publishes from its tag push only',
+  'joins the Windows feeds with x64 first, and keeps what an old x64 install reads',
+  // 0.48.1: only the newest winget pull request per package stays open.
+  'closes superseded winget pull requests after the new one, for the CLI and the desktop app',
+  'closes only older versions of the same package, and nothing when the new pull request is missing',
 ];
+
+/**
+ * The installers, feeds and CLI archives a release's GitHub Release must
+ * carry. arm64 from 0.48.1: Linux and Windows desktop packages, the Linux
+ * arm64 update feed, and the arm64 CLI the smoke tests ran.
+ */
+export function releaseAssets(version) {
+  return [
+    'checksums.txt', 'latest.yml', 'latest-mac.yml', 'latest-linux.yml', 'latest-linux-arm64.yml',
+    'filex-desktop-x64.exe', 'filex-desktop-portable-x64.exe', 'filex-desktop-x86_64.AppImage',
+    'filex-desktop-amd64.deb', 'filex-desktop-arm64.dmg',
+    'filex-desktop-arm64.exe', 'filex-desktop-portable-arm64.exe', 'filex-desktop-arm64.AppImage',
+    'filex-desktop-arm64.deb', 'filex-desktop-aarch64.rpm', 'filex-desktop-amd64.snap', 'filex-desktop-arm64.snap',
+    `filex_${version}_linux_x86_64.tar.gz`, `filex_${version}_windows_x86_64.zip`, `filex_${version}_darwin_arm64.tar.gz`,
+    `filex_${version}_linux_arm64.tar.gz`, `filex_${version}_windows_arm64.zip`,
+    'filex-linux-arm64', 'filex-windows-arm64.exe', 'filex-darwin-arm64',
+  ];
+}
+
+/**
+ * Both winget pull requests of a release name an x64 AND an arm64 installer.
+ * Read from the pull request's own commit on microsoft/winget-pkgs, so a
+ * merged one (branch deleted) still reads.
+ */
+function wingetArches(version) {
+  return {
+    name: `winget: the ${version} pull requests offer x64 and arm64 (BRFTech.filex, BRFTech.filex-app)`,
+    check: () => {
+      const lines = [];
+      const problems = [];
+      for (const id of ['BRFTech.filex', 'BRFTech.filex-app']) {
+        const title = `New version: ${id} ${version}`;
+        const list = run('gh', ['pr', 'list', '--repo', 'microsoft/winget-pkgs', '--author', 'brkfun', '--state', 'all',
+          '--search', `"${title}" in:title`, '--json', 'number,title', '--jq', `.[] | select(.title == "${title}") | .number`]);
+        if (list.status !== 0) return { ok: false, detail: `could not check — gh: ${(list.stderr || list.stdout).trim()}` };
+        const pr = list.stdout.trim().split(/\s+/)[0];
+        if (!pr) {
+          problems.push(`${id}: no pull request titled "${title}"`);
+          continue;
+        }
+        const view = run('gh', ['pr', 'view', pr, '--repo', 'microsoft/winget-pkgs', '--json', 'headRefOid,files']);
+        if (view.status !== 0) return { ok: false, detail: `could not check — gh pr view ${pr}: ${view.stderr.trim()}` };
+        const { headRefOid, files } = JSON.parse(view.stdout);
+        const inst = files.map((f) => f.path).find((f) => f.endsWith('.installer.yaml'));
+        if (!inst) {
+          problems.push(`${id} #${pr}: no installer manifest`);
+          continue;
+        }
+        const body = run('gh', ['api', `repos/microsoft/winget-pkgs/contents/${inst}?ref=${headRefOid}`, '--jq', '.content']);
+        if (body.status !== 0) return { ok: false, detail: `could not check — ${inst}: ${body.stderr.trim()}` };
+        const yml = Buffer.from(body.stdout.trim(), 'base64').toString('utf8');
+        const arches = [...yml.matchAll(/Architecture:\s*(\w+)/g)].map((m) => m[1]);
+        for (const a of ['x64', 'arm64']) if (!arches.includes(a)) problems.push(`${id} #${pr}: no ${a} installer (has ${arches.join(', ') || 'none'})`);
+        lines.push(`${id} #${pr}: ${arches.join(' + ')}`);
+      }
+      return problems.length ? { ok: false, detail: problems.join('\n') } : { ok: true, detail: lines.join('; ') };
+    },
+  };
+}
+
+/**
+ * The tag's release run built the Store bundle (x64 + arm64) and submitted it
+ * without a Store warning. The Store's own listing changes only once
+ * certification passes (hours to days), so the run is what is read here.
+ */
+function storeBundle(tag) {
+  return {
+    name: `Microsoft Store: ${tag}'s run bundled x64 + arm64 and submitted it`,
+    check: () => {
+      const runs = run('gh', ['run', 'list', '-R', 'BRF-Tech/filex', '--workflow', 'release.yml', '--branch', tag, '--limit', '1', '--json', 'databaseId', '--jq', '.[0].databaseId']);
+      const id = runs.stdout.trim();
+      if (runs.status !== 0 || !id) return { ok: false, detail: `could not check — no release.yml run for ${tag}: ${runs.stderr.trim()}` };
+      const view = run('gh', ['run', 'view', id, '-R', 'BRF-Tech/filex', '--json', 'jobs']);
+      if (view.status !== 0) return { ok: false, detail: `could not check — gh run view ${id}: ${view.stderr.trim()}` };
+      const job = JSON.parse(view.stdout).jobs.find((j) => j.name === 'Desktop packages (store)');
+      if (!job) return { ok: false, detail: `run ${id} has no "Desktop packages (store)" job` };
+      const step = (n) => job.steps.find((x) => x.name === n)?.conclusion ?? 'missing';
+      const problems = [];
+      for (const n of ['Bundle the Store packages', 'Submit to the Microsoft Store']) if (step(n) !== 'success') problems.push(`"${n}": ${step(n)}`);
+      const notes = run('gh', ['api', `repos/BRF-Tech/filex/check-runs/${job.databaseId}/annotations`, '--jq', '.[] | select(.title == "Microsoft Store") | .message']);
+      if (notes.status === 0 && notes.stdout.trim()) problems.push(`the run warned: ${notes.stdout.trim()}`);
+      return problems.length ? { ok: false, detail: `run ${id}: ${problems.join('; ')}` } : { ok: true, detail: `run ${id}: bundled and submitted` };
+    },
+  };
+}
 
 /** The npm names of the public packages under packages/ (release.yml publishes them all). */
 function npmPackages(repo) {
@@ -168,7 +269,11 @@ export default function plan({ repo, version, tag }) {
       // main.go it is older than main.go, and every app-plugin test refuses to
       // run on it (the v0.48.0 pretag: 50-odd "echo.wasm is older than
       // main.go" failures). Building it here is a no-op when it is current.
-      goGate('go: vet + test', (c) => path.join(c.repo, 'backend'), 'bash ../scripts/build-wasm-fixture.sh >/dev/null && go vet ./... && go test ./...'),
+      // -timeout 30m: go test's own default is 10m PER PACKAGE, and handlers
+      // (~5 min alone) ran beside wasmplugin on a busy workstation and crossed it
+      // (v0.49.0 release run, 2026-09-29: "test timed out after 10m0s" with
+      // no test hung). A hung test still fails, only later.
+      goGate('go: vet + test', (c) => path.join(c.repo, 'backend'), 'bash ../scripts/build-wasm-fixture.sh >/dev/null && go vet ./... && go test -timeout 30m ./...'),
       // A migration that only works on sqlite bricks the first boot after an
       // upgrade for everyone else; the parity tests SKIP without a DSN.
       { name: 'go: migrations on sqlite, postgres AND mysql', cmd: ['node', 'scripts/release/gates/engines.mjs'] },
@@ -240,7 +345,7 @@ export default function plan({ repo, version, tag }) {
       },
       // Lesson #55's checklist: build and test IN the target — the rewrite
       // changes the module path and every example domain.
-      goGate('export: go build + vet + test (public module path)', (c) => path.join(c.exportTarget, 'backend'), 'go build ./... && go vet ./... && go test ./...'),
+      goGate('export: go build + vet + test (public module path)', (c) => path.join(c.exportTarget, 'backend'), 'go build ./... && go vet ./... && go test -timeout 30m ./...'),
       {
         // ⚠⚠ The same for the web tests, run exactly as the release
         // workflow's Frontend job runs them. v0.45.0 passed every pretag gate
@@ -288,6 +393,7 @@ export default function plan({ repo, version, tag }) {
             'tests/deploy/dockerFrontendInputs.test.ts',
             'tests/deploy/wingetCla.test.ts',
             'tests/deploy/msstoreSubmit.test.ts',
+            'tests/deploy/releaseArm64.test.ts',
           ],
           env: (c) => ({ FILEX_WORKFLOWS_DIR: workflowsOf(c.exportTarget) }),
           mustPass: WORKFLOW_GUARDS,
@@ -309,17 +415,25 @@ export default function plan({ repo, version, tag }) {
           const r = run('gh', ['release', 'view', tag, '-R', 'BRF-Tech/filex', '--json', 'assets', '--jq', '.assets[].name']);
           if (r.status !== 0) return { ok: false, detail: `gh release view ${tag}: ${(r.stderr || r.stdout).trim()}` };
           const have = new Set(r.stdout.split('\n').map((s) => s.trim()).filter(Boolean));
-          const want = [
-            'checksums.txt', 'latest.yml', 'latest-mac.yml', 'latest-linux.yml',
-            'filex-desktop-x64.exe', 'filex-desktop-portable-x64.exe', 'filex-desktop-x86_64.AppImage',
-            'filex-desktop-amd64.deb', 'filex-desktop-arm64.dmg',
-            `filex_${version}_linux_x86_64.tar.gz`, `filex_${version}_windows_x86_64.zip`, `filex_${version}_darwin_arm64.tar.gz`,
-          ];
+          const want = releaseAssets(version);
           const missing = want.filter((w) => !have.has(w));
           return missing.length ? { ok: false, detail: `${have.size} asset(s); missing: ${missing.join(', ')}` } : { ok: true, detail: `${have.size} assets` };
         },
       },
+      // 0.48.1: the arm64 installer joined the x64 one in the ONE feed
+      // Windows reads; x64 first, or every existing install is offered arm64.
+      windowsFeedArches(`GitHub Release ${tag}: latest.yml offers the x64 and the arm64 installer, x64 first`, `https://github.com/BRF-Tech/filex/releases/download/${tag}/latest.yml`),
       { name: `ghcr: filex:${tag} and filex:slim-${tag}`, sh: `docker manifest inspect ghcr.io/brf-tech/filex:${tag} >/dev/null && docker manifest inspect ghcr.io/brf-tech/filex:slim-${tag} >/dev/null` },
+      // Each image for both architectures, each smoke-tested on its own
+      // machine before docker-manifest joined them.
+      {
+        name: `ghcr: filex:${tag} and filex:slim-${tag} are amd64 + arm64`,
+        sh: ['', 'slim-'].map((p) => `docker manifest inspect ghcr.io/brf-tech/filex:${p}${tag} | grep -q '"architecture": "arm64"' && docker manifest inspect ghcr.io/brf-tech/filex:${p}${tag} | grep -q '"architecture": "amd64"'`).join(' && '),
+      },
+      // One revision per architecture, both on stable (0.48.1: arm64).
+      snapChannel(`Snap Store: filex-app ${version} on stable for amd64 and arm64`, 'filex-app', ['amd64', 'arm64']),
+      wingetArches(version),
+      storeBundle(tag),
       {
         // Every package under packages/ — what release.yml publishes
         // (`pnpm publish --filter='./packages/*'`). A written list missed
@@ -344,9 +458,10 @@ export default function plan({ repo, version, tag }) {
       runningRelease(`fm.example.com runs ${tag}, built from the export commit`, 'https://fm.example.com'),
       runningRelease(`demo.filex.sh runs ${tag}, built from the export commit`, 'https://demo.filex.sh'),
       updateManifest(`filex.sh/updates/stable.json offers ${tag}`, 'https://filex.sh/updates/stable.json'),
-      desktopFeeds(`desktop feeds offer ${version} and serve the bytes they promise`, 'https://filex.sh/desktop', ['latest.yml', 'latest-mac.yml', 'latest-linux.yml'], {
-        mustExist: ['filex-desktop-portable-x64.exe'],
+      desktopFeeds(`desktop feeds offer ${version} and serve the bytes they promise`, 'https://filex.sh/desktop', ['latest.yml', 'latest-mac.yml', 'latest-linux.yml', 'latest-linux-arm64.yml'], {
+        mustExist: ['filex-desktop-portable-x64.exe', 'filex-desktop-portable-arm64.exe'],
       }),
+      windowsFeedArches('filex.sh/desktop/latest.yml offers the x64 and the arm64 installer, x64 first', 'https://filex.sh/desktop/latest.yml'),
       docsSite(`docs.filex.sh serves ${tag}'s pages, not a snapshot`, 'https://docs.filex.sh'),
       { name: 'shop window: the published surfaces', cmd: ['node', 'scripts/check-shop-window.mjs', '--published'] },
     ],

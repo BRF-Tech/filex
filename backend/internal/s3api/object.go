@@ -11,6 +11,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -35,6 +36,13 @@ func (h *Handler) getObject(w http.ResponseWriter, r *http.Request, p *protocola
 	// existence oracle. S3 itself answers 404 cross-account for this reason.
 	if !h.readable(p, set, key) {
 		h.objectError(w, r, bodyWanted, http.StatusNotFound, "NoSuchKey", "the specified key does not exist")
+		return
+	}
+	// The bytes of a visible object are a download (internal/perm). Refused
+	// AFTER readable, so the answer can say AccessDenied without becoming an
+	// existence oracle: this caller may already see the key.
+	if bodyWanted && !set.AllowsAt(key, perm.FilesDownload) {
+		h.objectError(w, r, bodyWanted, http.StatusForbidden, "AccessDenied", "permission denied: your account lacks the files.download permission")
 		return
 	}
 

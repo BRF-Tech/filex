@@ -139,6 +139,16 @@ function emittedTestIds(): Array<{ decl: string; re: RegExp }> {
         if (v.length > 1 && v.startsWith('`') && v.endsWith('`')) v = v.slice(1, -1);
         if (v) decls.add(v);
       }
+      // A DataTable row's Actions control: `:row-actions-test-id="(row) =>
+      // `x-${row.id}`"` names the control, and core RowActions names each
+      // entry of its menu `<that id>-<action key>`. Every admin table row is
+      // reached this way (e2e 178, 179 and the app-permission scene open the
+      // Roles table's row menus), so a scene that does must not read as
+      // waiting for an id nothing writes.
+      for (const m of src.matchAll(/:row-actions-test-id="[^"]*?`([^`]+)`/g)) {
+        decls.add(m[1]);
+        decls.add(`${m[1]}-\${key}`);
+      }
     }
   }
   return [...decls].map((decl) => ({

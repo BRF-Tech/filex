@@ -113,6 +113,10 @@ func TestAppUpdateNoticesReachOnlyAdministrators(t *testing.T) {
 		notify.EventAppUpdated, notify.EventAppUpdateAvailable,
 		notify.EventAppUpdateNeedsApproval, notify.EventAppUpdateFailed,
 		notify.EventPluginUpdateAvailable,
+		// A plugin install request waits for the platform operator too
+		// (internal/pluginreq): a plain user cannot approve it, and a tenant
+		// administrator may not.
+		notify.EventPluginRequested,
 	}
 	for _, k := range kinds {
 		_, err := svc.Send(ctx, notify.Event{Event: k, Severity: notify.SeverityInfo, Title: "lang-es",

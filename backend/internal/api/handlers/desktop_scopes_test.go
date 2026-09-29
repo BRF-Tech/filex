@@ -12,6 +12,11 @@ import (
 // to the rule /api/tokens already enforces: whatever a paired desktop gets, its
 // owner could have minted for themselves. If cappedScopes ever tightens, this
 // fails instead of the desktop quietly keeping the old, wider grant.
+//
+// ⚠ One named exception: a VIEWER's desktop also carries `write` (desktopScopes
+// says why — the account dialog asks it, the viewer role still refuses every
+// file change). It is the only verb the desktop may hold beyond the self-service
+// ceiling, and only for a viewer; anything else wider is a failure here.
 func TestDesktopScopes_NeverExceedTheSelfServiceCeiling(t *testing.T) {
 	h := &SelfTokens{}
 	for _, role := range []string{model.RoleAdmin, model.RoleUser, model.RoleViewer} {
@@ -25,12 +30,24 @@ func TestDesktopScopes_NeverExceedTheSelfServiceCeiling(t *testing.T) {
 		if want == "" || strings.Contains(","+want+",", ",admin,") {
 			t.Fatalf("%s: desktop scopes %q must be an explicit list without admin", role, want)
 		}
-		got, err := h.cappedScopes(context.Background(), u, want)
+		selfService := want
+		if role == model.RoleViewer {
+			if want != "read,write" {
+				t.Fatalf("viewer: desktop scopes %q, want read,write — the account dialog asks write", want)
+			}
+			selfService = "read"
+		}
+		got, err := h.cappedScopes(context.Background(), u, selfService)
 		if err != nil {
-			t.Fatalf("%s: desktop scopes %q are refused by the self-service ceiling: %v", role, want, err)
+			t.Fatalf("%s: desktop scopes %q are refused by the self-service ceiling: %v", role, selfService, err)
 		}
-		if got != want {
-			t.Fatalf("%s: desktop scopes %q, self-service ceiling allows %q", role, want, got)
+		if got != selfService {
+			t.Fatalf("%s: desktop scopes %q, self-service ceiling allows %q", role, selfService, got)
 		}
+	}
+	// The exception stays an exception: a viewer still cannot mint `write` for
+	// itself at /api/tokens.
+	if _, err := h.cappedScopes(context.Background(), &model.User{Role: model.RoleViewer}, "read,write"); err == nil {
+		t.Fatal("a viewer minted a write token at /api/tokens")
 	}
 }

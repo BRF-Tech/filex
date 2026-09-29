@@ -581,7 +581,15 @@ filex migrate down       # roll back exactly one migration
       (`read` / `write` / `delete` / `mcp` / `admin`) and use **`root:`
       confinement** to lock a token to one sub‑folder. Confinement is enforced in
       the backend, so a confined token can't escape its root even if it knows
-      other paths.
+      other paths. The verbs hold on every surface the token reaches — the
+      explorer's routes, the MCP tools, WebDAV, SFTP, FTPS, and the S3 keys and
+      NFS exports minted from it ([RBAC.md](RBAC.md#api-tokens-verbs-on-every-surface)).
+      Installing a plugin and making an administrator are never a token's: an
+      administrator signed in to the panel does them.
+- [ ] **Least‑privilege roles.** Give people the built-in User or Viewer role,
+      or a custom role that holds only what their work needs — each file
+      action, each kind of sharing, each protocol and each admin area is its
+      own permission ([PERMISSIONS.md](PERMISSIONS.md)).
 - [ ] **TOTP 2FA for admins.** Enable it per admin in **user settings →
       Security** (the dialog behind the avatar menu).
 - [ ] **Keep the proxy the sole ingress.** If you use proxy‑header auth

@@ -51,8 +51,11 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   actions to the file menu, screens filex draws for them, and public links for
   outside participants: the two that ship (**e-Signature**,
   `BRF-Tech/filex-sign`, and **Convert**, `BRF-Tech/filex-convert`), installing
-  one from GitHub through the permission review, what the administrator
-  controls, [updates](APP-PLUGINS.md#updates) that each wait for an
+  one from GitHub through the permission review,
+  [install requests](APP-PLUGINS.md#install-requests) (an API key asks, an
+  administrator decides), what the administrator controls,
+  [app permissions](APP-PLUGINS.md#app-permissions) handed out per role and per
+  person, [updates](APP-PLUGINS.md#updates) that each wait for an
   administrator and [going back](APP-PLUGINS.md#going-back) to the previous
   version, [an app's own interface](APP-PLUGINS.md#an-apps-own-interface) (a
   viewer for a file type, in a sandboxed frame), apps that wake up on their own,
@@ -60,7 +63,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   (inside and outside signers, PINs, deadlines, the audit trail, verifying, your
   own certificate authority), [converting files](APP-PLUGINS.md#converting-files),
   what guards an app's public links, limits, troubleshooting
-- [Writing an app plugin](PLUGIN-KIT.md) — the manifest, the exports,
+- [Writing an app plugin](PLUGIN-KIT.md) — the manifest (and the
+  [user permissions](PLUGIN-KIT.md#user-permissions-what-an-administrator-hands-out)
+  an app declares for the administrator to hand out), the exports,
   every host function and its permission, the screen catalogue, **an app's own
   interface** (HTML/JS in a sandboxed frame, the `@brftech/filex-app-ui` SDK,
   with or without a module), the **hourly
@@ -93,13 +98,20 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [`filex mount`](PROTOCOLS.md#filex-mount) — a remote server over ordinary
   HTTPS: a folder on Linux, a drive letter on Windows; ⚠ not a sync, and not
   available on macOS
-- [CLI client](CLI.md) — `filex client` and `filex sync` against a remote server
+- [CLI client](CLI.md) — `filex client` and `filex sync` against a remote server,
+  and [plugin install requests](CLI.md#plugin-requests) from the command line
 
 ## Authentication & access
 
 - [SSO (OIDC)](SSO.md) — sign in with Keycloak / Auth0 / Authentik / Okta / …
 - [LDAP & reverse‑proxy auth](LDAP.md) — Active Directory / LDAP, header auth
-- [RBAC & permissions](RBAC.md) — account roles, per‑storage RBAC, per‑item grants
+- [RBAC, folder access & API tokens](RBAC.md) — account roles, per‑storage RBAC, per‑item grants
+  (**Admin → Folder access**), what an API token's verbs allow on every surface,
+  and the acts that need an administrator signed in
+- [Roles & per-user permissions](PERMISSIONS.md) — what an account may do: 28
+  permissions, built-in and custom roles, per-person exceptions, delegated
+  admins, the permissions installed apps declare, public links that follow
+  their creator's right to share, per-protocol enforcement
 
 ## Integrations
 
@@ -119,7 +131,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   every driver, survives a dropped connection
 - [Sharing & file requests](SHARING.md) — public download links + upload/file‑drop;
   **My shares** and reading a link's PIN back, the one branded public screen and
-  its PIN lock-out, the maximum link life, and how the folder-ZIP cache is bounded
+  its PIN lock-out, the maximum link life, how the folder-ZIP cache is bounded,
+  and [a link that follows its creator](SHARING.md#a-link-follows-its-creator)
 - [Thumbnails](thumbnails.md) — image / video / pdf / office previews
 - [Search](SEARCH.md) — embedded full‑text index: forgiving filename
   matching (separators, several words in any order, folders, typos), VS
@@ -175,7 +188,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   two options every wrapper shares: the **navigation panel** (`sideNav`) and how
   much of the explorer to show (`uiProfile`: `standard` · `simple` — two values,
   and the third one, `drive`, was **removed** after v0.40.0; pass `simple`)
-- [AI & MCP](MCP.md) — API tokens (including the `user` / `app` token kinds), the permissions a token names — at least one, and never a blank list meaning all of them — the ceiling that stops a narrow token issuing a wider credential (`403 token_ceiling`), the MCP endpoint for agents, and credential-free upload tickets for large local files
+- [AI & MCP](MCP.md) — API tokens (including the `user` / `app` token kinds), the permissions a token names — at least one, and never a blank list meaning all of them, and holding on every surface the token reaches — the ceiling that stops a narrow token issuing a wider credential (`403 token_ceiling`), the MCP endpoint for agents, the [plugin tools](MCP.md#plugin-tools) that read plugins and leave install requests, and credential-free upload tickets for large local files
 
 ## Repo only — not published to docs.filex.sh
 

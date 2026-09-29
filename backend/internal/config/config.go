@@ -134,6 +134,11 @@ type Config struct {
 	// what an air-gapped install wants; an administrator can still press
 	// "Check now". A demo never runs it.
 	AppPluginUpdateCheck bool `yaml:"app_plugin_update_check"`
+	// PluginRequestTTLDays (FILEX_PLUGIN_REQUEST_TTL_DAYS, default 14) is how
+	// long a plugin install request an API key left waits for an
+	// administrator before it expires (internal/pluginreq, docs/APP-PLUGINS.md
+	// → Install requests).
+	PluginRequestTTLDays int `yaml:"plugin_request_ttl_days"`
 	// SecretKey (FILEX_SECRET_KEY) encrypts the secrets filex has to be able to
 	// read back rather than merely compare — today the S3 access keys, because
 	// SigV4 derives an HMAC chain from the secret and so cannot work off a
@@ -811,6 +816,7 @@ func Default() Config {
 			Interval: 24 * time.Hour,
 		},
 		AppPluginUpdateCheck: true,
+		PluginRequestTTLDays: 14,
 		Upload: UploadConfig{
 			ChunkSize:     8 << 20,
 			StagingTTL:    24 * time.Hour,
@@ -1105,6 +1111,7 @@ func applyEnv(c *Config) {
 		{"FILEX_APP_PLUGIN_MAX_OUTPUT_MB", &c.AppPluginMaxOutputMB},
 		{"FILEX_APP_PLUGIN_MAX_WASM_MB", &c.AppPluginMaxWasmMB},
 		{"FILEX_APP_PLUGIN_MAX_UI_MB", &c.AppPluginMaxUIMB},
+		{"FILEX_PLUGIN_REQUEST_TTL_DAYS", &c.PluginRequestTTLDays},
 	} {
 		if v := os.Getenv(kv.env); v != "" {
 			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {

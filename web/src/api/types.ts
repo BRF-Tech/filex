@@ -30,7 +30,19 @@ export interface User {
 
 export interface MeResponse {
   user: User;
-  permissions: string[];
+  /** The account's effective permissions, account-wide (backend internal/perm). */
+  permissions?: string[];
+  /** What the role allows only in some folders; the file browser offers
+   *  these and the server decides per file. */
+  permissions_in_folders?: string[];
+  /** Every permission whose answer differs from folder to folder; the file
+   *  browser asks the server about the selected files before offering these. */
+  permissions_by_folder?: string[];
+  /** Limits the permission rules set for this account. */
+  permission_settings?: import('./roles').PermRuleSettings;
+  /** A rule requires 2FA and the account has not enrolled: every API call
+   *  but enrolment answers 403 "2fa_required" until it does. */
+  two_factor_required?: boolean;
 }
 
 export interface LoginRequest {

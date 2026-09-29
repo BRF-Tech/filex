@@ -418,6 +418,14 @@ reading two names assumes two things.
 | Who a file belongs to (column and filter) | Owner | Sahibi | People, Kişiler |
 | An address that opens a share | link | bağlantı | link (in Turkish) |
 | Narrowing a list | filter | filtre | süzgeç |
+| The named set of permissions every person has exactly one of | role | rol | rule, kural, group |
+| The three roles filex ships (Administrator is locked; User and Viewer are edited on Roles) | built-in role: Administrator, User, Viewer | yerleşik rol: Yönetici, Kullanıcı, İzleyici | default role; Görüntüleyici (a file *viewer* is "görüntüleyici", in lower case) |
+| A role an administrator made. Its name is theirs and is never translated | custom role | özel rol | rule, kural |
+| One thing a role allows (Download, Rename, Share links…) | permission | izin | yetki, hak |
+| An Allow or Deny an administrator sets for one person alone, beating their role | exception | istisna | override, geçersiz kılma, "set for this account" |
+| What a permission check answered, beside each permission on a person's page | Allowed / Denied | İzin var / İzin yok | Allow / Deny — those are the buttons that set an exception |
+| A ready-made set of ticks (Standard user, Read-only, Upload-only, Guest) | preset | hazır ayar | template, şablon |
+| One file or folder opened to a person (Share → People), and the admin page listing them all | grant; the page is **Folder access** | yetki; the page is **Klasör erişimi** | permission, izin — since 0.49 those are a role's words |
 
 **Spelling is American English.** color, license, favorite, center, gray,
 behavior, organize, analyze, catalog, defense, customize — never colour,
@@ -437,6 +445,12 @@ says "Tekrar deneyin", "hesabınızla", "görebilirsiniz" — never "Tekrar dene
 "hesabınla", "görebilirsin", never "sen". A command — a button, a menu item, a
 placeholder — is the bare verb, as every Turkish interface writes it: "Kaydet",
 "Yeni sekmede aç", "Ara…". That is not the "sen" form, and it is not changed.
+
+**Turkish is written with its own letters** — ı İ ş Ş ğ Ğ ü Ü ö Ö ç Ç — in
+every string, examples and sample folder names included: "Arşiv", never
+"Arsiv". (0.49's role editor shipped "ör. Arsiv veya
+Musteriler/*/Sozlesmeler".) The gate knows the words interface text keeps
+reaching for; the rest is review.
 
 The machine-checkable part of this table is `web/tests/i18n/vocabulary.test.ts`:
 it reads every catalogue — explorer, admin, and the server's `server.*` text —
@@ -882,6 +896,52 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    > what `release.yml` watches. Development happens on GitLab; the public tree
    > is produced by `scripts/export-public.sh`, and the signed tag is made
    > there, on the commit that is actually published.
+
+   > ⚠⚠ **That checkout refuses a push that could publish the private history.**
+   > On 2026-08-27 a `git push … main --tags` from the *private* repository
+   > sent 47 of its release tags to GitHub: `main` was refused (unrelated
+   > histories), the tags were not, and each one made a private commit — with
+   > its whole history — reachable by SHA. Deleting a tag does not take that
+   > back; GitHub and every fork keep the objects. So the public checkout has a
+   > pre-push gate, `scripts/hooks/export-pre-push.sh`, installed with
+   > `bash scripts/hooks/install-export-hook.sh /path/to/public/checkout` and
+   > tested with `bash scripts/hooks/test-export-pre-push.sh` (all three live
+   > in the maintainers' checkout only; the installer copies the gate, so
+   > re-run it after changing the gate). It refuses:
+   >
+   > * a tag on a commit that is not on `main`, moving a published tag, and
+   >   deleting one — a published tag is permanent; fix forward with a new
+   >   version;
+   > * a `main` that does not fast-forward, and deleting `main`;
+   > * any ref whose new commits bring in a root commit — a history that does
+   >   not grow out of the public one, which is exactly what the private
+   >   repository is;
+   > * new commits in which gitleaks finds a secret or a private name: its
+   >   default rules; GitLab tokens matched to their full length (the stock
+   >   rule stops at 26 characters, which is not even half of the routable
+   >   `.01.` form); credentials written as `${VAR:-value}` shell defaults; the
+   >   private forge path; host names and addresses under the project's own
+   >   domain other than the two contact addresses; the server addresses and
+   >   the withheld files that `scripts/export-public.sh` itself lists; and
+   >   handover notes anywhere in the tree.
+   >
+   > Pull-request branches (anything under `refs/heads/` except `main`) are
+   > rebased, so they may be force-pushed and deleted; they still pass the
+   > root-commit check and the scan. A machine without gitleaks is refused,
+   > not skipped.
+   >
+   > ⚠ On Windows, a hook that is **killed by a signal** reads to git as
+   > success: MSYS reports the signal in the high byte of the exit code and git
+   > keeps only the low one. So `git push … | head -30` once published a commit
+   > the gate had just refused — `head` closed the pipe, the gate died of
+   > SIGPIPE, and git sent the push (2026-09-28). The gate now ignores SIGPIPE,
+   > runs itself as a child, and passes a push only when that child reached its
+   > verdict. Still: run a push into a file or straight to the terminal, not into
+   > `head`, and judge it by what the remote holds afterwards.
+   >
+   > **Never push with `--no-verify`.** There is no case where it is the right
+   > answer: a refusal means something about to become public should not —
+   > stop and tell the maintainer first.
 
 CI does the rest (GitHub Actions `release.yml`: the `test` gate above, then
 five jobs):

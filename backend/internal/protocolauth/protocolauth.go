@@ -60,6 +60,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/httpx"
 	"github.com/brf-tech/filex/backend/internal/identity"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/secretbox"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 )
@@ -331,6 +332,12 @@ func (r *Resolver) Password(ctx context.Context, identifier, password string) (*
 		// second factor depend on which protocol it was presented to.
 		return nil, ErrUnauthorized
 	}
+	// A rule requires this account to have 2FA and it has not enrolled: its
+	// password is refused here as an enrolled account's is, or the protocols
+	// would be the way round the rule (auth.TwoFactorPending).
+	if u != nil && auth.TwoFactorPending(ctx, r.Store, u) {
+		return nil, ErrUnauthorized
+	}
 	// Local password first: a bcrypt compare against a row we already hold,
 	// with no network in it. Keeping this ahead of the directory is what makes
 	// admin@local and every break-glass password answerable while the
@@ -571,4 +578,40 @@ func (r *Resolver) Forget() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.creds = nil
+}
+
+// Allows reports whether the account holds per-user permission q (package
+// perm). A resolver without a store (tests) answers yes; a resolution error
+// answers no.
+func (p *Principal) Allows(ctx context.Context, q perm.Perm) bool {
+	if p == nil || p.acl == nil {
+		return false
+	}
+	res, err := p.acl.Perms(ctx, p.User)
+	if err != nil {
+		return false
+	}
+	return res == nil || res.Can(q)
+}
+
+// Admit is the last step of every protocol login: the account must hold the
+// protocol's access permission (access.webdav, access.sftp, …). Refused, it
+// answers ErrUnauthorized like any other failed login — the wire must not
+// learn that the password was right — and says why in the log.
+//
+// ⚠ Checked when a connection authenticates, so taking the permission away
+// ends access at the next login (the "on reconnect" rule), not mid-session.
+// File actions inside an open session are different: they are judged against
+// the Principal's ACL set, which reloads every aclTTL — the same answer the
+// grants have always had.
+func (r *Resolver) Admit(ctx context.Context, p *Principal, access perm.Perm, protocol string) (*Principal, error) {
+	if p == nil {
+		return nil, ErrUnauthorized
+	}
+	if !p.Allows(ctx, access) {
+		slog.Info("protocol login refused: account lacks the protocol permission",
+			slog.String("protocol", protocol), slog.Int64("user_id", p.User.ID), slog.String("permission", string(access)))
+		return nil, ErrUnauthorized
+	}
+	return p, nil
 }

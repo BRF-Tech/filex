@@ -23,6 +23,7 @@ import (
 	"net/http"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -57,6 +58,11 @@ func (a *aiOps) Tags(ctx context.Context, p string, set *[]tagItem) (*aiTagsResu
 	ops := tagOps{store: a.store, acl: a.acl}
 	level := ops.level(ctx, n)
 	var items []tagItem
+	// Setting tags is `write` on the AI surface, as POST /api/ai/tags says —
+	// asked here so the MCP tool, which calls this directly, asks it too.
+	if set != nil && !auth.TokenAllows(ctx, auth.VerbWrite) {
+		return nil, denied(errAIForbidden, "token missing scope: %s", auth.VerbWrite)
+	}
 	if set != nil {
 		items, err = ops.set(ctx, c, n, level, tagsSetReq{NodeID: n.ID, Items: set})
 		if errors.Is(err, errTeamNeedsEdit) {

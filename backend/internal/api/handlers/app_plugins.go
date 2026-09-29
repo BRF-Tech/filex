@@ -33,9 +33,11 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/thumb"
@@ -67,6 +69,7 @@ func NewAppPlugins(reg *wasmplugin.Registry, store db.Store, aclr *acl.Resolver,
 	if reg != nil {
 		reg.SetOutputSink(h)
 		reg.SetHomeResolver(h.homeOf)
+		reg.SetHeldPermissions(h.heldAppPerms)
 		SetLockReasons(reg.LockReason)
 		SetAppLabels(reg.AppLabel)
 	}
@@ -103,6 +106,33 @@ func (h *AppPlugins) Actions(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	// What needs one of an app's user permissions the caller does not hold
+	// is left out (perm/app.go): the menu never offers what the run refuses.
+	if h.ACL != nil {
+		if res, perr := h.ACL.Perms(r.Context(), auth.UserFrom(r.Context())); perr == nil && res != nil {
+			holds := func(key, def string) bool {
+				if key == "" {
+					return true
+				}
+				ok, _ := res.AppAllowed(key, perm.AppDefault(def))
+				return ok
+			}
+			actions := ans.Actions[:0]
+			for _, a := range ans.Actions {
+				if holds(a.Requires, a.RequiresDefault) {
+					actions = append(actions, a)
+				}
+			}
+			ans.Actions = actions
+			views := ans.Views[:0]
+			for _, v := range ans.Views {
+				if holds(v.Requires, v.RequiresDefault) {
+					views = append(views, v)
+				}
+			}
+			ans.Views = views
+		}
 	}
 	writeJSON(w, http.StatusOK, ans)
 }
@@ -335,6 +365,11 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "this action is started by the app, not from the menu"})
 		return nil, false
 	}
+	// The app's own user permission (manifest `requires`, perm/app.go):
+	// "Request signatures" the administrator has not let this account use.
+	if !h.appUserPermOK(w, r, p, action.Requires) {
+		return nil, false
+	}
 	mode, writes, okMode := jobOutputMode(action, out)
 	if !okMode {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad output mode: " + out.Mode})
@@ -365,6 +400,13 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 		return nil, false
 	}
 	need := pluginACLNeed(action, writesSource)
+	// A token does what its verbs name (auth/token_verbs.go). An action a
+	// viewer may run needs only `read`, like the viewer; one that needs edit
+	// rights — it writes its result, into the file or into a chosen folder —
+	// needs `write`. The run route asks only `read`, so this is the door.
+	if (need > acl.LevelViewer || dest != nil) && !auth.AllowVerb(w, r, auth.VerbWrite) {
+		return nil, false
+	}
 	drv, err := h.StorageResolver(storageID)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "storage unavailable"})
@@ -659,6 +701,13 @@ func (h *AppPlugins) ViewEvent(w http.ResponseWriter, r *http.Request) {
 
 func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *viewRequest) {
 	pluginName, viewID := chi.URLParam(r, "plugin"), chi.URLParam(r, "view")
+	// A screen that `requires` one of the app's user permissions is refused
+	// to an account without it — opened or answered (perm/app.go).
+	if p, ok := h.Registry.ByName(pluginName); ok {
+		if v, ok := p.Manifest.View(viewID); ok && !h.appUserPermOK(w, r, p, v.Requires) {
+			return
+		}
+	}
 	// The person's own address, for `context.actor.ip` — the same reading
 	// (trusted proxies included) a public page gets as `visitor_ip`.
 	r = r.WithContext(wasmplugin.WithActorIP(r.Context(), clientIP(r)))
@@ -891,4 +940,88 @@ func (h *AppPlugins) checkSurfaceOpen(r *http.Request, s *wire.Surface) {
 	if !ownsStorageQuiet(r, storageID) || !aclAllowID(r.Context(), h.ACL, h.Store, storageID, rels[0], acl.LevelViewer) {
 		s.Open = nil
 	}
+}
+
+// appUserPermOK asks one of the app's own user permissions (manifest
+// `user_permissions`, named by an action's or a view's `requires`) for the
+// caller — app.<app>.<id>, decided by perm.Result.AppAllowed: the person's
+// exception, their custom role, the built-in role, then the app's default.
+// On refusal it has written the 403, shaped like every permission refusal
+// (error, permission, source, message).
+//
+// ⚠ Asked on EVERY door that starts the app's work for a person: a menu run,
+// a screen opened, a screen's event, a job a screen queues. A door that
+// forgets it is how "Request signatures" stays usable to a role it was taken
+// from.
+func (h *AppPlugins) appUserPermOK(w http.ResponseWriter, r *http.Request, p *wasmplugin.Installed, id string) bool {
+	if id == "" || h.ACL == nil || p == nil || p.Manifest == nil {
+		return true
+	}
+	up, ok := p.Manifest.UserPermission(id)
+	if !ok {
+		// Validated at install; a row that names an undeclared one refuses.
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied"})
+		return false
+	}
+	res, err := h.ACL.Perms(r.Context(), auth.UserFrom(r.Context()))
+	if err != nil || res == nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return false
+	}
+	key, allowed, src := appPermHeld(res, p, up)
+	if allowed {
+		return true
+	}
+	lang := langOf(r)
+	writeJSON(w, http.StatusForbidden, map[string]any{
+		"error":      "permission_denied",
+		"permission": key,
+		"source":     src,
+		"message": srvtext.Text(lang, "server.perm.app_denied", srvtext.Vars{
+			"permission": up.Label.Get(lang),
+			"app":        p.Manifest.Label.Get(lang),
+		}),
+	})
+	return false
+}
+
+// appPermHeld is THE decision on one of an app's user permissions for the
+// account whose resolved permissions are res: app.<app>.<id>, by
+// perm.Result.AppAllowed with the manifest's default. The door
+// (appUserPermOK) and what the app is told about the person (heldAppPerms,
+// wire.Actor.Permissions) both ask it, so an app is never told "you may" by a
+// list the door disagrees with.
+func appPermHeld(res *perm.Result, p *wasmplugin.Installed, up wire.UserPermission) (key string, allowed bool, src perm.Source) {
+	key = perm.AppKey(p.Manifest.Name, up.ID)
+	allowed, src = res.AppAllowed(key, perm.AppDefault(up.Default))
+	return key, allowed, src
+}
+
+// heldAppPerms answers wire.Actor.Permissions (Registry.SetHeldPermissions):
+// the ids of p's user_permissions u holds, each decided by appPermHeld — the
+// door's own question. It mirrors appUserPermOK where that one decides
+// without asking: with no ACL wired every door lets them through, so all are
+// held; when u's permissions cannot be read every door refuses, so none is.
+func (h *AppPlugins) heldAppPerms(ctx context.Context, u *model.User, p *wasmplugin.Installed) []string {
+	if u == nil || p == nil || p.Manifest == nil || len(p.Manifest.UserPermissions) == 0 {
+		return nil
+	}
+	var res *perm.Result
+	if h.ACL != nil {
+		got, err := h.ACL.Perms(ctx, u)
+		if err != nil || got == nil {
+			return nil
+		}
+		res = got
+	}
+	out := make([]string, 0, len(p.Manifest.UserPermissions))
+	for _, up := range p.Manifest.UserPermissions {
+		if res != nil {
+			if _, ok, _ := appPermHeld(res, p, up); !ok {
+				continue
+			}
+		}
+		out = append(out, up.ID)
+	}
+	return out
 }

@@ -29,6 +29,10 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 var reservedAppNames = map[string]bool{"cache": true, "spool": true, "public": true, "assets": true}
 var idRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,63}$`)
 
+// userPermIDRe is a user permission's id: the last part of app.<app>.<id>
+// (perm.IsAppKey), so no dots.
+var userPermIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
 // Limits the host imposes on what a manifest may ask for.
 const (
 	DefaultMemoryPages = 1024 // 64 MiB
@@ -172,6 +176,27 @@ func (m *Manifest) Validate() error {
 	if err := m.checkLanguages(); err != nil {
 		return err
 	}
+	// user_permissions: what the administrator can grant per role and per
+	// person (perm/app.go). Ids are this app's own; `requires` names them.
+	userPermIDs := map[string]bool{}
+	for i := range m.UserPermissions {
+		up := &m.UserPermissions[i]
+		if !userPermIDRe.MatchString(up.ID) {
+			return fmt.Errorf("manifest: user_permissions[%d]: id %q must match %s", i, up.ID, userPermIDRe)
+		}
+		if userPermIDs[up.ID] {
+			return fmt.Errorf("manifest: user_permissions: duplicate id %q", up.ID)
+		}
+		userPermIDs[up.ID] = true
+		if up.Default == "" {
+			up.Default = "user"
+		}
+		switch up.Default {
+		case "viewer", "user", "admin":
+		default:
+			return fmt.Errorf("manifest: user_permissions[%d] (%s): default %q must be viewer, user or admin", i, up.ID, up.Default)
+		}
+	}
 	viewIDs := map[string]bool{}
 	for i := range m.Views {
 		v := &m.Views[i]
@@ -206,6 +231,9 @@ func (m *Manifest) Validate() error {
 				return fmt.Errorf("manifest: views[%d] (%s): %w", i, v.ID, err)
 			}
 		}
+		if v.Requires != "" && !userPermIDs[v.Requires] {
+			return fmt.Errorf("manifest: views[%d] (%s): requires %q, which is not declared in user_permissions", i, v.ID, v.Requires)
+		}
 	}
 	actionIDs := map[string]bool{}
 	for i := range m.Actions {
@@ -225,6 +253,9 @@ func (m *Manifest) Validate() error {
 		}
 		if a.View != "" && !viewIDs[a.View] {
 			return fmt.Errorf("manifest: actions[%d]: view %q is not declared in views", i, a.View)
+		}
+		if a.Requires != "" && !userPermIDs[a.Requires] {
+			return fmt.Errorf("manifest: actions[%d] (%s): requires %q, which is not declared in user_permissions", i, a.ID, a.Requires)
 		}
 		switch a.MinRole {
 		case "", "viewer", "editor", "owner":
@@ -639,6 +670,17 @@ func (m *Manifest) checkLanguages() error {
 			return err
 		}
 	}
+	for i := range m.UserPermissions {
+		up := m.UserPermissions[i]
+		if err := missing(fmt.Sprintf("user_permissions[%d] (%s) label", i, up.ID), up.Label); err != nil {
+			return err
+		}
+		if len(up.Description) > 0 {
+			if err := missing(fmt.Sprintf("user_permissions[%d] (%s) description", i, up.ID), up.Description); err != nil {
+				return err
+			}
+		}
+	}
 	// A setting written as ONE string is the author's choice (a plain string
 	// is still accepted, so every manifest from before this keeps
 	// installing); a setting written as a {lang: …} map promises every
@@ -700,4 +742,18 @@ func checkPurpose(p *wire.PagePurpose, langs []string) error {
 		return fmt.Errorf("purpose.section %q must match %s", p.Section, idRe)
 	}
 	return nil
+}
+
+// UserPermission returns the declared user permission id (manifest
+// `user_permissions`), and whether there is one.
+func (m *Manifest) UserPermission(id string) (wire.UserPermission, bool) {
+	if m == nil {
+		return wire.UserPermission{}, false
+	}
+	for _, up := range m.UserPermissions {
+		if up.ID == id {
+			return up, true
+		}
+	}
+	return wire.UserPermission{}, false
 }

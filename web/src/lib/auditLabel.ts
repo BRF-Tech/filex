@@ -116,6 +116,7 @@ const WIRE_RESOURCE: Record<string, string> = {
   replication_targets: 'replication-targets',
   auth_providers: 'auth-providers',
   app_plugins: 'app-plugins',
+  plugin_requests: 'plugin-requests',
   webhook_config: 'webhook-config',
   smtp_test: 'smtp-test',
 };

@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/writegate"
@@ -160,6 +161,22 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 	mp, ok := drv.(storage.MultipartUploader)
 	if !ok {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "storage does not support multipart upload"})
+		return
+	}
+	// The ≥editor check above is the path; replacing a file that is there is
+	// files.modify, adding one files.create.
+	if err := checkUploadSize(r.Context(), u.Store, req.Size); err != nil {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": err.Error(), "code": "FILE_TOO_LARGE"})
+		return
+	}
+	upNeed := perm.FilesCreate
+	if _, serr := drv.Stat(r.Context(), target); serr == nil {
+		upNeed = perm.FilesModify
+	}
+	if v := aclCanID(r.Context(), u.ACL, u.Store, storageID, target, upNeed); !v.ok {
+		if !v.WritePerm(w, r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		}
 		return
 	}
 

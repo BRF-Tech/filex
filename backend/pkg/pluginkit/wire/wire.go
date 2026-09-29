@@ -341,6 +341,26 @@ type Action struct {
 	// a surface (`job`) or a public page — the second half of a flow, not a
 	// thing a person picks.
 	Hidden bool `json:"hidden,omitempty"`
+	// Requires names one of the manifest's `user_permissions` (its id): only
+	// accounts that hold that permission see and run this action. Empty: the
+	// action needs nothing beyond `min_role` and running apps at all.
+	Requires string `json:"requires,omitempty"`
+}
+
+// UserPermission is a permission the app lets the administrator hand out per
+// role and per person ("Request signatures"): filex lists it in the role
+// editor under the app's name, as app.<app>.<id>, and an action or a view
+// that `requires` it is refused to an account that does not hold it. Signing
+// what somebody sent you needs no such permission; asking people to sign does
+// — an app declares only what an organisation would want to limit.
+type UserPermission struct {
+	ID          string `json:"id"`
+	Label       Text   `json:"label"`
+	Description Text   `json:"description,omitempty"`
+	// Default is who holds it until the administrator decides: `viewer`
+	// (every account), `user` (accounts that can change files — the usual
+	// choice) or `admin` (administrators only, until granted).
+	Default string `json:"default"`
 }
 
 // View is a screen the plugin can be asked to draw — with filex's own
@@ -364,6 +384,9 @@ type View struct {
 	// frame (docs/APP-PLUGINS-API.md → An app's own interface). Empty: the
 	// view is a Surface the module draws.
 	UI string `json:"ui,omitempty"`
+	// Requires: as Action.Requires — the view (and every job it starts) is
+	// refused to an account without that user permission.
+	Requires string `json:"requires,omitempty"`
 }
 
 // UISpec is the `ui` block: the app's own interface.
@@ -500,10 +523,15 @@ type Manifest struct {
 	PermissionReasons map[string]Text              `json:"permission_reasons,omitempty"`
 	Settings          []Field                      `json:"settings,omitempty"`
 	Actions           []Action                     `json:"actions,omitempty"`
-	Views             []View                       `json:"views,omitempty"`
-	PublicPages       []PublicPage                 `json:"public_pages,omitempty"`
-	Limits            Limits                       `json:"limits,omitempty"`
-	Wasm              *WasmSource                  `json:"wasm,omitempty"`
+	// UserPermissions are what the app lets the administrator grant per role
+	// and per person (app.<app>.<id>); actions and views name one in
+	// `requires`. filex before 0.49.0 does not know this field and refuses
+	// the manifest — declare it with `filex: ">=0.49.0"`.
+	UserPermissions []UserPermission `json:"user_permissions,omitempty"`
+	Views           []View           `json:"views,omitempty"`
+	PublicPages     []PublicPage     `json:"public_pages,omitempty"`
+	Limits          Limits           `json:"limits,omitempty"`
+	Wasm            *WasmSource      `json:"wasm,omitempty"`
 	// UI is the app's own interface (HTML/JS/CSS in a zip), served by filex
 	// in a sandboxed frame. An app may have a module, an interface, or both.
 	UI *UISpec `json:"ui,omitempty"`
@@ -562,6 +590,36 @@ type Actor struct {
 	// the next. Personal data: an app that records it must show it to the
 	// person before it keeps it.
 	IP string `json:"ip,omitempty"`
+	// Permissions are the ids of THIS app's `user_permissions` the person
+	// holds (filex 0.49.0 and later), decided exactly as filex decides them
+	// at the door — an administrator holds every one. Set on a job
+	// (`action_run`), a view event and an interface's call; absent on a
+	// public page's event (nobody signed in) and on work nobody started.
+	// Use Can.
+	//
+	// ⚠ Why an app needs it: filex refuses an action or a screen that
+	// `requires` a permission before your code runs, but a hint on ANOTHER
+	// screen ("…or Request signatures… to ask others") is drawn by you. The
+	// signing app drew that hint for everybody, including a person the menu
+	// no longer offered the action to. Say only what the reader can do.
+	// It is a courtesy, not a gate — the door still decides.
+	Permissions []string `json:"permissions,omitempty"`
+}
+
+// Can reports whether the person holds the app's own user permission id
+// (one of the manifest's `user_permissions`, `request` — not
+// `app.sign.request`). False on a nil Actor, and on a filex older than 0.49.0,
+// which does not say.
+func (a *Actor) Can(id string) bool {
+	if a == nil {
+		return false
+	}
+	for _, p := range a.Permissions {
+		if p == id {
+			return true
+		}
+	}
+	return false
 }
 
 // FileRef is one file the call may read through file_* host functions. Ref

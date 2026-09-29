@@ -559,3 +559,125 @@ func TestFetchUpdate_IsWhatTheCheckWouldInstall(t *testing.T) {
 	_, err = reg.FetchUpdate(ctx, up.ID)
 	assert.Equal(t, ErrCodeManifestInvalid, installError(t, err).Code, "an uploaded app has no source")
 }
+
+// ⚠⚠ Lesson #751. A newer version whose manifest carries what this filex does
+// not know — a field a newer filex added (`user_permissions` to a filex before
+// 0.49.0), a newer manifest_version — is a version that needs a newer filex,
+// not a source the check could not read: the list says *needs filex …*, never
+// *Could not check*, and nobody's bell rings. Installing or upgrading to that
+// manifest is still refused: an unknown field may be a permission this filex
+// cannot enforce.
+func TestUpdates_WhatThisFilexDoesNotKnowNeedsANewerFilex(t *testing.T) {
+	withHost(t, "0.49.0")
+	ctx := context.Background()
+	web := &fakeWeb{ok: map[string]string{packRaw("main"): string(packWithRange(t, "lang-es", "0.1.0", "", ""))}}
+	reg, _ := newPackRegistry(t, withWeb(web))
+	nf := &fakeNotify{}
+	reg.SetNotify(nf)
+	st := installPackFromGitHub(t, reg, "main")
+
+	publish := func(name, version, rng string, mutate func(m map[string]any)) []byte {
+		var m map[string]any
+		require.NoError(t, json.Unmarshal(packWithRange(t, name, version, rng, ""), &m))
+		if mutate != nil {
+			mutate(m)
+		}
+		b, err := json.Marshal(m)
+		require.NoError(t, err)
+		return b
+	}
+	future := func(m map[string]any) { m["a_field_from_the_future"] = map[string]any{"id": "x"} }
+	newerWire := func(m map[string]any) { m["manifest_version"] = 99 }
+
+	for _, c := range []struct {
+		name, rng, requires string
+		mutate              func(m map[string]any)
+	}{
+		{"an unknown field, no range", "", ">0.49.0", future},
+		{"an unknown field under a range that lets this filex in", ">=0.47.0", ">0.49.0", future},
+		{"an unknown field under a range that leaves this filex out", ">=0.50.0", ">=0.50.0", future},
+		{"a newer manifest_version", "", ">0.49.0", newerWire},
+	} {
+		web.ok[packRaw("main")] = string(publish("lang-es", "0.2.0", c.rng, c.mutate))
+		rep, err := reg.CheckUpdates(ctx)
+		require.NoError(t, err)
+		assert.Empty(t, rep.Failed, "%s: not check_failed", c.name)
+		p, _ := reg.ByName("lang-es")
+		got := reg.StatusOf(p)
+		require.NotNil(t, got.Update, c.name)
+		require.Equal(t, UpdateIncompatible, got.Update.Status, "%s: %+v", c.name, got.Update.Refusal)
+		assert.Equal(t, "0.2.0", got.Update.Version, c.name)
+		assert.Equal(t, c.requires, got.Update.Requires, c.name)
+		assert.Nil(t, got.Update.Refusal, c.name)
+		assert.Equal(t, "0.1.0", got.Version, "%s: nothing moved", c.name)
+
+		_, err = reg.FetchUpdate(ctx, st.ID)
+		ie := installError(t, err)
+		assert.Equal(t, ErrCodeIncompatible, ie.Code, c.name)
+		assert.Equal(t, c.requires, ie.Requires, c.name)
+		assert.Equal(t, "0.49.0", ie.Filex, c.name)
+	}
+	assert.Empty(t, nf.events, "the server is behind, not the app: no bell")
+
+	// Install and upgrade read strictly: the same manifest is refused.
+	_, _, err := reg.Install(ctx, &InstallInput{Manifest: publish("lang-de", "0.2.0", ">=0.47.0", future), Source: "upload", Granted: []string{}})
+	ie := installError(t, err)
+	assert.Equal(t, ErrCodeManifestInvalid, ie.Code)
+	assert.Contains(t, ie.Message, `unknown field "a_field_from_the_future"`)
+	_, _, err = reg.Upgrade(ctx, st.ID, &InstallInput{Manifest: publish("lang-es", "0.2.0", ">=0.47.0", future), Source: "upload", Granted: []string{}})
+	assert.Equal(t, ErrCodeManifestInvalid, installError(t, err).Code)
+
+	// A newer version that is broken for any other reason is still said:
+	// the source is at fault, not the server.
+	web.ok[packRaw("main")] = string(publish("lang-es", "0.2.0", "", func(m map[string]any) { m["label"] = map[string]any{"es": "sin inglés"} }))
+	rep, err := reg.CheckUpdates(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"lang-es"}, rep.Failed)
+	p, _ := reg.ByName("lang-es")
+	got := reg.StatusOf(p)
+	assert.Equal(t, UpdateCheckFailed, got.Update.Status)
+	require.NotNil(t, got.Update.Refusal)
+	assert.Equal(t, ErrCodeManifestInvalid, got.Update.Refusal.Code)
+}
+
+// A release that needs a newer filex for what it carries is stepped over to
+// the newest one this filex can read — the way a range is stepped over.
+func TestUpdates_AReleaseWithAFieldFromTheFutureIsSteppedOver(t *testing.T) {
+	withHost(t, "0.48.0")
+	rel, _ := json.Marshal([]map[string]any{
+		{"tag_name": "v0.3.0", "draft": false, "prerelease": false, "body": "uses user_permissions"},
+		{"tag_name": "v0.2.1", "draft": false, "prerelease": false, "body": "fixes"},
+		{"tag_name": "v0.1.0", "draft": false, "prerelease": false},
+	})
+	var future map[string]any
+	require.NoError(t, json.Unmarshal(packWithRange(t, "lang-es", "0.3.0", ">=0.47.0", ""), &future))
+	future["user_permissions_from_the_future"] = []any{map[string]any{"id": "request"}}
+	fb, _ := json.Marshal(future)
+	web := &fakeWeb{ok: map[string]string{
+		packRaw("v0.1.0"):     string(packWithRange(t, "lang-es", "0.1.0", "", "")),
+		packRaw("v0.2.1"):     string(packWithRange(t, "lang-es", "0.2.1", ">=0.47.0", "")),
+		packRaw("v0.3.0"):     string(fb),
+		releasesURL(packRepo): string(rel),
+	}}
+	reg, _ := newPackRegistry(t, withWeb(web))
+	installPackFromGitHub(t, reg, "v0.1.0")
+
+	rep, err := reg.CheckUpdates(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, rep.Failed)
+	assert.Equal(t, []string{"lang-es"}, rep.Available)
+	p, _ := reg.ByName("lang-es")
+	assert.Equal(t, "0.2.1", reg.StatusOf(p).Update.Version)
+
+	// Only the one from the future left: needs a newer filex, not "could not check".
+	delete(web.ok, packRaw("v0.2.1"))
+	rel, _ = json.Marshal([]map[string]any{{"tag_name": "v0.3.0", "draft": false, "prerelease": false}})
+	web.ok[releasesURL(packRepo)] = string(rel)
+	rep, err = reg.CheckUpdates(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, rep.Failed)
+	got := reg.StatusOf(p)
+	assert.Equal(t, UpdateIncompatible, got.Update.Status)
+	assert.Equal(t, "0.3.0", got.Update.Version)
+	assert.Equal(t, ">0.48.0", got.Update.Requires)
+}

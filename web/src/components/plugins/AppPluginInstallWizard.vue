@@ -62,7 +62,7 @@ import {
 import { extractError } from '@/api/client';
 import { refusalSentence } from '@/lib/appPluginRefusal';
 import { formatBytes } from '@/lib/format';
-import { pluginLabelOf, type PluginText } from '@brftech/filex-core';
+import { pluginLabelOf } from '@brftech/filex-core';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -70,6 +70,7 @@ import Checkbox from '@/components/ui/Checkbox.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Badge from '@/components/ui/Badge.vue';
 import AppPluginLanguages from './AppPluginLanguages.vue';
+import AppPluginPermissionList from './AppPluginPermissionList.vue';
 
 type Source = 'github' | 'file' | 'url';
 type Step = 'source' | 'review' | 'done';
@@ -278,28 +279,14 @@ const grant = computed<string[]>(() =>
   review.value ? review.value.permissions.map((p) => p.id) : [],
 );
 
-/**
- * Reason for one permission, in the reader's language: the dry run's words,
- * else the manifest's, else none.
- *
- * ⚠⚠ Both sources are the APP's words and arrive as every language at once —
- * `{"en": "…", "tr": "…"}` (wire.Text) — so both go through `pluginLabelOf`.
- * This returned the dry run's value untouched while it was typed `string`,
- * and the review printed every reason as raw JSON, Turkish and all
- * (2026-09-21; e2e/shots/apps.mjs now refuses to photograph that screen).
+/*
+ * The permission rows (each one's label and the app's reason, in the reader's
+ * language) are AppPluginPermissionList: the same list a plugin request's
+ * review draws (PluginRequestsPanel).
  */
-function reasonOf(id: string, fromReview: PluginText | string | undefined): string {
-  return (
-    pluginLabelOf(fromReview, locale.value) ||
-    pluginLabelOf(review.value?.manifest.permission_reasons?.[id], locale.value)
-  );
-}
 
 /** The review's range verdict: false when this filex is outside the app's range. */
 const compatible = computed(() => review.value?.compat?.ok !== false);
-
-/** The permissions this upgrade adds to the grant — the ones being approved. */
-const added = computed(() => new Set(review.value?.upgrade?.added ?? []));
 
 // An install whose name is taken cannot go through: the review says so and
 // offers the upgrade instead of letting "Install" be the one to find out. An
@@ -709,24 +696,11 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
           {{ t('appPlugins.wizard.enginesMissing', { engines: review.engines_missing.map((e) => e.name).join(', ') }) }}
         </div>
 
-        <div>
-          <h3 class="text-sm font-semibold">{{ t('appPlugins.wizard.permissions') }}</h3>
-          <p v-if="!review.permissions.length" class="mt-1 text-sm text-zinc-500">{{ t('appPlugins.wizard.noPermissions') }}</p>
-          <ul v-else class="rule-list mt-2 rounded-lg" data-testid="app-plugin-permissions">
-            <li v-for="perm in review.permissions" :key="perm.id" class="p-3" :data-testid="`perm-${perm.id}`">
-              <div class="flex flex-wrap items-center gap-2">
-                <Badge tone="brand" size="xs"><span class="font-mono">{{ perm.id }}</span></Badge>
-                <span class="text-sm font-medium">{{ perm.label }}</span>
-                <Badge v-if="added.has(perm.id)" tone="amber" size="xs" :data-testid="`perm-new-${perm.id}`">
-                  {{ t('appPlugins.wizard.newPermission') }}
-                </Badge>
-              </div>
-              <p class="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-                {{ reasonOf(perm.id, perm.reason) || t('appPlugins.wizard.noReason') }}
-              </p>
-            </li>
-          </ul>
-        </div>
+        <AppPluginPermissionList
+          :permissions="review.permissions"
+          :reasons="review.manifest.permission_reasons"
+          :added="review.upgrade?.added"
+        />
 
         <Checkbox v-model="understood" :label="t('appPlugins.wizard.understand')" name="app-plugin-understand" />
 

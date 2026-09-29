@@ -208,6 +208,34 @@ func AIAdminAction(method, path, id, name string) (string, string, string) {
 // outside an *http.Request context, e.g. from the in-process MCP invoker).
 func ActionForPath(method, p, id, name string) (string, string, string) {
 	switch {
+	// ── per-user permissions (internal/perm) ──
+	// Ahead of the users block: /users/{id}/exceptions is a users path, and
+	// "who changed what this account may do" deserves its own action rather
+	// than the generic update the fallback would name it.
+	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/users/") && strings.HasSuffix(p, "/exceptions"):
+		return "user.permissions_set", "user", id
+	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/users/") && strings.HasSuffix(p, "/roles"):
+		return "user.roles_set", "user", id
+	// Action names keep their first spelling: they are stored in the audit
+	// log, and renaming them would orphan the rows already written.
+	// /roles/builtin is matched before the /roles/{id} prefix below.
+	case method == http.MethodPut && p == "/api/admin/roles/builtin":
+		return "permissions.defaults_set", "permissions", ""
+	case method == http.MethodPost && (p == "/api/admin/roles" || p == "/api/admin/roles/"):
+		return "permission_rule.create", "permission_rule", ""
+	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/roles/") && id != "":
+		return "permission_rule.update", "permission_rule", id
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/roles/") && id != "":
+		return "permission_rule.delete", "permission_rule", id
+	// ── plugin install requests ──
+	// internal/pluginreq writes its own rows — plugin_request.create /
+	// approve / reject / expire / supersede — with what was frozen and who
+	// decided, whichever door the call came in by (the panel, /api/ai/admin,
+	// an MCP tool). A second, generic row here would count every event twice
+	// and call an approval a "create".
+	case strings.HasPrefix(p, "/api/admin/plugin-requests"):
+		return "", "", ""
+
 	// ── storages ──
 	case method == http.MethodPost && p == "/api/admin/storages/":
 		return "storage.create", "storage", ""

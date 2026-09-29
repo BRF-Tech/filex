@@ -82,6 +82,17 @@ type AuthConfig =
 Function-token bearers are awaited on every request so silent JWT
 refresh just works.
 
+**What the account may do.** Against a filex server with roles and per-user
+permissions (0.49+), the explorer reads the signed-in account's permissions
+from `GET /api/auth/me` itself and hides what its role refuses — Delete,
+Rename, Share and the rest — so an embed hides exactly what the filex web app
+hides, with nothing to wire. Pass `permissions` (and `permissionsByFolder`) in
+the config only if your host already holds the answer, or `me` to point the
+request elsewhere. An API token behind the embed is held to its own verbs as
+well: `read` alone is a read-only explorer
+([PERMISSIONS.md](https://github.com/BRF-Tech/filex/blob/main/docs/PERMISSIONS.md),
+[RBAC.md → API tokens](https://github.com/BRF-Tech/filex/blob/main/docs/RBAC.md#api-tokens-verbs-on-every-surface)).
+
 ## API surface
 
 ```ts

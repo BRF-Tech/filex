@@ -1,6 +1,10 @@
 {
   "about": "Context for translators — not read by the server. `groups`: where the keys under a prefix appear (the longest matching prefix wins). `keys`: a note for one key. `vars`: what each {placeholder} holds; `key_vars` overrides it for one key. scripts/lib/i18n-catalogue.mjs merges this into filex-catalogue-context.json, and web/tests/i18n/langPackCatalogue.test.ts fails when a server key has no group or a placeholder no description.",
   "groups": {
+    "server.perm.blocked_extension": "API refusal when the person's role blocks a file type they tried to upload, create or rename to. One sentence.",
+    "server.perm.app_denied": "API refusal when a person lacks one of an app's own permissions (the role editor lists them under the app's name). {permission} is the app's label for it, e.g. “Request signatures”; {app} is the app's name, e.g. “Sign”. One sentence.",
+    "server.perm.denied.": "API refusal shown when a person lacks a permission (a toast or dialog in the file manager, or an error an API client logs). One sentence; the {action} is a lowercase phrase from server.perm.action.*. Which sentence is said names where the “no” came from: base — the person's built-in role (User, Viewer) does not include it; override — an administrator set an exception for this person alone; role — only administrators ever hold it; rule — the person's custom role {rule} does not include it; role_off — the person's custom role {rule} is switched off; viewer_ceiling — a read-only account can never hold it.",
+    "server.perm.action.": "A lowercase verb phrase naming what one permission allows, slotted into the server.perm.denied.* sentences as {action}. Grammar must fit every one of those sentences. Where one verb form cannot fit them all, make {action} a noun phrase and word the sentences around it: Turkish writes “dosya silme” (deleting files) and “Hesabınızın {action} izni yok” (your account has no {action} permission); “override” puts it in quotes as the permission's name.",
     "server.mail.": "Email filex sends. Plain text: one line per key, no markup. Written in the RECIPIENT's language as each flow decides it (below).",
     "server.mail.greeting": "Email: the first line of every mail filex writes to a person.",
     "server.mail.valid_days": "Email (share link, file request): how long the link works.",
@@ -68,6 +72,9 @@
     "server.notify.plugin.notice.body": "An installed app's own notification: \"<app name>: <the app's message>\"."
   },
   "vars": {
+    "ext": "a file extension without the dot, e.g. exe",
+    "action": "what the person tried to do — one of the server.perm.action.* phrases",
+    "rule": "the name an administrator gave a role (a custom role; the key keeps its older name)",
     "name": "a file or folder name, as it is on disk",
     "link": "a clickable link, already made — put it where your language puts it; the words inside it are their own key",
     "count": "a number",
@@ -113,6 +120,7 @@
   },
   "key_vars": {
     "server.perm.ui_new": { "ext": "a file extension with its dot, e.g. .drawio" },
+    "server.perm.app_denied": { "permission": "the app's own label for one of its permissions, in the reader's language when the app has one, e.g. “Request signatures”", "app": "the installed app's name, e.g. “e-Signature”" },
     "server.perm.ui_viewer": { "kind": "a kind of file: an extension with its dot (.drawio) or a media type (image/svg+xml)" },
     "server.notify.app_updated.title": { "version": "the app's new version, e.g. 1.2.0 (not a filex version)" },
     "server.notify.app_updated.body": { "from": "the app's previous version, e.g. 1.1.0 (not a path)" },
@@ -120,6 +128,8 @@
     "server.notify.app_update_needs_approval.title": { "version": "the app's new version, e.g. 1.2.0 (not a filex version)" },
     "server.notify.app_update_failed.title": { "version": "the app's version that could not be installed, e.g. 1.2.0 (not a filex version)" },
     "server.notify.app_update_failed.body": { "from": "the app's version that keeps running, e.g. 1.1.0 (not a path)" },
+    "server.notify.plugin_requested.title": { "plugin": "the name of the app or storage plugin somebody asked for", "version": "the version asked for, e.g. 1.2.0 (not a filex version)" },
+    "server.notify.plugin_requested.body": { "requester": "the name of the person who asked (an API key's account), or the word for \"someone\"", "reason": "the requester's own words: why the plugin is needed" },
     "server.public.drop_remove_aria": { "name": "the name of a file the visitor picked" },
     "server.public.drop_err_too_large": { "name": "the name of a file the visitor picked" },
     "server.public.drop_err_ext": { "name": "the name of a file the visitor picked" },

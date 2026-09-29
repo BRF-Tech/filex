@@ -8,7 +8,7 @@
 // failed with "Found dead link ./LAZY-CATALOGUE in file RELEASES.md" — the
 // second time in two days docs.filex.sh froze.
 
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -39,10 +39,33 @@ describe('release body links on the Releases page', async () => {
     expect(relativeLinks('[l](./LAZY-CATALOGUE.md)', docs)).toBe(`[l](${REPO}docs/LAZY-CATALOGUE.md)`);
   });
 
-  it('leaves absolute links and anchors alone, and repo files go to the repository', () => {
+  it('leaves absolute links alone, and repo files go to the repository', () => {
     expect(relativeLinks('[g](https://example.com/x.md)', docs)).toBe('[g](https://example.com/x.md)');
-    expect(relativeLinks('[a](#top)', docs)).toBe('[a](#top)');
     expect(relativeLinks('[b](backend/go.mod)', docs)).toBe(`[b](${REPO}backend/go.mod)`);
+  });
+
+  // ⚠ v0.48.1's notes point at their own sections — "([Removed](#removed))",
+  // "([Changed](#changed))" — which exist in CHANGELOG.md and on nothing else.
+  // This page holds every release: `#removed` matched no heading at all (the
+  // anchor gate's one dead link, 2026-09-28), and `#changed` quietly landed
+  // in v0.47.0's section. An in-page anchor from a release body keeps its
+  // words and loses the link.
+  it('turns a release body\'s own section anchors into plain words', () => {
+    const v0481 =
+      '> ⚠ **The iframe converter is removed** ([Removed](#removed)): conversion is\n' +
+      '> ⚠ **Nothing updates itself any more** ([Changed](#changed)): 0.47 installed';
+    const out = relativeLinks(v0481, docs);
+    expect(out).toBe(
+      '> ⚠ **The iframe converter is removed** (Removed): conversion is\n' +
+        '> ⚠ **Nothing updates itself any more** (Changed): 0.47 installed',
+    );
+    expect(relativeLinks('[a](#top) and [s](docs/STORAGE.md#s3)', docs)).toBe('a and [s](./STORAGE.md#s3)');
+  });
+
+  it('the Releases page it wrote carries no in-page anchor from a release body', () => {
+    const page = readFileSync(path.join(__dirname, '..', '..', '..', 'docs', 'RELEASES.md'), 'utf8');
+    const bare = page.split('\n').filter((l) => /\]\(#[^)]*\)/.test(l));
+    expect(bare, 'regenerate it: cd docs-site && npm run releases').toEqual([]);
   });
 
   it('checks the real tree by default', () => {

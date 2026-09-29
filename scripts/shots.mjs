@@ -253,7 +253,16 @@ function pngState() {
   return state;
 }
 
-const APP_DIR_VARS = new Set(['FILEX_SIGN_APP_DIR', 'FILEX_CONVERT_APP_DIR']);
+const APP_DIR_VARS = new Set([
+  'FILEX_SIGN_APP_DIR',
+  'FILEX_CONVERT_APP_DIR',
+  // The langpack scene's three packs (e2e/shots/langpack.mjs): without them a
+  // pack built for this release could not be pointed at, and the scene found
+  // the checkouts' last published pack instead (2026-09-28, v0.49.0: 94%).
+  'FILEX_LANG_ES_APP_DIR',
+  'FILEX_LANG_DE_APP_DIR',
+  'FILEX_LANG_FR_APP_DIR',
+]);
 // Where the converter scene's engines come from (e2e/shots/scene.mjs →
 // bootInstance). They choose a machine to run on; none of them can make a
 // picture go missing, which is what the SHOTS_* filter below is for.

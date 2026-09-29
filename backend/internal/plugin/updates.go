@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -406,12 +407,102 @@ func (m *Manager) checkOne(ctx context.Context, e *entry, now time.Time) UpdateI
 	return info
 }
 
+// ErrSourceChanged: the source publishes a different build than the one an
+// approval was given for (internal/pluginreq). Nothing was stopped, written
+// or run.
+var ErrSourceChanged = errors.New("the source now publishes a different build than the one that was approved")
+
+// SourceBuild is what a source publishes for this platform: its feed, and the
+// build filex would install. The dry run of an install or upgrade from a
+// source (internal/pluginreq freezes it for an administrator to approve).
+type SourceBuild struct {
+	Feed     *Feed      `json:"feed"`
+	Platform string     `json:"platform"`
+	Binary   FeedBinary `json:"binary"`
+}
+
+// ResolveSource reads a source's feed and picks this platform's build, held
+// to the feed's `filex` range — exactly what InstallFromSource would install,
+// without installing it. Nothing is downloaded but the feed.
+func (m *Manager) ResolveSource(ctx context.Context, source string) (*SourceBuild, error) {
+	f, err := m.fetchFeed(ctx, strings.TrimSpace(source))
+	if err != nil {
+		return nil, err
+	}
+	plat := m.platform()
+	b, ok := f.Binaries[plat]
+	if !ok {
+		return nil, reject("%s %s has no build for %s", FeedFileName, f.Version, plat)
+	}
+	if rng := strings.TrimSpace(f.Filex); rng != "" {
+		if judge := m.hooks().Range; judge != nil {
+			ok, requires, filex, err := judge(rng)
+			if err != nil {
+				return nil, reject("%s: filex: %v", FeedFileName, err)
+			}
+			if !ok {
+				label := strings.TrimSpace(f.Name)
+				if label == "" {
+					label = FeedFileName
+				}
+				return nil, reject("%s %s works with filex %s; this is %s", label, f.Version, requires, filex)
+			}
+		}
+	}
+	return &SourceBuild{Feed: f, Platform: plat, Binary: b}, nil
+}
+
+// ResolveUpdate is the update check for ONE plugin, answered rather than
+// recorded: the newer build its source publishes for this platform, or the
+// refusal "Review update" would give (up to date, incompatible, unreadable).
+// Nothing is downloaded but the feed; nothing is written.
+func (m *Manager) ResolveUpdate(ctx context.Context, id int64) (*SourceBuild, *model.Plugin, error) {
+	e, err := m.entryFor(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	e.mu.Lock()
+	row := *e.row
+	e.mu.Unlock()
+	build, _, err := m.resolveUpdate(ctx, &row)
+	return build, &row, err
+}
+
+// resolveUpdate is ResolveUpdate on a row already read.
+func (m *Manager) resolveUpdate(ctx context.Context, row *model.Plugin) (*SourceBuild, UpdateInfo, error) {
+	if row.Kind != model.PluginKindBinary {
+		return nil, UpdateInfo{}, reject("a remote plugin is upgraded where it runs")
+	}
+	f, err := m.fetchFeed(ctx, row.Source)
+	if err != nil {
+		return nil, UpdateInfo{}, err
+	}
+	info, bin := m.judge(row, f)
+	switch info.Status {
+	case UpdateCurrent:
+		return nil, info, reject("%s is up to date: its source has nothing newer than %s", row.Name, row.Version)
+	case UpdateIncompatible:
+		return nil, info, reject("%s %s works with filex %s, not this one", row.Name, info.Version, info.Requires)
+	case UpdateCheckFailed:
+		return nil, info, reject("%s", info.Error)
+	}
+	return &SourceBuild{Feed: f, Platform: info.Platform, Binary: *bin}, info, nil
+}
+
 // UpgradeFromSource installs the newer version the plugin's source has — an
 // administrator's approval ("Review update"). The same search the check
 // makes, the bytes held to the feed's sha256 before anything is stopped, then
 // the ordinary upgrade with its signature check, conformance probe and
 // roll-back.
 func (m *Manager) UpgradeFromSource(ctx context.Context, id int64) (*Status, error) {
+	return m.UpgradeFromSourcePinned(ctx, id, "")
+}
+
+// UpgradeFromSourcePinned is UpgradeFromSource held to the build an approval
+// was given for: when the source now publishes a build whose sha256 is not
+// wantSHA, it answers ErrSourceChanged before downloading anything. "" pins
+// nothing (the source's current build).
+func (m *Manager) UpgradeFromSourcePinned(ctx context.Context, id int64, wantSHA string) (*Status, error) {
 	e, err := m.entryFor(ctx, id)
 	if err != nil {
 		return nil, err
@@ -419,21 +510,14 @@ func (m *Manager) UpgradeFromSource(ctx context.Context, id int64) (*Status, err
 	e.mu.Lock()
 	row := *e.row
 	e.mu.Unlock()
-	if row.Kind != model.PluginKindBinary {
-		return m.statusOf(ctx, e), reject("a remote plugin is upgraded where it runs")
-	}
-	f, err := m.fetchFeed(ctx, row.Source)
+	build, info, err := m.resolveUpdate(ctx, &row)
 	if err != nil {
 		return m.statusOf(ctx, e), err
 	}
-	info, bin := m.judge(&row, f)
-	switch info.Status {
-	case UpdateCurrent:
-		return m.statusOf(ctx, e), reject("%s is up to date: its source has nothing newer than %s", row.Name, row.Version)
-	case UpdateIncompatible:
-		return m.statusOf(ctx, e), reject("%s %s works with filex %s, not this one", row.Name, info.Version, info.Requires)
-	case UpdateCheckFailed:
-		return m.statusOf(ctx, e), reject("%s", info.Error)
+	bin := build.Binary
+	if want := strings.ToLower(strings.TrimSpace(wantSHA)); want != "" && want != bin.SHA256 {
+		return m.statusOf(ctx, e), RejectedError{fmt.Errorf("%w (%s %s is %s…, the approval named %s…)", ErrSourceChanged,
+			row.Name, info.Version, short(bin.SHA256), short(want))}
 	}
 	resp, err := m.download(ctx, strings.TrimSpace(bin.URL))
 	if err != nil {
@@ -452,29 +536,25 @@ func (m *Manager) UpgradeFromSource(ctx context.Context, id int64) (*Status, err
 // publishes for this platform — the feed's version, held to the feed's
 // sha256 — and keeps the source, so the daily check follows it.
 func (m *Manager) InstallFromSource(ctx context.Context, name, source string) (*Status, error) {
+	return m.InstallFromSourcePinned(ctx, name, source, "")
+}
+
+// InstallFromSourcePinned is InstallFromSource held to the build an approval
+// was given for: a source that now publishes another build answers
+// ErrSourceChanged before anything is downloaded. "" pins nothing.
+func (m *Manager) InstallFromSourcePinned(ctx context.Context, name, source, wantSHA string) (*Status, error) {
 	if !validName(name) {
 		return nil, ErrBadName
 	}
 	source = strings.TrimSpace(source)
-	f, err := m.fetchFeed(ctx, source)
+	build, err := m.ResolveSource(ctx, source)
 	if err != nil {
 		return nil, err
 	}
-	plat := m.platform()
-	b, ok := f.Binaries[plat]
-	if !ok {
-		return nil, reject("%s %s has no build for %s", FeedFileName, f.Version, plat)
-	}
-	if rng := strings.TrimSpace(f.Filex); rng != "" {
-		if judge := m.hooks().Range; judge != nil {
-			ok, requires, filex, err := judge(rng)
-			if err != nil {
-				return nil, reject("%s: filex: %v", FeedFileName, err)
-			}
-			if !ok {
-				return nil, reject("%s %s works with filex %s; this is %s", name, f.Version, requires, filex)
-			}
-		}
+	b := build.Binary
+	if want := strings.ToLower(strings.TrimSpace(wantSHA)); want != "" && want != b.SHA256 {
+		return nil, RejectedError{fmt.Errorf("%w (%s %s is %s…, the approval named %s…)", ErrSourceChanged,
+			name, build.Feed.Version, short(b.SHA256), short(want))}
 	}
 	st, err := m.InstallFromURL(ctx, name, b.URL, b.SHA256, b.Signature)
 	if err != nil {

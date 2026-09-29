@@ -172,7 +172,15 @@ test.describe('App plugin: convert — install, choose a target, get the file', 
 
   test('the menu offers Convert on a file and not on a folder', async ({ page }) => {
     await openExplorer(page);
-    const onFile = await menuVerbs(page, QUALIFIED);
+    // The app's rows join the menu when /api/files/plugins/actions answers —
+    // read it again until they do (see 97-app-plugin-sign.spec.ts).
+    let onFile: string[] = [];
+    await expect
+      .poll(async () => (onFile = await menuVerbs(page, QUALIFIED)).some((v) => /convert|dönüştür/i.test(v)), {
+        timeout: 20_000,
+        message: "the converter's row in the file menu",
+      })
+      .toBe(true);
     expect(
       onFile.some((v) => /convert|dönüştür/i.test(v)),
       `the converter's row must be in the file menu: [${onFile.join(', ')}]`,

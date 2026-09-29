@@ -165,7 +165,9 @@ func TestAdminRoutes_TokenWinsOverSessionCookie(t *testing.T) {
 func TestAIAdminSurface_ConfinedTokenIsRefused(t *testing.T) {
 	f := newTokenGateFixture(t)
 
-	confined := testutil.NewAPIToken(t, f.store, f.adminID, "admin,mcp,root:main://projects/acme")
+	// `read` so the file tools are on offer at all: they follow the token's
+	// verbs (ai_mcp.go fileToolVerb), and this test is about confinement.
+	confined := testutil.NewAPIToken(t, f.store, f.adminID, "read,admin,mcp,root:main://projects/acme")
 	st, body := statusWithToken(t, http.MethodGet, f.srv.URL+"/api/ai/admin/users", confined)
 	assert.Equal(t, http.StatusForbidden, st, "confined admin-scoped token on /api/ai/admin; body: %s", body)
 	assert.NotContains(t, body, "admin@test.local")

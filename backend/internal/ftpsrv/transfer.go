@@ -155,7 +155,7 @@ func (f *fs) openWrite(name string, flags int, offset int64) (ftpserver.FileTran
 	if t.isRoot() || t.Rel == "" {
 		return nil, os.ErrInvalid
 	}
-	if !f.canWrite(t) {
+	if !f.canDo(t, f.writeNeed(t)) {
 		// ⚠ A write that cannot happen must SAY so, unlike a read: answering
 		// "no such file" would make a client retry against a path it can see.
 		return nil, os.ErrPermission
@@ -308,7 +308,7 @@ func (u *upload) Close() error {
 	ctx := context.WithoutCancel(u.fs.ctx)
 	// The ceiling, before the bytes reach the storage.
 	if usr := auth.UserFrom(ctx); usr != nil && u.fs.srv.cfg.Quota != nil {
-		if err := u.fs.srv.cfg.Quota.CheckCanWrite(ctx, usr.ID, u.size); err != nil {
+		if err := u.fs.srv.cfg.Quota.CheckFile(ctx, usr.ID, u.size, u.size); err != nil {
 			return err
 		}
 	}

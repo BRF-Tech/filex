@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 )
@@ -206,9 +207,15 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 			return
 		}
-		if mode == "edit" && !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelEditor) {
+		if mode == "edit" && !aclCanID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, perm.FilesModify).ok {
 			mode = "view"
 		}
+	}
+	// …and a token without `write` gets the view (auth/token_verbs.go): the
+	// document server's save lands through the signed callback, where no token
+	// is asked again, so an editing session here IS the write.
+	if mode == "edit" && !auth.TokenAllows(r.Context(), auth.VerbWrite) {
+		mode = "view"
 	}
 	// ⚠⚠ The desktop's open-with working copy IS edited here — its editor
 	// window opens `.filex-open/<session>-<name>` and this save is how the

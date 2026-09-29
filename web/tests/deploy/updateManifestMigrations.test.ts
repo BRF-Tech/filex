@@ -31,6 +31,14 @@ function git(dir: string, ...args: string[]) {
   });
 }
 
+function derivedPublished(repoDir: string, published: string[]): string[] {
+  return execFileSync(PYTHON, [GEN, '--print-migrations', '--repo-dir', repoDir, ...published.flatMap((v) => ['--published', v])], {
+    encoding: 'utf8',
+  })
+    .split(/\r?\n/)
+    .filter(Boolean);
+}
+
 describe('update manifest: migrations come from the tags', () => {
   it('marks exactly the tags that add a migration file', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-manifest-'));
@@ -62,6 +70,9 @@ describe('update manifest: migrations come from the tags', () => {
     release('v0.11.0');
 
     expect(derived(dir)).toEqual(['v0.3.0', 'v0.11.0']);
+    // v0.48.0 was tagged but never published: its migrations shipped in the
+    // next release, which must carry the mark (v0.3.0 unpublished here).
+    expect(derivedPublished(dir, ['v0.1.0', 'v0.1.1', 'v0.2.0', 'v0.10.0', 'v0.11.0'])).toEqual(['v0.3.0', 'v0.10.0', 'v0.11.0']);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

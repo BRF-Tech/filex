@@ -21,6 +21,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -280,9 +281,16 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 	// Authorization stays at submission time. The worker restores the actor on
 	// its context for catalogue/audit side effects but must not make a fresh
 	// authorization decision after the request has gone away.
-	if !aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(req.Path, "/"), acl.LevelViewer) ||
-		!aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(dest, "/"), acl.LevelEditor) {
+	// RBAC: reading the archive needs ≥viewer; extracting adds files to dest →
+	// files.create there (≥editor).
+	if !aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(req.Path, "/"), acl.LevelViewer) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		return
+	}
+	if v := aclCanID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(dest, "/"), perm.FilesCreate); !v.ok {
+		if !v.WritePerm(w, r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		}
 		return
 	}
 
@@ -733,6 +741,17 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 	}
 	if existingTmp != "" {
 		defer os.Remove(existingTmp)
+	}
+	// Adding to a zip that is there changes it; writing a new one adds a file.
+	addNeed := perm.FilesCreate
+	if existingTmp != "" {
+		addNeed = perm.FilesModify
+	}
+	if v := aclCanID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(req.Path, "/"), addNeed); !v.ok {
+		if !v.WritePerm(w, r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		}
+		return
 	}
 
 	// New tmp file we'll stream the rebuilt archive into.

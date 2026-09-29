@@ -16,7 +16,9 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/trash"
@@ -65,7 +67,7 @@ func (h *Handler) putObject(w http.ResponseWriter, r *http.Request, p *protocola
 	// so: answering NoSuchKey would make a client retry forever against a
 	// bucket it can see. The existence-oracle argument does not apply — the
 	// caller already proved it can see this bucket to get here.
-	if !h.writable(p, set, key) {
+	if !h.writable(p, set, key, h.writeNeed(ctx, st, key)) {
 		WriteError(w, r, http.StatusForbidden, "AccessDenied", "you do not have write access to this key")
 		return
 	}
@@ -97,7 +99,7 @@ func (h *Handler) putObject(w http.ResponseWriter, r *http.Request, p *protocola
 	// The per-user ceiling, checked BEFORE the bytes land. Checking afterwards
 	// means the disk already holds what the quota was meant to prevent.
 	if u := auth.UserFrom(ctx); u != nil && h.cfg.Quota != nil {
-		if err := h.cfg.Quota.CheckCanWrite(ctx, u.ID, size); err != nil {
+		if err := h.cfg.Quota.CheckFile(ctx, u.ID, size, size); err != nil {
 			WriteError(w, r, http.StatusRequestEntityTooLarge, "EntityTooLarge", err.Error())
 			return
 		}
@@ -194,7 +196,7 @@ func (h *Handler) putDirectoryMarker(w http.ResponseWriter, r *http.Request, p *
 		WriteError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	if !h.writable(p, set, dir) {
+	if !h.writable(p, set, dir, perm.FilesCreate) {
 		WriteError(w, r, http.StatusForbidden, "AccessDenied", "you do not have write access to this key")
 		return
 	}
@@ -245,7 +247,7 @@ func (h *Handler) deleteObject(w http.ResponseWriter, r *http.Request, p *protoc
 		WriteError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	if !h.writable(p, set, key) {
+	if !h.writable(p, set, key, perm.FilesDelete) {
 		WriteError(w, r, http.StatusForbidden, "AccessDenied", "you do not have write access to this key")
 		return
 	}
@@ -267,6 +269,11 @@ func (h *Handler) deleteObject(w http.ResponseWriter, r *http.Request, p *protoc
 		// operation to retry; answering 404 turns a no-op into a retry loop.
 		h.sync().Delete(sctx, st, key)
 	case errors.Is(terr, trash.ErrUnsupported):
+		// No trash on this storage: the delete is for good — files.purge.
+		if !set.Can(key, perm.FilesPurge) {
+			WriteError(w, r, http.StatusForbidden, "AccessDenied", "permission denied: your account lacks the files.purge permission")
+			return
+		}
 		del, ok := drv.(storage.Deleter)
 		if !ok {
 			WriteError(w, r, http.StatusNotImplemented, "NotImplemented", "this storage cannot delete")
@@ -288,8 +295,11 @@ func (h *Handler) deleteObject(w http.ResponseWriter, r *http.Request, p *protoc
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// writable applies the confinement and the grant for a mutation.
-func (h *Handler) writable(p *protocolauth.Principal, set *acl.Set, key string) bool {
+// writable applies the confinement, the grant and — when need is set — the
+// per-user permission (internal/perm) for a mutation. need == "" keeps the
+// plain ≥editor level (aborting or listing a multipart upload already
+// authorised when it was created).
+func (h *Handler) writable(p *protocolauth.Principal, set *acl.Set, key string, need perm.Perm) bool {
 	// Internal trees are not writable through the gateway either: a caller who
 	// could PUT over .versions/42/1 could destroy the very history the
 	// overwrite guard exists to keep, and the guard skips internal paths so
@@ -307,7 +317,17 @@ func (h *Handler) writable(p *protocolauth.Principal, set *acl.Set, key string) 
 			return false
 		}
 	}
-	return set.Effective(key) >= acl.LevelEditor
+	if set.Effective(key) < acl.LevelEditor {
+		return false
+	}
+	return need == "" || set.Can(key, need)
+}
+
+// writeNeed is what writing key's bytes is: files.modify when an object is
+// there to replace, files.create when not.
+func (h *Handler) writeNeed(ctx context.Context, st *model.Storage, key string) perm.Perm {
+	drv, err := h.cfg.Resolver(st.ID)
+	return protoperm.WriteNeed(ctx, drv, err, key)
 }
 
 // mimeFor picks the content type to record: what the client declared, else a
@@ -426,7 +446,7 @@ func (h *Handler) deleteObjects(w http.ResponseWriter, r *http.Request, p *proto
 			out.Errors = append(out.Errors, DeleteErrorEntry{Key: o.Key, Code: "InvalidRequest", Message: "empty key"})
 			continue
 		}
-		if !h.writable(p, set, key) {
+		if !h.writable(p, set, key, perm.FilesDelete) {
 			out.Errors = append(out.Errors, DeleteErrorEntry{Key: o.Key, Code: "AccessDenied", Message: "no write access to this key"})
 			continue
 		}

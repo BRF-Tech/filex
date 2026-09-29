@@ -41,6 +41,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/plugin"
+	"github.com/brf-tech/filex/backend/internal/pluginreq"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/queue"
 	"github.com/brf-tech/filex/backend/internal/quota"
@@ -1157,9 +1158,20 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		slog.Info("updates: checking disabled")
 	}
 
+	// Plugin install requests (internal/pluginreq): what an API key leaves
+	// instead of installing a plugin. The raw store — the rows are instance-
+	// wide, like the plugins — and the hourly expiry of requests nobody
+	// decided.
+	pluginRequests := pluginreq.New(pluginreq.Options{
+		Store: store, Apps: appPlugins, Plugins: pluginMgr, Notify: srvObj.notify,
+		TTL: time.Duration(cfg.PluginRequestTTLDays) * 24 * time.Hour,
+	})
+	pluginRequests.StartSweeper(ctx)
+
 	deps := &api.Deps{
 		Cfg:                      cfg,
 		Store:                    scopedStore,
+		PluginRequests:           pluginRequests,
 		Updater:                  updater,
 		Worker:                   worker,
 		Index:                    idx,

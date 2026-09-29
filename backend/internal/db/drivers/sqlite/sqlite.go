@@ -93,6 +93,10 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	s.DraftSQL = &db.DraftSQL{Pool: sqlDB}
 	// Rows deleted where they stood (issue #74), the same way.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB}
+	// Plugin install requests (00070), the same way; timestamps in
+	// CURRENT_TIMESTAMP's spelling, as both engines this file serves compare
+	// them as text.
+	s.PluginRequestSQL = &db.PluginRequestSQL{Pool: sqlDB, Time: db.CatalogueTime}
 	return s
 }
 
@@ -113,6 +117,8 @@ type Store struct {
 	*db.DraftSQL
 	// ListVanishedNodeIDs, CountChildRows (internal/db vanished_sql.go).
 	*db.VanishedSQL
+	// The plugin install requests (internal/db plugin_requests_sql.go).
+	*db.PluginRequestSQL
 }
 
 // upsertClause matches SQLite's upsert tail so it can be swapped for MySQL's.
@@ -1381,9 +1387,36 @@ func (s *Store) TouchLastLogin(ctx context.Context, id int64) error {
 	return err
 }
 
+// DeleteUser implements db.Store: the account and the public links it
+// opened, in one transaction (see the interface for the rule).
 func (s *Store) DeleteUser(ctx context.Context, id int64) error {
-	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM users WHERE id=?`, id)
+	_, err := s.DeleteUserWithLinks(ctx, id)
 	return err
+}
+
+// personLinks matches the links an account opened itself — every row it
+// created except an app's own public page (model.Share.IsApp).
+const personLinks = `created_by=? AND NOT (plugin_id > 0 AND page_id <> '')`
+
+// DeleteUserWithLinks implements db.Store.
+func (s *Store) DeleteUserWithLinks(ctx context.Context, id int64) (int64, error) {
+	var closed int64
+	err := s.WithTx(ctx, func(ctx context.Context) error {
+		if err := s.conn(ctx).QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM shares WHERE `+personLinks+` AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)`,
+			id).Scan(&closed); err != nil {
+			return err
+		}
+		if _, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM shares WHERE `+personLinks, id); err != nil {
+			return err
+		}
+		_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM users WHERE id=?`, id)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return closed, nil
 }
 
 // ─────────────────── Sessions ───────────────────
@@ -1461,8 +1494,8 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context) error {
 
 func (s *Store) CreateAPIToken(ctx context.Context, t *model.APIToken) (*model.APIToken, error) {
 	res, err := s.conn(ctx).ExecContext(ctx,
-		`INSERT INTO api_tokens (user_id, label, token_hash, scopes, usernames, kind, expires_at) VALUES (?,?,?,?,?,?,?)`,
-		t.UserID, t.Label, t.TokenHash, t.Scopes, t.Usernames, model.NormalizeTokenKind(t.Kind), t.ExpiresAt)
+		`INSERT INTO api_tokens (user_id, label, token_hash, scopes, usernames, kind, source, expires_at) VALUES (?,?,?,?,?,?,?,?)`,
+		t.UserID, t.Label, t.TokenHash, t.Scopes, t.Usernames, model.NormalizeTokenKind(t.Kind), t.Source, t.ExpiresAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1717,7 +1750,7 @@ func (s *Store) DeleteNFSExport(ctx context.Context, id, userID int64) error {
 
 func (s *Store) GetAPITokenByHash(ctx context.Context, tokenHash string) (*model.APIToken, error) {
 	row := s.conn(ctx).QueryRowContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens WHERE token_hash=?`,
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), COALESCE(source,''), last_used_at, expires_at, created_at FROM api_tokens WHERE token_hash=?`,
 		tokenHash)
 	return scanAPIToken(row)
 }
@@ -1727,12 +1760,12 @@ func (s *Store) GetAPITokenByHash(ctx context.Context, tokenHash string) (*model
 // access key checking that the token it inherits from is still valid.
 func (s *Store) GetAPITokenByID(ctx context.Context, id int64) (*model.APIToken, error) {
 	return scanAPIToken(s.conn(ctx).QueryRowContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens WHERE id=?`, id))
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), COALESCE(source,''), last_used_at, expires_at, created_at FROM api_tokens WHERE id=?`, id))
 }
 
 func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
 	rows, err := s.conn(ctx).QueryContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens ORDER BY created_at DESC`)
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), COALESCE(source,''), last_used_at, expires_at, created_at FROM api_tokens ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -1750,7 +1783,7 @@ func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
 
 func (s *Store) ListAPITokensByUser(ctx context.Context, userID int64) ([]*model.APIToken, error) {
 	rows, err := s.conn(ctx).QueryContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens WHERE user_id=? ORDER BY created_at DESC`,
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), COALESCE(source,''), last_used_at, expires_at, created_at FROM api_tokens WHERE user_id=? ORDER BY created_at DESC`,
 		userID)
 	if err != nil {
 		return nil, err
@@ -1803,7 +1836,7 @@ func (s *Store) DeleteAPIToken(ctx context.Context, id int64) error {
 func scanAPIToken(row rowScanner) (*model.APIToken, error) {
 	t := &model.APIToken{}
 	var lastUsed, expires sql.NullTime
-	if err := row.Scan(&t.ID, &t.UserID, &t.Label, &t.TokenHash, &t.Scopes, &t.Usernames, &t.Kind, &lastUsed, &expires, &t.CreatedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.UserID, &t.Label, &t.TokenHash, &t.Scopes, &t.Usernames, &t.Kind, &t.Source, &lastUsed, &expires, &t.CreatedAt); err != nil {
 		return nil, err
 	}
 	t.Kind = model.NormalizeTokenKind(t.Kind)

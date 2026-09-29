@@ -306,6 +306,11 @@ describe('folder files, header version 0x02', () => {
     expect(sha(new Uint8Array(await legacy047.decryptFile(made.fmk, v1)))).toBe(sha(plain));
   });
 
+  // ⚠ Real PBKDF2 at 600 000 iterations, three times (the legacy marker,
+  // then the old and the new password in startRekey). Under the default
+  // 5 s it failed only with the whole suite on a loaded machine
+  // (2026-09-28, 5021 ms) and passed alone: the time is the key
+  // derivation, so the test gets a budget for it.
   it('a re-key re-wraps a 0x02 file from its header alone; the body does not change', async () => {
     const legacyMade = await (await import('../fixtures/e2ecrypto-legacy-v0.30.1')).createMarker('before-rekey');
     const plain = pattern(6000, 14);
@@ -332,7 +337,7 @@ describe('folder files, header version 0x02', () => {
     ).toBe(sha(plain));
     const pwKey = await unlockWithPassword(start.marker, 'after-the-rekey');
     expect(pwKey).not.toBeNull();
-  });
+  }, 20_000);
 
   it(
     'more than 200 MB, at the production chunk size, without holding the file: encrypt → decrypt as one pipe',

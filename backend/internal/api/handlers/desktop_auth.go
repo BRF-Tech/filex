@@ -163,6 +163,8 @@ func (h *DesktopAuth) Complete(w http.ResponseWriter, r *http.Request) {
 		// Starred and Shared with me. Pairings made before this keep `app`
 		// until they are made again (docs/DESKTOP.md).
 		Kind: model.TokenKindUser,
+		// Using this token is access.desktop, not access.api (package perm).
+		Source: model.TokenSourceDesktop,
 	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -188,16 +190,31 @@ func (h *DesktopAuth) Complete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"code": code, "email": u.Email})
 }
 
-// desktopScopes is what a paired desktop may do: read, write and delete its
-// owner's files — and only read for a viewer, because a viewer cannot mint
-// write or delete for themselves at /api/tokens either (SelfTokens.cappedScopes
-// refuses it). An explicit list through the one issuance rule every door
-// shares (apitoken.ParseIssued): never empty, and never `admin` — a desktop
-// pairing is not where an administrator hands out administration.
+// desktopScopes is what a paired desktop may do: what its owner does in a
+// browser. read, write and delete for an account that may change files;
+// read and write for a viewer.
+//
+// ⚠ Why a viewer's desktop carries `write` (Burak, 2026-09-28): the verbs of a
+// token gate the ROUTE, the account's role gates the FILES. Changing the
+// account itself — profile, password, two-factor — asks `write` (routes.go,
+// accountWrite), so a `read` desktop answered 403 there while the same viewer
+// changed them freely in the browser. A viewer's role is still capped at
+// viewer level on every storage (acl.RoleCeiling), so `write` opens no file
+// change: every route that writes a file, a link or a grant asks that level
+// and refuses. `delete` stays out — it opens nothing for a viewer either, and
+// what is not needed is not handed out.
+//
+// ⚠ This is the one token a viewer holds with `write`: /api/tokens still
+// mints only `read` for a viewer (SelfTokens.cappedScopes), and a token cannot
+// mint wider than itself anyway (token_ceiling.go).
+//
+// An explicit list through the one issuance rule every door shares
+// (apitoken.ParseIssued): never empty, and never `admin` — a desktop pairing is
+// not where an administrator hands out administration.
 func desktopScopes(u *model.User) (string, error) {
 	want := []string{apitoken.ScopeRead, apitoken.ScopeWrite, apitoken.ScopeDelete}
 	if u.IsViewer() {
-		want = []string{apitoken.ScopeRead}
+		want = []string{apitoken.ScopeRead, apitoken.ScopeWrite}
 	}
 	verbs, roots, err := apitoken.ParseIssued(strings.Join(want, ","))
 	if err != nil {

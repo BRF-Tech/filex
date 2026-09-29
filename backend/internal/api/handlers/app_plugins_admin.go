@@ -18,6 +18,12 @@
 // ⚠ Instance-wide, never tenant-scoped, for the same reason storage plugins
 // are: a plugin's actions appear in every tenant's file menu. Only the
 // supertenant may touch this surface.
+//
+// ⚠⚠ Installing, upgrading, going back, switching, removing and the action
+// overrides need an administrator SIGNED IN to the panel (requireSession): an
+// API key gets 403 and is pointed at /api/admin/plugin-requests. The review
+// (?dry_run=1), the list, a detail, the logs and the update check stay open
+// to an admin-scoped key.
 package handlers
 
 import (
@@ -422,8 +428,15 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 	return in, true
 }
 
+// Install installs an app — or, with ?dry_run=1, answers its review and
+// installs nothing. The review is open to an admin-scoped API key (it is how
+// an agent sees what it would be asking for); the install itself needs a
+// signed-in administrator (requireSession).
 func (h *AppPluginsAdmin) Install(w http.ResponseWriter, r *http.Request) {
 	if !h.gate(w, r) {
+		return
+	}
+	if !isDryRun(r) && !requireSession(w, r, "installing an app") {
 		return
 	}
 	in, ok := h.readInstall(w, r, 0)
@@ -444,6 +457,9 @@ func (h *AppPluginsAdmin) Install(w http.ResponseWriter, r *http.Request) {
 
 func (h *AppPluginsAdmin) Upgrade(w http.ResponseWriter, r *http.Request) {
 	if !h.gate(w, r) {
+		return
+	}
+	if !isDryRun(r) && !requireSession(w, r, "upgrading an app") {
 		return
 	}
 	p, ok := h.plugin(w, r)
@@ -467,7 +483,7 @@ func (h *AppPluginsAdmin) Upgrade(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AppPluginsAdmin) Patch(w http.ResponseWriter, r *http.Request) {
-	if !h.gate(w, r) {
+	if !h.gate(w, r) || !requireSession(w, r, "switching an app on or off") {
 		return
 	}
 	p, ok := h.plugin(w, r)
@@ -500,7 +516,7 @@ func (h *AppPluginsAdmin) Patch(w http.ResponseWriter, r *http.Request) {
 // POST /api/admin/app-plugins/{id}/rollback. No new approval — that version's
 // grant was approved when it was installed (wasmplugin/versions.go).
 func (h *AppPluginsAdmin) Rollback(w http.ResponseWriter, r *http.Request) {
-	if !h.gate(w, r) {
+	if !h.gate(w, r) || !requireSession(w, r, "putting an app back to its previous version") {
 		return
 	}
 	p, ok := h.plugin(w, r)
@@ -525,7 +541,7 @@ func actorIDOf(r *http.Request) *int64 {
 }
 
 func (h *AppPluginsAdmin) Delete(w http.ResponseWriter, r *http.Request) {
-	if !h.gate(w, r) {
+	if !h.gate(w, r) || !requireSession(w, r, "removing an app") {
 		return
 	}
 	p, ok := h.plugin(w, r)
@@ -593,8 +609,10 @@ func (h *AppPluginsAdmin) GetOverrides(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"actions": rows})
 }
 
+// PutOverrides changes who may use an app's actions and where (admin_only,
+// enabled, applies): a permission change, so a signed-in administrator's.
 func (h *AppPluginsAdmin) PutOverrides(w http.ResponseWriter, r *http.Request) {
-	if !h.gate(w, r) {
+	if !h.gate(w, r) || !requireSession(w, r, "changing who may use an app's actions") {
 		return
 	}
 	p, ok := h.plugin(w, r)

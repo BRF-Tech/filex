@@ -126,7 +126,7 @@
     "external": "External services",
     "authProviders": "Auth providers",
     "apiMcp": "API / MCP",
-    "grants": "Permissions",
+    "grants": "Folder access",
     "audit": "Audit log",
     "sync": "Sync runs",
     "shares": "Shares",
@@ -154,7 +154,8 @@
     "plugins": "Plugins",
     "usage": "Usage & cost",
     "apps": "Apps",
-    "appearance": "Appearance"
+    "appearance": "Appearance",
+    "roles": "Roles"
   },
   "login": {
     "title": "Sign in",
@@ -258,7 +259,7 @@
       "syncInterval": "Scan every (minutes)",
       "syncIntervalHint": "How often filex walks this storage for changes made outside it (poll mode). Leave empty for the server default (15 minutes). A large, rarely changing storage is happier with a long interval; a scan that outlasts its interval is not started twice.",
       "rbac": "Per-item access control (RBAC)",
-      "rbacHint": "When on, non-admins see only files/folders explicitly granted to them via the permissions panel. When off, the storage is open to all users (capability by role).",
+      "rbacHint": "When on, non-admins see only the files and folders granted to them (listed under Folder access). When off, everyone opens the storage according to their role.",
       "path": "Filesystem path",
       "followSymlinks": "Follow symlinks that leave this folder",
       "scanExclude": "Paths to exclude from scanning",
@@ -424,6 +425,7 @@
     "resetPasswordConfirm": "Give \"{email}\" a new password? The current one stops working and every session of this account is signed out.",
     "passwordOptionalHint": "Optional — an account without a password signs in through SSO or with an API key",
     "createdOk": "User created",
+    "createdRoleNotSet": "The account was created as a Viewer, but its role could not be set: {error}",
     "updatedOk": "User updated",
     "deletedOk": "User deleted",
     "quota": {
@@ -753,7 +755,7 @@
     "technicalDetailIs": "Technical detail: {detail}"
   },
   "grants": {
-    "title": "Permissions",
+    "title": "Folder access",
     "subtitle": "Every per-file/folder grant — who has what, where. Revoke any.",
     "search": "Search user, path, storage…",
     "user": "User",
@@ -847,7 +849,7 @@
       "embed": "Embedding",
       "external": "External service",
       "file": "File",
-      "grants": "Permission",
+      "grants": "Folder access",
       "notifications": "Notification",
       "plugins": "Plugin",
       "profile": "Profile",
@@ -878,9 +880,14 @@
       "webhooks": "Webhook",
       "app_plugins": "App",
       "app_plugin": "App",
+      "plugin_request": "Plugin request",
+      "plugin_requests": "Plugin request",
       "auth_providers": "Sign-in provider",
       "quota": "Quota",
-      "themes": "Theme"
+      "themes": "Theme",
+      "permissions": "Built-in role",
+      "roles": "Role",
+      "permission_rule": "Role"
     },
     "verb": {
       "action": "changed",
@@ -923,7 +930,14 @@
       "download_link_refused": "drag-out download refused",
       "ui_save": "saved from its interface",
       "upgrade": "upgraded",
-      "rollback": "put back to the previous version"
+      "rollback": "put back to the previous version",
+      "permissions_set": "exceptions changed",
+      "defaults_set": "permissions changed",
+      "roles_set": "role changed",
+      "approve": "approved",
+      "reject": "rejected",
+      "expire": "expired",
+      "supersede": "closed because its source changed"
     },
     "target": {
       "auth_provider": "Sign-in provider",
@@ -940,7 +954,10 @@
       "user": "User",
       "version": "Version",
       "app_plugin": "App",
-      "file": "File"
+      "file": "File",
+      "permissions": "Built-in role",
+      "permission_rule": "Role",
+      "plugin_request": "Plugin request"
     },
     "viaAi": "{resource} (AI)",
     "filterResource": "What",
@@ -1194,7 +1211,7 @@
     "creds": "Demo account: {email} · password: {password}",
     "sandbox": "Shared sandbox — everything resets nightly; storages, plugins and apps are switched off here.",
     "adminHint": "Sign in with a non-demo account for full admin.",
-    "alsoIncluded": "Also included: apps — sandboxed WebAssembly add-ons installed through a permission review, with e-Signature and Convert shipping alongside · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · personal and team tags · symlinked folders · a view and sort remembered per folder · RBAC with per-file and per-folder grants · multi-tenancy · OIDC SSO and LDAP / Active Directory · in-place viewers and editors, Office through ONLYOFFICE · creating a document from + New — Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
+    "alsoIncluded": "Also included: apps — sandboxed WebAssembly add-ons installed through a permission review, with e-Signature and Convert shipping alongside · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · personal and team tags · symlinked folders · a view and sort remembered per folder · roles and per-person exceptions, per-file and per-folder access, and apps' own permissions · multi-tenancy · OIDC SSO and LDAP / Active Directory · in-place viewers and editors, Office through ONLYOFFICE · creating a document from + New — Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
     "features": {
       "storageTitle": "6 storage drivers, both directions",
       "storageBody": "Mount local disks, S3, SFTP, WebDAV, FTP/FTPS and SMB/NAS side by side as one tree — then reach that same tree back as S3, SFTP, FTPS, NFSv3 or WebDAV.",
@@ -1334,6 +1351,7 @@
       "app_update_needs_approval": "App update needs approval",
       "app_update_failed": "App update failed",
       "plugin_update_available": "Storage plugin update available",
+      "plugin_requested": "Plugin install request",
       "replica_fail": "Replica write failed",
       "replica_fail_spike": "Replica failures rising",
       "replica_reconcile_done": "Replica retries queued",
@@ -1803,6 +1821,67 @@
   "connections": {
     "subtitle": "How to reach this server from your own computer — mount it, or connect with an S3 client, over SFTP, or with the filex app.",
     "advanced": "Manage storages"
+  },
+  "pluginRequests": {
+    "title": "Install requests",
+    "subtitle": "An API key cannot install, upgrade or remove a plugin: an agent, a script or the CLI leaves a request here instead. What the source answered is frozen on the request — the manifest, the SHA-256, the permissions — and approving installs exactly that.",
+    "expiresAfter": "A request nobody decides expires after {count} day. | A request nobody decides expires after {count} days.",
+    "pendingCount": "{count} waiting",
+    "showHistory": "Show decided requests",
+    "hideHistory": "Show waiting requests only",
+    "empty": "No request is waiting.",
+    "emptyHistory": "No requests yet.",
+    "jump": "{from} → {to}",
+    "via": "API key “{key}”",
+    "fields": {
+      "plugin": "Plugin",
+      "version": "Version",
+      "source": "Source",
+      "requester": "Requested by",
+      "reason": "Reason",
+      "permissions": "Permissions",
+      "requested": "Requested",
+      "expires": "Expires",
+      "status": "Status"
+    },
+    "kind": {
+      "app": "App",
+      "storage": "Storage plugin"
+    },
+    "op": {
+      "install": "Install",
+      "upgrade": "Upgrade"
+    },
+    "status": {
+      "pending": "Waiting",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "expired": "Expired",
+      "superseded": "Source changed"
+    },
+    "source": {
+      "own": "Its own update source"
+    },
+    "actions": {
+      "review": "Review",
+      "approve": "Approve and install",
+      "reject": "Reject"
+    },
+    "review": {
+      "title": "Install request: {name}",
+      "sha256": "SHA-256",
+      "manifestSha256": "Manifest SHA-256",
+      "frozen": "Approving installs these bytes and these permissions, and nothing else. If the source serves anything different by now, nothing is installed and the request is closed as “Source changed”.",
+      "lastError": "The last approval attempt failed: {error}",
+      "rejectReason": "Why you are rejecting it (optional)",
+      "rejectPlaceholder": "The requester can read this.",
+      "decided": "{status} by {who}, {when}",
+      "decidedNobody": "{status}, {when}",
+      "note": "Note"
+    },
+    "approved": "{name} {version} installed",
+    "rejected": "Request for {name} rejected",
+    "superseded": "The source of {name} has changed since the request was made, so nothing was installed. The request is closed as “Source changed”."
   },
   "plugins": {
     "title": "Plugins",
@@ -2549,5 +2628,259 @@
     "minLength": "Use at least {n} character. | Use at least {n} characters.",
     "maxLength": "Use at most {n} character. | Use at most {n} characters.",
     "pattern": "This is not in the expected form."
+  },
+  "permissions": {
+    "title": "Roles",
+    "subtitle": "A role is a named set of permissions. Everyone has exactly one role: Administrator (everything, locked), User, Viewer, or a custom role, picked on the person’s own page. A person’s own exceptions beat their role.",
+    "items": {
+      "files": {
+        "download": {
+          "label": "Download",
+          "hint": "Save files and zips to a device; read them over WebDAV, SFTP, FTP, S3 or NFS. Previews stay open."
+        },
+        "create": {
+          "label": "Add files and folders",
+          "hint": "Upload, create folders and files, copy in, extract archives, restore from the trash."
+        },
+        "modify": {
+          "label": "Change files",
+          "hint": "Overwrite, edit in the text editor or ONLYOFFICE, restore an older version."
+        },
+        "rename": {
+          "label": "Rename",
+          "hint": "Give files and folders a new name in the same folder."
+        },
+        "move": {
+          "label": "Move",
+          "hint": "Move files and folders to another folder. Moving and renaming at once needs both."
+        },
+        "delete": {
+          "label": "Delete",
+          "hint": "Move files and folders to the trash."
+        },
+        "purge": {
+          "label": "Delete permanently",
+          "hint": "Empty the trash; delete on storages that have no trash."
+        },
+        "tag": {
+          "label": "Tag files",
+          "hint": "Add and remove tags."
+        }
+      },
+      "share": {
+        "links": {
+          "label": "Share links",
+          "hint": "Create public download links."
+        },
+        "upload_links": {
+          "label": "Upload links",
+          "hint": "Create links other people can upload files through."
+        },
+        "users": {
+          "label": "Share with people",
+          "hint": "Give other accounts access to a file or folder."
+        }
+      },
+      "comments": {
+        "write": {
+          "label": "Comment",
+          "hint": "Write comments on files."
+        }
+      },
+      "ai": {
+        "use": {
+          "label": "AI agent API",
+          "hint": "Let AI agents and MCP clients work with files through /api/ai."
+        }
+      },
+      "plugins": {
+        "run": {
+          "label": "Run apps",
+          "hint": "Run app actions, such as signing flows."
+        }
+      },
+      "access": {
+        "webdav": {
+          "label": "WebDAV",
+          "hint": "Connect over WebDAV, e.g. from the operating system’s file manager."
+        },
+        "sftp": {
+          "label": "SFTP",
+          "hint": "Connect over SFTP and register SSH keys."
+        },
+        "ftp": {
+          "label": "FTPS",
+          "hint": "Connect over FTPS."
+        },
+        "s3": {
+          "label": "S3 access keys",
+          "hint": "Create S3 access keys and use them."
+        },
+        "nfs": {
+          "label": "NFS exports",
+          "hint": "Create NFS exports and mount them."
+        },
+        "api": {
+          "label": "API keys",
+          "hint": "Create personal API keys and use them."
+        },
+        "desktop": {
+          "label": "Desktop app",
+          "hint": "Sign in from the desktop app."
+        }
+      },
+      "account": {
+        "edit": {
+          "label": "Edit own profile",
+          "hint": "Change their own name, email, picture and password."
+        }
+      },
+      "admin": {
+        "users": {
+          "label": "Manage users",
+          "hint": "Users, their permissions, quotas and password resets — never an administrator's account."
+        },
+        "grants": {
+          "label": "Manage folder access",
+          "hint": "See and remove every folder grant."
+        },
+        "shares": {
+          "label": "Manage all shares",
+          "hint": "See and revoke everyone's links."
+        },
+        "audit": {
+          "label": "Read the audit log",
+          "hint": "See the audit log."
+        },
+        "monitor": {
+          "label": "Monitor",
+          "hint": "Dashboard, usage, sync history and the job queue, read-only."
+        },
+        "full": {
+          "label": "Full administrator",
+          "hint": "Everything else. Comes with the administrator role only."
+        }
+      }
+    },
+    "groups": {
+      "files": "Files and folders",
+      "sharing": "Sharing and features",
+      "access": "Access outside the web app",
+      "account": "Own account",
+      "admin": "Admin area",
+      "apps": "Apps"
+    },
+    "presets": {
+      "label": "Preset",
+      "full_admin": "Full admin",
+      "standard": "Standard user",
+      "read_only": "Read-only",
+      "upload_only": "Upload-only",
+      "guest": "Guest",
+      "custom": "Custom permissions"
+    },
+    "effect": {
+      "inherit": "Inherit",
+      "allow": "Allow",
+      "deny": "Deny"
+    },
+    "result": {
+      "allowed": "Allowed",
+      "denied": "Denied"
+    },
+    "source": {
+      "role": "administrators only",
+      "base": "built-in role",
+      "rule": "role “{name}”",
+      "override": "exception for this person",
+      "viewer_ceiling": "read-only account",
+      "role_off": "role “{name}” is switched off",
+      "app_default": "the app’s default"
+    },
+    "apps": {
+      "hint": "Permissions an installed app lets you give or take away, per role and per person.",
+      "default": "Default",
+      "defaultAllowed": "Default (allowed)",
+      "defaultDenied": "Default (denied)",
+      "resetAll": "Reset to defaults",
+      "holders": {
+        "viewer": "App default: everyone",
+        "user": "App default: people who can change files",
+        "admin": "App default: administrators only"
+      },
+      "readOnly": "Only an administrator can change app permissions."
+    },
+    "all": "All",
+    "none": "None",
+    "card": {
+      "title": "Roles and permissions",
+      "subtitle": "What this person may do: their role, and exceptions set for them alone. The result and where it comes from is shown beside each permission.",
+      "adminNote": "Administrators hold every permission; roles and exceptions do not apply to them.",
+      "viewerNote": "A read-only account can never add, change, delete or share files, whatever is set here.",
+      "conditional": "Their role works differently in some folders; what is shown here applies everywhere else.",
+      "clear": "Clear exceptions",
+      "saved": "Permissions saved",
+      "settingsTitle": "Limits from roles",
+      "exceptionsTitle": "Exceptions for this person",
+      "builtinRole": "Role: {role} — change it in the account details above.",
+      "readOnlyRoleNote": "“{role}” can only look at files, so adding, changing, deleting and sharing cannot be allowed as exceptions. Tick one of them in the role (or pick another role) to allow it."
+    },
+    "rules": {
+      "add": "New role",
+      "edit": "Edit role",
+      "empty": "No custom roles yet.",
+      "name": "Role name",
+      "description": "Description",
+      "enabled": "Enabled",
+      "disabled": "Off",
+      "effects": "Permissions",
+      "settings": "Limits",
+      "storages": "Storages",
+      "paths": "Folders (e.g. Archive or Clients/*/Contracts)",
+      "maxDays": "Maximum share-link lifetime (days)",
+      "passwordRequired": "Share links need a password",
+      "blockedExt": "Blocked file types",
+      "blockedExtHint": "e.g. exe, bat, ps1",
+      "maxUpload": "Largest file (MB)",
+      "require2fa": "Require two-factor authentication",
+      "deleteConfirm": "Delete the role “{name}”?",
+      "saved": "Role saved",
+      "deleted": "Role deleted",
+      "summaryAllow": "Allows: {list}",
+      "summaryDeny": "Denies: {list}",
+      "summaryLimits": "Limits: {list}",
+      "members": "{count} member | {count} members",
+      "locked": "Everything, always — cannot be changed",
+      "builtin": "Built-in",
+      "builtinSummary": "Its permissions are set from the row’s actions",
+      "membersColumn": "People",
+      "custom": "Custom",
+      "editBuiltin": "Edit the {role} role",
+      "builtinSaved": "Role saved",
+      "viewerCeilingNote": "A Viewer can never add, change, delete or share files; those stay off.",
+      "plusGroups": "starting role for SSO groups: {list}",
+      "ssoGroups": "Starting role for SSO groups",
+      "ssoGroupsHint": "A new account whose first sign-in carries one of these groups gets this role. After that, change it on the person’s page like anyone else’s.",
+      "permissionsHint": "Tick what people with this role may do. A new role starts from the Standard user preset; a preset replaces the ticks in one click.",
+      "folders": "Different in some folders",
+      "foldersHint": "Optional. Pick storages or folders, then Allow or Deny file actions there. Everywhere else, the ticks above apply.",
+      "summaryCount": "{count} of {total} permissions",
+      "summaryFolders": "In {places}:",
+      "disableConfirm": "Switch off “{name}”? The {count} person holding it will have no access until it is switched back on. | Switch off “{name}”? The {count} people holding it will have no access until it is switched back on.",
+      "deleteTitle": "Delete the role “{name}”",
+      "deleteMove": "{count} person holds this role. What should they have instead? | {count} people hold this role. What should they have instead?",
+      "moveTo": "Give them",
+      "translations": "Name and description in other languages",
+      "translationsHint": "Everyone sees the role in the language they use filex in. Where a language is left blank, they see the name and description above.",
+      "translationsCount": "{count} language | {count} languages",
+      "nameIn": "Role name ({language})",
+      "descriptionIn": "Description ({language})"
+    },
+    "customBadge": "Exceptions",
+    "twoFactor": {
+      "title": "Two-factor authentication required",
+      "body": "Your administrator requires two-factor authentication for this account. Set it up to continue.",
+      "action": "Set up now"
+    }
   }
 }

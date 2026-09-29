@@ -16,6 +16,11 @@
 //
 //	DELETE /api/admin/plugins/{id}
 //
+// ⚠⚠ Install, upgrade, PATCH and DELETE need an administrator SIGNED IN to
+// the panel (requireSession): an API key gets 403 and is pointed at
+// /api/admin/plugin-requests, where it may leave a request instead. Reading
+// (the list, one plugin, the update check) stays open to an admin-scoped key.
+//
 // ⚠ Instance-wide, never tenant-scoped: a plugin is a PROCESS filex runs (or a
 // service it trusts with storage credentials), so in multi-tenant mode only
 // the supertenant may touch this surface. A tenant admin gets 403, not an
@@ -154,7 +159,7 @@ type pluginInstallReq struct {
 
 // Install accepts three shapes; the Content-Type decides which.
 func (h *Plugins) Install(w http.ResponseWriter, r *http.Request) {
-	if !h.gate(w, r) {
+	if !h.gate(w, r) || !requireSession(w, r, "installing a storage plugin") {
 		return
 	}
 	ct := r.Header.Get("Content-Type")
@@ -245,7 +250,7 @@ func installStatus(err error) int {
 // Upgrade replaces a binary plugin's file, keeping its registration and every
 // storage built on it. A failed upgrade rolls back to the previous binary.
 func (h *Plugins) Upgrade(w http.ResponseWriter, r *http.Request) {
-	if !h.gate(w, r) {
+	if !h.gate(w, r) || !requireSession(w, r, "upgrading a storage plugin") {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -296,8 +301,11 @@ func (h *Plugins) Upgrade(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
+// Patch switches a plugin on or off and names its source. Both are the
+// administrator's: switching one on runs its binary, and the source is where
+// its next approved version comes from.
 func (h *Plugins) Patch(w http.ResponseWriter, r *http.Request) {
-	if !h.gate(w, r) {
+	if !h.gate(w, r) || !requireSession(w, r, "changing a storage plugin") {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -347,7 +355,7 @@ func (h *Plugins) Restart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Plugins) Delete(w http.ResponseWriter, r *http.Request) {
-	if !h.gate(w, r) {
+	if !h.gate(w, r) || !requireSession(w, r, "removing a storage plugin") {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)

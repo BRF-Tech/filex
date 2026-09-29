@@ -1,8 +1,8 @@
 // winget manifests and the Homebrew cask for ONE desktop release.
 //
 //   node scripts/pkg-manifests.mjs --version 0.43.3 \
-//        --windows release/filex-desktop-x64.exe --mac release/filex-desktop-arm64.dmg \
-//        --out ../pkg-out
+//        --windows release/filex-desktop-x64.exe [--windows-arm64 release/filex-desktop-arm64.exe] \
+//        --mac release/filex-desktop-arm64.dmg --out ../pkg-out
 //
 // writes
 //   <out>/winget/manifests/b/BRFTech/filex-app/<version>/BRFTech.filex-app{,.installer,.locale.en-US,.locale.tr-TR}.yaml
@@ -84,7 +84,7 @@ function y(s) {
   return /^[\w.\/:@+-][\w .\/:@+,()-]*$/.test(s) && !/^(yes|no|true|false|null|on|off)$/i.test(s) ? s : JSON.stringify(s);
 }
 
-export function wingetManifests({ version, sha, releaseDate }) {
+export function wingetManifests({ version, sha, shaArm64, releaseDate }) {
   const version_ = header('version') + [
     `PackageIdentifier: ${WINGET_ID}`,
     `PackageVersion: ${version}`,
@@ -122,10 +122,17 @@ export function wingetManifests({ version, sha, releaseDate }) {
     `  Publisher: ${PUBLISHER}`,
     `  DisplayVersion: ${version}`,
     `  ProductCode: ${PRODUCT_CODE}`,
+    // One installer per architecture; winget installs the one for the
+    // machine. x64 first, as it always was. The arm64 entry (0.48.1 on) only
+    // when its installer was built: a manifest naming a file that is not on
+    // the Release fails winget's own URL check for everybody.
     'Installers:',
     '- Architecture: x64',
     `  InstallerUrl: ${assetUrl(version, 'filex-desktop-x64.exe')}`,
     `  InstallerSha256: ${sha.toUpperCase()}`,
+    ...(shaArm64
+      ? ['- Architecture: arm64', `  InstallerUrl: ${assetUrl(version, 'filex-desktop-arm64.exe')}`, `  InstallerSha256: ${shaArm64.toUpperCase()}`]
+      : []),
     'ManifestType: installer',
     `ManifestVersion: ${SCHEMA}`,
     '',
@@ -246,12 +253,18 @@ export function run(argv) {
   const a = parseArgs(argv);
   if (!a.version || !/^\d+\.\d+\.\d+$/.test(a.version)) throw new Error('--version x.y.z is required');
   if (!a.out) throw new Error('--out <dir> is required');
+  if (a['windows-arm64'] && !a.windows) throw new Error('--windows-arm64 needs --windows: the x64 installer is the first entry');
   if (!a.windows && !a.mac) throw new Error('give --windows and/or --mac');
   const written = [];
   if (a.windows) {
     const dir = path.join(a.out, 'winget', wingetDir(a.version));
     fs.mkdirSync(dir, { recursive: true });
-    const files = wingetManifests({ version: a.version, sha: sha256(a.windows), releaseDate: a['release-date'] });
+    const files = wingetManifests({
+      version: a.version,
+      sha: sha256(a.windows),
+      shaArm64: a['windows-arm64'] ? sha256(a['windows-arm64']) : undefined,
+      releaseDate: a['release-date'],
+    });
     for (const [name, body] of Object.entries(files)) {
       fs.writeFileSync(path.join(dir, name), body);
       written.push(path.join(dir, name));

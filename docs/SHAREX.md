@@ -33,7 +33,9 @@ the MCP server use).
    **API / MCP**, at `/admin/api-mcp`).
 2. Click **New token**, give it a label (e.g. `ShareX`), and select the
    **`write`** scope. That is the only scope the uploader needs — `write` covers
-   both storing the file and minting its share link. At least one scope has
+   both storing the file and minting its share link. The account the token
+   belongs to needs edit rights on the target folder and the `share.links`
+   permission, as for any public link. At least one scope has
    to be ticked — a token is never issued with none — and `write` alone is
    the least‑privilege choice.
 3. Optionally bind the token to a **root folder** (confinement) so every ShareX
@@ -160,6 +162,12 @@ stripped, and a confined token can still only write inside its own root.
   *Form data (multipart/form-data)* and **File form name** must be `file`.
 - **`token missing scope: write` (403)** — the token lacks the `write` scope;
   issue a new one on the API / MCP page with `write` selected.
+- **`access denied: your account lacks the share.links permission` (403)** —
+  the token is fine, the account behind it may not make public links: its
+  role or an exception withholds `share.links`
+  ([PERMISSIONS.md](PERMISSIONS.md)). The same holds when a link that used to
+  open answers 404 later: a link answers only while its creator may still make
+  it ([SHARING.md](SHARING.md#a-link-follows-its-creator)).
 - **401 unauthorized** — the `X-Filex-Token` header value is wrong or the token
   was revoked. Re‑copy it (tokens are shown only once at creation).
 - **Link downloads instead of previewing** — confirm the returned URL still ends
