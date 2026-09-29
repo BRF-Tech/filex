@@ -2029,7 +2029,7 @@ model, the limits and every body are in
 | `GET` · `PUT /api/admin/users/{id}/roles` | `admin.users` | the person's one role: `{"role_id": 3}`, `{"role_id": null}` or `{"role": "viewer"}` |
 | `GET /api/admin/roles` | `admin.users` | the custom roles and who holds which |
 | `GET /api/admin/roles/builtin[?role=viewer]` | `admin.users` | `{permissions, preset, apps}` — `apps` is the built-in role's decisions about app permissions |
-| `PUT /api/admin/roles/builtin[?role=viewer]` | admin | `{"permissions": […], "apps": {"app.sign.request": "deny"}}` — `apps` absent keeps them, `{}` hands every one back to the app's default |
+| `PUT /api/admin/roles/builtin[?role=viewer]` | admin (multi-tenant: the supertenant's) | `{"permissions": […], "apps": {"app.sign.request": "deny"}}` — `apps` absent keeps them, `{}` hands every one back to the app's default. A tenant's admin gets `403 supertenant_only` |
 | `POST /api/admin/roles` · `PUT` · `DELETE /api/admin/roles/{id}` | admin | a custom role; its `settings.apps` holds its app decisions, `names` / `descriptions` its name and description in other interface languages. `DELETE …?to=user\|viewer\|<id>` moves its people |
 
 ⚠ An API key gets `403 session_required` where a change would make an account

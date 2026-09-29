@@ -188,10 +188,23 @@ func (h *PermissionsAdmin) GetDefaults(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"permissions": s.Strings(), "preset": perm.MatchPreset(s), "apps": apps})
 }
 
+// builtinRolesAreInstanceWide is what a tenant admin reads when refused.
+const builtinRolesAreInstanceWide = "the built-in User and Viewer roles apply to every tenant and are managed by the platform operator; a tenant's own roles are custom roles"
+
 // PutDefaults replaces the defaults.
 //
 //	PUT /api/admin/roles/builtin {"permissions":["files.download",…]}
+//
+// ⚠ Supertenant-only in multi-tenant mode. Each built-in role is ONE
+// instance-wide row (perm.SaveRoleBase), held by every account of every
+// tenant that has no custom role — so a tenant admin writing it would narrow
+// or widen every other tenant's people, up to making them all delegated
+// administrators (admin.* with a session). A tenant's own roles are custom
+// roles, which carry its provider_id (CreateRule). Reading stays open.
 func (h *PermissionsAdmin) PutDefaults(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, builtinRolesAreInstanceWide) {
+		return
+	}
 	var req permDefaultsWire
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Permissions == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json: want {\"permissions\":[…]}"})

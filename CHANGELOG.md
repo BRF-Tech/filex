@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **A tenant's administrator could rewrite the built-in User and Viewer roles
+  of every tenant** (multi-tenant mode, 0.49.0). Each built-in role is one
+  instance-wide row, held by every account that has no custom role, and
+  `PUT /api/admin/roles/builtin` asked only for an administrator — of any
+  tenant. One customer's administrator could take downloads away from every
+  other customer's people, or put `admin.users` into the User role and make
+  every account on the platform a delegated administrator of its own tenant.
+  Saving a built-in role is now the platform operator's
+  (`403 supertenant_only`); reading it stays open, and a tenant's own roles
+  are custom roles, as they were. On Admin → Roles a tenant's administrator
+  sees a built-in role read-only, and why, instead of a Save that is refused.
+  Single-tenant installs are unaffected.
+  - ⚠ A multi-tenant install that ran 0.49.0: check the User and Viewer roles
+    on Admin → Roles, and the audit log for built-in role changes (each one
+    records the role, before and after) made by an account outside the
+    supertenant.
+
 ## [0.49.0] - 2026-09-28
 
 Everyone has one role now — Administrator, User, Viewer or a custom role with

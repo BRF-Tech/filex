@@ -2856,6 +2856,8 @@
       "membersColumn": "People",
       "custom": "Custom",
       "editBuiltin": "Edit the {role} role",
+      "viewBuiltin": "View the {role} role",
+      "builtinPlatformOwned": "The built-in roles belong to the whole platform and its operator manages them. For permissions of your own, create a role.",
       "builtinSaved": "Role saved",
       "viewerCeilingNote": "A Viewer can never add, change, delete or share files; those stay off.",
       "plusGroups": "starting role for SSO groups: {list}",

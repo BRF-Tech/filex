@@ -54,6 +54,13 @@ var instanceWideRoutes = []struct {
 	{"auth drivers read", http.MethodGet, "/api/admin/auth-providers", nil},
 	{"auth drivers rewrite", http.MethodPatch, "/api/admin/auth-providers/oidc",
 		map[string]any{"enabled": true, "config": map[string]any{"issuer": "https://attacker.example"}}},
+	// The built-in User and Viewer roles — one global row each, held by every
+	// account of every tenant without a custom role
+	// (builtin_roles_tenant_test.go). Reading them stays open.
+	{"built-in User role rewrite", http.MethodPut, "/api/admin/roles/builtin",
+		map[string]any{"permissions": []string{"account.edit"}}},
+	{"built-in Viewer role rewrite", http.MethodPut, "/api/admin/roles/builtin?role=viewer",
+		map[string]any{"permissions": []string{"account.edit"}}},
 	// The binary every tenant is served by.
 	{"update status", http.MethodGet, "/api/admin/update", nil},
 	{"update apply", http.MethodPost, "/api/admin/update/apply", map[string]any{}},

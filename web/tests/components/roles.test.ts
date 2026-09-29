@@ -16,6 +16,7 @@ import { createI18n } from "vue-i18n";
 import { createMemoryHistory, createRouter } from "vue-router";
 
 import en from "@/locales/en.json";
+import { useCapabilitiesStore } from "@/stores/capabilities";
 import { openRowMenu, pickMenuItem, menuEntries, closeRowMenus } from "../helpers/rowMenu";
 
 const { catalogue, noDelete, roles, people, usersApi } = vi.hoisted(() => {
@@ -69,6 +70,8 @@ const { catalogue, noDelete, roles, people, usersApi } = vi.hoisted(() => {
     forUser: vi.fn(),
     setOverrides: vi.fn(),
     allOverrides: vi.fn(async () => ({})),
+    getDefaults: vi.fn(async () => ({ permissions: ["files.download", "access.desktop"], preset: "", apps: {} })),
+    putDefaults: vi.fn(async (permissions: string[]) => ({ permissions, preset: "", apps: {} })),
     userRole: vi.fn(async () => 7 as number | null),
     setUserRole: vi.fn(async (_id: number, r: number | string) => ({
       role_id: typeof r === "number" ? r : null,
@@ -224,6 +227,42 @@ describe("Roles page", () => {
     await openRowMenu(w, "role-actions-rule-7");
     expect(menuEntries().map((e) => e.label)).toEqual(["Edit role", "Delete"]);
     closeRowMenus();
+  });
+
+  // The built-in roles are one row for the whole platform, and the server
+  // refuses a tenant admin's save (requireSupertenant in PutDefaults). The page
+  // offers a tenant's admin the role to read — not a Save that always fails.
+  it("a tenant admin sees a built-in role read-only: the note, the grid locked, no Save", async () => {
+    const caps = useCapabilitiesStore();
+    caps.$patch({ loaded: true, data: { ...caps.data, caller_admin: false } });
+    const w = await mountAt(Roles);
+    await openRowMenu(w, "role-actions-builtin-user");
+    expect(menuEntries().map((e) => e.label)).toEqual(["View the User role"]);
+    await pickMenuItem("role-actions-builtin-user-edit");
+    await flushPromises();
+
+    expect(q('[data-testid="builtin-role-platform-note"]').textContent).toContain("create a role");
+    const boxes = Array.from(
+      document.body.querySelectorAll<HTMLInputElement>('[data-testid="builtin-role-user"] input[type="checkbox"]'),
+    );
+    expect(boxes.length).toBeGreaterThan(0);
+    expect(boxes.every((b) => b.disabled)).toBe(true);
+    expect(document.body.querySelector('[data-testid="builtin-role-save"]')).toBeNull();
+    expect(roles.putDefaults).not.toHaveBeenCalled();
+  });
+
+  it("the platform operator (or a single-tenant admin) still edits a built-in role", async () => {
+    const caps = useCapabilitiesStore();
+    caps.$patch({ loaded: true, data: { ...caps.data, caller_admin: true } });
+    const w = await mountAt(Roles);
+    await openRowMenu(w, "role-actions-builtin-user");
+    expect(menuEntries().map((e) => e.label)).toEqual(["Edit the User role"]);
+    await pickMenuItem("role-actions-builtin-user-edit");
+    await flushPromises();
+
+    expect(document.body.querySelector('[data-testid="builtin-role-platform-note"]')).toBeNull();
+    await click(q('[data-testid="builtin-role-save"]'));
+    expect(roles.putDefaults).toHaveBeenCalledTimes(1);
   });
 
   it("asks before switching off a role people hold, and sends nothing on No", async () => {

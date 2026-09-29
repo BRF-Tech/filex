@@ -16,6 +16,7 @@ import { StoragesApi } from '@/api/storages';
 import type { StorageRef } from '@/api/types';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 import { permissionLimitLines } from '@/lib/permissionLimits';
 import { roleDescription, roleName } from '@/lib/roleName';
 import RoleEditor from '@/components/RoleEditor.vue';
@@ -72,6 +73,13 @@ const builtins = computed(() =>
     members: builtinMembers.value[role] ?? 0,
   })),
 );
+
+// ⚠ The built-in roles are ONE row for the whole platform, and the server
+// refuses a tenant admin's save (requireSupertenant in PutDefaults). A tenant's
+// admin sees them read-only rather than a Save that is always refused. Until
+// capabilities have loaded the answer is unknown, and the server decides.
+const caps = useCapabilitiesStore();
+const builtinReadOnly = computed(() => caps.loaded && caps.data.caller_admin === false);
 
 function openBuiltin(role: BuiltinRole) {
   builtinRole.value = role;
@@ -207,6 +215,9 @@ const columns = computed<DataColumn<RoleRow>[]>(() => [
 ]);
 function rowActions(row: RoleRow): ContextAction[] {
   if (row.builtin === 'admin') return [];
+  if (row.builtin && builtinReadOnly.value) {
+    return [{ key: 'edit', label: t('permissions.rules.viewBuiltin', { role: row.name }), icon: 'lock' }];
+  }
   if (row.builtin) return [{ key: 'edit', label: t('permissions.rules.editBuiltin', { role: row.name }), icon: 'rename' }];
   return [
     { key: 'edit', label: t('permissions.rules.edit'), icon: 'rename' },
@@ -315,7 +326,7 @@ function onRowAction(key: string, row: RoleRow) {
         :storages="storages"
         @saved="onSaved"
       />
-      <BuiltinRoleEditor v-model="builtinOpen" :role="builtinRole" :catalogue="catalogue" />
+      <BuiltinRoleEditor v-model="builtinOpen" :role="builtinRole" :catalogue="catalogue" :readonly="builtinReadOnly" />
 
       <Modal
         :model-value="deleting !== null"

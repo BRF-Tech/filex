@@ -2856,6 +2856,8 @@
       "membersColumn": "Kişiler",
       "custom": "Özel",
       "editBuiltin": "{role} rolünü düzenle",
+      "viewBuiltin": "{role} rolünü görüntüle",
+      "builtinPlatformOwned": "Yerleşik roller platformun tamamınındır ve platform yöneticisi tarafından yönetilir. Kendi izinleriniz için yeni bir rol oluşturun.",
       "builtinSaved": "Rol kaydedildi",
       "viewerCeilingNote": "Bir İzleyici asla dosya ekleyemez, değiştiremez, silemez veya paylaşamaz; bunlar kapalı kalır.",
       "plusGroups": "SSO grupları için başlangıç rolü: {list}",

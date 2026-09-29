@@ -126,6 +126,13 @@ User role's permissions are the *defaults* every regular account starts from.
 The Viewer role can never be given file changes or sharing — those stay off
 however it is edited.
 
+⚠ **In multi-tenant mode the built-in roles belong to the whole platform.**
+Each is one row, held by every account of every tenant without a custom role,
+so only the platform operator (an administrator of the supertenant) saves them;
+a tenant's administrator sees them read-only and gives their people a
+[custom role](#custom-roles) instead
+([MULTI-TENANCY.md → Instance-wide admin surfaces](MULTI-TENANCY.md#instance-wide-admin-surfaces)).
+
 | Preset | What it is |
 |---|---|
 | Full admin | Everything |
@@ -403,7 +410,7 @@ An **API key** is held to its own verbs on each of these doors as well —
 | `GET` / `PUT /api/admin/users/{id}/exceptions` | `admin.users` | exceptions + effective (with `effective.apps`, [App permissions](#app-permissions)) / `{"overrides":{"files.delete":"deny","app.sign.request":"deny"}}` — `{}` clears. The whole map is replaced. Allowing an `admin.*` permission needs a session; changing an `app.*` key needs an administrator |
 | `GET` / `PUT /api/admin/users/{id}/roles` | `admin.users` | a person's one role, set in one call: `{"role_id":3}` (a custom role — also sets the level underneath), `{"role_id":null}`, or `{"role":"viewer"}` (a built-in role; ends the custom one). An administrator given a custom role stops being one — never the last administrator (`409`) |
 | `GET /api/admin/roles/builtin[?role=viewer]` | `admin.users` | a built-in role's permissions, its `preset`, and `apps`: its decisions about app permissions |
-| `PUT /api/admin/roles/builtin[?role=viewer]` | admin | `{"permissions":[…], "apps":{"app.sign.request":"deny"}}` — `apps` absent leaves those decisions as they are, `{}` hands every one back to the app's default. A list with an `admin.*` permission needs a session |
+| `PUT /api/admin/roles/builtin[?role=viewer]` | admin (multi-tenant: the supertenant's) | `{"permissions":[…], "apps":{"app.sign.request":"deny"}}` — `apps` absent leaves those decisions as they are, `{}` hands every one back to the app's default. A list with an `admin.*` permission needs a session. A tenant's admin gets `403 supertenant_only` |
 | `GET /api/admin/roles` | `admin.users` | the custom roles, and `assignments`: user id → the role they hold |
 | `POST /api/admin/roles` | admin | create a custom role, with its `names` / `descriptions` in other languages (one that allows an `admin.*` permission needs a session) |
 | `PUT` / `DELETE /api/admin/roles/{id}` | admin | replace / delete a custom role — a `PUT` replaces `names` and `descriptions` too (an edit that adds an `admin.*` permission needs a session) |
