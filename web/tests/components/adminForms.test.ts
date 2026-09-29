@@ -62,6 +62,19 @@ vi.mock('@/api/storages', () => ({
   StoragesApi: { list: vi.fn(async () => []) },
 }));
 
+// The Users page reads the roles when it mounts (0.49.0). Unmocked, both
+// calls went to the network, were refused after the test had ended, and the
+// page then drew into a body the next test had already emptied — vitest's
+// "Cannot read properties of null (reading 'insertBefore')", an unhandled
+// rejection that fails the run although every test passed.
+vi.mock('@/api/roles', () => ({
+  RolesApi: {
+    allOverrides: vi.fn(async () => ({})),
+    listRules: vi.fn(async () => ({ rules: [], assignments: {}, builtinMembers: {} })),
+    setUserRole: vi.fn(),
+  },
+}));
+
 import Users from '@/views/Users.vue';
 import Webhooks from '@/views/Webhooks.vue';
 import ApiMcp from '@/views/ApiMcp.vue';
