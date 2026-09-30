@@ -68,6 +68,7 @@ const { catalogue, accounting, roles, usersApi } = vi.hoisted(() => {
     setOverrides: vi.fn(),
     allOverrides: vi.fn(async () => ({})),
     userRole: vi.fn(async () => 7 as number | null),
+    userRoleDetail: vi.fn(async () => ({ role_id: 7 as number | null, group_role: null })),
     setUserRole: vi.fn(),
   };
   const people = [
@@ -87,6 +88,7 @@ const { catalogue, accounting, roles, usersApi } = vi.hoisted(() => {
 
 vi.mock('@/api/roles', () => ({ RolesApi: roles }));
 vi.mock('@/api/users', () => ({ UsersApi: usersApi }));
+vi.mock('@/api/groups', () => ({ GroupsApi: { list: vi.fn(async () => []), forUser: vi.fn(async () => []) } }));
 vi.mock('@/api/storages', () => ({ StoragesApi: { list: vi.fn(async () => []) } }));
 vi.mock('@/api/quota', () => ({
   quotaApi: {

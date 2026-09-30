@@ -20,7 +20,8 @@ import Select from '@/components/ui/Select.vue';
 import Modal from '@/components/ui/Modal.vue';
 import ResetPasswordModal from '@/components/ResetPasswordModal.vue';
 import UserRolesCard from '@/components/UserRolesCard.vue';
-import { RolesApi, type PermissionRule } from '@/api/roles';
+import UserGroupsCard from '@/components/UserGroupsCard.vue';
+import { RolesApi, type GroupRole, type PermissionRule } from '@/api/roles';
 import { roleName } from '@/lib/roleName';
 import Spinner from '@/components/ui/Spinner.vue';
 
@@ -43,6 +44,19 @@ const role = ref<string>('viewer');
 const customRoles = ref<PermissionRule[]>([]);
 const heldRoleId = ref<number | null>(null);
 const heldRole = computed(() => customRoles.value.find((r) => r.id === heldRoleId.value) ?? null);
+/** With no custom role of their own: the one a group gives them. */
+const groupRole = ref<GroupRole | null>(null);
+const groupRoleRule = computed(() =>
+  groupRole.value ? (customRoles.value.find((r) => r.id === groupRole.value?.role_id) ?? null) : null,
+);
+/** The custom role in force — their own, else their group's — for the card. */
+const roleInForce = computed(() => {
+  // The role itself (its names in other languages come with it), and the
+  // group it comes from when it is not their own.
+  if (heldRole.value) return { ...heldRole.value, group: null as string | null };
+  if (groupRoleRule.value && groupRole.value) return { ...groupRoleRule.value, group: groupRole.value.group_name };
+  return null;
+});
 const CUSTOM = 'custom:';
 /** The choice as saved, to tell whether the Role field changed. */
 const savedRole = ref('');
@@ -65,13 +79,14 @@ async function load() {
       // Best effort: without the roles list the field offers the built-in
       // roles only.
       RolesApi.listRules().catch(() => ({ rules: [] as PermissionRule[], assignments: {} })),
-      RolesApi.userRole(id.value).catch(() => null),
+      RolesApi.userRoleDetail(id.value).catch(() => ({ role_id: null, group_role: null })),
     ]);
     user.value = u;
     email.value = u.email;
     displayName.value = u.display_name;
     customRoles.value = list.rules;
-    heldRoleId.value = held;
+    heldRoleId.value = held.role_id;
+    groupRole.value = held.group_role;
     role.value = currentChoice();
     savedRole.value = role.value;
   } catch (e: unknown) {
@@ -91,21 +106,52 @@ async function save() {
     }
     // The role is one server call (it also guards the last administrator),
     // and only made when the choice changed — no audit entry for a no-op.
+    let stillFromGroup: GroupRole | null = null;
     if (picked !== savedRole.value) {
+      // ⚠ A built-in role does not replace the role a group gives them (only
+      // a custom role of their own does) — say so before, not after.
+      const g = groupRole.value;
+      if (g && !picked.startsWith(CUSTOM) && picked !== 'admin') {
+        const ok = confirm(
+          t('users.groupRoleConfirm', { name: personName(user.value!), role: groupRoleRule.value ? roleName(groupRoleRule.value, locale.value) : `#${g.role_id}`, group: g.group_name }),
+        );
+        if (!ok) return;
+      }
       const res = await RolesApi.setUserRole(
         id.value,
         picked.startsWith(CUSTOM) ? Number(picked.slice(CUSTOM.length)) : (picked as UserRole),
       );
       heldRoleId.value = res.role_id;
+      stillFromGroup = res.group_role ?? null;
     }
-    user.value = await UsersApi.get(id.value);
+    await refreshRole();
     savedRole.value = currentChoice();
-    toast.success(t('users.updatedOk'));
+    if (stillFromGroup) {
+      const rule = customRoles.value.find((r) => r.id === stillFromGroup?.role_id);
+      const name = rule ? roleName(rule, locale.value) : `#${stillFromGroup.role_id}`;
+      toast.warn(t('users.groupRoleStill', { role: name, group: stillFromGroup.group_name }));
+    } else {
+      toast.success(t('users.updatedOk'));
+    }
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
   } finally {
     saving.value = false;
   }
+}
+
+/** Re-reads the account and the role in force — after its role or its
+ *  groups changed, either of which can move the other. */
+async function refreshRole() {
+  const [u, held] = await Promise.all([
+    UsersApi.get(id.value),
+    RolesApi.userRoleDetail(id.value).catch(() => ({ role_id: heldRoleId.value, group_role: null })),
+  ]);
+  user.value = u;
+  heldRoleId.value = held.role_id;
+  groupRole.value = held.group_role;
+  role.value = currentChoice();
+  savedRole.value = role.value;
 }
 
 async function confirmDelete() {
@@ -219,7 +265,7 @@ onMounted(() => {
         <h1 class="text-xl font-semibold flex items-center gap-2">
           {{ personName(user) }}
           <!-- ⚠ The role in words (it printed "user" under the name). -->
-          <Badge size="xs" data-testid="user-edit-role">{{ heldRole && user.role !== 'admin' ? roleName(heldRole, locale) : t(`users.roles.${user.role}`) }}</Badge>
+          <Badge size="xs" data-testid="user-edit-role">{{ roleInForce && user.role !== 'admin' ? roleName(roleInForce, locale) : t(`users.roles.${user.role}`) }}</Badge>
         </h1>
         <p class="text-sm text-zinc-500">{{ user.email }}</p>
       </div>
@@ -235,6 +281,9 @@ onMounted(() => {
       <Input v-model="email" type="email" :label="t('common.email')" readonly disabled />
       <Input v-model="displayName" :label="t('users.fields.displayName')" required />
       <Select v-model="role" :options="roleOptions" :label="t('common.role')" />
+      <p v-if="user.role !== 'admin' && !heldRole && roleInForce?.group" class="text-xs text-zinc-600 dark:text-zinc-300" data-testid="user-group-role">
+        {{ t('groups.userCard.roleFromGroup', { role: roleName(roleInForce, locale), group: roleInForce.group }) }}
+      </p>
 
       <div class="flex justify-between items-center pt-2 gap-2">
         <Button type="button" variant="outline" @click="showReset = true">
@@ -256,7 +305,11 @@ onMounted(() => {
 
     <!-- Per-user permissions (backend internal/perm). Keyed on the SAVED
          role, not the form's: the card describes what the server holds. -->
-    <UserRolesCard :user-id="user.id" :role="user.role" :custom-role="user.role !== 'admin' ? heldRole : null" />
+    <UserRolesCard :user-id="user.id" :role="user.role" :custom-role="user.role !== 'admin' ? roleInForce : null" />
+
+    <!-- Groups (backend internal/group): folder access and a role for
+         everyone in them. Changing them can move the role in force. -->
+    <UserGroupsCard :user-id="user.id" :user-name="personName(user)" @changed="refreshRole" />
 
     <!-- koru:k3 — storage quota -->
     <div class="card card-body space-y-3">

@@ -75,6 +75,7 @@
     "ext": "a file extension without the dot, e.g. exe",
     "action": "what the person tried to do — one of the server.perm.action.* phrases",
     "rule": "the name an administrator gave a role (a custom role; the key keeps its older name)",
+    "group": "the name an administrator gave a group of people (Admin → Groups)",
     "name": "a file or folder name, as it is on disk",
     "link": "a clickable link, already made — put it where your language puts it; the words inside it are their own key",
     "count": "a number",

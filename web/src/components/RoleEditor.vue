@@ -281,6 +281,9 @@ async function save() {
       <section class="space-y-1">
         <ChipInput v-model="ssoGroups" :label="t('permissions.rules.ssoGroups')" data-testid="role-sso-groups" />
         <p class="text-xs text-zinc-500">{{ t('permissions.rules.ssoGroupsHint') }}</p>
+        <p class="text-xs text-amber-700 dark:text-amber-400" data-testid="role-starting-legacy">
+          {{ t('permissions.rules.startingRoleLegacy') }}
+        </p>
       </section>
     </form>
 

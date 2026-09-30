@@ -107,7 +107,9 @@ func (h *Shared) SharedWithMe(w http.ResponseWriter, r *http.Request) {
 		if !st.RBACEnabled {
 			continue
 		}
-		grants, gerr := h.Store.ListFileGrantsByStorageUser(r.Context(), st.ID, u.ID)
+		// Their own grants and their groups' (acl.UserGrants): shared with a
+		// group they are in is shared with them.
+		grants, gerr := acl.UserGrants(r.Context(), h.Store, st.ID, u)
 		if gerr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": gerr.Error()})
 			return
@@ -117,10 +119,30 @@ func (h *Shared) SharedWithMe(w http.ResponseWriter, r *http.Request) {
 		}
 		sharedStorages = append(sharedStorages, st.Name)
 
+		// One row per item: the same folder shared with the person and with
+		// one of their groups is still one folder shared with them — at the
+		// HIGHEST of those levels (acl.Set.Effective takes the highest too),
+		// capped by the account's ceiling, as the folder itself will answer.
+		best := map[string]*model.FileGrant{}
+		for _, g := range grants {
+			rel := acl.CleanRel(g.PathPrefix)
+			if b := best[rel]; b == nil || acl.ParseLevel(g.Level) > acl.ParseLevel(b.Level) {
+				best[rel] = g
+			}
+		}
+		ceiling := acl.RoleCeiling(u.Role)
 		for _, g := range grants {
 			rel := acl.CleanRel(g.PathPrefix)
 			if rel == "" {
 				continue // (3) whole-storage grant — reported via `storages`
+			}
+			if best[rel] != g {
+				continue
+			}
+			if lv := acl.ParseLevel(g.Level); lv > ceiling {
+				capped := *g
+				capped.Level = ceiling.String()
+				g = &capped
 			}
 			if confined && !root.Within(st.Name, rel) {
 				continue

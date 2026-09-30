@@ -155,7 +155,8 @@
     "usage": "Kullanım ve maliyet",
     "apps": "Uygulamalar",
     "appearance": "Görünüm",
-    "roles": "Roller"
+    "roles": "Roller",
+    "groups": "Gruplar"
   },
   "login": {
     "title": "Oturum aç",
@@ -437,7 +438,10 @@
       "recompute": "Kullanımı yeniden hesapla",
       "recomputeOk": "Kullanım yeniden hesaplandı",
       "noRead": "Sunucu mevcut kota bilgisini okumayı desteklemiyor; güncel kullanım kaydettikten sonra görünür."
-    }
+    },
+    "viaGroup": "{group} üzerinden",
+    "groupRoleConfirm": "{name}, “{group}” grubu üzerinden “{role}” rolüne sahip. Burada seçilen yerleşik rol bunun yerine geçmez: kişiye özel bir rol verin ya da onu gruptan çıkarın. Yine de kaydedilsin mi?",
+    "groupRoleStill": "Kaydedildi, ancak “{group}” grubundan gelen “{role}” rolü geçerli olmaya devam ediyor."
   },
   "profile": {
     "saved": "Profil kaydedildi",
@@ -758,14 +762,15 @@
     "title": "Klasör erişimi",
     "subtitle": "Dosya/klasör bazlı tüm yetkiler — kime, nerede, ne. İstediğinizi geri alın.",
     "search": "Kullanıcı, yol, depo ara…",
-    "user": "Kullanıcı",
+    "user": "Kullanıcı veya grup",
     "storage": "Depo",
     "path": "Yol",
     "level": "Seviye",
     "revoke": "Geri al",
     "revokeConfirm": "{email} kullanıcısının {path} erişimi geri alınsın mı?",
     "revokedOk": "Yetki geri alındı",
-    "empty": "Henüz yetki yok."
+    "empty": "Henüz yetki yok.",
+    "group": "Grup"
   },
   "apiMcp": {
     "title": "API / MCP",
@@ -887,7 +892,9 @@
       "themes": "Tema",
       "permissions": "Yerleşik rol",
       "roles": "Rol",
-      "permission_rule": "Rol"
+      "permission_rule": "Rol",
+      "group": "Grup",
+      "groups": "Grup"
     },
     "verb": {
       "action": "değiştirildi",
@@ -937,7 +944,9 @@
       "approve": "onaylandı",
       "reject": "reddedildi",
       "expire": "süresi doldu",
-      "supersede": "kaynağı değiştiği için kapatıldı"
+      "supersede": "kaynağı değiştiği için kapatıldı",
+      "members_add": "üye eklendi",
+      "member_remove": "üye çıkarıldı"
     },
     "target": {
       "auth_provider": "Kimlik sağlayıcısı",
@@ -957,7 +966,8 @@
       "file": "Dosya",
       "permissions": "Yerleşik rol",
       "permission_rule": "Rol",
-      "plugin_request": "Eklenti isteği"
+      "plugin_request": "Eklenti isteği",
+      "group": "Grup"
     },
     "viaAi": "{resource} (AI)",
     "filterResource": "Ne",
@@ -2631,7 +2641,7 @@
   },
   "permissions": {
     "title": "Roller",
-    "subtitle": "Rol, adı olan bir izin kümesidir. Herkesin tam olarak bir rolü vardır: Yönetici (her şey, kilitli), Kullanıcı, İzleyici ya da kişinin kendi sayfasında seçilen özel bir rol. Kişiye özel istisnalar rolün önüne geçer.",
+    "subtitle": "Rol, adı olan bir izin kümesidir. Herkesin tam olarak bir rolü vardır: Yönetici (her şey, kilitli), Kullanıcı, İzleyici ya da kişinin kendi sayfasında seçilen özel bir rol — kendi rolü yoksa üyesi olduğu bir grubun verdiği rol. Kişiye özel istisnalar rolün önüne geçer.",
     "items": {
       "files": {
         "download": {
@@ -2795,7 +2805,9 @@
       "override": "bu kişiye özel istisna",
       "viewer_ceiling": "salt okunur hesap",
       "role_off": "“{name}” rolü kapalı",
-      "app_default": "uygulamanın varsayılanı"
+      "app_default": "uygulamanın varsayılanı",
+      "rule_group": "“{group}” grubundan “{name}” rolü",
+      "role_off_group": "“{group}” grubundan “{name}” rolü kapalı"
     },
     "apps": {
       "hint": "Kurulu bir uygulamanın rol ve kişi bazında verilip geri alınabilen izinleri.",
@@ -2823,7 +2835,9 @@
       "settingsTitle": "Rollerden gelen sınırlar",
       "exceptionsTitle": "Bu kişiye özel istisnalar",
       "builtinRole": "Rol: {role} — yukarıdaki hesap bilgilerinden değiştirin.",
-      "readOnlyRoleNote": "“{role}” yalnızca dosyaları görüntüleyebilir; bu yüzden eklemeye, değiştirmeye, silmeye ve paylaşmaya istisna olarak izin verilemez. İzin vermek için bunlardan birini rolde işaretleyin (ya da başka bir rol seçin)."
+      "readOnlyRoleNote": "“{role}” yalnızca dosyaları görüntüleyebilir; bu yüzden eklemeye, değiştirmeye, silmeye ve paylaşmaya istisna olarak izin verilemez. İzin vermek için bunlardan birini rolde işaretleyin (ya da başka bir rol seçin).",
+      "groupRole": "Rol: {role}, “{group}” grubu üzerinden. Yukarıda seçilecek kendi rolü bunun yerine geçer.",
+      "groupReadOnlyNote": "“{group}” grubundan gelen “{role}” rolü yalnızca dosyalara bakabildiği için bu hesap gruptayken İzleyicidir: kendi Düzenleyici ve Sahip klasör paylaşımları da İzleyici sayılır."
     },
     "rules": {
       "add": "Yeni rol",
@@ -2874,7 +2888,11 @@
       "translationsHint": "Herkes rolü filex'i kullandığı dilde görür. Bir dil boş bırakılırsa o dilde yukarıdaki ad ve açıklama görünür.",
       "translationsCount": "{count} dil",
       "nameIn": "Rol adı ({language})",
-      "descriptionIn": "Açıklama ({language})"
+      "descriptionIn": "Açıklama ({language})",
+      "groups": "{count} grup",
+      "deleteMoveGroups": "Bu role sahip grup sayısı: {count}. Seçtiğiniz role geçerler; Kullanıcı ya da İzleyici seçilirse rolsüz kalırlar.",
+      "viaGroups": "gruplar üzerinden {count} üye",
+      "startingRoleLegacy": "Bu yalnızca yeni bir hesabın rolünü, ilk oturum açışında bir kez belirler. Her oturum açışta kimlik sağlayıcıyı izleyen üyelik için bunun yerine bir grubu SSO grubuna bağlayın (Yönetim → Gruplar) ve gruba bu rolü verin."
     },
     "customBadge": "İstisnalar",
     "twoFactor": {
@@ -2882,5 +2900,62 @@
       "body": "Yöneticiniz bu hesap için iki adımlı doğrulamayı zorunlu kıldı. Devam etmek için kurun.",
       "action": "Şimdi kur"
     }
+  },
+  "groups": {
+    "title": "Gruplar",
+    "subtitle": "Adlandırılmış kişi grupları. Bir klasörü bir grupla, bir kişiyle paylaşır gibi paylaşın; bir gruba rol verin: kendi rolü olmayan her üye o rolü alır. Kişiler buradan elle ya da oturum açarken gelen SSO grubu üzerinden katılır.",
+    "editTitle": "Grup",
+    "add": "Yeni grup",
+    "create": "Oluştur",
+    "search": "Grup ara…",
+    "empty": "Henüz grup yok.",
+    "noMatch": "Eşleşen grup yok.",
+    "members": "{count} üye",
+    "folders": "{count} klasör",
+    "ssoSummary": "SSO: {list}",
+    "savedOk": "Grup kaydedildi",
+    "deletedOk": "Grup silindi",
+    "deleteConfirm": "“{name}” grubu silinsin mi? Klasör erişimleri de gider. Üyelerin hesapları kalır; grubun rolüne sahip olanlar yerleşik rollerine döner.",
+    "fields": {
+      "name": "Ad",
+      "description": "Açıklama",
+      "role": "Rol",
+      "noRole": "Rol yok",
+      "roleHint": "Kendi rolü olmayan her üye bu rolü alır.",
+      "sso": "SSO grupları",
+      "ssoHint": "Her satıra bir tane, kimlik sağlayıcının grup bilgisinde geldiği biçimiyle. Oturum açarken bunlardan birini taşıyan kişiler gruba katılır, taşımadığında ayrılır.",
+      "ssoAdminOnly": "Bir grubu SSO gruplarına yalnızca bir yönetici bağlayabilir.",
+      "priority": "Rol önceliği",
+      "priorityHint": "Rol veren birden fazla grupta olan biri için en yüksek öncelikli grup belirler (eşitse daha eski grup). Kapalı bir rol atlanır, sıradakine geçilir.",
+      "priorityAdminOnly": "Hangi grubun rolünün geçerli olacağını yalnızca bir yönetici değiştirebilir."
+    },
+    "membersTitle": "Üyeler",
+    "addMember": "Ad ya da e-postayla kişi ekleyin…",
+    "noMembers": "Bu grupta henüz kimse yok.",
+    "remove": "Gruptan çıkar",
+    "removeConfirm": "{name} gruptan çıkarılsın mı?",
+    "removeSsoConfirm": "{name} bu gruba SSO üzerinden katıldı. Şimdi çıkarılsın mı? Kimlik sağlayıcı onu hâlâ bu gruba koyuyorsa bir sonraki oturum açışında yeniden katılır.",
+    "source": {
+      "manual": "Eklendi",
+      "sso": "SSO",
+      "ssoHint": "Gruba SSO üzerinden katıldı — her oturum açışta kimlik sağlayıcıyla eşitlenir."
+    },
+    "foldersTitle": "Klasör erişimi",
+    "foldersHint": "Gruba bir klasörü dosya gezgininden verin: Paylaş → Kişiler, sonra grubu bir kişi gibi seçin.",
+    "level": {
+      "viewer": "Görüntüleyen",
+      "editor": "Düzenleyen",
+      "owner": "Sahip"
+    },
+    "userCard": {
+      "title": "Gruplar",
+      "none": "Hiçbir grupta değil.",
+      "pick": "Bir grup seçin…",
+      "add": "Bir gruba ekle",
+      "addButton": "Ekle",
+      "removeConfirm": "{name}, “{group}” grubundan çıkarılsın mı?",
+      "roleFromGroup": "Kendi rolü olmadığı için “{group}” grubu üzerinden “{role}” rolüne sahip."
+    },
+    "prioritySummary": "öncelik {n}"
   }
 }

@@ -476,6 +476,42 @@ type Store interface {
 	SetUserCustomRole(ctx context.Context, userID, roleID int64) error
 	ListUserCustomRoles(ctx context.Context) (map[int64]int64, error)
 
+	// Groups (migration 00072, internal/group). One implementation for every
+	// engine: db.GroupSQL, embedded in each driver's Store. GetGroup and
+	// GetGroupFileGrant return sql.ErrNoRows for an unknown id. Deleting a
+	// group takes its memberships and grants along; deleting a role leaves
+	// its groups with none (ReassignGroupRole first to move them).
+	ListGroups(ctx context.Context) ([]*model.Group, error)
+	GetGroup(ctx context.Context, id int64) (*model.Group, error)
+	CreateGroup(ctx context.Context, g *model.Group) (*model.Group, error)
+	UpdateGroup(ctx context.Context, g *model.Group) error
+	DeleteGroup(ctx context.Context, id int64) error
+	ReassignGroupRole(ctx context.Context, from, to int64) error
+	ListGroupMembers(ctx context.Context, groupID int64) ([]*model.GroupMember, error)
+	ListUserGroupMemberships(ctx context.Context, userID int64) ([]*model.GroupMember, error)
+	ListAllGroupMembers(ctx context.Context) ([]*model.GroupMember, error)
+	AddGroupMember(ctx context.Context, groupID, userID int64) error
+	RemoveGroupMember(ctx context.Context, groupID, userID int64) error
+	SetUserLinkedGroups(ctx context.Context, userID int64, source string, groupIDs []int64) (added, removed []int64, err error)
+	DropForeignMemberships(ctx context.Context, userID, providerID int64) error
+
+	// The built-in level an account had before a group's role moved it
+	// (user_group_levels), so leaving the group can put it back.
+	GetUserGroupLevel(ctx context.Context, userID int64) (string, bool, error)
+	SetUserGroupLevel(ctx context.Context, userID int64, level string) error
+	DeleteUserGroupLevel(ctx context.Context, userID int64) error
+
+	// A group's folder grants (group_file_grants). Rows come back as
+	// model.FileGrant with GroupID set and UserID zero.
+	ListGroupFileGrantsByStorage(ctx context.Context, storageID int64) ([]*model.FileGrant, error)
+	ListGroupFileGrantsByStorageUser(ctx context.Context, storageID, userID int64) ([]*model.FileGrant, error)
+	ListGroupFileGrantsByGroup(ctx context.Context, groupID int64) ([]*model.FileGrant, error)
+	ListAllGroupFileGrants(ctx context.Context) ([]*model.FileGrant, error)
+	GetGroupFileGrant(ctx context.Context, id int64) (*model.FileGrant, error)
+	CreateGroupFileGrant(ctx context.Context, g *model.FileGrant) (*model.FileGrant, error)
+	UpdateGroupFileGrantLevel(ctx context.Context, id int64, level string) error
+	DeleteGroupFileGrant(ctx context.Context, id int64) error
+
 	// Shares
 	CreateShare(ctx context.Context, share *model.Share) (*model.Share, error)
 	GetShareByID(ctx context.Context, id int64) (*model.Share, error)

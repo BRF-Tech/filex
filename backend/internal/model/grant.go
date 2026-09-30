@@ -26,20 +26,26 @@ func ValidGrantLevel(s string) bool {
 }
 
 // FileGrant is one row of the per-file/per-folder ACL. It grants a single
-// user a level on a path within one storage. PathPrefix is stored in
+// user — or, from group_file_grants, a group — a level on a path within one
+// storage. PathPrefix is stored in
 // confine-form (cleaned, no leading/trailing slash; "" == storage root); for
 // a directory grant the level cascades to every descendant, for a file grant
 // it applies to that exact path only. Grants are only consulted on storages
 // with RBACEnabled=true. See internal/acl for resolution.
 type FileGrant struct {
-	ID         int64     `json:"id"`
-	StorageID  int64     `json:"storage_id"`
-	PathPrefix string    `json:"path_prefix"`
-	IsDir      bool      `json:"is_dir"`
-	UserID     int64     `json:"user_id"`
-	Level      string    `json:"level"`
-	CreatedBy  *int64    `json:"created_by,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         int64  `json:"id"`
+	StorageID  int64  `json:"storage_id"`
+	PathPrefix string `json:"path_prefix"`
+	IsDir      bool   `json:"is_dir"`
+	UserID     int64  `json:"user_id,omitempty"`
+	// GroupID is set instead of UserID on a group's grant
+	// (group_file_grants, migration 00072): every member of the group holds
+	// it. The two tables have their own ids — a grant is named by its id AND
+	// which of the two it is.
+	GroupID   int64     `json:"group_id,omitempty"`
+	Level     string    `json:"level"`
+	CreatedBy *int64    `json:"created_by,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 
 	// Enrichment fields (not persisted; filled by the permissions handler for
 	// the UI panel). Left empty by the store scanners.
@@ -49,5 +55,6 @@ type FileGrant struct {
 	// display name, else username, else e-mail. The panels print this; the
 	// e-mail stays for the tooltip.
 	UserName  string `json:"user_name,omitempty"`
+	GroupName string `json:"group_name,omitempty"`
 	Inherited bool   `json:"inherited,omitempty"`
 }

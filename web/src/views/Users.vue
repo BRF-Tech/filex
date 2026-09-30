@@ -119,10 +119,16 @@ const roleOf = computed(() => {
   }
   return m;
 });
+/** user id → the group their role comes from, when it is not their own. */
+const viaOf = ref<Map<number, string>>(new Map());
 async function loadCustom() {
   const [all, roles] = await Promise.all([
     RolesApi.allOverrides().catch(() => ({})),
-    RolesApi.listRules().catch(() => ({ rules: [], assignments: {} as Record<string, number> })),
+    RolesApi.listRules().catch(() => ({
+      rules: [],
+      assignments: {} as Record<string, number>,
+      groupAssignments: {} as Record<string, { role_id: number; group_name: string }>,
+    })),
   ]);
   customPerms.value = new Set(
     Object.entries(all)
@@ -134,7 +140,16 @@ async function loadCustom() {
   for (const [uid, rid] of Object.entries(roles.assignments)) {
     if (known.has(rid)) ids.set(Number(uid), rid);
   }
+  // With none of their own, the role a group gives them is the one in force.
+  const via = new Map<number, string>();
+  for (const [uid, g] of Object.entries(roles.groupAssignments ?? {})) {
+    if (known.has(g.role_id) && !ids.has(Number(uid))) {
+      ids.set(Number(uid), g.role_id);
+      via.set(Number(uid), g.group_name);
+    }
+  }
   roleIdOf.value = ids;
+  viaOf.value = via;
   customRules.value = roles.rules;
 }
 
@@ -192,7 +207,8 @@ const columns = computed<DataColumn<User>[]>(() => [
     id: 'role',
     label: t('common.role'),
     sortable: true,
-    width: 110,
+    // Wide enough for a role and "through {group}" on one line.
+    width: 180,
     sortValue: (u) => ROLE_RANK[u.role] ?? 9,
   },
   {
@@ -346,9 +362,18 @@ function onRowAction(key: string, row: User) {
 
       <template #cell-role="{ row }">
         <span class="inline-flex flex-wrap items-center gap-1">
-        <Badge v-if="(row as User).role !== 'admin' && roleOf.has((row as User).id)" tone="brand" size="xs">
-          {{ roleOf.get((row as User).id) }}
-        </Badge>
+        <template v-if="(row as User).role !== 'admin' && roleOf.has((row as User).id)">
+          <Badge
+            tone="brand"
+            size="xs"
+            :title="viaOf.has((row as User).id) ? t('users.viaGroup', { group: viaOf.get((row as User).id) }) : undefined"
+          >
+            {{ roleOf.get((row as User).id) }}
+          </Badge>
+          <span v-if="viaOf.has((row as User).id)" class="text-xs text-zinc-500" data-testid="user-role-via">
+            {{ t('users.viaGroup', { group: viaOf.get((row as User).id) }) }}
+          </span>
+        </template>
         <Badge v-else :tone="roleTone((row as User).role)" size="xs">
           {{ t(`users.roles.${(row as User).role}`) }}
         </Badge>

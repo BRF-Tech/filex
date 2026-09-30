@@ -189,12 +189,48 @@ func (r *Resolver) LoadSet(ctx context.Context, u *model.User, s *model.Storage)
 	if u == nil || u.IsAdmin() || s == nil || !s.RBACEnabled {
 		return set, nil
 	}
-	grants, err := r.store.ListFileGrantsByStorageUser(ctx, s.ID, u.ID)
+	grants, err := UserGrants(ctx, r.store, s.ID, u)
 	if err != nil {
 		return nil, err
 	}
 	set.grants = grants
 	return set, nil
+}
+
+// UserGrants is every grant that reaches u on one storage: their own, and
+// those of the groups they are in (group_file_grants) that are in their
+// tenant. A group's grant counts exactly as a grant to each member would —
+// the highest covering level wins, and the account-role ceiling caps it.
+func UserGrants(ctx context.Context, store db.Store, storageID int64, u *model.User) ([]*model.FileGrant, error) {
+	grants, err := store.ListFileGrantsByStorageUser(ctx, storageID, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	viaGroups, err := store.ListGroupFileGrantsByStorageUser(ctx, storageID, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(viaGroups) == 0 {
+		return grants, nil
+	}
+	// A person moved to another tenant keeps their rows until someone
+	// removes them; a group of the tenant they left must not reach them.
+	inScope := map[int64]bool{}
+	for _, g := range viaGroups {
+		ok, seen := inScope[g.GroupID]
+		if !seen {
+			gr, gerr := store.GetGroup(ctx, g.GroupID)
+			if gerr != nil {
+				return nil, gerr
+			}
+			ok = perm.GroupInScope(gr, u.ProviderID)
+			inScope[g.GroupID] = ok
+		}
+		if ok {
+			grants = append(grants, g)
+		}
+	}
+	return grants, nil
 }
 
 // Locks returns the live app-plugin locks of one storage as a Set that

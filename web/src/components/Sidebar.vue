@@ -8,6 +8,7 @@ import {
   Blocks,
   Database,
   Users,
+  UsersRound,
   Settings,
   Brush,
   PlugZap,
@@ -138,6 +139,7 @@ const items = computed<NavItem[]>(() => [
   ...appItems.value,
 
   { to: { name: 'users' }, label: t('nav.users'), icon: Users, group: 'access' },
+  { to: { name: 'groups' }, label: t('nav.groups'), icon: UsersRound, group: 'access' },
   { to: { name: 'grants' }, label: t('nav.grants'), icon: ShieldCheck, group: 'access' },
   { to: { name: 'roles' }, label: t('nav.roles'), icon: UserCog, group: 'access' },
   {

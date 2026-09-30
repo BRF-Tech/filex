@@ -262,7 +262,10 @@ function sourceText(src: PermSource | undefined): string {
   if (!src) return '';
   if (src.kind === 'rule' || src.kind === 'role_off') {
     const rule = props.rules.find((r) => r.id != null && r.id === src.rule_id);
-    return t(`permissions.source.${src.kind}`, { name: rule ? roleName(rule, locale.value) : (src.rule_name ?? `#${src.rule_id}`) });
+    const name = rule ? roleName(rule, locale.value) : (src.rule_name ?? `#${src.rule_id}`);
+    // A role the account holds through a group says which group.
+    if (src.group_name) return t(`permissions.source.${src.kind}_group`, { name, group: src.group_name });
+    return t(`permissions.source.${src.kind}`, { name });
   }
   return t(`permissions.source.${src.kind}`);
 }

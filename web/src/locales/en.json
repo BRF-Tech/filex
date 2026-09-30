@@ -155,7 +155,8 @@
     "usage": "Usage & cost",
     "apps": "Apps",
     "appearance": "Appearance",
-    "roles": "Roles"
+    "roles": "Roles",
+    "groups": "Groups"
   },
   "login": {
     "title": "Sign in",
@@ -437,7 +438,10 @@
       "recompute": "Recompute usage",
       "recomputeOk": "Usage recomputed",
       "noRead": "The server does not support reading the current quota; usage appears after you save."
-    }
+    },
+    "viaGroup": "through {group}",
+    "groupRoleConfirm": "{name} has the role “{role}” through the group “{group}”. A built-in role picked here does not replace it: give them a custom role, or take them out of the group. Save anyway?",
+    "groupRoleStill": "Saved, but the role “{role}” from the group “{group}” still applies."
   },
   "profile": {
     "saved": "Profile saved",
@@ -758,14 +762,15 @@
     "title": "Folder access",
     "subtitle": "Every per-file/folder grant — who has what, where. Revoke any.",
     "search": "Search user, path, storage…",
-    "user": "User",
+    "user": "User or group",
     "storage": "Storage",
     "path": "Path",
     "level": "Level",
     "revoke": "Revoke",
     "revokeConfirm": "Revoke {email}'s access to {path}?",
     "revokedOk": "Grant revoked",
-    "empty": "No grants yet."
+    "empty": "No grants yet.",
+    "group": "Group"
   },
   "apiMcp": {
     "title": "API / MCP",
@@ -887,7 +892,9 @@
       "themes": "Theme",
       "permissions": "Built-in role",
       "roles": "Role",
-      "permission_rule": "Role"
+      "permission_rule": "Role",
+      "group": "Group",
+      "groups": "Group"
     },
     "verb": {
       "action": "changed",
@@ -937,7 +944,9 @@
       "approve": "approved",
       "reject": "rejected",
       "expire": "expired",
-      "supersede": "closed because its source changed"
+      "supersede": "closed because its source changed",
+      "members_add": "members added",
+      "member_remove": "member removed"
     },
     "target": {
       "auth_provider": "Sign-in provider",
@@ -957,7 +966,8 @@
       "file": "File",
       "permissions": "Built-in role",
       "permission_rule": "Role",
-      "plugin_request": "Plugin request"
+      "plugin_request": "Plugin request",
+      "group": "Group"
     },
     "viaAi": "{resource} (AI)",
     "filterResource": "What",
@@ -2631,7 +2641,7 @@
   },
   "permissions": {
     "title": "Roles",
-    "subtitle": "A role is a named set of permissions. Everyone has exactly one role: Administrator (everything, locked), User, Viewer, or a custom role, picked on the person’s own page. A person’s own exceptions beat their role.",
+    "subtitle": "A role is a named set of permissions. Everyone has exactly one role: Administrator (everything, locked), User, Viewer, or a custom role, picked on the person’s own page — or, when they have none of their own, given by a group they are in. A person’s own exceptions beat their role.",
     "items": {
       "files": {
         "download": {
@@ -2795,7 +2805,9 @@
       "override": "exception for this person",
       "viewer_ceiling": "read-only account",
       "role_off": "role “{name}” is switched off",
-      "app_default": "the app’s default"
+      "app_default": "the app’s default",
+      "rule_group": "role “{name}” from the group “{group}”",
+      "role_off_group": "role “{name}” from the group “{group}” is switched off"
     },
     "apps": {
       "hint": "Permissions an installed app lets you give or take away, per role and per person.",
@@ -2823,7 +2835,9 @@
       "settingsTitle": "Limits from roles",
       "exceptionsTitle": "Exceptions for this person",
       "builtinRole": "Role: {role} — change it in the account details above.",
-      "readOnlyRoleNote": "“{role}” can only look at files, so adding, changing, deleting and sharing cannot be allowed as exceptions. Tick one of them in the role (or pick another role) to allow it."
+      "readOnlyRoleNote": "“{role}” can only look at files, so adding, changing, deleting and sharing cannot be allowed as exceptions. Tick one of them in the role (or pick another role) to allow it.",
+      "groupRole": "Role: {role}, through the group “{group}”. Their own role, picked above, would replace it.",
+      "groupReadOnlyNote": "“{role}”, from the group “{group}”, can only look at files, so this account is a Viewer while it is in the group: its own Editor and Owner folder shares count as Viewer too."
     },
     "rules": {
       "add": "New role",
@@ -2874,7 +2888,11 @@
       "translationsHint": "Everyone sees the role in the language they use filex in. Where a language is left blank, they see the name and description above.",
       "translationsCount": "{count} language | {count} languages",
       "nameIn": "Role name ({language})",
-      "descriptionIn": "Description ({language})"
+      "descriptionIn": "Description ({language})",
+      "groups": "{count} group | {count} groups",
+      "deleteMoveGroups": "Groups holding it: {count}. They get the role you pick, or none for User or Viewer.",
+      "viaGroups": "{count} member through a group | {count} members through groups",
+      "startingRoleLegacy": "This only sets the role of a new account, once, at its first sign-in. For membership that follows the identity provider at every sign-in, link a group to the SSO group instead (Admin → Groups) and give the group this role."
     },
     "customBadge": "Exceptions",
     "twoFactor": {
@@ -2882,5 +2900,62 @@
       "body": "Your administrator requires two-factor authentication for this account. Set it up to continue.",
       "action": "Set up now"
     }
+  },
+  "groups": {
+    "title": "Groups",
+    "subtitle": "Named sets of people. Share a folder with a group like with a person, and give a group a role: everyone in it without a role of their own gets it. People join by hand here, or through an SSO group their sign-in carries.",
+    "editTitle": "Group",
+    "add": "New group",
+    "create": "Create",
+    "search": "Search groups…",
+    "empty": "No groups yet.",
+    "noMatch": "No group matches.",
+    "members": "{count} member | {count} members",
+    "folders": "{count} folder | {count} folders",
+    "ssoSummary": "SSO: {list}",
+    "savedOk": "Group saved",
+    "deletedOk": "Group deleted",
+    "deleteConfirm": "Delete the group “{name}”? Its folder access goes with it. Its members keep their accounts, and anyone who had its role goes back to their built-in role.",
+    "fields": {
+      "name": "Name",
+      "description": "Description",
+      "role": "Role",
+      "noRole": "No role",
+      "roleHint": "Everyone in the group gets this role unless they have a role of their own.",
+      "sso": "SSO groups",
+      "ssoHint": "One per line, exactly as the identity provider’s group claim sends it. People whose sign-in carries one join the group, and leave it when it stops.",
+      "ssoAdminOnly": "Only an administrator can link a group to SSO groups.",
+      "priority": "Role priority",
+      "priorityHint": "For someone in several groups that give a role: the group with the highest priority decides (equal: the older group). A switched-off role is skipped for the next one.",
+      "priorityAdminOnly": "Only an administrator can change which group’s role wins."
+    },
+    "membersTitle": "Members",
+    "addMember": "Add a person by name or email…",
+    "noMembers": "Nobody is in this group yet.",
+    "remove": "Remove from the group",
+    "removeConfirm": "Remove {name} from the group?",
+    "removeSsoConfirm": "{name} is in this group through SSO. Remove them now? They join again at their next sign-in if the identity provider still puts them in it.",
+    "source": {
+      "manual": "Added",
+      "sso": "SSO",
+      "ssoHint": "In the group through SSO — kept in step with the identity provider at each sign-in."
+    },
+    "foldersTitle": "Folder access",
+    "foldersHint": "Give the group a folder from the file explorer: Share → People, then pick the group like a person.",
+    "level": {
+      "viewer": "Viewer",
+      "editor": "Editor",
+      "owner": "Owner"
+    },
+    "userCard": {
+      "title": "Groups",
+      "none": "Not in any group.",
+      "pick": "Pick a group…",
+      "add": "Add to a group",
+      "addButton": "Add",
+      "removeConfirm": "Remove {name} from “{group}”?",
+      "roleFromGroup": "With no role of their own, they have the role “{role}” through the group “{group}”."
+    },
+    "prioritySummary": "priority {n}"
   }
 }

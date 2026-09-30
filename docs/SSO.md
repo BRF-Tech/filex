@@ -233,7 +233,7 @@ of filex only.
 | `FILEX_OIDC_REDIRECT_URL` | no | Defaults to `FILEX_PUBLIC_URL` + `/api/auth/oidc/callback`. Whatever it resolves to must match the IdP exactly. |
 | `FILEX_OIDC_AUTO_REDIRECT` | no | `true` makes the login page start the OIDC flow straight away instead of showing the password form; `?local=1` still reaches the form. See [CONFIGURATION.md](CONFIGURATION.md#authentication). |
 | `FILEX_OIDC_LOGOUT` | no | What **Sign out** ends: `idp` (default) — filex's session and the IdP's, when the IdP supports it; `local` — filex's session only. See [Signing out](#signing-out). |
-| `FILEX_OIDC_ROLE_CLAIM` | no | Claim holding roles/groups (string or array). |
+| `FILEX_OIDC_ROLE_CLAIM` | no | Claim holding roles/groups (string or array). Also what filex groups linked to SSO groups are matched against at every sign-in ([GROUPS.md](GROUPS.md#members-and-sso-links)). |
 | `FILEX_OIDC_ADMIN_GROUP` | no | Value within that claim that elevates a user to admin. |
 
 The legacy `FILEX_AUTH_OIDC_*` prefix is also accepted for all OIDC keys.

@@ -84,6 +84,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Plugin install requests (00070), written once in internal/db.
 	s.PluginRequestSQL = &db.PluginRequestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
+	// Groups (00072), written once in internal/db.
+	s.GroupSQL = db.NewGroupSQL(sqlDB, true)
 	return s
 }
 
@@ -107,6 +109,8 @@ type Store struct {
 	*db.VanishedSQL
 	// The plugin install requests (internal/db plugin_requests_sql.go).
 	*db.PluginRequestSQL
+	// The group methods (internal/db group_sql.go, migration 00072).
+	*db.GroupSQL
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
@@ -1058,7 +1062,11 @@ func (s *Store) SetUserProvider(ctx context.Context, userID, providerID int64, o
 	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE users SET provider_id=$1, oidc_subject=$2, updated_at=NOW() WHERE id=$3`,
 		providerID, oidcSubject, userID)
-	return err
+	if err != nil {
+		return err
+	}
+	// A group of the tenant they left no longer holds them (migration 00072).
+	return s.DropForeignMemberships(ctx, userID, providerID)
 }
 
 func (s *Store) GetUserByProviderEmail(ctx context.Context, providerID int64, email string) (*model.User, error) {

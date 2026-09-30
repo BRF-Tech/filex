@@ -31,6 +31,12 @@ func TestActionForPath(t *testing.T) {
 		{"role delete", http.MethodDelete, "/api/admin/roles/4", "4", "", "permission_rule.delete", "permission_rule", "4"},
 		{"user exceptions", http.MethodPut, "/api/admin/users/5/exceptions", "5", "", "user.permissions_set", "user", "5"},
 		{"user roles", http.MethodPut, "/api/admin/users/5/roles", "5", "", "user.roles_set", "user", "5"},
+		// Groups (internal/group). Member routes must not read as a group update.
+		{"group create", http.MethodPost, "/api/admin/groups", "", "", "group.create", "group", ""},
+		{"group update", http.MethodPut, "/api/admin/groups/2", "2", "", "group.update", "group", "2"},
+		{"group delete", http.MethodDelete, "/api/admin/groups/2", "2", "", "group.delete", "group", "2"},
+		{"group members add", http.MethodPost, "/api/admin/groups/2/members", "2", "", "group.members_add", "group", "2"},
+		{"group member remove", http.MethodDelete, "/api/admin/groups/2/members/7", "2", "", "group.member_remove", "group", "2"},
 		// Generic fallback: replica isn't in the explicit switch.
 		{"generic replica patch", http.MethodPatch, "/api/admin/replica/settings", "", "", "replica.update", "replica", ""},
 		{"generic queue retry", http.MethodPost, "/api/admin/queue/abc/retry", "abc", "", "queue.create", "queue", "abc"},

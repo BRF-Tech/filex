@@ -77,6 +77,10 @@ func (h *Grants) tryMail(ctx context.Context, to, subject, body string) bool {
 // grantView is the enriched grant row returned to the panel.
 type grantView struct {
 	*model.FileGrant
+	// Kind is "user" (a person's grant) or "group" (a group's — GroupID and
+	// GroupName are set, the user fields empty). The two have their own ids:
+	// PATCH/DELETE a group's at /permissions/groups/{id}.
+	Kind            string `json:"kind"`
 	UserEmail       string `json:"user_email"`
 	UserDisplayName string `json:"user_display_name"`
 	Inherited       bool   `json:"inherited"`
@@ -197,12 +201,23 @@ func (h *Grants) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	groupGrants, err := h.Store.ListGroupFileGrantsByStorage(r.Context(), st.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	all = append(all, groupGrants...)
 	direct := []grantView{}
 	inherited := []grantView{}
 	for _, g := range all {
 		gp := acl.CleanRel(g.PathPrefix)
-		gv := grantView{FileGrant: g}
-		if u, uerr := h.Store.GetUser(r.Context(), g.UserID); uerr == nil && u != nil {
+		gv := grantView{FileGrant: g, Kind: "user"}
+		if g.GroupID != 0 {
+			gv.Kind = "group"
+			if gr, gerr := h.Store.GetGroup(r.Context(), g.GroupID); gerr == nil && gr != nil {
+				gv.GroupName = gr.Name
+			}
+		} else if u, uerr := h.Store.GetUser(r.Context(), g.UserID); uerr == nil && u != nil {
 			gv.UserEmail = u.Email
 			gv.UserDisplayName = u.DisplayName
 			gv.UserName = u.Label()
@@ -234,13 +249,16 @@ func (h *Grants) List(w http.ResponseWriter, r *http.Request) {
 type grantCreateReq struct {
 	Path   string `json:"path"`
 	UserID int64  `json:"user_id"`
-	Level  string `json:"level"`
-	IsDir  *bool  `json:"is_dir,omitempty"`
+	// GroupID grants to a group (every member) instead of one person. One
+	// of the two.
+	GroupID int64  `json:"group_id"`
+	Level   string `json:"level"`
+	IsDir   *bool  `json:"is_dir,omitempty"`
 }
 
-// Create (upsert) a grant for a user on a path.
+// Create (upsert) a grant for a user — or a group — on a path.
 //
-//	POST /api/files/permissions {path, user_id, level, is_dir?}
+//	POST /api/files/permissions {path, user_id | group_id, level, is_dir?}
 func (h *Grants) Create(w http.ResponseWriter, r *http.Request) {
 	var req grantCreateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -263,6 +281,14 @@ func (h *Grants) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if !model.ValidGrantLevel(req.Level) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid level"})
+		return
+	}
+	if req.GroupID > 0 && req.UserID > 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "give user_id or group_id, not both"})
+		return
+	}
+	if req.GroupID > 0 {
+		h.createGroupGrant(w, r, st, rel, req)
 		return
 	}
 	if req.UserID <= 0 {
@@ -305,6 +331,49 @@ func (h *Grants) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, g)
+}
+
+// createGroupGrant is Create for a group. The group must be one the
+// caller's tenant can see. Its members' account-role ceilings still apply —
+// a viewer account in a group granted editor reaches the folder as a viewer —
+// so, unlike a person's grant, any level is accepted.
+func (h *Grants) createGroupGrant(w http.ResponseWriter, r *http.Request, st *model.Storage, rel string, req grantCreateReq) {
+	g, err := h.Store.GetGroup(r.Context(), req.GroupID)
+	if err != nil || g == nil || !groupForStorage(r.Context(), g) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "group not found"})
+		return
+	}
+	isDir := true
+	if req.IsDir != nil {
+		isDir = *req.IsDir
+	}
+	var createdBy *int64
+	if u := auth.UserFrom(r.Context()); u != nil {
+		id := u.ID
+		createdBy = &id
+	}
+	created, err := h.Store.CreateGroupFileGrant(r.Context(), &model.FileGrant{
+		StorageID: st.ID, PathPrefix: rel, IsDir: isDir, GroupID: g.ID, Level: req.Level, CreatedBy: createdBy,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	created.GroupName = g.Name
+	writeJSON(w, http.StatusOK, created)
+}
+
+// groupForStorage reports whether g may be given a grant by a caller of the
+// request's tenant: a tenant's own group, or — on an install without
+// tenants, or for the supertenant — any. An install-wide group in a
+// multi-tenant install can hold people of every tenant, so a confined caller
+// never grants to one.
+func groupForStorage(ctx context.Context, g *model.Group) bool {
+	scope, confined := confinedScope(ctx)
+	if !confined {
+		return true
+	}
+	return g.ProviderID != nil && *g.ProviderID == scope.ProviderID
 }
 
 type grantPatchReq struct {
@@ -376,6 +445,94 @@ func (h *Grants) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// groupGrantByID loads a group's grant named by {id}, answering 404.
+func (h *Grants) groupGrantByID(w http.ResponseWriter, r *http.Request) *model.FileGrant {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return nil
+	}
+	g, err := h.Store.GetGroupFileGrant(r.Context(), id)
+	if err != nil || g == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "grant not found"})
+		return nil
+	}
+	return g
+}
+
+// UpdateGroup changes a group grant's level.
+//
+//	PATCH /api/files/permissions/groups/{id} {level}
+func (h *Grants) UpdateGroup(w http.ResponseWriter, r *http.Request) {
+	g := h.groupGrantByID(w, r)
+	if g == nil {
+		return
+	}
+	var req grantPatchReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	if !model.ValidGrantLevel(req.Level) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid level"})
+		return
+	}
+	if _, ok := h.authorizeGrant(w, r, g); !ok {
+		return
+	}
+	if err := h.Store.UpdateGroupFileGrantLevel(r.Context(), g.ID, req.Level); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// DeleteGroup revokes a group grant.
+//
+//	DELETE /api/files/permissions/groups/{id}
+func (h *Grants) DeleteGroup(w http.ResponseWriter, r *http.Request) {
+	g := h.groupGrantByID(w, r)
+	if g == nil {
+		return
+	}
+	if _, ok := h.authorizeGrant(w, r, g); !ok {
+		return
+	}
+	if err := h.Store.DeleteGroupFileGrant(r.Context(), g.ID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// SearchGroups returns the groups matching q (by name) that the caller could
+// grant to, so the permissions panel can offer them beside people. Like
+// SearchUsers, any authenticated user may call it; it carries names only.
+//
+//	GET /api/files/permissions/groups?q=<substr>
+func (h *Grants) SearchGroups(w http.ResponseWriter, r *http.Request) {
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	groups, err := h.Store.ListGroups(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	out := make([]map[string]any, 0, 10)
+	for _, g := range groups {
+		if !groupForStorage(r.Context(), g) {
+			continue
+		}
+		if q != "" && !strings.Contains(strings.ToLower(g.Name), q) {
+			continue
+		}
+		out = append(out, map[string]any{"id": g.ID, "name": g.Name, "description": g.Description})
+		if len(out) >= 10 {
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"groups": out})
+}
+
 // authorizeGrant loads the grant's storage and verifies the caller may manage
 // it (owner of the grant's path, or admin).
 func (h *Grants) authorizeGrant(w http.ResponseWriter, r *http.Request, g *model.FileGrant) (*model.Storage, bool) {
@@ -445,9 +602,71 @@ func (h *Grants) AdminList(w http.ResponseWriter, r *http.Request) {
 			"user_name":    userName[g.UserID],
 			"level":        g.Level,
 			"created_at":   g.CreatedAt,
+			"kind":         "user",
+		})
+	}
+	// Groups' grants, in the same shape, with the group in place of the person.
+	groupGrants, err := h.Store.ListAllGroupFileGrants(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	groupName := map[int64]string{}
+	for _, g := range groupGrants {
+		if scoped && !scope.IsSupertenant && !scope.CanAccessStorage(g.StorageID) {
+			continue
+		}
+		if _, ok := storageName[g.StorageID]; !ok {
+			if st, e := h.Store.GetStorage(r.Context(), g.StorageID); e == nil && st != nil {
+				storageName[g.StorageID] = st.Name
+			}
+		}
+		if _, ok := groupName[g.GroupID]; !ok {
+			if gr, e := h.Store.GetGroup(r.Context(), g.GroupID); e == nil && gr != nil {
+				groupName[g.GroupID] = gr.Name
+			}
+		}
+		out = append(out, map[string]any{
+			"id":           g.ID,
+			"storage_id":   g.StorageID,
+			"storage_name": storageName[g.StorageID],
+			"path":         storageName[g.StorageID] + "://" + g.PathPrefix,
+			"path_prefix":  g.PathPrefix,
+			"is_dir":       g.IsDir,
+			"group_id":     g.GroupID,
+			"group_name":   groupName[g.GroupID],
+			"level":        g.Level,
+			"created_at":   g.CreatedAt,
+			"kind":         "group",
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"grants": out})
+}
+
+// AdminDeleteGroup revokes any group's grant (admin override).
+//
+//	DELETE /api/admin/grants/groups/{id}
+func (h *Grants) AdminDeleteGroup(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	// The same unconditional existence check as AdminDelete, for the same
+	// reason: a 404 only for a foreign id would say the row exists.
+	g, gerr := h.Store.GetGroupFileGrant(r.Context(), id)
+	if gerr != nil || g == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "grant not found"})
+		return
+	}
+	if !ownsStorage(w, r, g.StorageID, "grant") {
+		return
+	}
+	if err := h.Store.DeleteGroupFileGrant(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // AdminDelete revokes any grant (admin override).

@@ -356,6 +356,20 @@ const routes: RouteRecordRaw[] = [
         meta: { adminPerm: 'admin.users', breadcrumb: 'users.editTitle', parent: 'users' },
       },
       {
+        // Groups of people (backend internal/group) — managing people, so
+        // admin.users like the Users page.
+        path: 'groups',
+        name: 'groups',
+        component: () => import('@/views/Groups.vue'),
+        meta: { adminPerm: 'admin.users', breadcrumb: 'nav.groups' },
+      },
+      {
+        path: 'groups/:id',
+        name: 'groups.edit',
+        component: () => import('@/views/GroupEdit.vue'),
+        meta: { adminPerm: 'admin.users', breadcrumb: 'groups.editTitle', parent: 'groups' },
+      },
+      {
         /**
          * gorunum:v2 — the profile PAGE is gone; every field it had is in the
          * user-settings dialog. The ADDRESS stays because the server prints it:

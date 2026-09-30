@@ -236,6 +236,19 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 	case strings.HasPrefix(p, "/api/admin/plugin-requests"):
 		return "", "", ""
 
+	// ── groups (internal/group) ──
+	// Members first: /groups/{id}/members/… is under the /groups/{id} prefix.
+	case method == http.MethodPost && strings.HasPrefix(p, "/api/admin/groups/") && strings.HasSuffix(p, "/members"):
+		return "group.members_add", "group", id
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/groups/") && strings.Contains(p, "/members/"):
+		return "group.member_remove", "group", id
+	case method == http.MethodPost && (p == "/api/admin/groups" || p == "/api/admin/groups/"):
+		return "group.create", "group", ""
+	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/groups/") && id != "":
+		return "group.update", "group", id
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/groups/") && id != "":
+		return "group.delete", "group", id
+
 	// ── storages ──
 	case method == http.MethodPost && p == "/api/admin/storages/":
 		return "storage.create", "storage", ""

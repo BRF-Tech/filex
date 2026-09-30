@@ -13,6 +13,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/group"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/tenant"
@@ -319,7 +320,11 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	// role ends the custom one (below), which can hand back what it took away
 	// (refuseGain); and a password they set is an account they can sign in
 	// as (refuseTakeover). Before any field is written.
-	if req.Role != nil && target != nil && target.Role != *req.Role {
+	// A tenant move in the same request is judged together with the role
+	// below (the move's check), on the state both leave: judged apart, each
+	// check assumes the other change is not happening.
+	moving := req.ProviderID != nil && target != nil && (target.ProviderID == nil || *target.ProviderID != *req.ProviderID)
+	if req.Role != nil && target != nil && target.Role != *req.Role && !moving {
 		if refuseGain(w, r, h.ACL, target, func(in *perm.Input) {
 			in.Role = *req.Role
 			in.CustomRoleID = 0
@@ -355,10 +360,51 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown provider_id"})
 			return
 		}
+		// Moving takes them out of the old tenant's groups (SetUserProvider),
+		// and with them a role — possibly a restrictive one — and the level it
+		// set: a delegated administrator is judged by what they would hold in
+		// the new tenant, like any other change to an account.
+		if moving {
+			next := *req.ProviderID
+			moved, err := groupsPreview(r.Context(), h.Store, target, &next, func(groups []*model.Group) []*model.Group {
+				out := make([]*model.Group, 0, len(groups))
+				for _, g := range groups {
+					if g.ProviderID == nil || *g.ProviderID == next {
+						out = append(out, g)
+					}
+				}
+				return out
+			})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			change := moved
+			if req.Role != nil && target.Role != *req.Role {
+				// And the role picked in the same request: it ends their own
+				// custom role and is their level, unless a group of the new
+				// tenant gives them a role (Preview then sets its level).
+				role := *req.Role
+				change = func(in *perm.Input) {
+					moved(in)
+					in.Role, in.CustomRoleID = role, 0
+				}
+			}
+			if refuseGain(w, r, h.ACL, target, change) {
+				return
+			}
+		}
 		if err := h.Store.SetUserProvider(r.Context(), id, *req.ProviderID, ""); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		// SetUserProvider took them out of the old tenant's groups: the role
+		// those gave them — and the level it set — go with them.
+		if err := group.SyncLevels(r.Context(), h.Store, []int64{id}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		perm.Invalidate()
 	}
 	if req.Password != nil {
 		hash, err := local.HashPassword(*req.Password)
@@ -380,6 +426,24 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 			_ = h.Store.SetUserCustomRole(r.Context(), id, 0)
 			perm.Invalidate()
 		}
+		// As on the Role field (PutUserRoles): the level picked here is the
+		// account's own now — forget the one kept from before a group's role,
+		// or leaving the group would restore it over this choice — and a
+		// group's role that still applies moves it again.
+		// Only when the role really changes: an unchanged role sent along with
+		// other fields is no choice, and forgetting the kept level then would
+		// leave the account on the group role's level for good once it left.
+		if target == nil || target.Role != *req.Role {
+			if err := h.Store.DeleteUserGroupLevel(r.Context(), id); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		}
+		if err := group.SyncLevels(r.Context(), h.Store, []int64{id}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		perm.Invalidate()
 	}
 	if req.Enabled != nil {
 		if err := h.Store.SetUserEnabled(r.Context(), id, *req.Enabled); err != nil {

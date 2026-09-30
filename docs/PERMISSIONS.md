@@ -9,7 +9,9 @@ Every person has **one role**, picked in the Role field on their own page:
 a **built-in role** — Administrator (everything, locked), User or Viewer — or
 a **custom role**, which is its own list of permissions, ticked the same way.
 Roles are managed on Admin → Roles. (In the API and the database a custom
-role is a *permission rule* — the names below use both.)
+role is a *permission rule* — the names below use both.) A **group** can hold
+a custom role too: it is the role of every member with none of their own
+([GROUPS.md](GROUPS.md#the-role)).
 
 An installed **app** can add permissions of its own to this list — *Request
 signatures*, say — decided by the same roles and exceptions
@@ -46,7 +48,7 @@ A file action needs **both** of these:
 | Layer | Source |
 |---|---|
 | Built-in role | the **User** role's permissions (the install defaults) or the **Viewer** role's; Administrator: everything |
-| Custom role | the one custom role the account holds, if it is enabled — its own list **replaces** the built-in role's; its "different in some folders" part applies per path |
+| Custom role | the one custom role the account holds — its own, else its highest-priority group's ([GROUPS.md](GROUPS.md#the-role)) — if it is enabled: its own list **replaces** the built-in role's; its "different in some folders" part applies per path |
 | Exceptions | the account's own Allow / Deny (*overrides* in the API). **Always win** over roles |
 
 Then two hard lines nothing crosses:
@@ -206,6 +208,11 @@ exception. Editing the role moves its people with it.
 
 ### Starting role for SSO groups
 
+> For membership that follows the identity provider at **every** sign-in,
+> link a [group](GROUPS.md#members-and-sso-links) to the SSO group and give
+> the group the role instead. The starting role below is kept for accounts
+> that already rely on it; the role editor points to Groups.
+
 A role can name SSO groups. When a **new** account is created at its first SSO
 sign-in and the provider's `role_claim` (ID token or access token; dotted
 paths like `realm_access.roles` work) carries one of them, the account starts
@@ -214,7 +221,9 @@ level. **Only at creation**: after that the role is the person's, changed on
 their page like anyone else's, and a later sign-in never hands it back or
 takes it away. An account the admin mapping makes an administrator gets no
 role. filex still stores each sign-in's groups (replaced every time), but
-they no longer change what an existing account may do. LDAP sign-ins carry no
+they no longer change what an existing account may do — except through a
+filex **group** linked to one of them, whose role and folders follow the
+sign-in ([GROUPS.md](GROUPS.md#members-and-sso-links)). LDAP sign-ins carry no
 groups.
 
 ### Require 2FA
@@ -233,7 +242,7 @@ gets an admin panel showing only its pages:
 
 | Permission | Pages / routes |
 |---|---|
-| `admin.users` | Users (list, create, edit, delete, reset password, quotas), each person's exceptions, giving and taking custom roles |
+| `admin.users` | Users (list, create, edit, delete, reset password, quotas), each person's exceptions, giving and taking custom roles, Groups ([GROUPS.md](GROUPS.md#who-may-manage-groups)) |
 | `admin.grants` | **Folder access** — every per-file and per-folder grant ([RBAC.md](RBAC.md)); removing grants |
 | `admin.shares` | Everyone's shares; revoke, delete |
 | `admin.audit` | The audit log |
@@ -466,7 +475,9 @@ A permission refusal is `403`:
 
 `message` is in the reader's language, and names the role by its name in that
 language when it has one (`source.rule_name` is always the role's own name;
-`source.kind` keeps the API's name, `rule`, for a custom role). An app permission is refused the same way, with
+`source.kind` keeps the API's name, `rule`, for a custom role). A role held
+through a group adds `group_id` and `group_name` to `source`, and the sentence
+names the group ([GROUPS.md](GROUPS.md#the-role)). An app permission is refused the same way, with
 its key as `permission` and `source.kind` `override`, `rule`, `base` (the
 built-in role) or `app_default` (the app's own default). A refusal caused by
 the **path** (no grant, a read-only account, a lock) keeps its historical body.

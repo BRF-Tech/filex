@@ -112,6 +112,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   permissions, built-in and custom roles, per-person exceptions, delegated
   admins, the permissions installed apps declare, public links that follow
   their creator's right to share, per-protocol enforcement
+- [Groups](GROUPS.md) — named sets of people: folder access and a role for
+  everyone in them, members by hand or through SSO groups, per tenant
 
 ## Integrations
 

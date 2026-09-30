@@ -17,6 +17,11 @@ before.
 
 ![Admin → Folder access: every per-folder grant — who, which storage, which path, which level](screenshots/v0.49.0/roles/folder-access-1440.png)
 
+> A grant can also be given to a **group** — every member holds it, the
+> highest covering level still wins and the account ceiling still caps it.
+> See [GROUPS.md](GROUPS.md#folder-access); the panel routes below take a
+> `group_id` in place of `user_id`.
+
 ## Model
 
 Two layers combine, then a ceiling is applied:

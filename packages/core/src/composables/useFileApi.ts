@@ -115,12 +115,18 @@ export interface ManagerResponse {
   storage_info?: StorageInfo[];
 }
 
-/** A single ACL grant row (RBAC permissions panel). */
+/** A single ACL grant row (RBAC permissions panel): to one person, or — with
+ *  `kind: 'group'` — to a group, every member of which holds it. A group's
+ *  grant has its own id space (change it with the *GroupPermission calls). */
 export interface Grant {
   id: number;
   storage_id: number;
   path_prefix: string;
-  user_id: number;
+  /** "user" or "group"; absent from servers older than groups (a person). */
+  kind?: 'user' | 'group';
+  user_id?: number;
+  group_id?: number;
+  group_name?: string;
   level: 'viewer' | 'editor' | 'owner';
   user_email?: string;
   user_display_name?: string;
@@ -172,6 +178,13 @@ export interface NodeVersion {
 }
 export interface UserSearchResponse {
   users: UserSuggestion[];
+}
+
+/** A group the caller could share with (GET /api/files/permissions/groups). */
+export interface GroupSuggestion {
+  id: number;
+  name: string;
+  description?: string;
 }
 
 /* === calisma:d3 — node comments (inspector panel) === */
@@ -521,7 +534,21 @@ export function useFileApi(config: ExplorerConfig) {
   async function searchUsers(q: string): Promise<UserSearchResponse> {
     return jsonFetch<UserSearchResponse>(permissionsUrl('/users') + '?q=' + encodeURIComponent(q));
   }
-  async function addPermission(body: { path: string; user_id: number; level: string; is_dir?: boolean }): Promise<unknown> {
+  /** Groups matching q; an empty list from a server without groups. */
+  async function searchGroups(q: string): Promise<{ groups: GroupSuggestion[] }> {
+    try {
+      return await jsonFetch<{ groups: GroupSuggestion[] }>(permissionsUrl('/groups') + '?q=' + encodeURIComponent(q));
+    } catch {
+      return { groups: [] };
+    }
+  }
+  async function updateGroupPermission(id: number, level: string): Promise<unknown> {
+    return jsonFetch(permissionsUrl('/groups/' + id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level }) });
+  }
+  async function deleteGroupPermission(id: number): Promise<unknown> {
+    return jsonFetch(permissionsUrl('/groups/' + id), { method: 'DELETE' });
+  }
+  async function addPermission(body: { path: string; user_id?: number; group_id?: number; level: string; is_dir?: boolean }): Promise<unknown> {
     return jsonFetch(permissionsUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
   async function updatePermission(id: number, level: string): Promise<unknown> {
@@ -1648,9 +1675,12 @@ export function useFileApi(config: ExplorerConfig) {
     listPermissions,
     resolveEmail,
     searchUsers,
+    searchGroups,
     addPermission,
     updatePermission,
     deletePermission,
+    updateGroupPermission,
+    deleteGroupPermission,
     invitePermission,
     shareMail,
     // Internals (exposed for useUploadChunked + PreviewModal)

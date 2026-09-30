@@ -591,6 +591,7 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.AppPlugins != nil {
 		permH.AppPermissions = d.AppPlugins.UserPermissions
 	}
+	groupsH := handlers.NewGroupsAdmin(d.Store, d.ACL)
 	seth := handlers.NewSettings(d.Store)
 	seth.AttachMailer(d.Mailer)
 	authh := handlers.NewAuth(d.Store, d.LocalAuth, d.OIDCAuth, d.Cfg.PublicURL, d.Cfg.MultiTenant, d.Cfg.CookieDomain)
@@ -1343,6 +1344,11 @@ func BuildRouter(d *Deps) http.Handler {
 			r.With(write).Delete("/permissions/{id}", grantsH.Delete)
 			r.Get("/permissions/resolve", grantsH.Resolve)
 			r.Get("/permissions/users", grantsH.SearchUsers)
+			// A group's grants have their own ids (group_file_grants); the
+			// fixed "groups" segment keeps them apart from a person's {id}.
+			r.Get("/permissions/groups", grantsH.SearchGroups)
+			r.With(write).Patch("/permissions/groups/{id}", grantsH.UpdateGroup)
+			r.With(write).Delete("/permissions/groups/{id}", grantsH.DeleteGroup)
 			r.With(write).Post("/permissions/invite", grantsH.Invite)
 			r.With(write).Post("/permissions/share-mail", grantsH.ShareMail)
 
@@ -1536,6 +1542,20 @@ func BuildRouter(d *Deps) http.Handler {
 				r.With(users).Get("/roles", permH.ListRules)
 				r.With(users).Get("/roles/", permH.ListRules)
 				r.With(users).Get("/roles/builtin", permH.GetDefaults)
+				// Groups (internal/group) — managing people, so admin.users. The
+				// handler holds the delegated lines: roles given through a group,
+				// never one's own membership, and links to an outside directory
+				// are an administrator's (handlers/groups_admin.go).
+				r.With(users).Get("/groups", groupsH.List)
+				r.With(users).Get("/groups/", groupsH.List)
+				r.With(users).Post("/groups", groupsH.Create)
+				r.With(users).Post("/groups/", groupsH.Create)
+				r.With(users).Get("/groups/{id}", groupsH.Get)
+				r.With(users).Put("/groups/{id}", groupsH.Update)
+				r.With(users).Delete("/groups/{id}", groupsH.Delete)
+				r.With(users).Post("/groups/{id}/members", groupsH.AddMembers)
+				r.With(users).Delete("/groups/{id}/members/{user_id}", groupsH.RemoveMember)
+				r.With(users).Get("/users/{id}/groups", groupsH.UserGroups)
 				// Per-user quota, nested where callers look for it first. The
 				// flat /quota/{user_id} predates it and still works;
 				// handlers/quota.go has documented the nested shape since before
@@ -1553,6 +1573,7 @@ func BuildRouter(d *Deps) http.Handler {
 				grants := handlers.RequireAdminPermission(d.ACL, perm.AdminGrants)
 				r.With(grants).Get("/grants", grantsH.AdminList)
 				r.With(grants).Delete("/grants/{id}", grantsH.AdminDelete)
+				r.With(grants).Delete("/grants/groups/{id}", grantsH.AdminDeleteGroup)
 
 				shares := handlers.RequireAdminPermission(d.ACL, perm.AdminShares)
 				r.With(shares).Get("/shares", sharesAdmH.List)

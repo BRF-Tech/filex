@@ -369,6 +369,16 @@ sixteen crossings succeeded.**
 | `versions/{id}`, `trash/{id}`, `grants/{id}`, `shares/{id}` revoke + delete | Destroy another tenant's version history, trashed files, RBAC grants and live share links | 404 |
 | `ai-tokens` — `POST` with any `user_id`, plus list/patch/delete by id | **Identity takeover.** A token authenticates AS its bound user, with that user's scope, so an unchecked `user_id` mints a credential over another tenant's whole storage set — needing no password and no login | 404 |
 
+**Groups** ([GROUPS.md](GROUPS.md#tenants)) are built on this rule from the
+start rather than fixed into it. A tenant admin's group is stamped with their
+tenant whatever the body says, and every group route — read, edit, delete,
+members, the sharing panel's group picker and a group's folder grants —
+answers another tenant's group, and an **install-wide** one, as unknown (404).
+An install-wide group is the supertenant's: only an unconfined caller makes or
+changes one, its SSO links match only the supertenant's sign-ins, and a
+tenant's role can be given only to that tenant's groups. Pinned by
+`TestGroups_TenantIsolation` and `TestGroups_InstallWideIsTheSupertenants`.
+
 The refusal is **404, not 403**. A 403 confirms the row exists; repeated over an
 id range it becomes a census of the platform's other customers. The
 instance-wide gate below answers 403 because there the *surface* is refused and

@@ -165,6 +165,8 @@ var permRouteTable = map[string]permRoute{
 	"POST /api/files/permissions":                           inHandler("share.users (and owner level on the item)"),
 	"PATCH /api/files/permissions/{id}":                     inHandler("share.users"),
 	"DELETE /api/files/permissions/{id}":                    inHandler("share.users"),
+	"PATCH /api/files/permissions/groups/{id}":              inHandler("share.users"),
+	"DELETE /api/files/permissions/groups/{id}":             inHandler("share.users"),
 	"POST /api/files/permissions/invite":                    inHandler("share.users"),
 	"POST /api/files/permissions/share-mail":                inHandler("share.links"),
 	"POST /api/files/comments":                              gated(perm.CommentsWrite),

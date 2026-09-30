@@ -154,6 +154,7 @@ async function router(at = '/dashboard'): Promise<Router> {
       { path: '/duplicates', name: 'duplicates', component: Blank },
       { path: '/tagged', name: 'tagged', component: Blank },
       { path: '/users', name: 'users', component: Blank },
+      { path: '/groups', name: 'groups', component: Blank },
       { path: '/grants', name: 'grants', component: Blank },
       { path: '/roles', name: 'roles', component: Blank },
       { path: '/auth-providers', name: 'auth-providers', component: Blank },

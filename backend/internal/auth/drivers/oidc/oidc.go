@@ -28,6 +28,7 @@ import (
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/group"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 )
@@ -296,6 +297,25 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 	// admin mapping made an administrator is bound by no role.
 	if created && !user.IsAdmin() && len(groups) > 0 {
 		d.giveStartingRole(ctx, user, groups)
+	}
+	// filex groups linked to these SSO groups (internal/group): the account
+	// joins the ones it is now in and leaves the ones it was in only through
+	// SSO — every sign-in, the IdP being the authority. Members added by hand
+	// stay. A group can give a role, so the level underneath may move too.
+	if _, err := group.SyncLinked(ctx, d.store, user, model.GroupLinkSSO, groups); err != nil {
+		slog.Warn("oidc: could not update the account's SSO-linked groups",
+			slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
+	}
+	// The level a group's role sets is checked at every sign-in, not only
+	// when a membership moved: the admin mapping above may just have demoted
+	// an administrator, whose level no group's role was allowed to set while
+	// they were one.
+	if err := group.SyncLevels(ctx, d.store, []int64{user.ID}); err != nil {
+		slog.Warn("oidc: could not bring the account's level in step with its groups",
+			slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
+	}
+	if u2, err := d.store.GetUser(ctx, user.ID); err == nil && u2 != nil {
+		user = u2
 	}
 	_ = d.store.TouchLastLogin(ctx, user.ID)
 

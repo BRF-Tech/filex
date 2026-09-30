@@ -38,8 +38,11 @@ type installSnapshot struct {
 	rules []*model.PermissionRule
 	// members is user id → the one custom role they hold.
 	members map[int64]int64
-	gen     uint64
-	at      time.Time
+	// groups is user id → the groups they are in, in group id order — for
+	// the role of an account with none of its own (EffectiveRole).
+	groups map[int64][]*model.Group
+	gen    uint64
+	at     time.Time
 }
 
 // SnapshotTTL bounds how stale the cached defaults and rules may be. Writes
@@ -113,7 +116,11 @@ func (l *Loader) Load(ctx context.Context, u *model.User) (*Result, error) {
 		return nil, err
 	}
 	in.Defaults, in.Rules = snap.defaults, snap.rules
-	in.CustomRoleID = snap.members[u.ID]
+	roleID, via := EffectiveRole(snap.members[u.ID], snap.groups[u.ID], snap.rules, u.ProviderID)
+	in.CustomRoleID = roleID
+	if via != nil {
+		in.ViaGroup = &GroupRef{ID: via.ID, Name: via.Name}
+	}
 	in.AppDecisions = snap.apps[u.Role]
 	viewer := snap.viewer
 	in.ViewerBase = &viewer
@@ -152,12 +159,37 @@ func (l *Loader) Preview(ctx context.Context, u *model.User, change func(*Input)
 	in.ViewerBase = &viewer
 	if u != nil && u.ID != 0 {
 		in.CustomRoleID = snap.members[u.ID]
+		in.Groups = append([]*model.Group(nil), snap.groups[u.ID]...)
 		if in.Overrides, err = l.Store.GetUserPermissionOverrides(ctx, u.ID); err != nil {
 			return nil, fmt.Errorf("perm: overrides: %w", err)
 		}
 	}
 	if change != nil {
 		change(&in)
+	}
+	// The custom role as Load picks it, AFTER the change: the account's own
+	// (as the change left it), else its groups' (EffectiveRole). A change
+	// that ends a person's own role hands them their group's, and a preview
+	// that left it out would judge a state the account never reaches — both
+	// ways: a gain through the group unseen, a gain it never gets refused.
+	if u != nil && u.ID != 0 {
+		roleID, via := EffectiveRole(in.CustomRoleID, in.Groups, snap.rules, in.ProviderID)
+		in.CustomRoleID, in.ViaGroup = roleID, nil
+		if via != nil {
+			in.ViaGroup = &GroupRef{ID: via.ID, Name: via.Name}
+			// And the level that role sets: group.SyncLevels runs after every
+			// such change and moves the account to it. Judged at the level the
+			// request left, a Viewer's ceiling would hide every write the
+			// group's role allows — and the account holds them once synced.
+			if in.Role != model.RoleAdmin {
+				for _, r := range snap.rules {
+					if r != nil && r.ID == roleID {
+						in.Role = RoleHolder(r)
+						break
+					}
+				}
+			}
+		}
 	}
 	// After the change: it may be a role change, and the built-in role's
 	// app decisions follow the role.
@@ -198,11 +230,40 @@ func (l *Loader) snapshot(ctx context.Context) (*installSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	s = &installSnapshot{defaults: defaults, viewer: viewer, apps: apps, rules: rules, members: members, gen: gen, at: time.Now()}
+	groups, err := loadUserGroups(ctx, l.Store)
+	if err != nil {
+		return nil, err
+	}
+	s = &installSnapshot{defaults: defaults, viewer: viewer, apps: apps, rules: rules, members: members, groups: groups, gen: gen, at: time.Now()}
 	l.mu.Lock()
 	l.snap = s
 	l.mu.Unlock()
 	return s, nil
+}
+
+// loadUserGroups maps every account to the groups it is in, in group id
+// order.
+func loadUserGroups(ctx context.Context, store db.Store) (map[int64][]*model.Group, error) {
+	all, err := store.ListGroups(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("perm: groups: %w", err)
+	}
+	byID := make(map[int64]*model.Group, len(all))
+	for _, g := range all {
+		byID[g.ID] = g
+	}
+	members, err := store.ListAllGroupMembers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("perm: group members: %w", err)
+	}
+	out := map[int64][]*model.Group{}
+	// ListAllGroupMembers is in group id order, so each list is too.
+	for _, m := range members {
+		if g := byID[m.GroupID]; g != nil {
+			out[m.UserID] = append(out[m.UserID], g)
+		}
+	}
+	return out, nil
 }
 
 // LoadDefaults returns the install's defaults for role=user: the stored set,

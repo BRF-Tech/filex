@@ -97,6 +97,8 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	// CURRENT_TIMESTAMP's spelling, as both engines this file serves compare
 	// them as text.
 	s.PluginRequestSQL = &db.PluginRequestSQL{Pool: sqlDB, Time: db.CatalogueTime}
+	// Groups (00072), the same way.
+	s.GroupSQL = db.NewGroupSQL(sqlDB, false)
 	return s
 }
 
@@ -119,6 +121,8 @@ type Store struct {
 	*db.VanishedSQL
 	// The plugin install requests (internal/db plugin_requests_sql.go).
 	*db.PluginRequestSQL
+	// The group methods (internal/db group_sql.go, migration 00072).
+	*db.GroupSQL
 }
 
 // upsertClause matches SQLite's upsert tail so it can be swapped for MySQL's.
@@ -1241,7 +1245,11 @@ func (s *Store) SetUserProvider(ctx context.Context, userID, providerID int64, o
 	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE users SET provider_id=?, oidc_subject=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 		providerID, oidcSubject, userID)
-	return err
+	if err != nil {
+		return err
+	}
+	// A group of the tenant they left no longer holds them (migration 00072).
+	return s.DropForeignMemberships(ctx, userID, providerID)
 }
 
 // GetUserByProviderEmail looks a user up within a single provider (tenant), the

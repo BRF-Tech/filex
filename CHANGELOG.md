@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Groups** ([docs/GROUPS.md](docs/GROUPS.md), migration 00072). Admin →
+  Groups makes named sets of people, per tenant. Share a folder with a group
+  in the explorer's sharing panel, like with a person; give a group a custom
+  role, which every member without a role of their own holds — their own role
+  wins, and a **role priority** decides between groups. Members are added by
+  hand or through **SSO groups**: a group names values of the provider's
+  groups claim, and every sign-in joins and leaves them as the identity
+  provider says. A person's page lists their groups and says when their role
+  comes from one; the Users list and Roles page count roles held through
+  groups; refusals name the group. Delegated administrators with
+  `admin.users` manage groups, but never their own membership or a group
+  they are in, never SSO links or role priority, and never a role beyond
+  their own; a group role with administration rights needs a signed-in
+  administrator, as it does for a person.
+
+### Changed
+
+- Nothing changes on upgrade: migration 00072 only adds the group tables,
+  empty.
+- The Roles page's introduction says one role per person, and a role's
+  *Starting role for SSO groups* points to groups, which follow the identity
+  provider at every sign-in.
+
 ## [0.49.0] - 2026-09-28
 
 Everyone has one role now — Administrator, User, Viewer or a custom role with

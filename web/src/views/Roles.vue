@@ -12,6 +12,7 @@ import { ShieldCheck, Plus, Lock } from 'lucide-vue-next';
 import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
 import { RolesApi, type BuiltinRole, type PermCatalogue, type PermissionRule } from '@/api/roles';
+import { GroupsApi, type Group } from '@/api/groups';
 import { StoragesApi } from '@/api/storages';
 import type { StorageRef } from '@/api/types';
 import { extractError } from '@/api/client';
@@ -34,7 +35,11 @@ const catalogue = ref<PermCatalogue | null>(null);
 const roles = ref<PermissionRule[]>([]);
 /** user id → the custom role they hold. */
 const assignments = ref<Record<string, number>>({});
+/** user id → the role a group gives them (people with none of their own). */
+const groupAssignments = ref<Record<string, { role_id: number }>>({});
 const storages = ref<StorageRef[]>([]);
+/** Groups, for how many hold each role (a group's role reaches its members). */
+const groups = ref<Group[]>([]);
 /** People on each built-in role itself (counted by the server). */
 const builtinMembers = ref<Partial<Record<'admin' | BuiltinRole, number>>>({});
 const loading = ref(true);
@@ -47,14 +52,17 @@ const builtinRole = ref<BuiltinRole>('user');
 async function load() {
   loading.value = true;
   try {
-    const [cat, rs, sts] = await Promise.all([
+    const [cat, rs, sts, gs] = await Promise.all([
       RolesApi.catalogue(),
       RolesApi.listRules(),
       StoragesApi.list().catch(() => [] as StorageRef[]),
+      GroupsApi.list().catch(() => [] as Group[]),
     ]);
+    groups.value = gs;
     catalogue.value = cat;
     roles.value = rs.rules;
     assignments.value = rs.assignments;
+    groupAssignments.value = rs.groupAssignments ?? {};
     builtinMembers.value = rs.builtinMembers ?? {};
     storages.value = sts;
   } catch (e) {
@@ -93,13 +101,14 @@ function onSaved(r: PermissionRule) {
   RolesApi.listRules()
     .then((rs) => {
       assignments.value = rs.assignments;
+      groupAssignments.value = rs.groupAssignments ?? {};
       builtinMembers.value = rs.builtinMembers ?? {};
     })
     .catch(() => {});
 }
 
 async function setEnabled(r: PermissionRule, enabled: boolean) {
-  const n = memberCount(r);
+  const n = memberCount(r) + viaGroupCount(r);
   // A switched-off role gives its people nothing until it is on again.
   if (!enabled && n > 0 && !confirm(t('permissions.rules.disableConfirm', { name: roleName(r, locale.value), count: n }, n))) return;
   try {
@@ -122,7 +131,8 @@ const moveOptions = computed(() => [
     .map((x) => ({ value: String(x.id), label: roleName(x, locale.value) })),
 ]);
 async function remove(r: PermissionRule) {
-  if (memberCount(r) > 0) {
+  // People OR groups holding it: the server asks what they become either way.
+  if (memberCount(r) > 0 || groupCount(r) > 0) {
     deleting.value = r;
     moveTo.value = 'user';
     return;
@@ -148,6 +158,25 @@ function permLabel(k: string): string {
 }
 function memberCount(r: PermissionRule): number {
   return Object.values(assignments.value).filter((id) => id === r.id).length;
+}
+/** People who hold the role through a group (none of their own). */
+function viaGroupCount(r: PermissionRule): number {
+  return Object.values(groupAssignments.value).filter((g) => g.role_id === r.id).length;
+}
+/** Groups that give the role to their members. */
+function groupCount(r: PermissionRule): number {
+  return groups.value.filter((g) => g.role_id === r.id).length;
+}
+/** "2 members · 3 through groups · 1 group" — or "3 members through groups"
+ *  on its own when nobody holds the role directly. */
+function membersText(r: PermissionRule): string {
+  const n = memberCount(r);
+  const v = viaGroupCount(r);
+  const parts = [v && !n ? t('permissions.rules.viaGroups', { count: v }, v) : t('permissions.rules.members', { count: n }, n)];
+  if (v && n) parts.push(t('permissions.rules.viaGroups', { count: v }, v));
+  const g = groupCount(r);
+  if (g) parts.push(t('permissions.rules.groups', { count: g }, g));
+  return parts.join(' · ');
 }
 function ssoGroupsText(r: PermissionRule): string {
   const groups = r.targets.filter((x) => x.kind === 'sso_group').map((x) => x.value);
@@ -185,7 +214,7 @@ interface RoleRow {
 }
 const rows = computed<RoleRow[]>(() => [
   ...builtins.value.map((b) => ({ key: `builtin-${b.role}`, builtin: b.role, name: t(`users.roles.${b.role}`), members: b.members })),
-  ...roles.value.map((r) => ({ key: `rule-${r.id}`, rule: r, name: roleName(r, locale.value), members: memberCount(r) })),
+  ...roles.value.map((r) => ({ key: `rule-${r.id}`, rule: r, name: roleName(r, locale.value), members: memberCount(r) + viaGroupCount(r) })),
 ]);
 const columns = computed<DataColumn<RoleRow>[]>(() => [
   { id: 'name', label: t('permissions.rules.name'), sortable: true, width: 240 },
@@ -266,7 +295,8 @@ function onRowAction(key: string, row: RoleRow) {
 
         <template #cell-members="{ row }">
           <div :data-testid="`role-members-${row.key}`">
-            {{ t('permissions.rules.members', { count: row.members }, row.members) }}
+            <template v-if="row.rule">{{ membersText(row.rule) }}</template>
+            <template v-else>{{ t('permissions.rules.members', { count: row.members }, row.members) }}</template>
             <span v-if="row.rule && ssoGroupsText(row.rule)" class="tbl-sub">{{ ssoGroupsText(row.rule) }}</span>
           </div>
         </template>
@@ -323,8 +353,11 @@ function onRowAction(key: string, row: RoleRow) {
         @update:model-value="(v: boolean) => { if (!v) deleting = null; }"
       >
         <div v-if="deleting" class="space-y-3" data-testid="role-delete-move">
-          <p class="text-sm">
+          <p v-if="memberCount(deleting)" class="text-sm">
             {{ t('permissions.rules.deleteMove', { count: memberCount(deleting) }, memberCount(deleting)) }}
+          </p>
+          <p v-if="groupCount(deleting)" class="text-sm">
+            {{ t('permissions.rules.deleteMoveGroups', { count: groupCount(deleting) }) }}
           </p>
           <Select v-model="moveTo" :options="moveOptions" :label="t('permissions.rules.moveTo')" class="w-60 max-w-full" />
         </div>

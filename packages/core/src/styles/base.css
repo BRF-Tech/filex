@@ -8496,6 +8496,15 @@ filex-explorer {
   background: var(--fe-bg-hover);
   color: var(--fe-text-muted);
 }
+/* A group: squared, so it reads as "many people" beside the round avatars. */
+.fe-share__av--group {
+  border-radius: var(--fe-radius-sm, 4px);
+}
+.fe-share__kind {
+  margin-inline-start: var(--fe-gap-sm);
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
 .fe-share__person {
   flex: 1 1 auto;
   min-width: 0;
