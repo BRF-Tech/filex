@@ -11,7 +11,8 @@ name: Release
 #   plan ── test ─┬─ binaries ─┬─ desktop  (installers, attached to the Release;
 #                 │            │     │      the snaps also to the Snap Store)
 #                 │            │     ├─ desktop-arm64-check (install + open on
-#                 │            │     │   real arm64 machines, screenshots)
+#                 │            │     │   real arm64 machines and Linux x64,
+#                 │            │     │   sandbox checked, screenshots)
 #                 │            │     └─ aur (PKGBUILD push)
 #                 │            └─ cli-smoke (CLI + server on arm64 machines)
 #                 ├─ docker ─── docker-manifest   (one native runner per arch)
@@ -994,8 +995,15 @@ jobs:
                 d="$r/win-unpacked"; [ "$a" = arm64 ] && d="$r/win-arm64-unpacked"
                 check "$d/filex.exe" "$d/resources/bin/filex.exe" --expect "$a"
               done ;;
-            linux) check "$r/linux-unpacked/filex-app" "$r/linux-unpacked/resources/bin/filex" --expect amd64 ;;
-            linux-arm64) check "$r/linux-arm64-unpacked/filex-app" "$r/linux-arm64-unpacked/resources/bin/filex" --expect arm64 ;;
+            # Linux: `filex-app` is the launcher (desktop/build/linux/launcher.sh,
+            # put there by desktop/scripts/linux-launcher.cjs); the Electron
+            # binary is filex-app-bin beside it.
+            linux)
+              head -1 "$r/linux-unpacked/filex-app" | grep -qx '#!/bin/sh'
+              check "$r/linux-unpacked/filex-app-bin" "$r/linux-unpacked/resources/bin/filex" --expect amd64 ;;
+            linux-arm64)
+              head -1 "$r/linux-arm64-unpacked/filex-app" | grep -qx '#!/bin/sh'
+              check "$r/linux-arm64-unpacked/filex-app-bin" "$r/linux-arm64-unpacked/resources/bin/filex" --expect arm64 ;;
             macos) check "$r/mac-arm64/filex.app/Contents/MacOS/filex" "$r/mac-arm64/filex.app/Contents/Resources/bin/filex" --expect arm64 ;;
           esac
       # The arm64 packages, for desktop-arm64-check to install and open on a
@@ -1011,6 +1019,22 @@ jobs:
             desktop/release/*arm64*.deb
             desktop/release/*aarch64*.rpm
             desktop/release/*arm64*.snap
+          if-no-files-found: error
+          retention-days: 7
+      # The x64 Linux packages, for the same check on an x64 Ubuntu 24.04
+      # machine (desktop-arm64-check, linux-x64 row). Since 0.50 every Linux
+      # build starts through a launcher that refuses to run without Chromium's
+      # sandbox, so the x64 .deb, AppImage and snap are opened as carefully as
+      # the arm64 ones.
+      - name: Keep the x64 Linux packages for the check
+        if: matrix.label == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-x64-linux
+          path: |
+            desktop/release/*x86_64.AppImage
+            desktop/release/*amd64.deb
+            desktop/release/*amd64.snap
           if-no-files-found: error
           retention-days: 7
       - name: Keep the Store package for Partner Center
@@ -1201,10 +1225,29 @@ jobs:
           fi
           command -v snapcraft >/dev/null || sudo snap install snapcraft --classic
           snapcraft whoami
-          snapcraft upload --release=stable "$snap"
+          # ⚠ Since 0.50 the snap asks for `browser-support` with
+          # `allow-sandbox: true` (Chromium's sandbox inside the snap). The
+          # Store reviews that by hand: the revision is uploaded and waits for
+          # the review before it reaches stable. That is expected, not a failed
+          # release; the run says so and carries on. Any other failure fails.
+          set +e
+          out=$(snapcraft upload --release=stable "$snap" 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$out"
+          if [ "$rc" -ne 0 ]; then
+            if printf '%s' "$out" | grep -qi 'manual review'; then
+              msg="$(basename "$snap") is uploaded and waits for the Snap Store's manual review (allow-sandbox); it reaches stable once the review passes."
+              echo "::warning title=Snap Store: manual review::$msg"
+              echo "### Snap Store: waiting for manual review" >> "$GITHUB_STEP_SUMMARY"
+              echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            exit "$rc"
+          fi
           echo "### Snap Store: $(basename "$snap") uploaded to stable" >> "$GITHUB_STEP_SUMMARY"
 
-  # ── The arm64 packages, on arm64 machines ─────────────────────────────
+  # ── The arm64 packages, on arm64 machines (and Linux x64) ─────────────
   #
   # The Windows arm64 packages are cross-built, and nothing about a build
   # proves the result starts on the CPU it is for. So each is installed the way
@@ -1214,16 +1257,26 @@ jobs:
   # desktop-look.mjs waits for the window to load a page and photographs it
   # over DevTools; the pictures are kept as `desktop-arm64-screenshots` and
   # are looked at before a release is called good.
+  #
+  # ⚠⚠ Linux, since 0.50: a window is not enough. The 0.49 AppImage and snap
+  # opened windows with Chromium's sandbox OFF (--no-sandbox), so on Linux
+  # every opening is checked for the sandbox (--expect-sandbox: each renderer
+  # in its own PID namespace, no --no-sandbox anywhere), and the two cases that
+  # cannot build it on Ubuntu 24.04 are checked to REFUSE with the launcher's
+  # message (--expect-refusal): the AppImage before its AppArmor profile, the
+  # snap before `snap connect filex-app:browser-sandbox`. The same on an x64
+  # machine (linux-x64), since the launcher is in every Linux package.
   desktop-arm64-check:
-    name: Desktop arm64 on a real ${{ matrix.label }} machine
+    name: Desktop packages on a real ${{ matrix.label }} machine
     needs: [plan, desktop]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.desktop.result != 'skipped' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04-arm, label: linux-arm64 }
-          - { os: windows-11-arm, label: windows }
+          - { os: ubuntu-24.04-arm, label: linux-arm64, artifact: desktop-arm64-linux-arm64 }
+          - { os: ubuntu-24.04, label: linux-x64, artifact: desktop-x64-linux }
+          - { os: windows-11-arm, label: windows, artifact: desktop-arm64-windows }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -1236,38 +1289,82 @@ jobs:
           node-version: "22"
       - uses: actions/download-artifact@v4
         with:
-          name: desktop-arm64-${{ matrix.label }}
+          name: ${{ matrix.artifact }}
           path: pkg
-      - name: .deb, AppImage and snap on Linux arm64
-        if: matrix.label == 'linux-arm64'
+      - name: .deb, AppImage and snap on Linux, sandboxed
+        if: startsWith(matrix.label, 'linux')
         shell: bash
+        env:
+          LABEL: ${{ matrix.label }}
         run: |
           set -euo pipefail
+          case "$LABEL" in
+            linux-arm64) ARCH=arm64; DEB=arm64; IMG=arm64; SNAP=arm64 ;;
+            *) ARCH=amd64; DEB=amd64; IMG=x86_64; SNAP=amd64 ;;
+          esac
           ls -la pkg
           mkdir -p shots
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb
-          sudo apt-get install -y ./pkg/filex-desktop-arm64.deb
-          node "$CI_SCRIPTS"/arch-of.mjs /opt/filex/filex-app /opt/filex/resources/bin/filex --expect arm64
+          look() { xvfb-run -a -s "-screen 0 1280x800x24" node "$CI_SCRIPTS"/desktop-look.mjs "$@"; }
+          # A refusal is checked with NO display: the launcher then only
+          # writes to stderr, and no dialog waits for a click that never comes.
+          refuses() { env -u DISPLAY -u WAYLAND_DISPLAY node "$CI_SCRIPTS"/desktop-look.mjs "$@" --expect-refusal; }
+
+          # .deb: the setuid helper is installed, so the sandbox is on with
+          # nothing set up. `filex-app` is the launcher, filex-app-bin the app.
+          sudo apt-get install -y "./pkg/filex-desktop-$DEB.deb"
+          head -1 /opt/filex/filex-app | grep -qx '#!/bin/sh'
+          node "$CI_SCRIPTS"/arch-of.mjs /opt/filex/filex-app-bin /opt/filex/resources/bin/filex --expect "$ARCH"
           /opt/filex/resources/bin/filex --version
-          xvfb-run -a -s "-screen 0 1280x800x24" node "$CI_SCRIPTS"/desktop-look.mjs --exe /usr/bin/filex-app --out shots/linux-arm64-deb.png
-          chmod +x pkg/filex-desktop-arm64.AppImage
+          look --exe /usr/bin/filex-app --out "shots/$LABEL-deb.png" --expect-sandbox
+
+          # AppImage: Ubuntu 24.04 lets only programs with an AppArmor profile
+          # create user namespaces, and an AppImage cannot carry the setuid
+          # helper. Without the profile the launcher must refuse with its
+          # message; with the one docs/DESKTOP.md gives ("AppImage on recent
+          # Ubuntu") it must open sandboxed. Never with --no-sandbox.
+          # The restriction is Ubuntu 24.04's default; set it in case a runner
+          # image turned it off, so the refusal is always exercised.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=1
+          img="$HOME/Apps/filex-desktop-$IMG.AppImage"
+          mkdir -p "$HOME/Apps"
+          cp "pkg/filex-desktop-$IMG.AppImage" "$img"
+          chmod +x "$img"
           # No FUSE on the runner: the AppImage runtime unpacks and runs.
-          # ⚠ Ubuntu 24.04 confines unprivileged user namespaces, which
-          # Chromium's sandbox needs when it has no setuid helper (the .deb
-          # has one, an AppImage cannot). Opened as a user opens it first;
-          # only if that fails, again with --no-sandbox, and the run says so.
           export APPIMAGE_EXTRACT_AND_RUN=1
-          if ! xvfb-run -a -s "-screen 0 1280x800x24" node "$CI_SCRIPTS"/desktop-look.mjs --exe "$PWD/pkg/filex-desktop-arm64.AppImage" --out shots/linux-arm64-appimage.png --port 9334; then
-            echo "::warning title=AppImage::the arm64 AppImage did not open with the sandbox on Ubuntu 24.04; retrying with --no-sandbox"
-            xvfb-run -a -s "-screen 0 1280x800x24" node "$CI_SCRIPTS"/desktop-look.mjs --exe "$PWD/pkg/filex-desktop-arm64.AppImage" --arg --no-sandbox --out shots/linux-arm64-appimage.png --port 9335
-          fi
-          if [ -f pkg/filex-desktop-arm64.snap ]; then
-            sudo snap install --dangerous pkg/filex-desktop-arm64.snap
+          refuses --exe "$img" --port 9334 --timeout 90
+          sudo tee /etc/apparmor.d/filex-appimage > /dev/null <<'EOF'
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          profile filex-appimage @{HOME}/**/filex-desktop-*.AppImage flags=(unconfined) {
+            userns,
+            include if exists <local/filex-appimage>
+          }
+          EOF
+          sudo apparmor_parser -r /etc/apparmor.d/filex-appimage
+          look --exe "$img" --out "shots/$LABEL-appimage.png" --port 9335 --expect-sandbox
+          # The image's own menu entry, which AppImage integrators copy: the
+          # sandbox stays on (up to 0.49 it said --no-sandbox).
+          (cd "$RUNNER_TEMP" && "$img" --appimage-extract '*.desktop' > /dev/null)
+          grep -qx 'Exec=AppRun --filex-desktop-entry %U' "$RUNNER_TEMP"/squashfs-root/*.desktop
+          if grep -q -- '--no-sandbox' "$RUNNER_TEMP"/squashfs-root/*.desktop; then echo "the AppImage's menu entry turns the sandbox off" >&2; exit 1; fi
+          look --exe "$img" --arg --filex-desktop-entry --out "shots/$LABEL-appimage-entry.png" --port 9336 --expect-sandbox
+          unset APPIMAGE_EXTRACT_AND_RUN
+
+          # snap: a --dangerous install connects nothing the Store has not
+          # granted, so the browser-sandbox plug starts disconnected: the
+          # launcher must refuse and name the command. Connected, sandboxed.
+          if [ -f "pkg/filex-desktop-$SNAP.snap" ]; then
+            sudo snap install --dangerous "pkg/filex-desktop-$SNAP.snap"
             snap list filex-app
-            xvfb-run -a -s "-screen 0 1280x800x24" node "$CI_SCRIPTS"/desktop-look.mjs --exe /snap/bin/filex-app --out shots/linux-arm64-snap.png --port 9336 --timeout 150
+            snap connections filex-app | grep browser
+            refuses --exe /snap/bin/filex-app --port 9337 --timeout 150
+            sudo snap connect filex-app:browser-sandbox
+            look --exe /snap/bin/filex-app --out "shots/$LABEL-snap.png" --port 9338 --timeout 150 --expect-sandbox
           else
-            echo "::warning title=snap::no arm64 snap was built"
+            echo "::warning title=snap::no $SNAP snap was built"
           fi
       - name: NSIS installer and portable .exe on Windows arm64
         if: matrix.label == 'windows'
