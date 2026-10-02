@@ -8,7 +8,7 @@
 # request of its own, so they pile up — on 2026-09-28 BRFTech.filex-app had
 # 0.44.2, 0.46.1 and 0.47.0 open at once (#441070, #441715, #441927), each a
 # reviewer's time spent on a version nobody should install any more. Only the
-# newest one is worth reviewing (Burak, 2026-09-28).
+# newest one is worth reviewing (the maintainer, 2026-09-28).
 #
 # Rules:
 #   - the NEW pull request ("New version: <id> <version>") must exist and be

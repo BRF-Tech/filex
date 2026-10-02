@@ -378,8 +378,8 @@ jobs:
             # for five minutes and warns when there is none.
             GH_TOKEN="$WINGET_TOKEN" CLA_COMPANY="BRF TEKNOLOJİ LİMİTED ŞİRKETİ" \
               bash .github/workflows/scripts/winget-cla.sh "New version: BRFTech.filex ${VER}"
-            # Only the newest version's pull request stays open (Burak,
-            # 2026-09-28): once this one exists, our older ones for the same
+            # Only the newest version's pull request stays open (the
+            # maintainer, 2026-09-28): once this one exists, our older ones for the same
             # package are closed as superseded. Nothing is closed if it does not.
             GH_TOKEN="$WINGET_TOKEN" bash .github/workflows/scripts/winget-supersede.sh BRFTech.filex "${VER}"
           fi
@@ -1155,7 +1155,7 @@ jobs:
           CLA_COMPANY: BRF TEKNOLOJİ LİMİTED ŞİRKETİ
         run: |
           bash "$CI_SCRIPTS"/winget-cla.sh "New version: BRFTech.filex-app ${VER}"
-      # Only the newest version's pull request stays open (Burak, 2026-09-28),
+      # Only the newest version's pull request stays open (the maintainer, 2026-09-28),
       # and only once it exists (scripts/winget-supersede.sh).
       - name: Close the superseded winget pull requests
         if: matrix.label == 'windows' && env.PUBLISH == 'true' && env.FULL == 'true' && env.WINGET_TOKEN != ''
