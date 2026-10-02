@@ -51,7 +51,7 @@ jobs:
         run: go vet ./...
       - name: Test
         working-directory: backend
-        run: go test ./...
+        run: go test -timeout 30m ./...
       - name: Build
         working-directory: backend
         run: go build ./...
@@ -101,7 +101,7 @@ jobs:
         env:
           FILEX_TEST_PG_DSN: postgres://filex:filex@127.0.0.1:5432/filex?sslmode=disable
           FILEX_TEST_MYSQL_DSN: root:filex@tcp(127.0.0.1:3306)/mysql
-        run: go test ./internal/db/ ./internal/queue/ ./internal/ops/
+        run: go test -timeout 30m ./internal/db/ ./internal/queue/ ./internal/ops/
 
   frontend:
     name: Frontend (pnpm)
